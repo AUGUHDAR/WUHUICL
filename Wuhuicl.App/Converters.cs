@@ -1,0 +1,47 @@
+using System.Globalization;
+using System.Windows;
+using System.Windows.Data;
+using System.Windows.Media;
+
+namespace Wuhuicl.App;
+
+public sealed class InvertBool : IValueConverter
+{
+    public object Convert(object v, Type t, object p, CultureInfo c) => v is not true;
+    public object ConvertBack(object v, Type t, object p, CultureInfo c) => v is not true;
+}
+
+/// <summary>true → Visible，false → Collapsed（默认），参数 "invert" 时反过来。</summary>
+public sealed class BoolVis : IValueConverter
+{
+    public object Convert(object v, Type t, object p, CultureInfo c)
+    {
+        bool b = v is true;
+        if (p as string == "invert") b = !b;
+        return b ? Visibility.Visible : Visibility.Collapsed;
+    }
+    public object ConvertBack(object v, Type t, object p, CultureInfo c) => v is Visibility.Visible;
+}
+
+/// <summary>字符串非空 → Visible。用于"没有账号时才显示引导卡"。</summary>
+public sealed class CountVis : IValueConverter
+{
+    public object Convert(object v, Type t, object p, CultureInfo c)
+    {
+        int n = v is int i ? i : 0;
+        bool wantEmpty = p as string == "empty";
+        return (wantEmpty ? n == 0 : n > 0) ? Visibility.Visible : Visibility.Collapsed;
+    }
+    public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
+}
+
+/// <summary>把 "Ok"/"Warn"/"Accent" 这类键名映射成当前主题里的画刷（主题切换后仍正确）。</summary>
+public sealed class BrushByKey : IValueConverter
+{
+    public object Convert(object v, Type t, object p, CultureInfo c)
+    {
+        var key = v as string ?? "Accent";
+        return Application.Current?.TryFindResource(key) as Brush ?? Brushes.Gray;
+    }
+    public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
+}
