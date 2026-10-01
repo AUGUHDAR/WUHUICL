@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Wuhuicl.App/Wuhuicl.App.csproj" />
+  <Project Path="Wuhuicl.Core/Wuhuicl.Core.csproj" />
+  <Project Path="Wuhuicl.Tool/Wuhuicl.Tool.csproj" />
+</Solution>
