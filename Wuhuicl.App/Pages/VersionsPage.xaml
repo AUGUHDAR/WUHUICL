@@ -354,22 +354,18 @@
                     <TextBlock Grid.Column="4" Text="{Binding Paths.Root}" FontFamily="{StaticResource MonoFont}"
                                FontSize="12" Foreground="{DynamicResource Fg2}" VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis"/>
-                    <Grid Grid.Column="6">
-                        <Button x:Name="BtnFolderMore" Style="{StaticResource BtnGhost}" MinHeight="28"
-                                Padding="12,4" FontSize="13" Content="管理文件夹" Click="FolderMore_Click"/>
-                        <Popup x:Name="PopFolderMore" PlacementTarget="{x:Reference BtnFolderMore}"
-                               Placement="Bottom" AllowsTransparency="True" Focusable="False" StaysOpen="False">
-                            <Border Style="{StaticResource PopupCard}" MinWidth="150" Padding="10">
-                                <StackPanel>
-                                    <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch" Content="添加目录"/>
-                                    <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch"
-                                            Content="打开目录" Margin="0,8,0,0"/>
-                                    <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch"
-                                            Content="迁移存档" Margin="0,8,0,0"/>
-                                </StackPanel>
-                            </Border>
-                        </Popup>
-                    </Grid>
+                    <!-- .folder-tools-trigger：.btn.btn-ghost.btn-sm，文案「管理文件夹」+ 一个 muted 的
+                         文件夹数量（GameView.vue:956）。原来这里挂着一个 Popup（添加目录/打开目录/迁移存档），
+                         那三个标签原版不存在，是自造的，已删除；触发钮改为直接开合下面的 .folder-manager-actions。 -->
+                    <Button Grid.Column="6" x:Name="BtnFolderMore" Style="{StaticResource BtnSmGhost}"
+                            HorizontalAlignment="Right" Click="FolderMore_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="管理文件夹"/>
+                            <!-- folders.length：模型里还没有"受管文件夹"集合，先留槽不编数据 -->
+                            <TextBlock x:Name="FolderCount" Text="" Margin="8,0,0,0" Opacity="0.75"
+                                       Visibility="Collapsed"/>
+                        </StackPanel>
+                    </Button>
                 </Grid>
 
                 <!-- .folder-manager-actions（GameView.vue:958-988）：folderToolsOpen 为真才渲染，
@@ -380,7 +376,7 @@
                      其中「设为默认」是 v-if="currentFolder 非默认"（:973）、「刷新」在 folderBusy 时换 .spin + 扫描中（:963-964），
                      两条都要代码侧决定，这里全按可见态铺出来。 -->
                 <Border x:Name="FolderActions" Margin="0,8,0,0" Padding="0,8,0,0"
-                        BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1"
+                        BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0"
                         Visibility="Collapsed">
                     <WrapPanel>
                         <Button Style="{StaticResource BtnSmGhost}" Content="+ 添加新的绑定游戏文件夹"
@@ -486,19 +482,18 @@
                     </Border>
                 </Grid>
 
-                <!-- .catalog-status：状态条（:1045）——本轮显示下载进度与提示 -->
-                <Border Background="{DynamicResource Card}" BorderBrush="{DynamicResource Line}"
-                        BorderThickness="1" CornerRadius="14" Padding="12,9" Margin="0,12,0,0">
-                    <StackPanel>
-                        <Grid>
-                            <TextBlock x:Name="DlHint" FontSize="12" Foreground="{DynamicResource Fg2}"
-                                       Text="选中版本后点右上「安装所选版本」" HorizontalAlignment="Left"/>
-                            <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}" HorizontalAlignment="Right"
-                                       Text="{Binding Progress, StringFormat={}{0:0}%}"/>
-                        </Grid>
-                        <ProgressBar Value="{Binding Progress}" Maximum="100" Margin="0,8,0,0"/>
-                    </StackPanel>
-                </Border>
+                <!-- .catalog-status（GameView.vue:1045-1049）：不是卡片，就是一行两条 12px 的 muted 文本，
+                     flex / space-between / gap 10 / wrap / margin-bottom 12（样式 :1503）。
+                     左：loading ? 正在核对最新版本… : 自动检查已开启（或清单不可用的告警）；
+                     右：发布时间为本地时间 (+ · 最近检查 时间)。
+                     之前这里是我自造的带边框进度卡：原版安装进度出现在「本地已安装」的 .installing-row
+                     与下载中心面板里，不在这条状态行上，所以去掉卡壳与进度条。 -->
+                <Grid Margin="0,12,0,12">
+                    <TextBlock x:Name="DlHint" FontSize="12" Foreground="{DynamicResource Fg2}"
+                               Text="自动检查已开启" HorizontalAlignment="Left" TextWrapping="Wrap"/>
+                    <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}" HorizontalAlignment="Right"
+                               Text="发布时间为本地时间"/>
+                </Grid>
 
                 <!-- .card.latest-release（GameView.vue:1050-1055，样式 :1504-1509）：
                      .card 本体给底 Card / 描边 1 Line / radius 14 / padding 20（ui-system.css:12 抹掉阴影），

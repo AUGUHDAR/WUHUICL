@@ -43,5 +43,9 @@ public partial class VersionsPage : UserControl
         BodyInstalled.Visibility = dl ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
     }
 
-    void FolderMore_Click(object sender, System.Windows.RoutedEventArgs e) => PopFolderMore.IsOpen = !PopFolderMore.IsOpen;
+    /// <summary>原版 folderToolsOpen 的开合（GameView.vue:956）：触发钮切换 .folder-manager-actions 本身，
+    /// 不是弹菜单。</summary>
+    void FolderMore_Click(object sender, System.Windows.RoutedEventArgs e)
+        => FolderActions.Visibility = FolderActions.Visibility == System.Windows.Visibility.Visible
+            ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
 }
