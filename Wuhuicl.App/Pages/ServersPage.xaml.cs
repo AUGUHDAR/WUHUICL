@@ -204,4 +204,19 @@ public partial class ServersPage : UserControl
     // ServerDetail / ServerListScroll / ServerDetailScroll（ServersView.vue:488 + :510 的 sticky 与两列独立滚动容器）。
     // 另外 EmptyAll / EmptyNoMatch / LoadErrorBar 是模板 :366 + :370 + :373 的三个 v-if 分支壳，
     // 数据接入后与 WorkspaceGrid 互斥显隐。// 占位：等联机功能接入
+
+    // ---- 三个模态的开合（ServersView.vue:383 / :406 / :427）----
+    // 本轮只铺版式：保存/删除/进入都要等服务器条目与实例关联的数据接入，这里只负责收起，
+    // 不做任何假写入。
+    void CloseServerModals()
+    {
+        ModalServerEdit.Visibility = Visibility.Collapsed;
+        ModalServerDelete.Visibility = Visibility.Collapsed;
+        ModalServerJoin.Visibility = Visibility.Collapsed;
+    }
+
+    void SrvCancel_Click(object sender, RoutedEventArgs e) => CloseServerModals();
+    void SrvSave_Click(object sender, RoutedEventArgs e) => CloseServerModals();
+    void SrvDelete_Click(object sender, RoutedEventArgs e) => CloseServerModals();
+    void SrvJoin_Click(object sender, RoutedEventArgs e) => CloseServerModals();
 }

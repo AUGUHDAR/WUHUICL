@@ -1023,5 +1023,81 @@
                 </StackPanel>
             </Border>
         </StackPanel>
+
+        <!-- ============ 三个模态（ServersView.vue:383-440）============
+             .modal-mask.connection-modal：fixed inset 0 / z 10000 / flex centre / 底 mask / blur 10
+             （styles.css:527 + connection.css:4）。blur 需要代码侧的 MaskBlur，这里只给 Overlay 底色。
+             .modal：min(460px,100vw-48px) / max-h calc(100vh-96px) / padding 24 / radius 14 /
+             border 1 / 底 Card / shadow-lg（styles.css:545）。
+             .connection-muted：text-dim 12px line-height 1.7（connection.css:8）。
+             .modal-label：13px text-dim，margin 16 0 8（styles.css 通用模态标签）。
+             .connection-modal .input/.select：宽 100% / min-h 36 / padding 8 12 / radius 10 /
+             底 card-2 / 字 text 13（connection.css:13）；.connection-modal .btn：min-h 36 /
+             min-w 42 / gap 8 / padding 8 16 / 12px（connection.css:11）。 -->
+        <Border x:Name="ModalServerEdit" Background="{DynamicResource Overlay}" Visibility="Collapsed"
+                Panel.ZIndex="60">
+            <Border Style="{StaticResource Panel}" Width="460" MaxHeight="764" Padding="24"
+                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel>
+                    <TextBlock x:Name="ServerEditTitle" Text="添加服务器" FontSize="16" FontWeight="Bold"/>
+                    <TextBlock FontSize="12" LineHeight="20" Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
+                               Text="只修改启动器记录，不会覆盖游戏内服务器列表。"/>
+                    <TextBlock x:Name="ServerEditError" FontSize="12" LineHeight="20" Margin="0,8,0,0"
+                               Foreground="{DynamicResource Danger}" Visibility="Collapsed"/>
+                    <TextBlock Text="服务器名称" FontSize="13" Foreground="{DynamicResource Fg2}" Margin="0,16,0,8"/>
+                    <TextBox Style="{StaticResource Input}" MaxLength="30" FontSize="13"/>
+                    <TextBlock Text="服务器地址" FontSize="13" Foreground="{DynamicResource Fg2}" Margin="0,16,0,8"/>
+                    <TextBox x:Name="ServerEditAddr" Style="{StaticResource Input}" FontSize="13"
+                             FontFamily="{StaticResource MonoFont}" MaxLength="256"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,24,0,0">
+                        <Button Style="{StaticResource BtnGhost}" MinWidth="42" Content="取消"
+                                Click="SrvCancel_Click"/>
+                        <Button Style="{StaticResource BtnGold}" MinWidth="42" Margin="12,0,0,0" Content="保存"
+                                Click="SrvSave_Click"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <Border x:Name="ModalServerDelete" Background="{DynamicResource Overlay}" Visibility="Collapsed"
+                Panel.ZIndex="60">
+            <Border Style="{StaticResource Panel}" Width="460" MaxHeight="764" Padding="24"
+                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel>
+                    <TextBlock Text="删除服务器" FontSize="16" FontWeight="Bold"/>
+                    <!-- .confirm-text：14px / line-height 1.7 / overflow-wrap anywhere（styles.css:561） -->
+                    <TextBlock x:Name="ServerDeleteText" FontSize="14" LineHeight="24" TextWrapping="Wrap"
+                               Margin="0,12,0,0"
+                               Text="确定要从启动器删除该服务器吗？这只会删除启动器记录，不会修改 Minecraft 的 servers.dat；下次同步时，游戏内仍存在的条目可能再次出现。"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,24,0,0">
+                        <Button Style="{StaticResource BtnGhost}" MinWidth="42" Content="取消"
+                                Click="SrvCancel_Click"/>
+                        <Button Style="{StaticResource BtnDanger}" MinWidth="42" Margin="12,0,0,0" Content="确认删除"
+                                Click="SrvDelete_Click"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <Border x:Name="ModalServerJoin" Background="{DynamicResource Overlay}" Visibility="Collapsed"
+                Panel.ZIndex="60">
+            <Border Style="{StaticResource Panel}" Width="460" MaxHeight="764" Padding="24"
+                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel>
+                    <TextBlock x:Name="ServerJoinTitle" Text="进入服务器" FontSize="16" FontWeight="Bold"/>
+                    <TextBlock Text="选择游戏实例（将保存关联并启动）" FontSize="13"
+                               Foreground="{DynamicResource Fg2}" Margin="0,16,0,8"/>
+                    <ComboBox x:Name="ServerJoinInstance" MinHeight="36" FontSize="13"/>
+                    <TextBlock x:Name="ServerJoinHint" Style="{StaticResource Micro}" Margin="0,8,0,0"
+                               TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,24,0,0">
+                        <Button Style="{StaticResource BtnGhost}" MinWidth="42" Content="取消"
+                                Click="SrvCancel_Click"/>
+                        <Button Style="{StaticResource BtnGold}" MinWidth="42" Margin="12,0,0,0" Content="启动"
+                                Click="SrvJoin_Click"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Border>
     </Grid>
 </UserControl>
