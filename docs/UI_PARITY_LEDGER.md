@@ -86,3 +86,35 @@
 
 **E. 动效缺口**（详见 UI_MOTION.md 对账）
 路由 fade 180/80ms、toast 进出场 220ms、`spin` 0.8s、`dl-indeterminate` 1.25s、进度条宽度过渡 .3s、`nav-sub-item` 逐条淡入、`creator-bubble` reveal+drift、`mask-in`/`modal-in`（我缺 scale）、mp 选项 150ms 过渡、`prefers-reduced-motion` 全量归零。
+
+## 4. 复跑记录
+
+### 2026-10-03 复跑（第 3 批：首页 / 模组页 / 账号页 完成后）
+
+| 原版视图 | 有样式的类 | XAML 命中 | 覆盖率 | 未命中（按声明数排序） |
+|---|---|---|---|---|
+| App.vue | 120 | 51 | 42.5% | `mp-name-opt`, `mp-keysync-opt`, `mp-conflict-actions`, `mp-conflict`, `nav-icon`, `mp-replace-confirm`, `mp-radio`, `notice-dot`, `dl-dismiss`, `dl-stage`, `notice-item`, `launchfail-text` …(+57) |
+| HomeView.vue | 87 | 78 | 89.7% | `log-dialog`, `log-failure`, `log-body`, `log-close`, `log-mask`, `hero-metadata-slot`, `log-empty`, `hero-metadata`, `spinning` |
+| GameView.vue | 106 | 98 | 92.5% | `inst-icon`, `instance-commands`, `row-actions`, `installed-launch`, `installed-search`, `folder-caption`, `version-list`, `switch-ui` |
+| ServersView.vue | 22 | 21 | 95.5% | `modal-actions` |
+| BridgeView.vue | 43 | 40 | 93.0% | `bridge-apply-tag`, `switch-ui`, `bridge-select` |
+| FriendConnectView.vue | 17 | 17 | 100.0% | — |
+| KeysView.vue | 41 | 38 | 92.7% | `drag-active`, `switch-ui`, `menu-overlay` |
+| SkinsView.vue | 73 | 69 | 94.5% | `drag-hint`, `history-name-input`, `muted`, `hidden-input` |
+| CommunityView.vue | 73 | 70 | 95.9% | `instance-label`, `tag-cf`, `tag-success` |
+| FileManager.vue | 60 | 58 | 96.7% | `page-head`, `switch-ui` |
+| RecordingsView.vue | 26 | 26 | 100.0% | — |
+| SettingsView.vue | 141 | 112 | 79.4% | `theme-preview`, `mem-slider-thumb`, `tp-check`, `mem-slider-track`, `java-scan-track`, `collapse-arrow`, `tp-side`, `java-item-path`, `tp-body`, `tp-palette`, `plugin-info`, `java-auto-desc` …(+17) |
+| AccountsView.vue | 71 | 71 | 100.0% | — |
+| **合计** | **880** | **749** | **85.1%** | |
+
+剩余缺口的性质（逐条核过，不是笼统数字）：
+- **壳层 App.vue 42.5%**：modpack 冲突对话框族（mp-*）、下载中心明细行（dl-stage 族）、
+  通知列表行、启动失败模态、拖拽框细节 —— 正在补。
+- **设置页 79.4%** 的"未命中"里有 11 个是 `tp-*` / `mem-slider-*`：它们实现在
+  `MainWindow.BuildThemeOption` 与设置页自绘滑块里，只是没沿用原版类名，属命名噪声；
+  真缺的是 HomeLayoutEditor 本体与 java-list 的行内容。
+- **版本页 / 首页 90% 出头**：剩下的多是 `switch-ui`、`menu-overlay` 这类共享件类名
+  （我用的是 Style 键 `Switch`/`VersionMenuOverlay`），以及 `.log-*` 一族确实还在壳层里没打名字。
+- 明确**不做**的：原版死代码（`fm-disabled-tag`、`settings-navigation`、`.avatar`、
+  `.result-head .tag` 变体、`more-sentinel`、`.launching`），照抄反而错。
