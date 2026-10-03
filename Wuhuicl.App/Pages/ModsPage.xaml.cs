@@ -2,6 +2,7 @@ using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Media;
 
 namespace Wuhuicl.App.Pages;
 
@@ -18,6 +19,21 @@ public partial class ModsPage : UserControl
     bool _ready;
 
     string resourceKind = "mods";
+
+    // ---------------- v-if 门控位 ----------------
+    // 这几块在原版都由数据决定渲染与否（currentVersion / updatePanel / batchResults / dupOpen …），
+    // 而 FileManager.vue 的数据层（fs:list、mods:catalog、mods:checkUpdates）还没接进 LaunchSession，
+    // 所以这里给的是「门控布尔位 + 一次刷新」而不是绑定：默认值维持原版空数据下的形态（全部收起），
+    // 接线时把对应位改真并调 ApplyGating()，块级可见性就跟着走，不需要动 XAML。
+    bool _hasCurrentVersion = true;   // currentVersion（:341 fm-context / :347 card.empty / :400 fm-controls / :411 fm-card）
+    bool _updPanelOpen;               // updatePanel.open（:352）
+    bool _hasBatchResults;            // batchResults.length（:409）
+    bool _statusStripOn;              // entries.length && (loading || loadError)（:412）
+    bool _statusStripIsError;         // loadError（同一行的两态）
+    bool _dupModalOpen;               // dupOpen（:473，仅 mods）
+    bool _migrationModalOpen;         // migrationOpen（:460）
+    bool _versionModalOpen;           // switchFile 非空（:459）
+    bool _confirmModalOpen;           // delModal.open（:463）
 
     /// <summary>
     /// 资源类型，对应 FileManager.vue 的 props.rel：<c>mods</c>（默认）/ <c>resourcepacks</c> / <c>shaderpacks</c>。
@@ -129,6 +145,85 @@ public partial class ModsPage : UserControl
 
         BtnCheckUpdate.Visibility = mods ? Visibility.Visible : Visibility.Collapsed; // v-if rel==='mods' — :336
         BtnCtxRefresh.Visibility = mods ? Visibility.Collapsed : Visibility.Visible;  // v-if rel!=='mods' — :343
+        // 头部那颗「更多」（.file-more，:338）与整条 .fm-controls（搜索 + 两个 SelectMenu + 刷新，:400）
+        // 原版都是 v-if rel==='mods'：资源包 / 光影页不渲染，本轮补上门控。
+        HeadMoreHost.Visibility = mods ? Visibility.Visible : Visibility.Collapsed;
+        FmControls.Visibility = mods ? Visibility.Visible : Visibility.Collapsed;
+        EmptyShadersHint.Visibility = resourceKind == "shaderpacks" ? Visibility.Visible : Visibility.Collapsed; // :421
+
+        // 5. .shader-empty（FileManager.vue:411 的 :class ＋ :719）：光影包空列表时这张卡「什么都没有」——
+        //    background transparent / border 0 / box-shadow none / backdrop-filter none，
+        //    里面的 .empty 再换成 min-height min(380px,45vh)。
+        //    原版的完整条件是 shaderpacks && !entries.length && !loading && !loadError，
+        //    后三项要等 fs:list；这里先按 resourceKind 落壳，数据接入后把条件补全即可。
+        ApplyShaderEmpty();
+        ApplyEmptyMinHeight();
+
+        // 只有模组页会出现的两块（更新面板 :352、批量结果 :409）与 DupCleanModal（:473）在切走时强制收起
+        ApplyGating();
+    }
+
+    /// <summary>.shader-empty 的卡片底：光影包收成透明无边框，其余用主题画刷的动态引用（切主题不丢）。</summary>
+    void ApplyShaderEmpty()
+    {
+        bool on = resourceKind == "shaderpacks";
+        if (on)
+        {
+            FmCard.Background = Brushes.Transparent;
+            FmCard.BorderThickness = new Thickness(0);
+        }
+        else
+        {
+            // 还原成 .card 的两条 DynamicResource（Panel 样式：Card 底 / Line 描边 1 / radius 14 / 无阴影）。
+            // Border.Background / Border.BorderBrush 是 Border 自己注册的 DP，不能用 Control 的同名静态字段。
+            FmCard.SetResourceReference(Border.BackgroundProperty, "Card");
+            FmCard.SetResourceReference(Border.BorderBrushProperty, "Line");
+            FmCard.BorderThickness = new Thickness(1);
+        }
+    }
+
+    /// <summary>
+    /// .shader-empty .empty 的 min-height 是 min(380px,45vh)（:719）。WPF 无视口单位，
+    /// 45vh 按本页（.content 里那块 Grid，MainWindow.xaml:260）的实际高度算，窗口缩放时在 Page_SizeChanged 里重算。
+    /// 非光影页回到 .content .empty 的 120（ui-system.css:44）。
+    /// 同一处顺带把 DupCleanModal 的 max-height 84vh（DupCleanModal.vue:204-208）也算出来。
+    /// </summary>
+    void ApplyEmptyMinHeight()
+    {
+        double h = ActualHeight;
+        EmptyBlock.MinHeight = resourceKind == "shaderpacks" && h > 1
+            ? Math.Min(380, h * 0.45)
+            : 120;
+        if (h > 1) DupModal.MaxHeight = h * 0.84;
+    }
+
+    /// <summary>
+    /// v-if 门控：把上面那几位布尔值映射成块级 Visibility（XAML 里每块都注了原版行号）。
+    /// 默认全 false ＝ 原版空数据下的样子；刷新中的 .status-strip 还要按 loadError 换底
+    /// （.status-strip.error 是 danger-soft ＋ text 字色，ui-system.css:42）。
+    /// </summary>
+    void ApplyGating()
+    {
+        bool mods = resourceKind == "mods";
+        // :347 —— 没有可选版本时整页只剩这张卡（.fm-context / .fm-controls / .fm-card 会一起退场，等数据接入再收）
+        NoVersionCard.Visibility = _hasCurrentVersion ? Visibility.Collapsed : Visibility.Visible;
+        UpdPanel.Visibility = mods && _updPanelOpen ? Visibility.Visible : Visibility.Collapsed;      // :352
+        FmResults.Visibility = mods && _hasBatchResults ? Visibility.Visible : Visibility.Collapsed;   // :409
+        StatusStrip.Visibility = _statusStripOn ? Visibility.Visible : Visibility.Collapsed;           // :412
+        BtnStatusRetry.Visibility = _statusStripIsError ? Visibility.Visible : Visibility.Collapsed;   // :412 的 v-if loadError
+        if (_statusStripIsError) StatusStrip.SetResourceReference(Border.BackgroundProperty, "DangerSoft");
+        else StatusStrip.SetResourceReference(Border.BackgroundProperty, "AccentSoft");                 // ui-system.css:41-42
+        // 四个弹窗（:459/:460/:462/:473）；DupCleanModal 的 v-if 还带 props.rel==='mods'
+        ModVersionModalHost.Visibility = _versionModalOpen ? Visibility.Visible : Visibility.Collapsed;
+        ModMigrationModalHost.Visibility = _migrationModalOpen ? Visibility.Visible : Visibility.Collapsed;
+        ConfirmModalHost.Visibility = _confirmModalOpen ? Visibility.Visible : Visibility.Collapsed;
+        DupCleanModalHost.Visibility = mods && _dupModalOpen ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>窗口/面板尺寸变化时重算 .shader-empty 的 min(380px,45vh)。</summary>
+    void Page_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_ready) ApplyEmptyMinHeight();
     }
 
     /// <summary>
