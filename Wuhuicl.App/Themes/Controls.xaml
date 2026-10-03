@@ -1,88 +1,189 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:Wuhuicl.App"
+                    xmlns:ctl="clr-namespace:Wuhuicl.App.Controls">
 
-    <!-- 控件样式：一律用 DynamicResource 取色，切换主题时无需重建窗口 -->
+    <!-- 尺寸一律取 docs/UI_GEOMETRY_HOME.md 的实测值，不要凭感觉调（CSS 变量名去掉前缀写）：
+         ctl-h 36 / row-h 42 / space-* 4·8·12·16·24·32·48 / text-* 12·13·14·16·20·26
+         radius-sm 6 radius-md 10 radius-lg 14；hero 20、状态条 15、导航项 48、子项 40
+         这里不设 FontFamily：隐式样式会压过属性继承，图标字符会被换成中文字体渲染成豆腐块。 -->
+
     <FontFamily x:Key="UiFont">Microsoft YaHei UI, Segoe UI</FontFamily>
     <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas</FontFamily>
 
-    <!-- 不要在这里设 FontFamily：隐式样式会压过属性继承，
-         按钮 Content 里的图标字符会被换成中文字体渲染成豆腐块。字体由 Window 继承。 -->
+    <local:BoolVis x:Key="BoolVis"/>
+    <local:InvertBool x:Key="InvBool"/>
+    <local:CountVis x:Key="CountVis"/>
+    <local:BrushByKey x:Key="BrushByKey"/>
+    <local:StyleByKey x:Key="StyleByKey"/>
+
+    <!-- 这里绝不能设 Foreground：样式 setter 的优先级高于属性继承，
+         会把按钮模板里靠继承取色的文字（开始游戏 / 版本设置）压成 Fg 深色。
+         前景色由 Window.Foreground 继承下来，控件模板各自设。 -->
     <Style TargetType="TextBlock">
-        <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
         <Setter Property="TextOptions.TextFormattingMode" Value="Ideal"/>
         <Setter Property="TextOptions.TextRenderingMode" Value="ClearType"/>
         <Setter Property="UseLayoutRounding" Value="True"/>
     </Style>
+
+    <Style x:Key="PageTitle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+        <Setter Property="FontSize" Value="24"/><Setter Property="FontWeight" Value="Bold"/>
+    </Style>
     <Style x:Key="H1" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
         <Setter Property="FontSize" Value="24"/><Setter Property="FontWeight" Value="Bold"/>
     </Style>
-    <Style x:Key="H2" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
-        <Setter Property="FontSize" Value="16"/><Setter Property="FontWeight" Value="Bold"/>
+    <Style x:Key="PageSub" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+        <Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
     </Style>
     <Style x:Key="Dim" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
-        <Setter Property="FontSize" Value="12.5"/><Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+        <Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+    </Style>
+    <!-- .instances-head h2 = 17px/750 -->
+    <Style x:Key="H2" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+        <Setter Property="FontSize" Value="17"/><Setter Property="FontWeight" Value="Bold"/>
+    </Style>
+    <Style x:Key="Lbl14" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+        <Setter Property="FontSize" Value="14"/><Setter Property="FontWeight" Value="SemiBold"/>
     </Style>
     <Style x:Key="Micro" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
-        <Setter Property="FontSize" Value="11"/><Setter Property="Foreground" Value="{DynamicResource Fg3}"/>
-    </Style>
-    <Style x:Key="Icon" TargetType="TextBlock">
-        <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
-        <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
-        <Setter Property="VerticalAlignment" Value="Center"/>
-        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="FontSize" Value="12"/><Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
     </Style>
 
-    <!-- 卡片 -->
-    <Style x:Key="CardBox" TargetType="Border">
+    <!-- ============ 矢量图标底座：82 个描边型 + 8 个实心型 ============ -->
+    <!-- 原版 90 处都是 stroke/fill = currentColor，即跟随继承下来的文字色。
+         这里等价做法是绑到宿主 ContentControl 的 Foreground（它自己继承自按钮/窗口），
+         绝不能写死 Fg——否则启动按钮、行内播放键这类彩底上的图标会变成深色。 -->
+    <Style x:Key="IconStroke" TargetType="Path">
+        <Setter Property="Stroke"
+                Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type ContentControl}}}"/>
+        <Setter Property="StrokeThickness" Value="2"/>
+        <Setter Property="Fill" Value="{x:Null}"/>
+        <Setter Property="StrokeStartLineCap" Value="Round"/>
+        <Setter Property="StrokeEndLineCap" Value="Round"/>
+        <Setter Property="StrokeLineJoin" Value="Round"/>
+    </Style>
+    <Style x:Key="IconFill" TargetType="Path">
+        <Setter Property="Fill"
+                Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type ContentControl}}}"/>
+        <Setter Property="Stroke" Value="{x:Null}"/>
+    </Style>
+
+    <!-- ============ 卡片：.content .card 是平面的（box-shadow:none） ============ -->
+    <!-- 样式键名绝不能与主题画刷键同名：StaticResource 从应用资源往回找时先命中主题字典，
+         把 SolidColorBrush 赋给 Style 会在解析期抛异常（Card 就踩过，和早先的 Nav 同一类）。
+         所以卡片样式叫 Panel，不叫 Card。tools/check_resource_keys.py 会守住这条。 -->
+    <Style x:Key="Panel" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource Card}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="18"/>
-        <Setter Property="Padding" Value="18"/>
-        <Setter Property="Effect" Value="{DynamicResource CardShadow}"/>
+        <Setter Property="CornerRadius" Value="14"/>
+        <Setter Property="Padding" Value="20"/>
     </Style>
+    <Style x:Key="CardTight" TargetType="Border" BasedOn="{StaticResource Panel}">
+        <Setter Property="Padding" Value="16"/>
+    </Style>
+    <Style x:Key="CardBox" TargetType="Border" BasedOn="{StaticResource Panel}"/>
 
-    <Style x:Key="Chip" TargetType="Border">
+    <!-- .tag：padding 2/8，radius 999，12px，line-height 1.6，border 1px transparent
+         — styles.css:459-472。透明边框不是多余的：CSS 里它照样占 2px 盒高（25.2），
+           不给的话 WPF 的标签会矮 4~6，行里看起来比原版小一圈。
+           radius 走 CssRadius.Pill：原版的 999 被浏览器收缩成 min(高,宽)/2≈12.6，
+           WPF 写死 999 会画成浅透镜（用户点名的"椭圆"）。 -->
+    <Style x:Key="Tag" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource ChipBg}"/>
-        <Setter Property="CornerRadius" Value="9"/>
-        <Setter Property="Padding" Value="9,3"/>
+        <Setter Property="ctl:CssRadius.Pill" Value="True"/>
+        <Setter Property="Padding" Value="8,2"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
+    <Style x:Key="Chip" TargetType="Border" BasedOn="{StaticResource Tag}"/>
 
-    <!-- 左侧竖排导航 -->
-    <Style x:Key="Nav" TargetType="RadioButton">
+    <!-- .tag 里的文字：line-height 1.6 决定胶囊高度（12px → 19.2 → 盒 25.2），
+         WPF 默认行高只有 ~1.28em，所以每个标签文字都要走这个样式补 LineHeight -->
+    <Style x:Key="TagText" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="LineHeight" Value="19"/>
+        <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
         <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
-        <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
+    </Style>
+
+    <!-- .result-head .tag（CommunityView.vue:1080）压成 11px + border:0 → 行高 11×1.6=17.6 -->
+    <Style x:Key="TagTextSm" TargetType="TextBlock" BasedOn="{StaticResource TagText}">
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="LineHeight" Value="18"/>
+    </Style>
+
+    <!-- 区块标题前的主题色短竖线在界面里内联画（4×17 radius 2），
+         不做成共享 Border 资源：同一个 UIElement 实例不能挂到多个父节点上。 -->
+
+    <!-- ============ 按钮 ============ -->
+    <Style x:Key="Btn" TargetType="Button">
+        <Setter Property="MinHeight" Value="36"/>
+        <Setter Property="Padding" Value="16,8"/>
         <Setter Property="FontSize" Value="14"/>
-        <Setter Property="Height" Value="44"/>
-        <Setter Property="Margin" Value="0,3"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Template">
             <Setter.Value>
-                <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="b" Background="Transparent" CornerRadius="12" Padding="13,0">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="24"/><ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="{TemplateBinding Tag}" Style="{StaticResource Icon}" FontSize="16"
-                                       Foreground="{TemplateBinding Foreground}" HorizontalAlignment="Left"/>
-                            <ContentPresenter Grid.Column="1" VerticalAlignment="Center" Margin="10,0,0,0"/>
-                            <TextBlock Grid.Column="2" x:Name="chev" Text="&#xE76C;" FontFamily="Segoe MDL2 Assets"
-                                       FontSize="11" Visibility="Collapsed"
-                                       Foreground="{TemplateBinding Foreground}"/>
-                        </Grid>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="b" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            SnapsToDevicePixels="True"
+                            CornerRadius="{Binding Path=(ctl:CssRadius.Round), RelativeSource={RelativeSource TemplatedParent}}"
+                            Padding="{TemplateBinding Padding}"
+                            RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
                     </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
                         </Trigger>
-                        <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
-                            <Setter Property="FontWeight" Value="Bold"/>
+                        <!-- .btn:active = transform: scale(0.985)，140ms ease（styles.css:184-186） -->
+                        <Trigger Property="IsPressed" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="b"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.14" Value="0.985"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="b"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.14" Value="0.985"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="b"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.14" Value="1"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="b"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.14" Value="1"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -90,28 +191,101 @@
         </Setter>
     </Style>
 
-    <!-- 主按钮（原版蓝色开始游戏） -->
-    <Style x:Key="PrimaryBtn" TargetType="Button">
+    <!-- .btn-gold：accent 渐变实心 + on-accent 文字 -->
+    <Style x:Key="BtnGold" TargetType="Button" BasedOn="{StaticResource Btn}">
         <Setter Property="Background" Value="{DynamicResource AccentGrad}"/>
         <Setter Property="Foreground" Value="{DynamicResource AccentFg}"/>
-        <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
-        <Setter Property="FontWeight" Value="Bold"/>
-        <Setter Property="FontSize" Value="15"/>
-        <Setter Property="Padding" Value="22,12"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Opacity" Value="0.94"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+    <Style x:Key="PrimaryBtn" TargetType="Button" BasedOn="{StaticResource BtnGold}"/>
+
+    <!-- .btn-ghost：card-2 底 + 描边 -->
+    <Style x:Key="BtnGhost" TargetType="Button" BasedOn="{StaticResource Btn}">
+        <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+    <Style x:Key="GhostBtn" TargetType="Button" BasedOn="{StaticResource BtnGhost}"/>
+
+    <!-- .btn-danger：浅红底 + 红字，不实心 -->
+    <Style x:Key="BtnDanger" TargetType="Button" BasedOn="{StaticResource Btn}">
+        <Setter Property="Foreground" Value="{DynamicResource Danger}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Danger}"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource Overlay}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- .btn-sm：32 高（ctl-h 36 减 8），radius radius-sm 6，13px（styles.css:258-263） -->
+    <Style x:Key="BtnSm" TargetType="Button" BasedOn="{StaticResource Btn}">
+        <Setter Property="MinHeight" Value="32"/>
+        <Setter Property="Padding" Value="12,4"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="ctl:CssRadius.Round" Value="6"/>
+    </Style>
+
+    <!-- .icon-btn：32×32，radius 6，内层 svg 16×16 -->
+    <Style x:Key="IconBtn" TargetType="Button">
+        <Setter Property="Width" Value="32"/>
+        <Setter Property="Height" Value="32"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="12"
-                            Padding="{TemplateBinding Padding}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="6"
+                            RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
+                        <Grid>
+                            <!-- hover 底色用独立覆盖层做透明度渐变：直接动画 Background 会改到共享的主题画刷 -->
+                            <Border x:Name="hv" Background="{DynamicResource CardSoft}" CornerRadius="6" Opacity="0"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentHi}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="hv"
+                                                                       Storyboard.TargetProperty="Opacity">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.13" Value="1"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="hv"
+                                                                       Storyboard.TargetProperty="Opacity">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.13" Value="0"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                            <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
                         </Trigger>
+                        <!-- .icon-btn:active = scale(0.93)，140ms（styles.css:290-292） -->
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentLo}"/>
+                            <Setter TargetName="b" Property="RenderTransform">
+                                <Setter.Value>
+                                    <ScaleTransform ScaleX="0.93" ScaleY="0.93"/>
+                                </Setter.Value>
+                            </Setter>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.45"/>
@@ -122,125 +296,92 @@
         </Setter>
     </Style>
 
-    <!-- 次级按钮（白底描边） -->
-    <Style x:Key="GhostBtn" TargetType="Button">
-        <Setter Property="Background" Value="{DynamicResource Card}"/>
-        <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
-        <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
-        <Setter Property="FontSize" Value="13"/>
-        <Setter Property="Padding" Value="14,8"/>
-        <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="b" Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
-                            CornerRadius="10" Padding="{TemplateBinding Padding}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
-                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
-                        </Trigger>
-                        <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource CardSoft}"/>
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Opacity" Value="0.4"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <!-- 深色半透明按钮（海报上的"版本设置"） -->
-    <Style x:Key="HeroBtn" TargetType="Button">
-        <Setter Property="Background" Value="{DynamicResource HeroChipBg}"/>
-        <Setter Property="Foreground" Value="#FFF2F5FA"/>
-        <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
-        <Setter Property="FontSize" Value="13.5"/>
-        <Setter Property="FontWeight" Value="SemiBold"/>
-        <Setter Property="Padding" Value="16,10"/>
-        <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="12"
-                            Padding="{TemplateBinding Padding}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="#D8202838"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <!-- 行内小方块按钮（最近游戏右侧的播放键） -->
-    <Style x:Key="SquareBtn" TargetType="Button">
-        <Setter Property="Width" Value="38"/><Setter Property="Height" Value="32"/>
-        <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
-        <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
-        <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="9">
-                        <TextBlock Text="&#xE768;" FontFamily="Segoe MDL2 Assets" FontSize="12"
-                                   Foreground="{TemplateBinding Foreground}"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource Accent}"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
-
-    <!-- 图标按钮（工具条与窗口控制） -->
-    <Style x:Key="IconBtn" TargetType="Button">
-        <Setter Property="Width" Value="40"/><Setter Property="Height" Value="32"/>
+    <!-- .win-btn：38×36 -->
+    <Style x:Key="WinBtn" TargetType="Button">
+        <Setter Property="Width" Value="38"/>
+        <Setter Property="Height" Value="36"/>
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
-        <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
-        <Setter Property="FontSize" Value="12"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="9">
+                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="10">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+                            <Setter TargetName="b" Property="Background" Value="{DynamicResource CardSoft}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
-    <Style x:Key="CloseBtn" TargetType="Button" BasedOn="{StaticResource IconBtn}">
+    <!-- .win-close:hover = danger 底 + 白字 -->
+    <Style x:Key="WinClose" TargetType="Button" BasedOn="{StaticResource WinBtn}">
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="9">
+                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="10">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="b" Property="Background" Value="{DynamicResource Danger}"/>
-                            <Setter Property="Foreground" Value="White"/>
+                            <Setter Property="Foreground" Value="#FFFFFFFF"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="CloseBtn" TargetType="Button" BasedOn="{StaticResource WinClose}"/>
+
+    <!-- .top-btn：36 高，padding 0 12，13px -->
+    <Style x:Key="TopBtn" TargetType="Button" BasedOn="{StaticResource Btn}">
+        <Setter Property="Padding" Value="12,0"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+                <!-- .top-btn:hover 的字色是 accent-2 而不是 accent（App.vue:2092） -->
+                <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- .top-back：36×36（ctl-h）/ radius 6 / card-2 底 / 1px color-mix(border 70%,transparent) /
+         字色 text-dim，svg 16×16；hover → 字色 text + 描边 border-strong（App.vue:2033-2058）。
+         disabled 只是 opacity .62，WPF 的 IsEnabled=False 会连带压住整块，这里用 Opacity 表达 -->
+    <Style x:Key="TopBack" TargetType="Button">
+        <Setter Property="Width" Value="36"/>
+        <Setter Property="Height" Value="36"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="b" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.62"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -248,27 +389,96 @@
         </Setter>
     </Style>
 
-
-    <!-- 主题选择胶囊 -->
-    <Style x:Key="ThemeChip" TargetType="RadioButton">
-        <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+    <!-- ============ 左侧导航 ============ -->
+    <!-- .nav-item：48 高 / padding 0 16 / gap 12 / radius 10；hover 与选中都不加底色，
+         选中态只画左侧 3px 竖条（原版 inset 3px 0 0 accent），标签 500→600 -->
+    <Style x:Key="Nav" TargetType="RadioButton">
+        <Setter Property="Height" Value="48"/>
+        <!-- .nav 是 flex 列且 gap 4（App.vue:1806），每项自带下边距凑出节距 52 -->
+        <Setter Property="Margin" Value="0,0,0,4"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="b" Background="{DynamicResource CardSoft}" BorderBrush="{DynamicResource Line}"
-                            BorderThickness="1" CornerRadius="9" Padding="14,7">
-                        <ContentPresenter VerticalAlignment="Center"/>
-                    </Border>
+                    <Grid>
+                        <Border Background="Transparent" CornerRadius="10"/>
+                        <Grid Margin="16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <ContentControl Grid.Column="0" Width="19" Height="19" VerticalAlignment="Center"
+                                            Style="{Binding Tag, RelativeSource={RelativeSource TemplatedParent},
+                                                    Converter={StaticResource StyleByKey}}"/>
+                            <ContentPresenter Grid.Column="2" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
-                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
-                            <Setter Property="FontWeight" Value="Bold"/>
+                            <!-- .nav-item.active 的字色不是 text 变量本身，而是 text 84% + accent 16%（App.vue:1833） -->
+                            <Setter Property="Foreground" Value="{DynamicResource NavActiveFg}"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- .nav-sub-item：40 高，左缩进 32，13px -->
+    <Style x:Key="NavSub" TargetType="RadioButton" BasedOn="{StaticResource Nav}">
+        <Setter Property="Height" Value="40"/>
+        <Setter Property="FontSize" Value="13"/>
+    </Style>
+
+    <!-- .nav-parent：与导航项同尺寸，但右侧多一个 14×14 尖角（.nav-caret），
+         展开时 rotate(90deg) 0.18s ease（App.vue:1884-1891）。它是展开开关，不是页面。 -->
+    <Style x:Key="NavParent" TargetType="ToggleButton">
+        <Setter Property="Height" Value="48"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Grid>
+                        <Border Background="{TemplateBinding Background}" CornerRadius="10"/>
+                        <Grid Margin="16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="14"/>
+                            </Grid.ColumnDefinitions>
+                            <ContentControl Grid.Column="0" Width="19" Height="19" VerticalAlignment="Center"
+                                            Style="{Binding Tag, RelativeSource={RelativeSource TemplatedParent},
+                                                    Converter={StaticResource StyleByKey}}"/>
+                            <ContentPresenter Grid.Column="2" VerticalAlignment="Center"/>
+                            <Viewbox Grid.Column="3" Width="14" Height="14" VerticalAlignment="Center">
+                                <Canvas Width="24" Height="24">
+                                    <Path x:Name="caret" Style="{StaticResource IconStroke}"
+                                          Data="M9,6 L15,12 L9,18" StrokeThickness="2"
+                                          RenderTransformOrigin="0.5,0.5">
+                                        <Path.RenderTransform><RotateTransform Angle="0"/></Path.RenderTransform>
+                                    </Path>
+                                </Canvas>
+                            </Viewbox>
+                        </Grid>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="caret" Property="RenderTransform">
+                                <Setter.Value><RotateTransform Angle="90"/></Setter.Value>
+                            </Setter>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -276,22 +486,489 @@
         </Setter>
     </Style>
 
-    <!-- 三格状态条 / 账号行：整格可点的扁平时钟按钮 -->
-    <Style x:Key="CellBtn" TargetType="Button">
+    <!-- ============ 分段/胶囊/搜索：原版同一模式复制了三遍，这里只留一份 ============ -->
+    <!-- .game-tab：height 36 / padding 0 20 / radius 6（GameView.vue:2169，覆盖 :1892 的 24 与 ctl-h）。
+         选中态的底色与 2px 下划线由 .game-tabs-blob 那层画（见页面里的 TabsBlob），这里只换字色 -->
+    <Style x:Key="PillTab" TargetType="RadioButton">
+        <Setter Property="Height" Value="36"/>
+        <Setter Property="Padding" Value="20,0"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="b" Background="Transparent" CornerRadius="6"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- .capsule：height 36 / padding 0 16 / radius 999（GameView.vue:1681-1696）
+         原版的 999 在 36 高上被浏览器收缩成 18；字面 999 在 WPF 里是浅透镜，所以显式给 18。
+         色：底 card-2、边 border、字 text-dim（不是 .btn 的 text）；hover 只改字色，边框不动
+         （:1694-1696 `.capsule:hover{color:var(text)}`，BtnGhost 那条 border-strong hover 要按下来） -->
+    <Style x:Key="Capsule" TargetType="Button" BasedOn="{StaticResource BtnGhost}">
+        <Setter Property="Height" Value="36"/>
+        <Setter Property="MinHeight" Value="36"/>
+        <Setter Property="Padding" Value="16,0"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+        <Setter Property="ctl:CssRadius.Round" Value="18"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+                <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- .capsule.active：边 accent、底 accent-soft、字 accent-2（GameView.vue:1700-1704） -->
+    <Style x:Key="CapsuleOn" TargetType="Button" BasedOn="{StaticResource Capsule}">
+        <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+        <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+    </Style>
+
+    <!-- .tool-search：height 36 / padding 0 12 / radius 999 / min-width 180（GameView.vue:1638-1660）
+         原版是 div + 内层 input，这里做成 Border 样式，占位文字由页面放 TextBlock -->
+    <Style x:Key="ToolSearch" TargetType="Border">
+        <Setter Property="Height" Value="36"/>
+        <Setter Property="MinWidth" Value="180"/>
+        <Setter Property="Padding" Value="12,0"/>
+        <Setter Property="ctl:CssRadius.Pill" Value="True"/>
+        <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <!-- .settings-scopes .btn：15px/650 min-height 38 padding 8 18，选中靠底色（SettingsView.vue:1839-1840） -->
+    <!-- .settings-scopes .btn：38 高 15px/650 padding 8 18；未选中就是 .btn 默认
+         （Card 底 + Line 描边），选中 [aria-current] 换 AccentSoft 底 + accent-2 字、
+         边框透明（SettingsView.vue:1839-1840） -->
+    <Style x:Key="ScopeTab" TargetType="RadioButton">
+        <Setter Property="MinHeight" Value="38"/>
+        <Setter Property="Padding" Value="18,8"/>
+        <Setter Property="FontSize" Value="15"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="b" Background="{DynamicResource Card}" CornerRadius="10"
+                            BorderBrush="{DynamicResource Line}" BorderThickness="1"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
+                            <Setter TargetName="b" Property="BorderBrush" Value="Transparent"/>
+                            <!-- .settings-scopes [aria-current] 的字色是 accent-2（SettingsView.vue:1840） -->
+                            <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- .settings-categories .btn：border 0 radius 6 min-height 32 padding 6 12 13px（:1842） -->
+    <Style x:Key="CatPill" TargetType="RadioButton">
+        <Setter Property="MinHeight" Value="32"/>
+        <Setter Property="Padding" Value="12,6"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="b" Background="Transparent" CornerRadius="6"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="b" Property="Background" Value="{DynamicResource Hover}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
+                            <!-- .settings-categories [aria-current] 字色是 accent（SettingsView.vue:1241 作用域块） -->
+                            <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- .collapse-head：min-height 42 padding 10 18，右侧 7×7 箭头旋转 45°（:1852 + :1377-1390） -->
+    <Style x:Key="CollapseHead" TargetType="ToggleButton">
+        <Setter Property="MinHeight" Value="42"/>
+        <Setter Property="Padding" Value="18,10"/>
+        <Setter Property="FontSize" Value="15"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ContentPresenter VerticalAlignment="Center"/>
+                            <Path Grid.Column="1" x:Name="arrow" Width="8" Height="8" Stretch="Uniform"
+                                  Data="M2,6 L8,12 L14,6" Stroke="{DynamicResource Fg2}" StrokeThickness="2"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform><RotateTransform Angle="0"/></Path.RenderTransform>
+                            </Path>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="arrow" Property="RenderTransform">
+                                <Setter.Value><RotateTransform Angle="180"/></Setter.Value>
+                            </Setter>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- .mirror-option：min-height 36 / padding 0 16 / radius 999 / gap 8（SettingsView.vue:1794-1809）。
+         单选版：样式有 TargetType，Button 版不能套在 RadioButton 上（会抛样式类型异常） -->
+    <Style x:Key="CapsuleRadio" TargetType="RadioButton">
+        <Setter Property="MinHeight" Value="36"/>
+        <Setter Property="Padding" Value="16,0"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+        <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="b" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                            SnapsToDevicePixels="True" ctl:CssRadius.Pill="True"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
+                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            <!-- .capsule.active / .mirror-option.active：底 accent-soft、边 accent、字 accent-2
+                                 （HomeLayoutEditor.vue:404、GameView.vue:1700、SettingsView.vue:1817-1820） -->
+                            <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ============ 首页 hero ============ -->
+    <!-- .hero-kicker：min-height 34 / padding 5 10 / radius 7 / 12px/650 / 深色玻璃底 -->
+    <Style x:Key="HeroKicker" TargetType="Border">
+        <Setter Property="MinHeight" Value="34"/>
+        <Setter Property="Padding" Value="10,5"/>
+        <Setter Property="CornerRadius" Value="7"/>
+        <Setter Property="Background" Value="#7A090D0E"/>
+        <Setter Property="BorderBrush" Value="#21FFFFFF"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="VerticalAlignment" Value="Top"/>
+        <Setter Property="HorizontalAlignment" Value="Left"/>
+    </Style>
+
+    <!-- .loader-badge：padding 5 11 / radius 999 / 11px/650 — HomeView.vue:831
+         首页 hero 的「原版」「正式版」徽章；radius 999 在浏览器里收缩成 min(高,宽)/2≈12，用 Pill 复现 -->
+    <Style x:Key="LoaderBadge" TargetType="Border">
+        <Setter Property="Padding" Value="11,5"/>
+        <Setter Property="ctl:CssRadius.Pill" Value="True"/>
+        <!-- 底色是主题派生的 accent 30%（HomeView.vue:831），不能写死成黑紫那一套的值，
+             否则蓝白/橙黑主题下徽章会变成一块不相干的深色 -->
+        <Setter Property="Background" Value="{DynamicResource LoaderBg}"/>
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource LoaderFg}"/>
+        <!-- 边框是 color-mix(accent-2 34%, transparent)，不是 accent-soft（HomeView.vue:831） -->
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentHiSoft}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="HorizontalAlignment" Value="Left"/>
+    </Style>
+
+    <!-- .hero-settings：52 高，左半圆角 10 -->
+    <Style x:Key="HeroSettings" TargetType="Button">
+        <Setter Property="Height" Value="52"/>
+        <Setter Property="MinWidth" Value="150"/>
+        <Setter Property="Padding" Value="18,0"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="#FFF4F7F5"/>
+        <Setter Property="Background" Value="#940A1011"/>
+        <Setter Property="BorderBrush" Value="#24FFFFFF"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="b" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="10,0,0,10" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="b" Property="Background" Value="#C2131D1D"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="HeroBtn" TargetType="Button" BasedOn="{StaticResource HeroSettings}"/>
+
+    <!-- .hero-more：52×52，右半圆角 10，左边框由前一个按钮提供 -->
+    <Style x:Key="HeroMore" TargetType="Button" BasedOn="{StaticResource HeroSettings}">
+        <Setter Property="Width" Value="52"/>
+        <Setter Property="MinWidth" Value="52"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="BorderThickness" Value="0,1,1,1"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="b" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="0,10,10,0">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="b" Property="Background" Value="#C2131D1D"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- .launch-progress：覆盖在启动按钮左侧的半透明白，宽度即百分比 -->
+    <Style x:Key="LaunchProgress" TargetType="ProgressBar">
+        <Setter Property="Background" Value="#40FFFFFF"/>
+        <Setter Property="Foreground" Value="#73FFFFFF"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ProgressBar">
+                    <Border Background="{TemplateBinding Background}">
+                        <Grid x:Name="PART_Track" ClipToBounds="True">
+                            <Rectangle x:Name="PART_Indicator" HorizontalAlignment="Left"
+                                       Fill="{TemplateBinding Foreground}"/>
+                        </Grid>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- .launch-main：min-height 56 / 21px/800 / 左半 radius 14，进度是半透明白覆盖层 -->
+    <Style x:Key="LaunchMain" TargetType="Button">
+        <Setter Property="MinHeight" Value="56"/>
+        <Setter Property="MinWidth" Value="180"/>
+        <Setter Property="Padding" Value="24,0"/>
+        <Setter Property="FontSize" Value="21"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+        <Setter Property="Background" Value="{DynamicResource AccentGrad}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AccentFg}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="b" Background="{TemplateBinding Background}"
+                            CornerRadius="14,0,0,14" ClipToBounds="True">
+                        <Grid>
+                            <ProgressBar x:Name="prog" Value="{Binding Progress}" Maximum="100"
+                                         Style="{StaticResource LaunchProgress}"
+                                         VerticalAlignment="Stretch"
+                                         Visibility="{Binding Busy, Converter={StaticResource BoolVis}}"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="b" Property="Opacity" Value="0.94"/>
+                        </Trigger>
+                        <!-- 原版禁用态是 filter:saturate(.75)，按钮仍然实心；
+                             用 0.45 透明度会把整块（含白字）洗成灰，视觉差很远 -->
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="b" Property="Opacity" Value="0.9"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- .launch-arrow：48 宽，右半 radius 14，左侧 1px 分隔线 -->
+    <Style x:Key="LaunchArrow" TargetType="Button">
+        <Setter Property="Width" Value="48"/>
+        <Setter Property="Background" Value="{DynamicResource AccentGrad}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AccentFg}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="0,14,14,0">
+                        <Border BorderBrush="#38FFFFFF" BorderThickness="1,0,0,0">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="b" Property="Opacity" Value="0.94"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- .runtime-item：padding 10 12，hover 出 accent-soft 浮块（radius 12，上下各缩 4px） -->
+    <Style x:Key="RuntimeCell" TargetType="Button">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
-        <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="11">
-                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="12"
+                            Margin="4,0" Padding="12,10">
+                        <Grid>
+                            <!-- .runtime-blob：accent 10% 的浮块，opacity 180ms + scale .97→1 200ms -->
+                            <Border x:Name="hv" Background="{DynamicResource AccentSoft}" CornerRadius="12"
+                                    Opacity="0" RenderTransformOrigin="0.5,0.5">
+                                <Border.RenderTransform><ScaleTransform ScaleX="0.97" ScaleY="0.97"/></Border.RenderTransform>
+                            </Border>
+                            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource Hover}"/>
+                            <!-- .runtime-item:hover { color: accent-2 }（HomeView.vue:873）：
+                                 只有继承色的 strong 会变，small 与首个 svg 各自有显式色 -->
+                            <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="hv"
+                                                                       Storyboard.TargetProperty="Opacity">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.18" Value="1"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="hv"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.2" Value="1"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="hv"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.2" Value="1"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="hv"
+                                                                       Storyboard.TargetProperty="Opacity">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.18" Value="0"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="hv"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.2" Value="0.97"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="hv"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.2" Value="0.97"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="CellBtn" TargetType="Button" BasedOn="{StaticResource RuntimeCell}"/>
+
+    <!-- .instance-play：40×34，radius 8 -->
+    <Style x:Key="SquareBtn" TargetType="Button">
+        <Setter Property="Width" Value="40"/>
+        <Setter Property="Height" Value="34"/>
+        <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+        <!-- .instance-play 的图标色是 accent-2（HomeView.vue:909） -->
+        <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="8">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="b" Property="Background" Value="{DynamicResource Accent}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource AccentFg}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -299,7 +976,7 @@
         </Setter>
     </Style>
 
-    <!-- 列表 -->
+    <!-- ============ 列表 ============ -->
     <Style x:Key="CardList" TargetType="ListBox">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="0"/>
@@ -315,24 +992,23 @@
         </Setter>
     </Style>
 
+    <!-- .home-dashboard .instance-card：min-height 72 / padding 12 / 无圆角无描边，只留底边线 -->
     <Style x:Key="RowItem" TargetType="ListBoxItem">
-        <Setter Property="Margin" Value="0,3"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ListBoxItem">
-                    <Border x:Name="b" Background="{DynamicResource CardSoft}" BorderBrush="{DynamicResource Line}"
-                            BorderThickness="1" CornerRadius="14" Padding="14,11">
-                        <ContentPresenter/>
+                    <Border x:Name="b" Background="Transparent"
+                            BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
+                        <ContentPresenter Margin="12" MinHeight="48" VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            <Setter TargetName="b" Property="Background" Value="{DynamicResource Hover}"/>
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
                             <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
-                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -340,55 +1016,117 @@
         </Setter>
     </Style>
 
-    <!-- 输入与下拉 -->
+    <!-- .version-row：min-height 42 / padding 8 12 / radius 10 / hover card-2 -->
+    <Style x:Key="RowCard" TargetType="ListBoxItem">
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                    <Border x:Name="b" Background="Transparent" Margin="0,2" CornerRadius="10" Padding="12,8">
+                        <ContentPresenter VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="b" Property="Background" Value="{DynamicResource CardSoft}"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ============ 输入 ============ -->
     <Style TargetType="TextBox">
+        <Setter Property="MinHeight" Value="36"/>
+        <Setter Property="Padding" Value="12,8"/>
+        <Setter Property="FontSize" Value="13"/>
         <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
-        <Setter Property="CaretBrush" Value="{DynamicResource Accent}"/>
+        <Setter Property="CaretBrush" Value="{DynamicResource Fg}"/>
         <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
-        <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
-        <Setter Property="FontSize" Value="13"/>
-        <Setter Property="Padding" Value="11,8"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TextBox">
-                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="1" CornerRadius="10">
-                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
+                    <Border x:Name="bd" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10">
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
+                                      VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Accent}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
+    <Style x:Key="Input" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}"/>
 
     <Style TargetType="CheckBox">
         <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
-        <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
         <Setter Property="FontSize" Value="13"/>
         <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="Check" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}"/>
+
+    <!-- .switch：40×22，滑块 14，左边距 3，选中位移 18 → 21（原版 translate(18px,-50%) 从 3 起） -->
+    <Style x:Key="Switch" TargetType="CheckBox">
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <Border x:Name="track" Width="40" Height="22" CornerRadius="11"
+                            Background="{DynamicResource CardSoft}"
+                            BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                        <Ellipse x:Name="knob" Width="14" Height="14" Fill="{DynamicResource Fg2}"
+                                 HorizontalAlignment="Left" VerticalAlignment="Center" Margin="3,0,0,0"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="track" Property="Background" Value="{DynamicResource AccentGrad}"/>
+                            <Setter TargetName="track" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            <Setter TargetName="knob" Property="Fill" Value="{DynamicResource AccentFg}"/>
+                            <Setter TargetName="knob" Property="Margin" Value="21,0,0,0"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <Style x:Key="ComboToggle" TargetType="ToggleButton">
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
-                    <Border Background="{DynamicResource CardSoft}" BorderBrush="{DynamicResource Line}"
-                            BorderThickness="1" CornerRadius="10" Padding="11,0">
+                    <Border x:Name="b" Background="{DynamicResource CardSoft}"
+                            BorderBrush="{DynamicResource Line}" BorderThickness="1"
+                            CornerRadius="10" Padding="12,0">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <ContentPresenter VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="1" Text="&#xE70D;" FontFamily="Segoe MDL2 Assets"
-                                       FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0"
-                                       Foreground="{DynamicResource Fg2}"/>
+                            <!-- 箭头内联画，不依赖图标字典的合并顺序 -->
+                            <Path Grid.Column="1" Style="{StaticResource IconStroke}"
+                                  Data="M6,9 L12,15 L18,9" StrokeThickness="2"
+                                  Width="14" Height="14" Stretch="Uniform" Margin="8,0,0,0"
+                                  VerticalAlignment="Center"/>
                         </Grid>
                     </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -396,8 +1134,7 @@
 
     <Style TargetType="ComboBox">
         <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
-        <Setter Property="Height" Value="34"/>
-        <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
+        <Setter Property="MinHeight" Value="36"/>
         <Setter Property="FontSize" Value="13"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -412,8 +1149,8 @@
                         <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom"
                                AllowsTransparency="True" Focusable="False" PopupAnimation="Fade">
                             <Border Background="{DynamicResource Card}" BorderBrush="{DynamicResource Line}"
-                                    BorderThickness="1" CornerRadius="12" MinWidth="{TemplateBinding ActualWidth}"
-                                    MaxHeight="320" Margin="0,5,0,0" Effect="{DynamicResource PopShadow}">
+                                    BorderThickness="1" CornerRadius="10" MinWidth="{TemplateBinding ActualWidth}"
+                                    MaxHeight="300" Margin="0,4,0,0" Padding="8">
                                 <ScrollViewer><ItemsPresenter/></ScrollViewer>
                             </Border>
                         </Popup>
@@ -423,16 +1160,17 @@
         </Setter>
     </Style>
 
+    <!-- .select-menu-option：min-height 42 / padding 4 12 / radius 6 -->
     <Style TargetType="ComboBoxItem">
         <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
-        <Setter Property="Padding" Value="12,8"/>
+        <Setter Property="MinHeight" Value="42"/>
+        <Setter Property="Padding" Value="12,4"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBoxItem">
-                    <Border x:Name="b" Background="Transparent" CornerRadius="8" Margin="4,1"
-                            Padding="{TemplateBinding Padding}">
-                        <ContentPresenter/>
+                    <Border x:Name="b" Background="Transparent" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsHighlighted" Value="True">
@@ -444,9 +1182,66 @@
         </Setter>
     </Style>
 
+    <!-- .float-menu 菜单项：min-height 34 / padding 0 10 / radius 7 / 12px -->
+    <Style x:Key="MenuItem2" TargetType="Button" BasedOn="{StaticResource Btn}">
+        <Setter Property="MinHeight" Value="34"/>
+        <Setter Property="Padding" Value="10,0"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+                <!-- .menu-item:hover / .active：底 accent-soft、字 accent-2（styles.css:618-624） -->
+                <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="PopupCard" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource Card}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="Padding" Value="6"/>
+    </Style>
+
+    <!-- .theme-option：48 高，preview 46×32，radius 6 -->
+    <Style x:Key="ThemeChip" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="b" Background="{DynamicResource CardSoft}"
+                            BorderBrush="{DynamicResource Line}" BorderThickness="1"
+                            CornerRadius="6" Padding="8,6">
+                        <ContentPresenter VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
+                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            <!-- .theme-option.active .theme-label：字色是 accent 本体、600（SettingsView.vue:1578-1580），
+                                 与 .capsule.active 用 accent-2 不同，别混用 -->
+                            <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ============ 进度条 / 滚动条 ============ -->
     <Style TargetType="ProgressBar">
         <Setter Property="Height" Value="6"/>
-        <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+        <!-- .dl-bar-fill / .mem-slider-fill 的底是 90° 两停 accent-2→accent，
+             不是 135° 三停的 accent-grad（App.vue:2281、SettingsView.vue:1719） -->
+        <Setter Property="Foreground" Value="{DynamicResource BarFill}"/>
         <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Template">
@@ -463,8 +1258,9 @@
         </Setter>
     </Style>
 
+    <!-- 滚动条槽固定 8px（对应 ::-webkit-scrollbar{width:8px;height:8px}） -->
     <Style TargetType="ScrollBar">
-        <Setter Property="Width" Value="10"/>
+        <Setter Property="Width" Value="8"/>
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -475,8 +1271,7 @@
                                 <Thumb>
                                     <Thumb.Template>
                                         <ControlTemplate TargetType="Thumb">
-                                            <Border Background="{DynamicResource Fg3}" Opacity="0.45"
-                                                    CornerRadius="5" Margin="3,2"/>
+                                            <Border Background="{DynamicResource Scroll}" CornerRadius="4"/>
                                         </ControlTemplate>
                                     </Thumb.Template>
                                 </Thumb>
@@ -489,13 +1284,15 @@
                             </Track.DecreaseRepeatButton>
                         </Track>
                     </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="Orientation" Value="Horizontal">
+                            <Setter Property="Width" Value="Auto"/>
+                            <Setter Property="Height" Value="8"/>
+                            <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
-        <Style.Triggers>
-            <Trigger Property="Orientation" Value="Horizontal">
-                <Setter Property="Height" Value="10"/><Setter Property="Width" Value="Auto"/>
-            </Trigger>
-        </Style.Triggers>
     </Style>
 </ResourceDictionary>

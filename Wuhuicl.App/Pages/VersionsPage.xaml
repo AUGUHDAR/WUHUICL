@@ -1,0 +1,307 @@
+<UserControl x:Class="Wuhuicl.App.Pages.VersionsPage"
+               xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+               xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 版式来源：docs/UI_GEOMETRY_PAGES.md §1（GameView.vue）。
+         凡基线与最终值不同的，一律取最终值：
+           .page max-width 1240 / gap 16（:2164 覆盖 :1510 的 940 与 sec-gap）
+           .folder-manager padding 12 16 / gap 8 / border 0（:2171 覆盖 :1519 的 20/12）
+           .folder-select-wrap auto minmax(160,320) minmax(60,1fr)（:2173 覆盖 :1534 的 minmax(210,320)）
+           .installed-card padding 0 16 / border 0（:2178）
+           .installed-row min-height 80 / padding 12 0 / radius 0（:2185 覆盖 :1819 的 42 + border-bottom）
+           .game-tab height 36 / padding 0 20 / radius 6（:2169 覆盖 :1892 的 24 与 ctl-h）
+         注释里不写 CSS 自定义属性名的双横杠前缀：XAML 注释不允许连续两个减号。 -->
+    <ScrollViewer VerticalScrollBarVisibility="Visible" Padding="0,0,8,0">
+        <StackPanel MaxWidth="1240">
+
+            <!-- .page-head：标题 24（ui-system.css:12 覆盖 styles.css:503 的 20），副标 13（styles.css:509） -->
+            <Grid Margin="0,0,0,0">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource H1}" Text="游戏版本"/>
+                    <TextBlock Style="{StaticResource PageSub}" Margin="0,4,0,0"
+                               Text="安装会校验客户端、库与资源的 SHA1；删除只动版本目录，存档与模组不碰。"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                    <CheckBox x:Name="ChkSnap" Content="显示快照与旧版" VerticalAlignment="Center"
+                              Checked="ShowSnap_Changed" Unchecked="ShowSnap_Changed"/>
+                    <Button Style="{StaticResource BtnGold}" Content="安装所选版本" Margin="16,0,0,0"
+                            Click="Install_Click"
+                            IsEnabled="{Binding Busy, Converter={StaticResource InvBool}}"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- .game-tabs：inline-flex gap 4 padding 4，最终 border 0 / radius 6 / 底 hover（:1870 + :2167）
+                 .game-tab height 36 padding 0 20 radius 6（:2169）
+                 .game-tabs-blob：radius 6 底 accent-soft + inset 0 -2px accent（:1881 + :2168），
+                 left/width 原版由 JS 内联（:120-124）→ 按契约 §6.8 留独立 Border，不在模板里画死 -->
+            <Border Background="{DynamicResource Hover}" CornerRadius="6" Padding="4"
+                    HorizontalAlignment="Left" Margin="0,16,0,0">
+                <Grid>
+                    <Canvas x:Name="TabsHost" IsHitTestVisible="False">
+                        <!-- .game-tabs-blob：radius 6 底 accent-soft + box-shadow inset 0 -2px accent（:1881 + :2168）。
+                             WPF 无 inset 阴影，用 2px 下边框等价表达 -->
+                        <Border x:Name="TabsBlob" Width="0" Height="0" Opacity="0" CornerRadius="6"
+                                Background="{DynamicResource AccentSoft}"
+                                BorderBrush="{DynamicResource Accent}" BorderThickness="0,0,0,2"/>
+                    </Canvas>
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton x:Name="TabDownload" Style="{StaticResource PillTab}" Content="版本下载"
+                                     IsChecked="True" Checked="Tab_Changed"/>
+                        <RadioButton x:Name="TabInstalled" Style="{StaticResource PillTab}" Content="{Binding InstalledTabText}"
+                                     Margin="4,0,0,0" Checked="Tab_Changed"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- .folder-manager：padding 12 16（:2171）；主行 grid auto minmax(160,320) minmax(60,1fr)（:2173），
+                 单行：label 12px dim + select + 路径 mono 12 + 管理文件夹（btn-ghost btn-sm）贴右。
+                 原版没有第二行按钮——目录管理动作收进「管理文件夹」的浮层（对应 InstanceCenter 入口） -->
+            <Border Background="{DynamicResource Card}" CornerRadius="14" Padding="16,12" Margin="0,16,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition MinWidth="160" MaxWidth="320" Width="260"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Style="{StaticResource Micro}" Text="新版本安装位置"
+                               VerticalAlignment="Center"/>
+                    <ComboBox Grid.Column="2" SelectedIndex="0" VerticalAlignment="Center">
+                        <ComboBoxItem>.minecraft（启动器托管）</ComboBoxItem>
+                        <ComboBoxItem>D:/Games/minecraft</ComboBoxItem>
+                    </ComboBox>
+                    <!-- .folder-current-path：mono 12px 单行截断（:1545-1551） -->
+                    <TextBlock Grid.Column="4" Text="{Binding Paths.Root}" FontFamily="{StaticResource MonoFont}"
+                               FontSize="12" Foreground="{DynamicResource Fg2}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+                    <Grid Grid.Column="6">
+                        <Button x:Name="BtnFolderMore" Style="{StaticResource BtnGhost}" MinHeight="28"
+                                Padding="12,4" FontSize="13" Content="管理文件夹" Click="FolderMore_Click"/>
+                        <Popup x:Name="PopFolderMore" PlacementTarget="{x:Reference BtnFolderMore}"
+                               Placement="Bottom" AllowsTransparency="True" Focusable="False" StaysOpen="False">
+                            <Border Style="{StaticResource PopupCard}" MinWidth="150" Padding="10">
+                                <StackPanel>
+                                    <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch" Content="添加目录"/>
+                                    <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch"
+                                            Content="打开目录" Margin="0,8,0,0"/>
+                                    <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch"
+                                            Content="迁移存档" Margin="0,8,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- ================= 下载页签 ================= -->
+            <StackPanel x:Name="BodyDownload">
+
+                <!-- .game-controls → .toolbar（GameView.vue:1003-1041）：一个 flex 行、gap 12，
+                     顺序是 搜索框（flex:1，长条胶囊）→ 筛选胶囊 → 刷新 → 镜像 tag。
+                     之前做成"胶囊靠左、搜索框靠右 180 宽"是错的：原版 tool-search 有 flex:1（:1642）。 -->
+                <Grid Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <!-- .tool-search：height 36 padding 0 12 radius 999 gap 8 min-width 180，svg 14（:1638） -->
+                    <Border Grid.Column="0" Style="{StaticResource ToolSearch}">
+                        <StackPanel Orientation="Horizontal">
+                            <ContentControl Width="14" Height="14" VerticalAlignment="Center"
+                                            Foreground="{DynamicResource Fg2}"
+                                            Style="{DynamicResource Icon.Search}"/>
+                            <!-- placeholder：text-dim 再叠 opacity .75（:1670-1673），不是 text-3 -->
+                            <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="13" Opacity="0.75"
+                                       Foreground="{DynamicResource Fg2}" Text="搜索版本号…"/>
+                        </StackPanel>
+                    </Border>
+                    <!-- .filter-capsules gap 8（:1676）；默认 typeFilter=release（:335）→ 正式版是 active 态
+                         （边 accent + 底 accent-soft + 字 accent-2，:1700-1704） -->
+                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                        <Button Style="{StaticResource CapsuleOn}" Content="正式版"/>
+                        <Button Style="{StaticResource Capsule}" Content="全部" Margin="8,0,0,0"/>
+                        <Button Style="{StaticResource Capsule}" Content="快照" Margin="8,0,0,0"/>
+                        <Button Style="{StaticResource Capsule}" Content="旧版" Margin="8,0,0,0"/>
+                    </StackPanel>
+                    <!-- .btn.btn-ghost.tool-refresh：36 高、radius 10、svg 14 + gap 8（:1025-1031） -->
+                    <Button Grid.Column="4" Style="{StaticResource GhostBtn}">
+                        <StackPanel Orientation="Horizontal">
+                            <ContentControl Width="14" Height="14" VerticalAlignment="Center"
+                                            Style="{DynamicResource Icon.Refresh}"/>
+                            <TextBlock Margin="8,0,0,0" Text="刷新"/>
+                        </StackPanel>
+                    </Button>
+                    <!-- .tag.mirror-toggle（:1034-1040）：镜像源＝BMCLAPI 时挂 tag-cyan（底 cyan-soft、字 cyan） -->
+                    <Border Grid.Column="6" Style="{StaticResource Tag}"
+                            Background="{DynamicResource CyanSoft}">
+                        <TextBlock Text="BMCLAPI 镜像" Style="{StaticResource TagText}"
+                                   Foreground="{DynamicResource Cyan}"/>
+                    </Border>
+                </Grid>
+
+                <!-- .catalog-status：状态条（:1045）——本轮显示下载进度与提示 -->
+                <Border Background="{DynamicResource Card}" BorderBrush="{DynamicResource Line}"
+                        BorderThickness="1" CornerRadius="14" Padding="12,9" Margin="0,12,0,0">
+                    <StackPanel>
+                        <Grid>
+                            <TextBlock x:Name="DlHint" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                       Text="选中版本后点右上「安装所选版本」" HorizontalAlignment="Left"/>
+                            <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}" HorizontalAlignment="Right"
+                                       Text="{Binding Progress, StringFormat={}{0:0}%}"/>
+                        </Grid>
+                        <ProgressBar Value="{Binding Progress}" Maximum="100" Margin="0,8,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- .list-card：padding 8（:1710）；.version-row：min-height 42 padding 8 12 radius 10（:1718） -->
+                <Border Style="{StaticResource Panel}" Padding="8" Margin="0,12,0,0">
+                    <ListBox Style="{StaticResource CardList}" ItemContainerStyle="{StaticResource RowCard}"
+                             ItemsSource="{Binding OnlineList}" SelectedItem="{Binding SelectedOnline}"
+                             MouseDoubleClick="Install_Click" MaxHeight="560">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="34"/>
+                                        <ColumnDefinition Width="12"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="12"/>
+                                        <ColumnDefinition Width="90"/>
+                                    </Grid.ColumnDefinitions>
+                                    <!-- .inst-icon：34×34 padding 4 border 1 radius 6（:1751） -->
+                                    <Border Grid.Column="0" Width="34" Height="34" CornerRadius="6"
+                                            BorderBrush="{DynamicResource Line}" BorderThickness="1"
+                                            Background="{DynamicResource CardSoft}">
+                                        <ContentControl Width="20" Height="20"
+                                                        Style="{DynamicResource Icon.GrassBlock}"/>
+                                    </Border>
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Label}" FontSize="13" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <!-- .version-date：12px（:1776） -->
+                                        <TextBlock Text="{Binding Subtitle}" FontSize="12"
+                                                   Foreground="{DynamicResource Fg2}"/>
+                                    </StackPanel>
+                                    <Border Grid.Column="3" Style="{StaticResource Tag}">
+                                        <TextBlock Text="{Binding Kind}" Style="{StaticResource TagText}"/>
+                                    </Border>
+                                    <!-- .row-bar：90×6 radius 999（:1787）。原版只在"该版本正在下载"时出现，
+                                         数据里没有逐版本进度 → 先 Collapsed 占位，绑不存在的属性会静默失效 -->
+                                    <Border Grid.Column="5" Width="90" Height="6" CornerRadius="3"
+                                            Background="{DynamicResource CardSoft}" VerticalAlignment="Center"
+                                            Visibility="Collapsed">
+                                        <Border Width="34" CornerRadius="3" Background="{DynamicResource Accent}"
+                                                HorizontalAlignment="Left"/>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Border>
+            </StackPanel>
+
+            <!-- ================= 已安装页签 ================= -->
+            <StackPanel x:Name="BodyInstalled" Visibility="Collapsed">
+                <!-- .installed-card：padding 0 16 / border 0 / radius 10（:2178） -->
+                <Border Background="{DynamicResource Card}" CornerRadius="10" Padding="16,0" Margin="0,16,0,0">
+                    <StackPanel>
+                        <!-- .installed-scope：padding 12 0 / gap 12（:2179） -->
+                        <Grid Margin="0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ComboBox Grid.Column="0" MinWidth="160" MaxWidth="260" SelectedIndex="0">
+                                <ComboBoxItem>全部实例</ComboBoxItem>
+                                <ComboBoxItem>仅收藏</ComboBoxItem>
+                                <ComboBoxItem>按加载器</ComboBoxItem>
+                            </ComboBox>
+                            <Border Grid.Column="2" Style="{StaticResource ToolSearch}">
+                                <StackPanel Orientation="Horizontal">
+                                    <ContentControl Width="14" Height="14" VerticalAlignment="Center"
+                                                    Foreground="{DynamicResource Fg2}"
+                                                    Style="{DynamicResource Icon.Search}"/>
+                                    <TextBlock Margin="8,0,0,0" VerticalAlignment="Center" FontSize="13" Opacity="0.75"
+                                               Foreground="{DynamicResource Fg2}" Text="搜索实例…"/>
+                                </StackPanel>
+                            </Border>
+                            <!-- .scope-count：12px -->
+                            <TextBlock Grid.Column="4" Text="{Binding InstalledList.Count, StringFormat=共 {0} 个}"
+                                       FontSize="12" Foreground="{DynamicResource Fg2}" VerticalAlignment="Center"/>
+                        </Grid>
+                        <!-- .installed-row：min-height 80 / padding 12 0 / gap 12 / 无圆角（:2185） -->
+                        <ListBox Style="{StaticResource CardList}" ItemContainerStyle="{StaticResource RowItem}"
+                                 ItemsSource="{Binding InstalledList}" SelectedItem="{Binding SelectedInstalled}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="28"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="36"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="4"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <!-- .fav-btn：28×28（:1946） -->
+                                        <Button Grid.Column="0" Style="{StaticResource IconBtn}" Width="28"
+                                                Height="28" ToolTip="收藏">
+                                            <ContentControl Width="15" Height="15"
+                                                            Style="{DynamicResource Icon.StarOutline}"/>
+                                        </Button>
+                                        <ContentControl Grid.Column="2" Width="36" Height="36"
+                                                        VerticalAlignment="Center"
+                                                        Style="{DynamicResource Icon.GrassBlock}"/>
+                                        <StackPanel Grid.Column="4" VerticalAlignment="Center">
+                                            <!-- .instance-name：weight 650，两行截断（:2188） -->
+                                            <TextBlock Text="{Binding Label}" FontSize="13" FontWeight="SemiBold"
+                                                       LineHeight="18" MaxHeight="36" TextWrapping="Wrap"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                            <!-- .instance-meta：gap 4 10 / 12px（:2191） -->
+                                            <TextBlock Text="{Binding Subtitle}" FontSize="12"
+                                                       Foreground="{DynamicResource Fg2}" Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="6" VerticalAlignment="Center">
+                                            <!-- 右侧按钮组 gap 8（:2196）：管理 + ▶启动（min-width 78，:2198） -->
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button Style="{StaticResource BtnGhost}" MinHeight="28"
+                                                        Padding="12,4" FontSize="13" Content="管理"
+                                                        Click="RowMore_Click" Tag="{Binding}"/>
+                                                <Button Style="{StaticResource BtnGold}" Content="启动"
+                                                        MinWidth="78" Padding="12,4" Margin="8,0,0,0" Tag="{Binding}"
+                                                        Click="LaunchRow_Click"/>
+                                            </StackPanel>
+                                            <!-- .played-text：12px dim（:1926） -->
+                                            <TextBlock Text="最近游玩: —" FontSize="12"
+                                                       Foreground="{DynamicResource Fg2}" Margin="0,4,0,0"
+                                                       HorizontalAlignment="Right"/>
+                                        </StackPanel>
+                                        <!-- .instance-more：min-width 32 / padding 0 8 / 20px（:2197） -->
+                                        <Button Grid.Column="8" Style="{StaticResource IconBtn}" Width="32"
+                                                Height="32" Content="&#x22EF;" FontFamily="{StaticResource UiFont}"
+                                                FontSize="18" Click="RowMore_Click" Tag="{Binding}"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

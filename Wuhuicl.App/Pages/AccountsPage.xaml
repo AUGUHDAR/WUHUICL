@@ -1,0 +1,454 @@
+<UserControl x:Class="Wuhuicl.App.Pages.AccountsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 账号页复刻 KAMUCL-1.1.5/src/renderer/src/views/AccountsView.vue
+         几何取值：docs/UI_GEOMETRY_PAGES.md §3 + §0，歧义处回读 .vue 原文（行号都注在用到处）。
+         下面 4 个页内样式是契约 §2 覆盖不到的形状，键名一律带 Acc/Prov 前缀，避免与 §4 画刷键撞名：
+         · .account-row（:864-882）是「常驻 card-2 底 + 1px 描边 + hover accent-deep + 选中 accent/AccentSoft」，
+           RowCard（padding 12 8、无描边、hover 才出底）表达不出来；
+         · .account-type-tabs 的选中态（:745-749）是实心 accent 渐变块，不是下划线也不是滑动指示条；
+         · .provider-item（:805-811）、.back-btn（:685-708）同理。 -->
+    <UserControl.Resources>
+
+        <!-- .account-type-tabs button：min-height 36 / padding 0 8 / radius 6 / 12px / text-dim，透明底 — :726-741 -->
+        <Style x:Key="AccTab" TargetType="Button">
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Padding" Value="8,0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" CornerRadius="6" Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <!-- button:hover { color: text } — :742-744 -->
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- .account-type-tabs button.active = 实心 accent 渐变 + on-accent + 600 — :745-749 -->
+        <Style x:Key="AccTabActive" TargetType="Button" BasedOn="{StaticResource AccTab}">
+            <Setter Property="Background" Value="{DynamicResource AccentGrad}"/>
+            <Setter Property="Foreground" Value="{DynamicResource AccentFg}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Style.Triggers>
+                <!-- 选中项 hover 也必须留在 on-accent，否则继承来的 hover 会把白字染黑 -->
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource AccentFg}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- .back-btn：padding 8 12 / radius 6 / 无边框 / 透明底 / 13px text-dim，hover 出 card-2 + accent-2 — :685-704 -->
+        <Style x:Key="AccBack" TargetType="Button">
+            <Setter Property="HorizontalAlignment" Value="Left"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" CornerRadius="6" Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource CardSoft}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- .provider-item：min-height 42 / padding 12 / border 1 / radius 10 / card-2 — :805-811 -->
+        <Style x:Key="ProvItem" TargetType="Border">
+            <Setter Property="MinHeight" Value="42"/>
+            <Setter Property="Padding" Value="12"/>
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="10"/>
+        </Style>
+
+        <!-- .account-row：min-height 42 / padding 12 16 / border 1 / radius 10 / card-2 底 — :864-874
+             hover 边框 accent-deep（→ AccentLo，styles.css:89 #c2570a 对上 BlackOrange.xaml:14 #c25a11）— :876-878
+             选中 = accent 边框 + AccentSoft 底 — :879-882 -->
+        <Style x:Key="AccRowItem" TargetType="ListBoxItem">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <!-- .account-list{gap:space-2=8} — :859-863 → 行间隔 8（WPF 无 gap，用行下边距表达） -->
+            <Setter Property="Margin" Value="0,0,0,8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="b" MinHeight="42" Padding="16,12" CornerRadius="10"
+                                Background="{DynamicResource CardSoft}"
+                                BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                            <ContentPresenter VerticalAlignment="Center"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource AccentLo}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <!-- .content{overflow-y:auto; scrollbar-gutter:stable} 槽宽 8px（UI_GEOMETRY_PAGES.md §0）；页边距 24 由宿主给 -->
+    <ScrollViewer VerticalScrollBarVisibility="Visible" Padding="0,0,8,0">
+
+        <!-- .page：flex column / gap 16（ui-system.css:10 把 :675 的 sec-gap 28 覆盖成 space-4）/ max-width 720 / margin 0 auto — :672-677 -->
+        <StackPanel MaxWidth="720" HorizontalAlignment="Center" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+
+            <!-- ============ acc-top：column，gap space-3=12 — :680-684 ============ -->
+            <Button x:Name="BtnBack" Style="{StaticResource AccBack}">
+                <!-- 返回首页的跳转不在页面里做（契约 §1：不引用 MainWindow），按钮先留着 -->
+                <StackPanel Orientation="Horizontal">
+                    <ContentControl Width="15" Height="15" VerticalAlignment="Center"
+                                    Style="{DynamicResource Icon.Back}"/>
+                    <!-- .back-btn svg 15×15 — :705-708；gap space-2=8 — :689 -->
+                    <TextBlock Text="返回首页" FontSize="13" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+
+            <!-- acc-top 的第二行；.content .page-head{margin-bottom:8} — ui-system.css:11 -->
+            <Grid Margin="0,12,0,8">
+                <!-- .page-head{flex column; gap:4} styles.css:498-502 -->
+                <StackPanel HorizontalAlignment="Left">
+                    <!-- .content .page-title：24px / line-height 1.35 — ui-system.css:12（覆盖 styles.css:503-508 的 20px） -->
+                    <TextBlock Style="{StaticResource PageTitle}" Text="账号" LineHeight="32.4"/>
+                    <!-- .page-sub：13px text-dim — styles.css:509-512；标题下 gap 4 -->
+                    <TextBlock Style="{StaticResource PageSub}" Text="管理微软正版、离线与外置 Yggdrasil 账号"
+                               Margin="0,4,0,0"/>
+                </StackPanel>
+                <!-- 右上动作位：原版这里是页内「添加账号」卡（:402），设备码/提供商模态本轮不做，入口先落在页头 -->
+                <Button x:Name="BtnAddEntry" Style="{StaticResource BtnGold}" Content="添加账号"
+                        HorizontalAlignment="Right" VerticalAlignment="Bottom" Click="AddEntry_Click"/>
+            </Grid>
+
+            <!-- ============ 添加账号卡（.card → Panel：radius 14 / padding 20 / border 1 / 无阴影）— :402-514 ============ -->
+            <Border x:Name="AddCard" Style="{StaticResource Panel}" Margin="0,16,0,0">
+                <StackPanel>
+                    <!-- .section-title：13px/700，margin 0 0 12 — :710-715 -->
+                    <TextBlock Text="添加账号" FontSize="13" FontWeight="Bold" Margin="0,0,0,12"/>
+
+                    <!-- .account-type-tabs：repeat(3,minmax(0,1fr)) / gap 4 / padding 4 / border 1 / radius 10 / card-2 — :717-724 -->
+                    <Border Background="{DynamicResource CardSoft}" BorderBrush="{DynamicResource Line}"
+                            BorderThickness="1" CornerRadius="10" Padding="4">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="4"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="4"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <!-- 三个文案照抄 :406 / :410 / :412 -->
+                            <Button x:Name="TabMicrosoft" Grid.Column="0" Style="{StaticResource AccTabActive}"
+                                    Content="Microsoft 正版登录" Click="ModeTab_Click"/>
+                            <Button x:Name="TabOffline" Grid.Column="2" Style="{StaticResource AccTab}"
+                                    Content="离线登录" Click="ModeTab_Click"/>
+                            <Button x:Name="TabYgg" Grid.Column="4" Style="{StaticResource AccTab}"
+                                    Content="外置 Yggdrasil 登录" Click="ModeTab_Click"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- ===== 模式面板：.account-mode-panel{margin-top:16} — :750-752 ===== -->
+
+                    <!-- Microsoft：:416-426 -->
+                    <StackPanel x:Name="PanelMicrosoft" Margin="0,16,0,0">
+                        <!-- .mode-description{margin-bottom:12; font-size:12; line-height:1.6} — :753-757 -->
+                        <TextBlock Style="{StaticResource Micro}" TextWrapping="Wrap" LineHeight="19.2"
+                                   Margin="0,0,0,12"
+                                   Text="通过微软设备代码完成正版授权，武慧启动器不会接触你的微软密码。"/>
+                        <!-- 第二段只有 .muted（color text-dim，字号继承 body 14px — styles.css:125-128），无 mode-description -->
+                        <TextBlock FontSize="14" TextWrapping="Wrap" LineHeight="22.4"
+                                   Foreground="{DynamicResource Fg2}"
+                                   Text="SSL 证书验证已启用：校验证书链、域名及有效期，证书异常时终止登录。"/>
+                        <Button x:Name="BtnMsLogin" Style="{StaticResource BtnGold}" Margin="0,12,0,0"
+                                HorizontalAlignment="Left">
+                            <!-- 占位：等账号功能接入 —— 点击后要开的是设备码模态（:565-596），本轮由主控统一做，故不挂事件。
+                                 按钮内 svg 15×15 跟随 currentColor（:421），底色是 accent 渐变，文字色已由 BtnGold 给成 AccentFg。 -->
+                            <StackPanel Orientation="Horizontal">
+                                <ContentControl Width="15" Height="15" VerticalAlignment="Center"
+                                                Style="{DynamicResource Icon.Microsoft}"/>
+                                <TextBlock Text="开始微软登录" FontSize="14" Margin="8,0,0,0"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+
+                    <!-- 离线：.add-row{flex; align-items:flex-start; gap:12} + .add-input-wrap{flex:1;min-width:0} — :428-447 / :760-768 -->
+                    <Grid x:Name="PanelOffline" Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <Grid>
+                                <!-- .input：min-height 36 / padding 8 12 / radius 10（契约 §2）；maxlength=16 — :436 -->
+                                <TextBox x:Name="TxtOffline" Style="{StaticResource Input}" MaxLength="16"
+                                         TextChanged="Offline_TextChanged"/>
+                                <!-- WPF 没有 placeholder，压一层不可命中的文字代替；padding-left 对齐 .input 的 12px -->
+                                <TextBlock x:Name="PhOffline" Text="离线账号用户名（3-16 位字母数字下划线）"
+                                           FontSize="13" Margin="12,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource Fg3}" IsHitTestVisible="False"/>
+                            </Grid>
+                            <!-- .field-error{margin-top:8; font-size:12; color:danger} — :772-776 -->
+                            <TextBlock x:Name="ErrOffline" FontSize="12" Foreground="{DynamicResource Danger}"
+                                       TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed"/>
+                        </StackPanel>
+                        <Button Grid.Column="2" x:Name="BtnAddOffline" Style="{StaticResource BtnGold}"
+                                Content="添加离线账号" VerticalAlignment="Top" IsEnabled="False"/>
+                        <!-- 占位：等账号功能接入 —— 写库要引擎侧 addOfflineAccount（:54），契约 §5 未暴露命令，按钮只做可用性校验反馈 -->
+                    </Grid>
+
+                    <!-- 外置 Yggdrasil：.ygg-panel{display:grid; gap:16} — :449-513 / :781-784 -->
+                    <StackPanel x:Name="PanelYgg" Margin="0,16,0,0">
+
+                        <!-- .provider-head{flex; space-between; align-center; gap:12} — :785-791 -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <!-- strong 继承 body 14px + bold（styles.css:125-128）— :452 -->
+                                <TextBlock Text="认证提供商" FontSize="14" FontWeight="Bold"/>
+                                <!-- .provider-head .mode-description{margin:4 0 0} — :798-800 -->
+                                <TextBlock Style="{StaticResource Micro}" TextWrapping="Wrap" LineHeight="19.2"
+                                           Margin="0,4,0,0"
+                                           Text="可输入 API Root，或把皮肤站卡片、URL、JSON/TXT 配置拖到窗口。"/>
+                            </StackPanel>
+                            <!-- .provider-head-actions{flex; wrap; justify-end; gap:8} — :792-797 -->
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                <!-- .btn.btn-ghost.btn-sm：32 高 / padding 12 4 / 13px（契约 §2 BtnSm 数值内联覆盖到 ghost 上） -->
+                                <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="12,4" FontSize="13"
+                                        Content="检查运行组件"/>
+                                <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="12,4" FontSize="13"
+                                        Margin="8,0,0,0" Content="添加提供商"/>
+                                <!-- 占位：等账号功能接入 —— 两个按钮分别打 checkYggdrasilRuntime(:226) 与提供商模态(:599-641) -->
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- API Root 输入：.provider-input-label{gap:8; margin-top:16} :996-1002 +
+                             .provider-source{min-height:84; mono 12} :1003-1007。
+                             原位在「添加外置登录提供商」模态里；模态本轮不做，字段先内联，度量照抄。 -->
+                        <StackPanel Margin="0,16,0,0">
+                            <TextBlock Style="{StaticResource Micro}" Text="API Root 或配置内容"/>
+                            <TextBox x:Name="TxtProviderSource" Style="{StaticResource Input}" Margin="0,8,0,0"
+                                     MinHeight="84" MaxHeight="168" AcceptsReturn="True" TextWrapping="Wrap"
+                                     VerticalScrollBarVisibility="Auto" VerticalContentAlignment="Top"
+                                     FontFamily="{StaticResource MonoFont}" FontSize="12"/>
+                        </StackPanel>
+
+                        <!-- .provider-list{grid; gap:8} — :801-804；行内容见 :462-477 -->
+                        <StackPanel Margin="0,16,0,0">
+                            <Border Style="{StaticResource ProvItem}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="12"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal">
+                                            <!-- .provider-item strong{margin-right:8; font-size:13} — :812-815 -->
+                                            <TextBlock Text="LittleSkin" FontSize="13" FontWeight="Bold"
+                                                       Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                            <!-- .tag.tag-danger：radius 999 / padding 2 8 / 12px — styles.css:459-472 + :483-486 -->
+                                            <Border Style="{StaticResource Tag}">
+                                                <TextBlock Text="HTTP 不安全" Style="{StaticResource TagText}"
+                                                           Foreground="{DynamicResource Danger}"/>
+                                            </Border>
+                                        </StackPanel>
+                                        <!-- .provider-url{max-width:520; margin-top:4; ellipsis; mono 12} — :816-823 -->
+                                        <TextBlock Style="{StaticResource Micro}"
+                                                   FontFamily="{StaticResource MonoFont}" MaxWidth="520"
+                                                   TextTrimming="CharacterEllipsis" Margin="0,4,0,0"
+                                                   Text="https://littleskin.cn/api/yggdrasil"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="2" Style="{StaticResource BtnDanger}" MinHeight="32"
+                                            Padding="12,4" FontSize="13" Content="删除" VerticalAlignment="Center"/>
+                                    <!-- 占位：等账号功能接入 —— 提供商来自 listYggdrasilProviders()(:148)，不在契约 §5 白名单，整行是静态文案 -->
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+
+                        <!-- .ygg-login-grid{grid-template-columns:1fr 1fr; gap:12} — :832-836 -->
+                        <Grid Margin="0,16,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="12"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="12"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <!-- label:first-child{grid-column:1/-1} — :843-845 -->
+                            <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3">
+                                <!-- label{grid; gap:8; color:text-dim; font-size:12} — :837-842 -->
+                                <TextBlock Style="{StaticResource Micro}" Text="提供商"/>
+                                <ComboBox Margin="0,8,0,0" SelectedIndex="0">
+                                    <ComboBoxItem Content="请选择提供商"/>
+                                    <ComboBoxItem Content="LittleSkin"/>
+                                    <!-- 占位：等账号功能接入 —— 选项来自 providers(:116) -->
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel Grid.Row="2" Grid.Column="0">
+                                <TextBlock Style="{StaticResource Micro}" Text="账号或邮箱"/>
+                                <TextBox Style="{StaticResource Input}" Margin="0,8,0,0"/>
+                            </StackPanel>
+                            <StackPanel Grid.Row="2" Grid.Column="2">
+                                <TextBlock Style="{StaticResource Micro}" Text="密码"/>
+                                <!-- type=password（:499）：WPF PasswordBox 没有共享模板，外面套一层 .input 度量的 Border -->
+                                <Border Margin="0,8,0,0" MinHeight="36" CornerRadius="10" Padding="12,8"
+                                        Background="{DynamicResource CardSoft}" BorderBrush="{DynamicResource Line}"
+                                        BorderThickness="1">
+                                    <PasswordBox Background="Transparent" BorderThickness="0" FontSize="13"
+                                                 Foreground="{DynamicResource Fg}" CaretBrush="{DynamicResource Fg}"
+                                                 VerticalContentAlignment="Center"/>
+                                </Border>
+                            </StackPanel>
+                            <!-- .ygg-login-btn{align-self:end; min-height:36} — :846-849；自动落位到第 3 行第 1 列 -->
+                            <Button Grid.Row="4" Grid.Column="0" Style="{StaticResource BtnGold}"
+                                    VerticalAlignment="Bottom" Content="登录"/>
+                            <!-- 占位：等账号功能接入 —— onYggLogin(:259) 未接入 -->
+                        </Grid>
+
+                        <!-- .security-note{color:ok; font-size:12} — :850-853 -->
+                        <TextBlock Style="{StaticResource Micro}" Foreground="{DynamicResource Ok}"
+                                   TextWrapping="Wrap" Margin="0,16,0,0"
+                                   Text="密码只用于本次认证请求，不会保存；令牌由 Windows 安全存储加密。"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- ============ 账号列表卡（.card）— :516-562 ============ -->
+            <Border Style="{StaticResource Panel}" Margin="0,16,0,0">
+                <StackPanel>
+                    <!-- .section-title 13/700/margin-bottom 12 — :710-715；计数照抄 :518 的 store.accounts.length -->
+                    <TextBlock FontSize="13" FontWeight="Bold" Margin="0,0,0,12"
+                               Text="{Binding AccountList.Count, StringFormat=我的账号（{0}）}"/>
+
+                    <!-- 空态：.empty{column; center; gap:16; color:text-dim; text-align:center} styles.css:515-524
+                         + .content .empty{min-height:120} ui-system.css:44
+                         + .list-empty{padding:32px 24px} — :856-858 -->
+                    <Border MinHeight="120" Padding="24,32"
+                            Visibility="{Binding HasNoAccount, Converter={StaticResource BoolVis}}">
+                        <TextBlock Style="{StaticResource Micro}" TextAlignment="Center" TextWrapping="Wrap"
+                                   MaxWidth="420" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Text="还没有账号，先添加一个离线账号或登录微软账号吧"/>
+                    </Border>
+
+                    <ListBox Style="{StaticResource CardList}" ItemContainerStyle="{StaticResource AccRowItem}"
+                             ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                             ItemsSource="{Binding AccountList}" SelectedItem="{Binding SelectedAccount}"
+                             Visibility="{Binding HasNoAccount, Converter={StaticResource BoolVis}, ConverterParameter=invert}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <!-- .account-row{flex; align-center; gap:12} — :864-874；列序 = 42 头像 / 12 / meta(*) / 12 / 动作 -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="42"/>
+                                        <ColumnDefinition Width="12"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="12"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- .avatar：42×42 / radius 50% / accent 渐变底 / 16px 800 on-accent — :883-895
+                                         WPF 的 Border 不会自动按 CornerRadius 裁子级，圆形头像补 EllipseGeometry 裁剪 -->
+                                    <Border Grid.Column="0" Width="42" Height="42" CornerRadius="21"
+                                            VerticalAlignment="Center"
+                                            Background="{DynamicResource AccentGrad}">
+                                        <Border.Clip>
+                                            <EllipseGeometry Center="21,21" RadiusX="21" RadiusY="21"/>
+                                        </Border.Clip>
+                                        <Grid>
+                                            <!-- 无皮肤图时兜底成 accent 字母（:890-892 的 16px/800） -->
+                                            <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="ExtraBold"
+                                                       Foreground="{DynamicResource AccentFg}" TextTrimming="CharacterEllipsis"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       MaxWidth="34" TextAlignment="Center"/>
+                                            <Image Source="{Binding Avatar}" Width="42" Height="42"
+                                                   RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                                        </Grid>
+                                    </Border>
+
+                                    <!-- .account-meta{flex:1; column; gap:4; min-width:0} — :896-902 -->
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                        <!-- .account-name{row; align-center; gap:8; weight:600; nowrap} — :903-910，字号继承 body 14 -->
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Name}" Style="{StaticResource Lbl14}"
+                                                       TextTrimming="CharacterEllipsis" MaxWidth="300"
+                                                       VerticalAlignment="Center"/>
+                                            <!-- 账号类型标签：原版按 type 挑 tag-gold/tag-cyan/无底 — :534-539；
+                                                 AccountRow 只暴露 KindText，配色落在 .tag 基态（text-dim）：styles.css:459-472 -->
+                                            <Border Style="{StaticResource Tag}" Margin="8,0,0,0">
+                                                <TextBlock Text="{Binding KindText}" Style="{StaticResource TagText}"/>
+                                            </Border>
+                                        </StackPanel>
+                                        <!-- .uuid{font-size:12; mono} — :911-914；AccountRow 未暴露 uuid，文案先占位 -->
+                                        <TextBlock Style="{StaticResource Micro}"
+                                                   FontFamily="{StaticResource MonoFont}" Margin="0,4,0,0"
+                                                   Text="uuid 待接入"/>
+                                        <!-- 占位：等账号功能接入（acc.uuid.slice(0,8) :541） -->
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <!-- .selected-badge{font-size:12; color:accent} — :915-921；显示条件即 :543 的 selected -->
+                                        <TextBlock Text="使用中" FontSize="12" Foreground="{DynamicResource Accent}"
+                                                   VerticalAlignment="Center"
+                                                   Visibility="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}, Converter={StaticResource BoolVis}}"/>
+                                        <!-- 验证会话（:545-552）与删除（:553-559）都是 .btn-sm 32 高；
+                                             验证会话原版只对 yggdrasil 出现（v-if acc.type==='yggdrasil'），AccountRow 未暴露 Kind，
+                                             所以先常驻 Collapsed，等账号功能接入按 Kind 决定显隐。 -->
+                                        <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="12,4"
+                                                FontSize="13" Margin="12,0,0,0" Content="验证会话"
+                                                Visibility="Collapsed"/>
+                                        <Button Style="{StaticResource BtnDanger}" MinHeight="32" Padding="12,4"
+                                                FontSize="13" Margin="12,0,0,0" Content="删除"/>
+                                        <!-- 占位：等账号功能接入 —— onRemove(acc)(:368) 不在契约 §5 白名单，不挂事件 -->
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

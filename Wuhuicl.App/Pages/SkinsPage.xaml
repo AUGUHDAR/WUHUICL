@@ -1,0 +1,720 @@
+<UserControl x:Class="Wuhuicl.App.Pages.SkinsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:Wuhuicl.App.Controls">
+
+    <!-- 皮肤与披风页复刻 KAMUCL-1.1.5/src/renderer/src/views/SkinsView.vue。
+         该文件有两个 scoped style 块：前块 :602-1080 是 flex 版基线，后块 :1081-1109 把整页改写成
+         CSS Grid（UI_GEOMETRY_PAGES.md §6 开头就点明「以后者为准」），所以本页所有顶层几何取 :1081-1109，
+         后块没覆盖到的细节（卡片头、分段控件、披风/历史行内度量）才回落到前块的行号。
+         后块 :1085 把 .row-main/.row-sub 设成 display:contents（两个包裹 div 不再渲染），
+         因此 WPF 里也不给它们建容器：三个 pane 直接当顶层 grid 的子项摆槽位。
+         下面 4 个页内样式都是契约 §2 覆盖不到的形状，键名一律 Skin 前缀，避免与 §4 画刷键撞名：
+         · SkinPaneHead / SkinPaneTitle —— .pane-head 42 高 + 8 下边距（:675-682）、.pane-title 13/700（:683-687），
+           §2 的 Dim 是 13 非粗、Lbl14 是 14 SemiBold，都对不上；
+         · SkinSegItem(+Active) —— .seg-btn 高 100% / padding 0 16 / 12px（:833-857），§2 无同形按钮样式；
+         · SkinCapeItem —— .cape-item 是「常驻 card-2 底 + 1px 描边 + 内部 58px 网格」（:897-911 + :1097），
+           RowCard/RowItem 都是列表行配方（无描边、hover 才出底），表达不出来；
+         · SkinStatusStrip —— .status-strip（ui-system.css:41-42）§2 未收录。
+         注释里的 CSS 变量一律去掉负号前缀写（themes/Controls.xaml:5 的规矩），因为 XML 注释不允许出现连续两个减号。 -->
+    <UserControl.Resources>
+
+        <!-- .pane-head：row / space-between / gap 12 / min-height row-h 42 / margin-bottom space-2 8 — :675-682 -->
+        <Style x:Key="SkinPaneHead" TargetType="Grid">
+            <Setter Property="MinHeight" Value="42"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+
+        <!-- .pane-title：margin 0 / 13px（text-sm）/ 700 — :683-687 -->
+        <Style x:Key="SkinPaneTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- .seg-btn：position relative / height 100% / padding 0 16（space-4）/ radius 6 / 无底无边 / 12px text-dim — :833-850
+             :hover:not(.active) color text — :851-853（过渡色属动画，本轮不做，契约 §6.8） -->
+        <Style x:Key="SkinSegItem" TargetType="Button">
+            <Setter Property="Padding" Value="16,0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="VerticalAlignment" Value="Stretch"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" CornerRadius="6" Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- .seg-btn.active：color on-accent / 600 — :854-857（.active 的底色由 .seg-blob 提供，见下方 SegBlob） -->
+        <Style x:Key="SkinSegItemActive" TargetType="Button" BasedOn="{StaticResource SkinSegItem}">
+            <Setter Property="Foreground" Value="{DynamicResource AccentFg}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Style.Triggers>
+                <!-- 选中项 hover 必须留在 on-accent，否则上面的 hover 会把彩底上的字染成深色 -->
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource AccentFg}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- .cape-item：基线 :897-911（card-2 底 / border 1 / radius 10 / padding 12 8）
+             最终几何 :1097（grid 58px minmax(0,1fr) × 两行 / gap 8 12 / min-height 100 / padding 12 / 文字左对齐）
+             hover 边框 accent-deep（→ AccentLo，与 AccountsPage 对同一变量的映射一致）— :912-915
+             translateY(-2px) 与 .active 的 accent 边框属交互态/动画，本轮只做静态结构（契约 §6.8） -->
+        <Style x:Key="SkinCapeItem" TargetType="Button">
+            <Setter Property="MinHeight" Value="100"/>
+            <Setter Property="Padding" Value="12"/>
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" CornerRadius="10" Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <ContentPresenter VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource AccentLo}"/>
+                            </Trigger>
+                            <!-- .cape-item:disabled{opacity:.6} — :916-919 -->
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.6"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- .status-strip：flex wrap / gap 12 / padding 12 16 / radius 10 / margin-bottom 12 / 13px / accent-soft 底 — ui-system.css:41
+             .status-strip.error：bg danger-soft / color text — ui-system.css:42；
+             danger-soft 在契约 §4 里没有对应键（§4 只给到 Danger 实色），故 error 态保留 AccentSoft 底 + Danger 前景与描边，
+             不新造颜色（§4 硬规矩）。 -->
+        <Style x:Key="SkinStatusStrip" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="16,12"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+    </UserControl.Resources>
+
+    <!-- .content：overflow-y auto + scrollbar-gutter stable（槽宽 8，已由全局样式定）— UI_GEOMETRY_PAGES.md §0 / App.vue:2398-2404；页边距 24 由宿主给 -->
+    <ScrollViewer VerticalScrollBarVisibility="Visible" Padding="0,0,8,0">
+
+        <!-- ============ .skins-page 最终顶层：grid / minmax(260px,2fr) minmax(300px,3fr) / align-items start / gap 16 — :1083
+             （覆盖 :609-614 的 flex column + max-width 1080；:605 另给所有 pane min-width min(100%,280px)）
+             fr → *，minmax 的下界用列 MinWidth 表达（契约 §6.2/§6.3）；gap 16 用间隔列/间隔行表达（契约 §6.2）。
+             槽位：:1084 让 .skins-page 的**直接子元素**中的 page-head / status-strip / need-ms 跨 1/-1；
+                   template 的直接子只有 page-head(:344) 与 need-ms(:352)，两个 .status-strip 分别嵌在
+                   pane-info(:429) 与 pane-history(:537) 内，所以它们不跨整行，照原结构留在 pane 里。
+                   .pane-preview 列1行2（:1086）；.skin-operation-panel 列2行2（:1088）；.pane-history 跨 1/-1 行3（:1092）。
+             断点 @max-1050 转单列 minmax(0,1fr)（:1103-1107）、@max-650 .cape-grid 转 1 列（:1108）：
+             WPF 无 media query，本轮按宽窗单态实现，窄窗退化等主控统一加响应式再补。 ============ -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*" MinWidth="260"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="3*" MinWidth="300"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="16"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="16"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- ============ 行1 · grid-column 1/-1：页头（:1084） ============ -->
+            <!-- .content .page-head{margin-bottom:8} — ui-system.css:11；列内 gap 4 — styles.css:498-502 -->
+            <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,0,8">
+                <!-- .skins-page .page-title：20px（text-xl）/700 — :616-619。
+                     等特异性（0,2,0）下 scoped 块在 main.ts 的全局 css 之后注入（main.ts:4-5），
+                     所以它压过 .content .page-title 的 24px（ui-system.css:12）；LineHeight 1.35 仍按 ui-system.css:12。 -->
+                <TextBlock Text="皮肤与披风" FontSize="20" FontWeight="Bold" LineHeight="27"/>
+                <!-- .skins-page .page-sub：12px text-dim — :620-623（覆盖 styles.css:509-512 的 13px）
+                     // 占位：等皮肤档案接入 —— 文案取 :347 的非外置分支；外置分支是「查看 {providerName} 的角色材质」 -->
+                <TextBlock Style="{StaticResource Micro}" Margin="0,4,0,0" TextWrapping="Wrap"
+                           Text="管理微软正版账号的皮肤与披风"/>
+            </StackPanel>
+
+            <!-- ============ 行3 · 列1：.pane-preview（grid-column:1 / grid-row:2）— :1086 ============
+                 .skins-page .card：padding 20（card-pad）/ radius 14（radius-lg）— :625-630 → §2 Panel
+                 backdrop-filter blur(24px) saturate(130%)（:628-629）WPF 无等价物，卡片按契约 §6.4 保持平面无阴影。
+                 拖拽反馈本轮不做：.row-main.drag-over{box-shadow:0 0 0 3px var(accent-soft)} — :661-663
+                 + .row-main.drag-over .pane{outline:2px solid var(accent)} — :1102（WPF 无 outline，需外层套 Border 或 Adorner 表达）。 -->
+            <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource Panel}" MinWidth="280" VerticalAlignment="Top">
+                <StackPanel>
+
+                    <!-- .pane-head（:675-682）：3D 预览 + 右侧 .pane-tools -->
+                    <Grid Style="{StaticResource SkinPaneHead}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Style="{StaticResource SkinPaneTitle}" Text="3D 预览"/>
+                        <!-- .pane-tools：row / align center / gap 8（space-2）— :688-692
+                             原版整块 tools 是 v-if="!loadingProfile && currentSkin?.dataUrl"（:374），本轮无档案 → 常驻展示几何 -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+
+                            <!-- .seg：position relative / inline-flex / gap 2 / height 36（ctl-h）/ padding 3 / border 1 / radius 10 / card-2 — :811-820 -->
+                            <Border x:Name="AnimSeg" Height="36" Padding="3" CornerRadius="10"
+                                    Background="{DynamicResource CardSoft}"
+                                    BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                                <Grid x:Name="AnimSegGrid">
+                                    <!-- .seg-blob：absolute / top 3 / bottom 3 / radius 6（radius-sm）/ accent-grad 实心渐变 — :823-832
+                                         left/width 由 updateAnimSegBlob() 量 .seg-btn 后写入（:63-87）。
+                                         不量的话 blob 一直是 0 宽且 opacity 0，而 .active 的字色是 on-accent（白），
+                                         在白底卡片上就等于"选中项消失"——所以这里必须测，动画可以后补。 -->
+                                    <Border x:Name="SegBlob" Width="0" Opacity="0" HorizontalAlignment="Left"
+                                            VerticalAlignment="Stretch" Margin="0,3" CornerRadius="6"
+                                            Background="{DynamicResource AccentGrad}" IsHitTestVisible="False"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <!-- 默认 previewAnim = 'walk' — :59，故「行走」取 active 态 -->
+                                        <Button x:Name="SegWalk" Style="{StaticResource SkinSegItemActive}" Content="行走" Click="Seg_Click"/>
+                                        <!-- gap 2 — :815 -->
+                                        <Button x:Name="SegIdle" Style="{StaticResource SkinSegItem}" Click="Seg_Click"
+                                                Content="待机" Margin="2,0,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <!-- .pane-tools .icon-btn：36×36（ctl-h，覆盖 styles.css:266-301 的全局 32×32），内层 svg 16×16 — :693-703
+                                 原版「回正视角」图标是内联「圆圈 + 四向刻度」（:395-398），§3 的 43 个键里没有这个几何，
+                                 几何已按源补成 Icon.ResetView（圆圈 r7.5 + 四向刻度，stroke 1.8）；
+                                 title 走 ToolTip（:394）。之前用 Icon.Restore 是个圆角方块，看着像个空框 -->
+                            <Button x:Name="BtnResetView" Style="{StaticResource IconBtn}" Width="36" Height="36"
+                                    Margin="8,0,0,0" ToolTip="回正视角">
+                                <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.ResetView}"/>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- .preview-3d{sv3d-height:380px; position:relative} — :715-718
+                         .viewer3d{width:100%; height:var(sv3d-height); radius 10} — SkinViewer3D.vue:124（§6/§13）
+                         .pane-preview .viewer3d{min-height:320px} — :1087
+                         // 占位：等 3D 皮肤预览接入 —— WebGL 人偶（SkinViewer3D）本轮不做，只留 380 高容器与纸娃娃位图层 -->
+                    <Grid x:Name="SkinViewport" Height="380" MinHeight="320">
+
+                        <!-- .preview-3d-empty：height var(sv3d-height) / border 1px dashed border-strong / radius 10 / card-2 底 / overflow hidden — :719-728
+                             WPF 的 Border 画不出 dashed（StrokeDashArray 只在 Shape 上有），所以拆成两层：
+                             Border 给底色 + 圆角 + 裁切，同位置的 Rectangle 用 StrokeDashArray 3 2 补虚线（虚线节长是 CSS dashed 的近似） -->
+                        <Grid x:Name="PreviewEmptyState">
+                            <Border CornerRadius="10" ClipToBounds="True"
+                                    Background="{DynamicResource CardSoft}"/>
+                            <Rectangle RadiusX="10" RadiusY="10" SnapsToDevicePixels="True"
+                                       Stroke="{DynamicResource BorderStrong}" StrokeThickness="1"
+                                       StrokeDashArray="3 2"/>
+                            <!-- .preview-placeholder：column / align center / gap 8 / 12px text-dim — :735-742 -->
+                            <StackPanel x:Name="PreviewPlaceholder" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <!-- .preview-placeholder svg 40×40 opacity .6 — :743-747；
+                                     原版是内联「人形」svg（:416-419）→ §3 里的 Icon.User，颜色由宿主 Foreground 走 currentColor（契约 §6.7） -->
+                                <ContentControl Width="40" Height="40" Opacity="0.6"
+                                                Foreground="{DynamicResource Fg2}"
+                                                Style="{DynamicResource Icon.User}"/>
+                                <TextBlock Style="{StaticResource Micro}" Margin="0,8,0,0" Text="暂无皮肤"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- 纸娃娃位图占位：现成素材是 SkinRenderer.PaperDoll（ThemeManager.cs:187，由 skin.png 现算），
+                             HomePage 的 SkinDoll 走的同源路径（MainWindow.xaml.cs:45）。
+                             契约 §5 的 LaunchSession 白名单里没有 SkinPreview 属性 → 这里不写 Binding（绑不存在的属性等于静默失效的假实现），
+                             Source 由主控接线；NearestNeighbor 对应原版 image-rendering:pixelated（:937/:996）。 -->
+                        <!-- SkinViewer3D 的 WPF 等价（SkinDoll3D.cs）：拖拽 yaw/pitch、滚轮缩放、双击回正，
+                             行走/待机切 Walk；几何/相机/动画参数 1:1 抄 skinview3d v3.4.2 + SkinViewer3D.vue -->
+                        <Border CornerRadius="10" ClipToBounds="True" Margin="12">
+                            <ctl:SkinDoll3D x:Name="SkinDoll3D"/>
+                        </Border>
+
+                        <!-- .skin-overlay 配方：absolute left 12 / right 12 / bottom 12，min-height 34，padding 7 10，radius 9，
+                             border 1，11px / weight 550（= FontWeights.Medium），card 78% 半透明底 + blur(12px) — HomeView.vue:949（施工任务要求的角落层配方）
+                             WPF 无 backdrop-filter，半透明底只能取 §4 的实色画刷 Card（HomeView 的 color-mix 78% 表达不出来）。
+                             // 占位：等皮肤功能接入 —— 原版这一层只在 loading / 未登录 / 出错三态出现（HomeView.vue:649-651），文案取 loading 态 -->
+                        <!-- .skin-overlay：原版只在 loading / 未登录 / 出错三态出现（HomeView.vue:649-651），
+                             本页皮肤已就绪 → 常收起；结构保留等接入时切 Visible -->
+                        <Border VerticalAlignment="Bottom" HorizontalAlignment="Stretch" Margin="12"
+                                MinHeight="34" Padding="10,7" CornerRadius="9"
+                                Background="{DynamicResource Card}"
+                                BorderBrush="{DynamicResource Line}" BorderThickness="1"
+                                Visibility="Collapsed">
+                            <TextBlock Text="正在加载皮肤…" FontSize="11" FontWeight="Medium"
+                                       Foreground="{DynamicResource Fg2}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </Grid>
+
+                    <!-- .viewer-tip：margin-top 8 / 12px text-dim / 居中 — :729-734，文案 :411
+                         原版挂在 v-if="!loadingProfile && currentSkin?.dataUrl" 分支里（:403-411）；本页无状态源，先按静态文案铺出来 -->
+                    <TextBlock Style="{StaticResource Micro}" Margin="0,8,0,0" TextAlignment="Center"
+                               Text="拖动旋转 · 滚轮缩放 · 双击回正"/>
+                </StackPanel>
+            </Border>
+
+            <!-- ============ 行3 · 列2：.skin-operation-panel（grid-column:2 / grid-row:2）— :1088
+                 radius 14（radius-lg）/ overflow hidden / flex column / surface-content 底 + border 1
+                 // 占位：等皮肤功能接入 —— 面板内所有 pane padding 20 / 无边框 / 无底色（:1089），披风区只有 border-top（:1090）
+                 拖拽反馈同上：.row-main.drag-over .pane{outline:2px solid accent}（:1102）本轮不实现。 -->
+            <Border Grid.Row="2" Grid.Column="2" MinWidth="280" VerticalAlignment="Top"
+                    CornerRadius="14" ClipToBounds="True"
+                    Background="{DynamicResource Card}"
+                    BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                <StackPanel>
+
+                    <!-- ======== .pane-info（:428-491，padding 20 / border 0 / 透明底 — :1089）======== -->
+                    <StackPanel>
+
+                        <!-- .status-strip.error（v-if profileError — :429）：读取皮肤失败 + 重试
+                             // 占位：等皮肤功能接入 —— 无 profileError 数据源（契约 §5），先收起，几何与文案已就位 -->
+                        <Border x:Name="StripProfileError" Style="{StaticResource SkinStatusStrip}"
+                                Visibility="Collapsed">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" FontSize="13" Foreground="{DynamicResource Danger}"
+                                           TextWrapping="Wrap" VerticalAlignment="Center"
+                                           Text="读取皮肤失败："/>
+                                <Button Grid.Column="2" Style="{StaticResource BtnGhost}" Content="重试"
+                                        VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+
+                        <Grid Style="{StaticResource SkinPaneHead}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Style="{StaticResource SkinPaneTitle}" Text="当前皮肤"/>
+                            <!-- .tag：radius 999 / padding 2 8 / 12px — styles.css:459-472；
+                                 .tag-gold：bg accent-soft / color accent-2（→ AccentHi）— styles.css:474-478 → :432 的 Classic 分支 -->
+                            <Border Grid.Column="2" Style="{StaticResource Tag}" Background="{DynamicResource AccentSoft}">
+                                <TextBlock Text="经典 Classic" Style="{StaticResource TagText}" Foreground="{DynamicResource AccentHi}"/>
+                            </Border>
+                        </Grid>
+
+                        <!-- .skin-name-row：row / align center / gap 8 / min-height 42（row-h）— :766-771
+                             .skin-username：16px（text-lg）/700 — :772-775
+                             // 占位：等皮肤档案接入 —— 原文案是 profile.username 回退账号名（:438），白名单无对应属性，写死 Steve 并给截断 -->
+                        <Grid MinHeight="42">
+                            <TextBlock FontSize="16" FontWeight="Bold" TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center" Text="Steve"/>
+                        </Grid>
+
+                        <!-- .pending-box（v-if="isMs && pending" — :442）：row / align center / gap 12 / min-height 42 /
+                             padding 12 / border 1 accent / radius 10 / accent-soft 底 — :778-787
+                             // 占位：等皮肤上传接入 —— 无待上传文件，先收起 -->
+                        <Border x:Name="PendingBox" Visibility="Collapsed" Margin="0,12,0,0" MinHeight="42"
+                                Padding="12" CornerRadius="10" BorderBrush="{DynamicResource Accent}"
+                                BorderThickness="1" Background="{DynamicResource AccentSoft}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- .pending-viewer：width 132 / sv3d-height:176px — :788-792（§6 预览缩略） -->
+                                <Border Grid.Column="0" Width="132" Height="176" CornerRadius="10"
+                                        ClipToBounds="True" Background="{DynamicResource CardSoft}"
+                                        BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                                    <!-- // 占位：等 3D 皮肤预览接入 -->
+                                    <Image x:Name="PendingPreviewImg" Stretch="Uniform" Margin="8"
+                                           RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                                </Border>
+                                <!-- .pending-meta：flex:1 / column / align start / gap 8 — :793-800 -->
+                                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                    <!-- .pending-name：13/600 / 单行 ellipsis — :801-808 -->
+                                    <TextBlock FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                               Text="skin.png"/>
+                                    <!-- 这里的 .seg 原版没有 .seg-blob 子元素（:448-463），
+                                         于是 .active 的 on-accent 文字压在透明底上（:854-857）——照抄结构不改；
+                                         按契约 §6.8 也不给它补画指示块。 -->
+                                    <Border Height="36" Padding="3" CornerRadius="10" Margin="0,8,0,0"
+                                            HorizontalAlignment="Left"
+                                            Background="{DynamicResource CardSoft}"
+                                            BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Button x:Name="SegClassic" Style="{StaticResource SkinSegItemActive}"
+                                                    Content="经典 Classic"/>
+                                            <Button x:Name="SegSlim" Style="{StaticResource SkinSegItem}"
+                                                    Content="纤细 Slim" Margin="2,0,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                                <!-- .icon-btn 32×32（此处不在 .pane-tools 内，走全局尺寸 — styles.css:266-301），svg 16×16 — :465-469 -->
+                                <Button x:Name="BtnClearPending" Grid.Column="4" Style="{StaticResource IconBtn}"
+                                        ToolTip="移除待上传文件">
+                                    <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.Close}"/>
+                                </Button>
+                            </Grid>
+                        </Border>
+
+                        <!-- .skin-actions：row wrap / align center / gap 12 / margin-top 8，内部 .btn min-height 36 — :859-871
+                             WPF WrapPanel 无 gap：子项用 Margin 0,0,12,12 表达双向 12（行尾多出的 12 由 pane 的 padding 20 吞掉）
+                             契约 §1：按钮不跳转、不回调 MainWindow，本轮不挂 Click。 -->
+                        <WrapPanel Margin="0,8,0,0">
+                            <Button x:Name="BtnPickSkin" Style="{StaticResource BtnGhost}" Content="选择皮肤文件…"
+                                    Margin="0,0,12,12"/>
+                            <Button x:Name="BtnUploadSkin" Style="{StaticResource BtnGold}" Content="上传"
+                                    Margin="0,0,12,12"/>
+                        </WrapPanel>
+
+                        <!-- .skin-hint：margin-top 8 / 12px text-dim — :872-876，文案 :478 -->
+                        <TextBlock Style="{StaticResource Micro}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                   Text="支持 64×64 的 PNG 皮肤文件"/>
+
+                        <!-- .external-skin-note（v-else — :479-482）：grid justify-items start / gap 8 / margin-top 8 /
+                             padding 12 / border 1 / radius 10 / card-2 — :877-886
+                             // 占位：等外置登录接入 —— 非微软账号才出现，先收起 -->
+                        <Border x:Name="ExternalNote" Visibility="Collapsed" Margin="0,8,0,0" Padding="12"
+                                CornerRadius="10" Background="{DynamicResource CardSoft}"
+                                BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                            <!-- WPF 的 StackPanel 没有 Padding/圆角/描边，这层 Border 就是 .external-skin-note 本身 -->
+                            <StackPanel>
+                                <!-- .tag.tag-cyan：bg cyan-soft / color cyan — styles.css:479-483；
+                                     底色 cyan-soft（App.vue:998 深色 rgba(158,215,233,.13)），前景取 Cyan -->
+                                <Border Style="{StaticResource Tag}" Background="{DynamicResource CyanSoft}"
+                                        HorizontalAlignment="Left">
+                                    <TextBlock Text="LittleSkin" Style="{StaticResource TagText}" Foreground="{DynamicResource Cyan}"/>
+                                </Border>
+                                <TextBlock Style="{StaticResource Micro}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                           Text="外置账号的皮肤与披风由所属皮肤站管理；KAMUCL 会读取并在启动时加载当前材质。"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- ======== .pane-capes（:494-523，padding 20 / border 0 — :1089，另加 border-top 1 — :1090）======== -->
+                    <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0" Padding="20">
+                        <StackPanel>
+                            <Grid Style="{StaticResource SkinPaneHead}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- // 占位：等披风数据接入 —— 原文案是 披风（{{ capes.length }}）— :496 -->
+                                <TextBlock Grid.Column="0" Style="{StaticResource SkinPaneTitle}" Text="披风（0）"/>
+                            </Grid>
+
+                            <!-- .skin-operation-panel .pane-empty：min-height 60 / padding 16 — :1091
+                                 （覆盖基线 :704-712 的 min-height 120 / padding 24）；12px text-dim 居中继承基线 :706-707
+                                 // 占位：等披风数据接入 —— 文案 :500 -->
+                            <Border x:Name="CapeEmpty" MinHeight="60" Padding="16"
+                                    Background="{DynamicResource CardSoft}" CornerRadius="10">
+                                <TextBlock Style="{StaticResource Micro}" TextAlignment="Center"
+                                           VerticalAlignment="Center" HorizontalAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           Text="该账号暂无披风"/>
+                            </Border>
+
+                            <!-- .cape-grid 最终：repeat(2,minmax(0,1fr)) / gap 12 — :1096
+                                 （基线 :892-896 是 auto-fill minmax(124px,1fr) gap 12，即文档 §6 记的 .skin-grid 配方，被 :1096 整条取代）
+                                 @max-650 → 1 列 — :1108（WPF 无 media query，本轮固定 2 列）
+                                 // 占位：等披风数据接入 —— 有披风时才出现（:502 v-else），格子结构按最终几何铺两条示例 -->
+                            <Grid x:Name="CapeGrid" Visibility="Collapsed" Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="12"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <!-- .cape-item.active：border accent / bg accent-soft — :920-923（示例1，使用中） -->
+                                <Button Grid.Row="0" Grid.Column="0" Style="{StaticResource SkinCapeItem}"
+                                        Background="{DynamicResource AccentSoft}"
+                                        BorderBrush="{DynamicResource Accent}"
+                                        ToolTip="点击卸下披风">
+                                    <!-- :1097 的 grid：列 58px + minmax(0,1fr)，行 auto/auto，gap 8 12 → 用间隔行列表达 -->
+                                    <Grid HorizontalAlignment="Stretch">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="58"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="8"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <!-- .cape-preview 最终：grid-column 1 / grid-row 1/4（跨满所有行）/ 58×78 / padding 0 — :1098
+                                             基线 :924-934 的 radius 6 / card 底 / border 1 / 溢出裁 未被覆盖，继续生效 -->
+                                        <Border Grid.Row="0" Grid.RowSpan="3" Grid.Column="0"
+                                                Width="58" Height="78" VerticalAlignment="Center"
+                                                CornerRadius="6" ClipToBounds="True"
+                                                Background="{DynamicResource Card}"
+                                                BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                                            <!-- .cape-img：:1099 max-width/height 100% + object-fit contain（WPF 用 Stretch=Uniform）；
+                                                 渲染位图由 skin-render.ts 的 renderCape 出（:97），// 占位：等披风渲染接入 -->
+                                            <Image x:Name="CapePreviewImgA" Stretch="Uniform"
+                                                   RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                                        </Border>
+                                        <!-- .cape-name：13/600 + 单行 ellipsis — :946-953；字号在 :1101 再确认一次 13px -->
+                                        <TextBlock Grid.Row="0" Grid.Column="2" FontSize="13" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis" Text="赭红披风"/>
+                                        <!-- .cape-state：min-height 20 / 居中 — :954-958；内层 .tag.tag-gold — styles.css:474-478 -->
+                                        <Border Grid.Row="2" Grid.Column="2" Style="{StaticResource Tag}"
+                                                HorizontalAlignment="Left"
+                                                Background="{DynamicResource AccentSoft}">
+                                            <TextBlock Text="使用中" Style="{StaticResource TagText}" Foreground="{DynamicResource AccentHi}"/>
+                                        </Border>
+                                    </Grid>
+                                </Button>
+
+                                <!-- 示例2：未使用（基线描边 card-2 底，:897-911；title 文案 :509） -->
+                                <Button Grid.Row="2" Grid.Column="0" Style="{StaticResource SkinCapeItem}"
+                                        ToolTip="点击使用该披风">
+                                    <Grid HorizontalAlignment="Stretch">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="58"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="8"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <Border Grid.Row="0" Grid.RowSpan="3" Grid.Column="0"
+                                                Width="58" Height="78" VerticalAlignment="Center"
+                                                CornerRadius="6" ClipToBounds="True"
+                                                Background="{DynamicResource Card}"
+                                                BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                                            <!-- 没有位图时原版落到 .cape-alias：12px text-dim 居中 / padding 0 8 / 断词 — :939-945 -->
+                                            <TextBlock Style="{StaticResource Micro}" TextWrapping="Wrap"
+                                                       TextAlignment="Center" Padding="8,0"
+                                                       Text="cape"/>
+                                        </Border>
+                                        <TextBlock Grid.Row="0" Grid.Column="2" FontSize="13" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis" Text="远洋披风"/>
+                                        <!-- .cape-state 空占位（无 tag 时也要把 20 高撑住，:954-958） -->
+                                        <Border Grid.Row="2" Grid.Column="2" MinHeight="20"/>
+                                    </Grid>
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+
+            <!-- ============ 行5 · grid-column 1/-1：.pane-history（:1092，跨整行） ============
+                 空态规则 .pane-history:has(.pane-empty){display:flex; align-items:center; gap:16; padding:16px 20px} — :1093
+                 + .pane-head{margin:0; flex:none} — :1094 + .pane-empty{padding:8px; min-height:0} — :1095
+                 WPF 无 :has()：本页此刻就是空态，所以直接把 Padding 写成 20,16（CSS padding:16px 20px → WPF 上下16 左右20），
+                 并把 pane-head 与 pane-empty 摆在同一行（gap 16）。有数据时（:545 v-else）改回纵向堆叠 + Padding 20。 -->
+            <Border Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3" Style="{StaticResource Panel}"
+                    Padding="20,16" MinWidth="280" VerticalAlignment="Top">
+                <StackPanel>
+
+                    <!-- .status-strip.error（v-else-if historyError — :537）// 占位：等皮肤历史接入，先收起 -->
+                    <Border x:Name="StripHistoryError" Style="{StaticResource SkinStatusStrip}"
+                            Visibility="Collapsed">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" FontSize="13" Foreground="{DynamicResource Danger}"
+                                       TextWrapping="Wrap" VerticalAlignment="Center" Text="读取历史失败："/>
+                            <Button Grid.Column="2" Style="{StaticResource BtnGhost}" Content="重试"
+                                    VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- pane-head（空态里 margin 归 0、flex:none — :1094）；gap 12 — :679 -->
+                        <Grid Grid.Column="0" Style="{StaticResource SkinPaneHead}" Margin="0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <!-- // 占位：等皮肤历史接入 —— 原文案是 历史皮肤（{{ historyList.length }}）— :528 -->
+                            <TextBlock Grid.Column="0" Style="{StaticResource SkinPaneTitle}" Text="历史皮肤（0）"/>
+                            <!-- .history-search：width 180 / height 36 / padding 0 12 / 12px — :967-972，placeholder 文案 :533
+                                 原版 v-if="historyList.length"（:530）→ 空列表时不出现，故先收起（搜索逻辑本轮不做） -->
+                            <Grid Grid.Column="2">
+                                <TextBox x:Name="TxtHistorySearch" Style="{StaticResource Input}" Width="180"
+                                         Height="36" Padding="12,0" FontSize="12" VerticalContentAlignment="Center"/>
+                                <!-- WPF 没有 placeholder，压一层不可命中的文字代替；padding-left 对齐 12px -->
+                                <TextBlock Text="搜索文件名…" FontSize="12" Margin="12,0,0,0"
+                                           VerticalAlignment="Center" Foreground="{DynamicResource Fg3}"
+                                           IsHitTestVisible="False"/>
+                            </Grid>
+                        </Grid>
+
+                        <!-- .pane-empty（历史空态：padding 8 / min-height 0 — :1095），文案 :540
+                             // 占位：等皮肤功能接入 -->
+                        <TextBlock Grid.Column="2" Style="{StaticResource Micro}" Padding="8"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                   Text="暂无历史皮肤，上传皮肤后会自动保存到这里，方便随时换回"/>
+                    </Grid>
+
+                    <!-- .history-grid：repeat(auto-fill, minmax(120px,1fr)) / gap 12 — :973-977
+                         WPF 没有 auto-fill：这里用 WrapPanel + 子项 MinWidth 120 近似（能保证 ≥120 且换行，但不会像 1fr 那样把余量等分摊给每格）；
+                         要真正等分得用 UniformGrid 并由代码按容器宽算 Columns（同源配方 :892-896 的 124px 版本即文档 §6 的 .skin-grid）。
+                         // 占位：等皮肤历史接入 —— 原版 v-else 才出现（:545），先收起，条目几何按 :978-1052 铺两条示例 -->
+                    <WrapPanel x:Name="HistoryGrid" Visibility="Collapsed" Margin="0,12,0,0">
+
+                        <!-- .history-item：column / gap 8 — :978-982（gap 用子项 Margin 表达） -->
+                        <StackPanel MinWidth="120" Margin="0,0,12,12">
+                            <!-- .history-preview：height 168 / border 1 / radius 10 / card-2 底 / 溢出裁 — :983-993 -->
+                            <Border Height="168" CornerRadius="10" ClipToBounds="True"
+                                    Background="{DynamicResource CardSoft}"
+                                    BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                                <Grid>
+                                    <!-- .history-img：height 144 + image-rendering:pixelated — :994-997；
+                                         缩略图来自 renderSkinFront(dataUrl, 6)（:175）// 占位：等皮肤历史接入 -->
+                                    <Image x:Name="HistoryPreviewImgA" Height="144" Stretch="Uniform"
+                                           RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                                    <!-- .history-overlay：absolute inset 0 / 居中 / gap 8 / mask 底 / opacity 0→hover 1 — :998-1011
+                                         WPF 无 :hover 的 opacity 过渡（动画本轮不做，契约 §6.8）→ 先按静态 0 铺层，等主控加 Storyboard -->
+                                    <Border Background="{DynamicResource Overlay}" Opacity="0"
+                                            IsHitTestVisible="False">
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center">
+                                            <!-- .btn.btn-gold.btn-sm / .btn.btn-danger.btn-sm — :554-567；
+                                                 WPF 一个元素只能挂一个 Style，BtnGold/BtnDanger 与 §2 BtnSm 合不到一起，
+                                                 所以把 btn-sm 的三项度量（min-height 32 / padding 4 12 / 13px）就地写死
+                                                 （ui-system.css:17 把 styles.css:258-263 的 28 高覆盖成 32） -->
+                                            <Button Style="{StaticResource BtnGold}" Content="换回"
+                                                    MinHeight="32" Padding="12,4" FontSize="13"
+                                                    Margin="0,0,8,0"/>
+                                            <Button Style="{StaticResource BtnDanger}" Content="删除"
+                                                    MinHeight="32" Padding="12,4" FontSize="13"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                            <!-- .history-meta：row / space-between / gap 4 / min-height 20 — :1012-1018 -->
+                            <Grid MinHeight="20">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="4"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- .tag.tag-cyan（slim 分支 — :571-573；底 cyan-soft、字 cyan） -->
+                                <Border Grid.Column="0" Style="{StaticResource Tag}"
+                                        HorizontalAlignment="Left" Background="{DynamicResource CyanSoft}">
+                                    <TextBlock Text="纤细" Style="{StaticResource TagText}" Foreground="{DynamicResource Cyan}"/>
+                                </Border>
+                                <!-- .history-time：12px / 不换行 — :1024-1027；文案来自 fmtTime(item.time)（:574）// 占位：等皮肤历史接入 -->
+                                <TextBlock Grid.Column="2" Style="{StaticResource Micro}" FontSize="12"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" Text="0 天前"/>
+                            </Grid>
+                            <!-- .history-name-row：min-height 20 — :1028-1030
+                                 .history-name：block / 12px text-dim / 单行 ellipsis / radius 6 / padding 3 1 — :1031-1042 -->
+                            <Border MinHeight="20">
+                                <TextBlock Style="{StaticResource Micro}" Padding="3,1"
+                                           TextTrimming="CharacterEllipsis" Text="steve.png"/>
+                            </Border>
+                        </StackPanel>
+
+                        <StackPanel MinWidth="120" Margin="0,0,12,12">
+                            <Border Height="168" CornerRadius="10" ClipToBounds="True"
+                                    Background="{DynamicResource CardSoft}"
+                                    BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                                <Grid>
+                                    <Image x:Name="HistoryPreviewImgB" Height="144" Stretch="Uniform"
+                                           RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                                    <Border Background="{DynamicResource Overlay}" Opacity="0"
+                                            IsHitTestVisible="False">
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center">
+                                            <Button Style="{StaticResource BtnGold}" Content="换回"
+                                                    MinHeight="32" Padding="12,4" FontSize="13"
+                                                    Margin="0,0,8,0"/>
+                                            <Button Style="{StaticResource BtnDanger}" Content="删除"
+                                                    MinHeight="32" Padding="12,4" FontSize="13"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                            <!-- .tag-gold（classic 分支 — styles.css:474-478） -->
+                            <Grid MinHeight="20">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="4"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource Tag}"
+                                        HorizontalAlignment="Left" Background="{DynamicResource AccentSoft}">
+                                    <TextBlock Text="经典" Style="{StaticResource TagText}" Foreground="{DynamicResource AccentHi}"/>
+                                </Border>
+                                <TextBlock Grid.Column="2" Style="{StaticResource Micro}" FontSize="12"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" Text="0 天前"/>
+                            </Grid>
+                            <Border MinHeight="20">
+                                <TextBlock Style="{StaticResource Micro}" Padding="3,1"
+                                           TextTrimming="CharacterEllipsis" Text="skin_2026.png"/>
+                            </Border>
+                        </StackPanel>
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- ============ 行3 · grid-column 1/-1：need-ms（:1084 跨整行） ============
+                 .need-ms：card + empty，column / 居中 / gap 16（space-4）/ padding 48 20（space-7 card-pad）/ 文字居中 — :352 + :1055-1063
+                 .need-ms-text：14px（text-md）— :1070-1072
+                 原版是 v-if="!canViewProfile"（:352），与上面两个 pane 互斥；canViewProfile = 微软 或 外置账号（:21）。
+                 // 占位：等账号类型接入 —— 契约 §5 只有 HasNoAccount，表达不了「是哪种账号」，所以不写假绑定，默认收起由主控决定显隐。 -->
+            <Border Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Style="{StaticResource Panel}"
+                    Padding="20,48" Visibility="Collapsed">
+                <StackPanel HorizontalAlignment="Center">
+                    <!-- .need-ms-icon：52×52 / accent / opacity .8 — :1064-1069；
+                         原版是内联「披风人形」svg（:353-355），§3 无此几何 → 取最接近的 Icon.Skin，颜色给宿主 Foreground（契约 §6.7） -->
+                    <ContentControl Width="52" Height="52" HorizontalAlignment="Center" Opacity="0.8"
+                                    Foreground="{DynamicResource Accent}"
+                                    Style="{DynamicResource Icon.Skin}"/>
+                    <TextBlock FontSize="14" TextAlignment="Center" TextWrapping="Wrap"
+                               MaxWidth="420" Margin="0,16,0,0" HorizontalAlignment="Center"
+                               Text="皮肤与披风需要微软正版账号或外置 Yggdrasil 账号"/>
+                    <!-- .need-ms .btn：min-height 36 — :1073-1078（§2 BtnGold 已给）；
+                         原版点击是 store.currentView='accounts'（:357）→ 契约 §1 不让页面调 MainWindow，本轮不挂事件 -->
+                    <Button x:Name="BtnGoAccounts" Style="{StaticResource BtnGold}" Content="去登录"
+                            HorizontalAlignment="Center" Margin="0,16,0,0"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </ScrollViewer>
+</UserControl>

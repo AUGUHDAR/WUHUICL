@@ -6,9 +6,11 @@
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <!-- 顺序固定：[0] 控件样式，[1] 色值主题（运行时整体替换） -->
+                <!-- 顺序固定：[0] 控件样式，[1] 色值主题（运行时整体替换），[2] 矢量图标。
+                     主题槽必须是 [1]，ThemeManager.ThemeIndex 就按这个位置写死。 -->
                 <ResourceDictionary Source="Themes/Controls.xaml"/>
                 <ResourceDictionary Source="Themes/Transparent.xaml"/>
+                <ResourceDictionary Source="Themes/Icons.xaml"/>
             </ResourceDictionary.MergedDictionaries>
             <local:BoolVis x:Key="BoolVis"/>
             <local:InvertBool x:Key="InvBool"/>

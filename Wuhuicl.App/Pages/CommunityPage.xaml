@@ -1,0 +1,582 @@
+<UserControl x:Class="Wuhuicl.App.Pages.CommunityPage"
+               xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+               xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+               xmlns:ctl="clr-namespace:Wuhuicl.App.Controls">
+
+    <!-- 复刻 KAMUCL-1.1.5/src/renderer/src/views/CommunityView.vue（社区资源页）。
+         取值原则：同一选择器多次声明只取最终生效值——:1080 与 :1081 两个后期块覆盖了 :705-960 的基础块。
+         本轮不做的事：检索/分页数据（契约 §5 无对应属性 → 全部写死占位）、下载模态（弹窗库由主控统一做）。
+         注：下面注释里的 CSS 令牌名省略了前导双横线（var(ctl-h) ＝ 源码的 ctl-h 令牌），XML 注释不允许出现双横线。 -->
+
+    <UserControl.Resources>
+
+        <!-- .capsule：height calc(var(ctl-h) - 6px)=30 — :761；padding 0 16 — :762；radius 999 — :764；
+             border 0（:763，:1080 又用 !important 重申一次）；底 transparent、字 13px text-dim — :765-767 -->
+        <Style x:Key="Capsule" TargetType="Button">
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Padding" Value="16,0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" ctl:CssRadius.Pill="True" Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <!-- .capsule:hover{color:var(text)} — :773-775 -->
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- .capsule.active 基础是 color:var(on-accent)/600（:776-779），
+             被 :1083 `.community-page .capsule.active{color:var(text);background:var(accent-soft)}` 覆盖 → 取后者 -->
+        <Style x:Key="CapsuleActive" TargetType="Button" BasedOn="{StaticResource Capsule}">
+            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+
+        <!-- SelectMenu.vue：.select-menu-btn min-height 36 / padding 8 12 / radius 10 / 13px，chevron 14×14（台账 §13:291）
+             + .select 的 padding-right:32 让位给箭头（台账 §0:19，styles.css:336-340） -->
+        <Style x:Key="SelectBtn" TargetType="Button">
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="10" Padding="{TemplateBinding Padding}">
+                            <Grid>
+                                <ContentPresenter VerticalAlignment="Center"/>
+                                <ContentControl Width="14" Height="14" Margin="0,0,4,0"
+                                                HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                Foreground="{DynamicResource Fg2}"
+                                                Style="{DynamicResource Icon.ChevronDown}"/>
+                            </Grid>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <!-- .content：overflow-y auto + scrollbar-gutter:stable，padding 24 由宿主 Grid.Margin 给 — App.vue:2398-2404（契约 §6.5） -->
+    <ScrollViewer VerticalScrollBarVisibility="Visible" Padding="0,0,8,0">
+
+        <!-- .page：max-width 940 + margin 0 auto — :708-714（:1081 只换了 display/gap，940 这条仍然生效）
+             .community-page：display grid / grid-template-columns minmax(0,1fr)（单列）/ gap 12px !important — :1081 -->
+        <Grid MaxWidth="940" HorizontalAlignment="Center" VerticalAlignment="Top" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="12"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="12"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="12"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- ============ .page-head（:461-464）============ -->
+            <!-- flex column gap 4 — styles.css:498-502；.community-page>.page-head{margin:0} — :1081 -->
+            <StackPanel Grid.Row="0">
+                <TextBlock Style="{StaticResource PageTitle}" Text="社区资源"/>
+                <!-- .content .page-title 24px/Bold — ui-system.css:12；.page-sub 13px Fg2 — styles.css:509-512 -->
+                <TextBlock Style="{StaticResource PageSub}" Margin="0,4,0,0"
+                           Text="搜索并下载 Modrinth / CurseForge 上的 Mod、整合包、资源包、光影与数据包"/>
+            </StackPanel>
+
+            <!-- ============ 版本行 .filter-row.instance-row（:466-470）============ -->
+            <!-- margin/padding 0 + justify-content flex-end — :1080（gap 12 同为 :1080）；
+                 align-items baseline — :706。注：:1081 在单列下把它改回 flex-start，本处按台账 §7 的右对齐做 -->
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
+                <TextBlock Style="{StaticResource Dim}" Text="选择版本" VerticalAlignment="Center"
+                           Margin="0,0,12,0"/>
+                <!-- .instance-filter{max-width:420px} — :1080；.filter-select{flex:1;min-width:140} — :786-790
+                     flex:1 在本行（宽 ≈916）会被 max-width 夹到 420 → WPF 直接写 420 -->
+                <Button x:Name="InstanceFilter" Style="{StaticResource SelectBtn}" Width="420"
+                        HorizontalAlignment="Right" Click="InstanceSelect_Click">
+                    <!-- 占位：等社区检索的实例选择接入（选项来自已安装列表，本轮不绑） -->
+                    <TextBlock Text="选择实例…" Foreground="{DynamicResource Fg3}"/>
+                </Button>
+                <!-- .btn.btn-ghost.btn-sm — :469；btn-sm = 32 高 / padding 12,4 / 13px（§0:19 + 契约 §2） -->
+                <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="12,4" FontSize="13"
+                        Margin="12,0,0,0" Content="使用当前实例" Click="UseInstance_Click"/>
+            </StackPanel>
+
+            <!-- ============ 搜索卡 .card.search-card（:472-539）============ -->
+            <!-- padding 16 / column / gap 12 — :1080（基线 :717-721 也是 column gap 12）；卡片平面、无阴影（契约 §6.4） -->
+            <Border Grid.Row="4" Style="{StaticResource CardTight}">
+                <StackPanel>
+
+                    <!-- ·· 分类胶囊 .kind-capsules（:473-485，样式 :734-744）··
+                         width:fit-content → HorizontalAlignment=Left — :743
+                         background var(card-2)=CardSoft — :742；border 1 var(border) — :740；radius 999 — :741
+                         padding 3 — :739；flex wrap — :736-738；gap 2 — :737
+                         注：:1081 另把 .community-page .kind-capsules 改成 padding 0 0 8px + border-bottom，本轮按台账 §7 出胶囊壳 -->
+                    <Border Background="{DynamicResource CardSoft}" BorderBrush="{DynamicResource Line}"
+                            BorderThickness="1" ctl:CssRadius.Pill="True" Padding="3" HorizontalAlignment="Left">
+                        <!-- position:relative — :735；Grid 同格叠放＝绝对定位的等价物（Canvas 层不吃 Measure，指示块再大也不会撑宽胶囊壳） -->
+                        <Grid>
+                            <Canvas x:Name="CapsulesHost" IsHitTestVisible="False">
+                                <!-- .capsule-blob：radius 999 — :748；底 :749 的 accent-grad 被 :1080 覆盖成 accent-soft + 无阴影；
+                                     left/top/width/height 在原版全是 JS 内联（:64-74/:89-95）→ 按契约 §6.8 留独立 Border + x:Name，
+                                     坐标由本页 MoveBlob() 量取，动画等主控的 Storyboard 库；pointer-events:none — :752 -->
+                                <Border x:Name="CapsuleBlob" Width="0" Height="0" Opacity="0" ctl:CssRadius.Pill="True"
+                                        Background="{DynamicResource AccentSoft}"/>
+                            </Canvas>
+
+                            <!-- z-index:1 — :757；每格右边距 2 = gap 2（:737），最后一格不留 -->
+                            <WrapPanel x:Name="KindCapsules">
+                                <Button x:Name="CapMod" Style="{StaticResource CapsuleActive}" Content="Mod"
+                                        Margin="0,0,2,0" Click="Capsule_Click"/>
+                                <Button x:Name="CapModpack" Style="{StaticResource Capsule}" Content="整合包"
+                                        Margin="0,0,2,0" Click="Capsule_Click"/>
+                                <Button x:Name="CapResourcePack" Style="{StaticResource Capsule}" Content="资源包"
+                                        Margin="0,0,2,0" Click="Capsule_Click"/>
+                                <Button x:Name="CapShader" Style="{StaticResource Capsule}" Content="光影包"
+                                        Margin="0,0,2,0" Click="Capsule_Click"/>
+                                <Button x:Name="CapDataPack" Style="{StaticResource Capsule}" Content="数据包"
+                                        Click="Capsule_Click"/>
+                            </WrapPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- ·· .search-row（:487-503，样式 :722-729）：flex gap 12、input flex:1 min-width:0、按钮不压缩 ·· -->
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- .input：min-height 36 / padding 12,8 / radius 10（契约 §2，走 Input 样式）；placeholder 见 :491 -->
+                        <Grid Grid.Column="0">
+                            <TextBox x:Name="TxtKeyword" Style="{StaticResource Input}"
+                                     TextChanged="Keyword_TextChanged" KeyDown="Keyword_KeyDown"/>
+                            <TextBlock x:Name="PhKeyword" Text="输入资源名称，回车搜索…" IsHitTestVisible="False"
+                                       Margin="12,0,0,0" VerticalAlignment="Center" FontSize="13"
+                                       Foreground="{DynamicResource Fg3}"/>
+                        </Grid>
+
+                        <!-- .btn.btn-gold.search-btn — :494；svg 14×14 在 .btn 内属性生效（UI_ICONS A#41 → :496） -->
+                        <Button Grid.Column="2" Style="{StaticResource BtnGold}" Click="Search_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <!-- 原版 :496-499 是放大镜，等价于 §3 的 Icon.Search -->
+                                <ContentControl Width="14" Height="14" VerticalAlignment="Center"
+                                                Style="{DynamicResource Icon.Search}"/>
+                                <TextBlock Text="搜索" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+
+                        <!-- .btn.btn-ghost — :502 -->
+                        <Button Grid.Column="4" Style="{StaticResource BtnGhost}" Content="重置条件"
+                                Click="Reset_Click"/>
+                    </Grid>
+
+                    <!-- ·· .filter-row（:505-538）：flex gap 12 wrap — :781-785 / gap 12 :1080 ··
+                         flex:1 min-width 140 — :786-790；版本项 flex:1.4 min-width 170 — :793-797。
+                         注：WPF Grid 不换行，@max-800 的单列退化（ui-system.css:67）本轮不做 -->
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" MinWidth="140"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="1.4*" MinWidth="170"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*" MinWidth="140"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*" MinWidth="140"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- SelectMenu 资源来源（:506，选项见 :97-101） -->
+                        <Button Grid.Column="0" Style="{StaticResource SelectBtn}" Click="FilterSelect_Click">
+                            <TextBlock Text="全部来源"/>
+                        </Button>
+
+                        <!-- 可搜索版本输入（:508-517，.input.ver-filter-input width 100% — :798-800）
+                             它的下拉浮层 .ver-filter-menu（:519-534，top calc(100%+4px)/max-height 260 — :801-809）
+                             等主控的弹窗库，本轮只留输入框 -->
+                        <Grid Grid.Column="2">
+                            <TextBox x:Name="TxtVersion" Style="{StaticResource Input}"
+                                     TextChanged="Version_TextChanged"/>
+                            <TextBlock x:Name="PhVersion" Text="全部版本" IsHitTestVisible="False"
+                                       Margin="12,0,0,0" VerticalAlignment="Center" FontSize="13"
+                                       Foreground="{DynamicResource Fg3}"/>
+                        </Grid>
+
+                        <!-- SelectMenu 加载器（:536，选项见 :103-109；v-if supportsLoader 在 Mod 分类下为真 — :165） -->
+                        <Button Grid.Column="4" Style="{StaticResource SelectBtn}" Click="FilterSelect_Click">
+                            <TextBlock Text="全部加载器"/>
+                        </Button>
+
+                        <!-- SelectMenu 排序（:537，选项见 :169-173） -->
+                        <Button Grid.Column="6" Style="{StaticResource SelectBtn}" Click="FilterSelect_Click">
+                            <TextBlock Text="相关度"/>
+                        </Button>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- ============ 结果区 .card.list-card（:542-635）============ -->
+            <!-- .list-card{padding:0;background:transparent;border:0;box-shadow:none} — :818-823 → 外壳整个脱掉，只剩布局 -->
+            <StackPanel Grid.Row="6">
+
+                <!-- ·· 结果网格 .result-list：repeat(auto-fit, minmax(min(100%,300px),1fr)) gap 16 — :1080（覆盖 :826-830 的 auto-fill 260/gap 12）
+                     WPF 无 auto-fit：940 宽下 (940+16)/(300+16)=2.99 → 实测 3 列，故用 3 个 * 列 + 16 间隔列精确复刻该断点；
+                     窄窗口不会自动减列，是近似（UniformGrid/WrapPanel 能换列但丢掉 1fr 拉伸）。
+                     三张卡都是占位：等社区检索接入（契约 §5 没有可绑的检索结果）。 ·· -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- 占位：等社区检索接入 —— .result-card padding 16 / border 1 / radius 14 / box-shadow none（:831-840 + :1080，即契约 §2 的 CardTight）
+                         列流 gap 8 — :832-834 -->
+                    <Border Grid.Column="0" Style="{StaticResource CardTight}" MinWidth="0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- .result-top：row gap 12（space-3） — :850-855 -->
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- .result-icon 46×46 / radius 10 / 底 card / border 1 — :857-869
+                                     注：:868 那条 `box-shadow:0 2px 8px color-mix(accent 8%)` 不是令牌色，且契约 §6.4 要平面，未复刻 -->
+                                <Border Width="46" Height="46" CornerRadius="10" Background="{DynamicResource Card}"
+                                        BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                                    <!-- .icon-placeholder：取标题首字母，16px/700 text-dim — :575 / :876-880 -->
+                                    <TextBlock Text="R" FontSize="16" FontWeight="Bold"
+                                               Foreground="{DynamicResource Fg2}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+
+                                <!-- .result-head：flex wrap gap 6（:882-889 的 8 被 :1080 改成 6） -->
+                                <StackPanel Grid.Column="2" MinWidth="0">
+                                    <!-- .result-title 16px — :890-900 + :1080；650 字重在 WPF 只能落 SemiBold(600)
+                                         两行截断：line-height 1.45 → 行高 23.2，MaxHeight=2×23.2（契约 §6.6） -->
+                                    <TextBlock Text="RLCraft 极限生存整合包" FontSize="16" FontWeight="SemiBold"
+                                               LineHeight="23.2" MaxHeight="46.4" TextWrapping="Wrap"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                        <!-- .tag radius 999 / padding 8,2（契约 §2）；:1080 把 .result-head .tag 改成 11px + card-2 底 + text-dim + 无边框 -->
+                                        <Border Style="{StaticResource Tag}" Background="{DynamicResource CardSoft}"
+                                                BorderThickness="0">
+                                            <TextBlock Text="来源：CurseForge" Style="{StaticResource TagTextSm}"
+                                                       Foreground="{DynamicResource Fg2}"/>
+                                        </Border>
+                                        <!-- .result-author 12px — :906-909 + :1080；.muted=text-dim — styles.css:677 -->
+                                        <TextBlock Style="{StaticResource Micro}" Text="Shivaxi" Margin="6,0,0,0"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- .result-desc 12px / line-height 1.6 / min-height 3.2em=38.4 / 两行截断 — :910-920 + :1080 -->
+                            <TextBlock Grid.Row="2" Style="{StaticResource Micro}" FontSize="12"
+                                       LineHeight="19.2" MaxHeight="38.4" MinHeight="38.4" TextWrapping="Wrap"
+                                       TextTrimming="CharacterEllipsis"
+                                       Text="包含 170 余个 Mod 的硬核生存整合包：重做怪物等级、温度与装备体系，自带任务线与进度存档，适合长期开荒。"/>
+
+                            <!-- .result-meta：12px — :921-928 + :1080；margin-top:auto → 用上面的 `*` 行把它和页脚压到底 -->
+                            <StackPanel Grid.Row="6" Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource Micro}" FontSize="12" Text="下载量 328.4 万"/>
+                                <!-- .meta-dot{opacity:.6} — :929-931 -->
+                                <TextBlock Style="{StaticResource Micro}" FontSize="12" Text="·" Margin="8,0" Opacity="0.6"/>
+                                <TextBlock Style="{StaticResource Micro}" FontSize="12" Text="更新于 2026-07-19"/>
+                            </StackPanel>
+
+                            <!-- .result-foot：gap 12 + padding-top 8 + 上边线 — :932-939（gap 8 被 :1080 改 12）
+                                 边线原色是 color-mix(border 55%, transparent)，令牌表里没有 55% 这档 → 只能用 Line -->
+                            <Border Grid.Row="8" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0"
+                                    Padding="0,8,0,0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <!-- .result-links：gap 4（space-1） — :940-945 -->
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                        <!-- .result-links .icon-btn = 34×34 — :1080（基础 32×32 见契约 §2）；
+                                             内层 svg 由 styles.css:298 强制 16×16，:598 写的 14 是死值（UI_ICONS C9） -->
+                                        <Button Style="{StaticResource IconBtn}" Width="34" Height="34"
+                                                Click="SourcePage_Click"
+                                                ToolTip="打开 CurseForge 源页面（查看完整介绍）">
+                                            <!-- 原版 :598 是「外链」箭头，§3 的 43 个键里没有 → 用 Icon.Upload 代位 -->
+                                            <ContentControl Width="16" Height="16"
+                                                            Style="{DynamicResource Icon.Upload}"/>
+                                        </Button>
+                                        <Button Style="{StaticResource IconBtn}" Width="34" Height="34"
+                                                Margin="4,0,0,0" Click="Mcmod_Click"
+                                                ToolTip="在 MC 百科查看介绍与教程">
+                                            <!-- 原版 :605 是「书」，§3 无该键 → 用 Icon.Changelog（文档）代位 -->
+                                            <ContentControl Width="16" Height="16"
+                                                            Style="{DynamicResource Icon.Changelog}"/>
+                                        </Button>
+                                    </StackPanel>
+
+                                    <!-- .btn.btn-gold.btn-sm.result-dl — :608-615；svg 13×13 在 .btn 内生效（UI_ICONS C11 → :609）
+                                         .btn-sm：32 高 / padding 12,4 / 13px（§0:19 + 契约 §2） -->
+                                    <Button Grid.Column="2" Style="{StaticResource BtnGold}" MinHeight="32"
+                                            Padding="12,4" FontSize="13" Click="Download_Click">
+                                        <StackPanel Orientation="Horizontal">
+                                            <ContentControl Width="13" Height="13" VerticalAlignment="Center"
+                                                            Style="{DynamicResource Icon.Download}"/>
+                                            <TextBlock Text="下载" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <!-- 占位：等社区检索接入 -->
+                    <Border Grid.Column="2" Style="{StaticResource CardTight}" MinWidth="0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Width="46" Height="46" CornerRadius="10" Background="{DynamicResource Card}"
+                                        BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                                    <TextBlock Text="J" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource Fg2}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <StackPanel Grid.Column="2" MinWidth="0">
+                                    <TextBlock Text="JEI 物品管理器（Just Enough Items）" FontSize="16"
+                                               FontWeight="SemiBold" LineHeight="23.2" MaxHeight="46.4"
+                                               TextWrapping="Wrap" TextTrimming="CharacterEllipsis"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                        <Border Style="{StaticResource Tag}" Background="{DynamicResource CardSoft}"
+                                                BorderThickness="0">
+                                            <TextBlock Text="来源：Modrinth" Style="{StaticResource TagTextSm}"/>
+                                        </Border>
+                                        <TextBlock Style="{StaticResource Micro}" Text="mezz" Margin="6,0,0,0"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock Grid.Row="2" Style="{StaticResource Micro}" FontSize="12"
+                                       LineHeight="19.2" MaxHeight="38.4" MinHeight="38.4" TextWrapping="Wrap"
+                                       TextTrimming="CharacterEllipsis"
+                                       Text="在游戏界面右侧列出当前可访问的全部物品，支持合成表与用途双向查询，可按关键词过滤并高亮槽位。"/>
+
+                            <StackPanel Grid.Row="6" Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource Micro}" FontSize="12" Text="下载量 1204.6 万"/>
+                                <TextBlock Style="{StaticResource Micro}" FontSize="12" Text="·" Margin="8,0" Opacity="0.6"/>
+                                <TextBlock Style="{StaticResource Micro}" FontSize="12" Text="更新于 2026-09-02"/>
+                            </StackPanel>
+
+                            <Border Grid.Row="8" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0"
+                                    Padding="0,8,0,0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                        <Button Style="{StaticResource IconBtn}" Width="34" Height="34"
+                                                Click="SourcePage_Click" ToolTip="打开 Modrinth 源页面（查看完整介绍）">
+                                            <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.Upload}"/>
+                                        </Button>
+                                        <Button Style="{StaticResource IconBtn}" Width="34" Height="34" Margin="4,0,0,0"
+                                                Click="Mcmod_Click" ToolTip="在 MC 百科查看介绍与教程">
+                                            <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.Changelog}"/>
+                                        </Button>
+                                    </StackPanel>
+                                    <Button Grid.Column="2" Style="{StaticResource BtnGold}" MinHeight="32"
+                                            Padding="12,4" FontSize="13" Click="Download_Click">
+                                        <StackPanel Orientation="Horizontal">
+                                            <ContentControl Width="13" Height="13" VerticalAlignment="Center"
+                                                            Style="{DynamicResource Icon.Download}"/>
+                                            <TextBlock Text="下载" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <!-- 占位：等社区检索接入（标题故意写长，验两行截断 :890-900 / :1080） -->
+                    <Border Grid.Column="4" Style="{StaticResource CardTight}" MinWidth="0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="8"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Width="46" Height="46" CornerRadius="10" Background="{DynamicResource Card}"
+                                        BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                                    <TextBlock Text="全" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource Fg2}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <StackPanel Grid.Column="2" MinWidth="0">
+                                    <TextBlock FontSize="16" FontWeight="SemiBold" LineHeight="23.2" MaxHeight="46.4"
+                                               TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
+                                               Text="全新 3D 橡木与白桦树叶资源包（含 OptiFine 自定义模型与连接纹理）"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                        <Border Style="{StaticResource Tag}" Background="{DynamicResource CardSoft}"
+                                                BorderThickness="0">
+                                            <TextBlock Text="来源：Modrinth" Style="{StaticResource TagTextSm}"/>
+                                        </Border>
+                                        <TextBlock Style="{StaticResource Micro}" Text="Misode" Margin="6,0,0,0"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock Grid.Row="2" Style="{StaticResource Micro}" FontSize="12"
+                                       LineHeight="19.2" MaxHeight="38.4" MinHeight="38.4" TextWrapping="Wrap"
+                                       TextTrimming="CharacterEllipsis"
+                                       Text="为常见树种提供立体树叶与更粗糙的木质纹理，需要 OptiFine 或 Embeddium 才能启用自定义模型。"/>
+
+                            <StackPanel Grid.Row="6" Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource Micro}" FontSize="12" Text="下载量 46.2 万"/>
+                                <TextBlock Style="{StaticResource Micro}" FontSize="12" Text="·" Margin="8,0" Opacity="0.6"/>
+                                <TextBlock Style="{StaticResource Micro}" FontSize="12" Text="更新于 2026-06-11"/>
+                            </StackPanel>
+
+                            <Border Grid.Row="8" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0"
+                                    Padding="0,8,0,0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                        <Button Style="{StaticResource IconBtn}" Width="34" Height="34"
+                                                Click="SourcePage_Click" ToolTip="打开 Modrinth 源页面（查看完整介绍）">
+                                            <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.Upload}"/>
+                                        </Button>
+                                        <Button Style="{StaticResource IconBtn}" Width="34" Height="34" Margin="4,0,0,0"
+                                                Click="Mcmod_Click" ToolTip="在 MC 百科查看介绍与教程">
+                                            <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.Changelog}"/>
+                                        </Button>
+                                    </StackPanel>
+                                    <Button Grid.Column="2" Style="{StaticResource BtnGold}" MinHeight="32"
+                                            Padding="12,4" FontSize="13" Click="Download_Click">
+                                        <StackPanel Orientation="Horizontal">
+                                            <ContentControl Width="13" Height="13" VerticalAlignment="Center"
+                                                            Style="{DynamicResource Icon.Download}"/>
+                                            <TextBlock Text="下载" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <!-- ·· 空态 .empty（:553-561，样式 :515-524 + ui-system.css:44）··
+                     column center gap 16 — styles.css:515-521；最终 min-height 120 / padding 32 16 — ui-system.css:44；color text-dim — styles.css:522
+                     地球 40×40 — :554（UI_ICONS C8，几何与 Icon.Community 同 d）
+                     原版与结果是 v-if/v-else 互斥（:546-561），所以默认收起；接上检索后由结果数切换显示 -->
+                <StackPanel x:Name="EmptyState" Visibility="Collapsed" MinHeight="120">
+                    <!-- 图标色走宿主 ContentControl.Foreground（契约 §6.7），地球几何 = UI_ICONS C8（:554，sw 1.6） -->
+                    <ContentControl Width="40" Height="40" Margin="0,32,0,0" HorizontalAlignment="Center"
+                                    Foreground="{DynamicResource Fg2}"
+                                    Style="{DynamicResource Icon.Community}"/>
+                    <!-- 14px 来自 body 基础字号 text-md（styles.css:125-127），色即 .empty 的 text-dim（:522） -->
+                    <TextBlock Margin="16,16,16,32" HorizontalAlignment="Center" TextAlignment="Center"
+                               FontSize="14" Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
+                               Text="输入关键词或选择条件开始搜索"/>
+                </StackPanel>
+
+                <!-- ·· 分页 .pagination（:629-634，样式 :824）··
+                     flex wrap / justify-content center / gap 8（space-2）/ padding 16 0 8
+                     注：WPF WrapPanel 没有 row-gap，纵向间距靠每个按钮的 Margin；:630 的总数文案属检索数据，这里写死占位 -->
+                <WrapPanel x:Name="Pagination" Margin="0,16,0,8" HorizontalAlignment="Center">
+                    <TextBlock Style="{StaticResource Dim}" Text="共 3 项 · 第 1 / 1 页" VerticalAlignment="Center"
+                               Margin="0,4,8,4"/>
+                    <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="12,4" FontSize="13"
+                            Margin="0,4,8,4" Content="上一页" IsEnabled="False"/>
+                    <!-- 页码：.btn.btn-sm，当前页加 .btn-gold — :632 -->
+                    <Button Style="{StaticResource BtnGold}" MinHeight="32" Padding="12,4" FontSize="13"
+                            Margin="0,4,8,4" Content="1"/>
+                    <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="12,4" FontSize="13"
+                            Margin="0,4,8,4" Content="2" Click="Page_Click"/>
+                    <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="12,4" FontSize="13"
+                            Margin="0,4,8,4" Content="3" Click="Page_Click"/>
+                    <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="12,4" FontSize="13"
+                            Margin="0,4,8,4" Content="4" Click="Page_Click"/>
+                    <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="12,4" FontSize="13"
+                            Margin="0,4,0,4" Content="下一页" IsEnabled="False"/>
+                </WrapPanel>
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</UserControl>

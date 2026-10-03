@@ -1,0 +1,1027 @@
+<UserControl x:Class="Wuhuicl.App.Pages.ServersPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:Wuhuicl.App.Controls">
+
+    <!-- 服务器页，复刻 KAMUCL-1.1.5/src/renderer/src/views/ServersView.vue（:356-380 正文）
+         加同族共用组件层 components/connection/*.vue（几何全部在 connection.css，见台账 §12）。
+         ServersView 的 style 块是「非 scoped」的（ServersView.vue:448-531），靠 .servers-page 后代选择器
+         压 connection.css，所以本页所有数值一律取该块尾部的最终声明（:512-531），基线只在注释里留痕。
+
+         导航位置：App.vue:182-185 ——「服务器」是「资源管理」的子项，和主导航的「联机」（App.vue:117）
+         是两个互不相干的 view；原版 ServersView 内部没有任何页签，所以本页也不放 .connect-tabs
+         （那条页签带只有 VoxLinkPanel.vue:402 的「创建房间/加入房间/公共大厅」在用）。
+
+         数据：契约 §5 的 LaunchSession 白名单里没有任何服务器条目、ping、实例关联字段，
+         所以整页不写一条 Binding，行与详情全部是照原版文案写死的占位内容（每块注释 // 占位：等联机功能接入）。
+
+         注：下面 XML 注释里的 CSS 令牌一律去掉前导双横线书写（写 accent-soft 而不写 var 形式），
+         因为 XML 注释内不允许出现连续两个减号，否则 MC3000 会崩掉共用构建。 -->
+
+    <UserControl.Resources>
+
+        <!-- ============ 连接页族按钮：.connect-page .btn 13px + min-width row-h 42（connection.css:11 + :114） ============ -->
+        <Style x:Key="ConnectBtnGhost" TargetType="Button" BasedOn="{StaticResource BtnGhost}">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="MinWidth" Value="42"/>
+        </Style>
+        <Style x:Key="ConnectBtnGold" TargetType="Button" BasedOn="{StaticResource BtnGold}">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="MinWidth" Value="42"/>
+        </Style>
+        <Style x:Key="ConnectBtnDanger" TargetType="Button" BasedOn="{StaticResource BtnDanger}">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="MinWidth" Value="42"/>
+        </Style>
+        <!-- .btn.btn-ghost.btn-sm：32 高 / padding 4 12 / radius 6 / 13px（§2 的 BtnSm + ui-system.css:17） -->
+        <Style x:Key="ConnectBtnGhostSm" TargetType="Button" BasedOn="{StaticResource BtnSm}">
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+        </Style>
+
+        <!-- ============ .connect-tab：min-height 36 / padding 8 16 / radius 10 / border 1 border-strong /
+                    card-2 底 / 12px 600 / text-dim（connection.css:77）；hover 文字转 text（:78） ============ -->
+        <Style x:Key="ConnectTab" TargetType="Button">
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" CornerRadius="10" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- .connect-tab.active：字色 accent-2 + 底 accent-soft + 边 color-mix(accent 55%, border-strong)（connection.css:79）
+             WPF 没有 color-mix，描边退化成 accent 实色。 -->
+        <Style x:Key="ConnectTabActive" TargetType="Button" BasedOn="{StaticResource ConnectTab}">
+            <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+            <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+        </Style>
+
+        <!-- ============ .server-list：gap 0 / padding 8 / radius 14 / border 1 / surface-content 底
+                    （ServersView.vue:510 + :513；surface-content 在 §2 体系里就是 Panel 用的那张 Card 底） ============ -->
+        <Style x:Key="SrvList" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource Card}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Padding" Value="8"/>
+        </Style>
+
+        <!-- ============ .connection-panel：radius 14 / border 1 / surface-content 底 / box-shadow none
+                    （connection.css:15 + ui-system.css:27，阴影被 ui-system.css:78 关掉，台账 §12） ============ -->
+        <Style x:Key="SrvPanel" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource Card}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="14"/>
+        </Style>
+
+        <!-- ============ .server-list-item 最终态：min-height 86 / padding 0 4 / 无描边无圆角只留 1px 底边线 /
+                    透明底（ServersView.vue:514 + :509 的 border 0 + border-bottom + border-radius 0，
+                    覆盖 :463 的 42 高 + radius 10 + border 1 + card 底基线） ============ -->
+        <Style x:Key="SrvRow" TargetType="Border">
+            <Setter Property="MinHeight" Value="86"/>
+            <Setter Property="Padding" Value="4,0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="CornerRadius" Value="0"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Style.Triggers>
+                <!-- :hover 的 transform/box-shadow 被 :510 关掉，只剩 background card-2（:472） -->
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <!-- .active = accent-soft 底 + radius-sm 6，底边线仍留 border（ServersView.vue:515；
+             :509 的 inset 3px accent 左线被 :515 的 box-shadow none 关掉）
+             注：CornerRadius 6 配单边 border 在 WPF 里会把底角画成圆弧，是近似不是等值。 -->
+        <Style x:Key="SrvRowActive" TargetType="Border" BasedOn="{StaticResource SrvRow}">
+            <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Style.Triggers>
+                <!-- Style setter 优先级低于 trigger，选中态必须自己再压一次，否则划过就掉底 -->
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- ============ .server-row-button：flex / gap 12 / padding 12 8 / 无边透明底 / 文字继承 text / flex 1
+                    （ServersView.vue:475 + :517 + :509） ============ -->
+        <Style x:Key="SrvRowButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="8,12"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"
+                                CornerRadius="6">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ============ .server-favorite：32×32 / padding 0 / 无边透明底 / 22px 星标字形 / hover 出 accent-soft + accent
+                    （ServerListItem.vue:10 + 其 scoped :20-23；order 3 用列序表达，见行注释） ============ -->
+        <Style x:Key="SrvFav" TargetType="Button">
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="FontSize" Value="22"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" CornerRadius="6" Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ============ .connection-status 胶囊：padding 4 12 / radius 999 / 12px 600 / 前置 6×6 圆点走 currentColor
+                    （connection.css:24-25）；tone 只换文字色（:26-28 的 ok / danger / accent-2）。
+                    用 ContentControl 而不是 Border 承载：Border 没有 Foreground/FontSize，字号与色没法随 tone 继承下去；
+                    WPF 也没有 currentColor，圆点在每个 tone 分支里各自显式给同一张画刷。
+                    胶囊底是 card-2（connection.css:24），不是 .tag 的 ChipBg；tone 只改字色，不换底。
+                    HorizontalAlignment=Right 对应 .server-row-state 的 align-items flex-end（ServersView.vue:485）。 ============ -->
+        <Style x:Key="SrvStatus" TargetType="ContentControl">
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContentControl">
+                        <Border ctl:CssRadius.Pill="True" SnapsToDevicePixels="True"
+                                Background="{TemplateBinding Background}" Padding="12,4">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="SrvStatusOk" TargetType="ContentControl" BasedOn="{StaticResource SrvStatus}">
+            <Setter Property="Foreground" Value="{DynamicResource Ok}"/>
+        </Style>
+        <Style x:Key="SrvStatusPending" TargetType="ContentControl" BasedOn="{StaticResource SrvStatus}">
+            <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+        </Style>
+        <Style x:Key="SrvStatusDanger" TargetType="ContentControl" BasedOn="{StaticResource SrvStatus}">
+            <Setter Property="Foreground" Value="{DynamicResource Danger}"/>
+        </Style>
+
+        <!-- ============ input[type=checkbox] 18×18 + accent-color 主色（ServersView.vue:504）；
+                    §2 的 Check 是 13px 原生勾，尺寸与配色都对不上，按原版度量重写 ============ -->
+        <Style x:Key="SrvCheck" TargetType="CheckBox">
+            <Setter Property="Width" Value="18"/>
+            <Setter Property="Height" Value="18"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border x:Name="bx" CornerRadius="4" BorderThickness="1"
+                                BorderBrush="{DynamicResource BorderStrong}"
+                                Background="{DynamicResource CardSoft}">
+                            <ContentControl x:Name="tick" Width="12" Height="12" Visibility="Collapsed"
+                                            Foreground="{DynamicResource AccentFg}"
+                                            Style="{DynamicResource Icon.Check}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="bx" Property="Background" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="bx" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="tick" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- .server-address：无边透明底 / 13px text-dim 等宽 / cursor copy（ServerDetails.vue:30） -->
+        <Style x:Key="SrvAddress" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <ContentPresenter/>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Opacity" Value="0.7"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- .server-search 内的 input：无边框无底、继承字号 13（ServersView.vue:455） -->
+        <Style x:Key="SrvSearchInput" TargetType="TextBox" BasedOn="{StaticResource Input}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="MinHeight" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- details/summary 行：min-height ctl-h 36 / 13px text-dim（connection.css:42 + :114） -->
+        <Style x:Key="SrvSummary" TargetType="Button">
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <ContentPresenter VerticalAlignment="Center"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <!-- .content：overflow-y auto + scrollbar-gutter stable / padding 24 由宿主 Grid.Margin 给（App.vue:2398-2404，台账 §0）。
+         ≥1121 时 .content:has(.servers-page) 改成 overflow hidden、两列各自滚（ServersView.vue:510），
+         所以本页根节点自带内层滚动容器，不再套外层 ScrollViewer。
+         .connect-page：max-width 1120 / margin 0 auto / flex column gap sec-gap 28（connection.css:3）
+         → .servers-page 把 gap 压成 16（ServersView.vue:509）；@min-1121 又把 max-width 压成 1480 并 height 100%（:510 + :529）。
+         两档由代码里的 ApplyMetrics() 按视口宽切换（WPF 无 media query）。 -->
+    <Grid x:Name="PageRoot" MaxWidth="1120" HorizontalAlignment="Center" VerticalAlignment="Stretch">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ============ 正文 · 服务器（ServersView.vue:357-380） ============
+             原版 ServersView 没有任何页签：服务器 / MOD 面板 / 联机是三个互不相干的独立 view
+             （App.vue:177-185 里 bridge 与 servers 是资源管理子项，friends 是主导航项），
+             所以这里不放 .connect-tabs —— 那条页签带是 VoxLinkPanel.vue:402 内部「创建/加入/公共大厅」用的。 -->
+        <StackPanel x:Name="PanelServers" Grid.Row="1">
+
+            <!-- .connection-header：row / space-between / align-center / gap space-5 24 / wrap（connection.css:6），
+                 margin 与 padding 被 ServersView.vue:509 清成 0，所以块间只留 16 -->
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="24"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <!-- .connection-header h1 基线 26px/700 + letter-spacing -.5px（connection.css:7）
+                         → .content .connection-header h1 取 text-title 24px（ui-system.css:6 + :33），最终 24。
+                         WPF 的 TextBlock 没有 letter-spacing，这 0.5px 的收紧表达不了，留给字体渲染。 -->
+                    <TextBlock Style="{StaticResource H1}" Text="服务器" LineHeight="32"/>
+                    <!-- h1 small：12px / 400 / text-dim / margin-left 12（ServersView.vue:509），文案模板 :359
+                         // 占位：等联机功能接入（原版是 servers.length 与 onlineCount） -->
+                    <TextBlock Margin="12,0,0,4" VerticalAlignment="Bottom" FontSize="12"
+                               Foreground="{DynamicResource Fg2}" Text="4 个 · 2 个在线"/>
+                </StackPanel>
+                <!-- .btn.btn-gold，前缀是全角加号文字字形（ServersView.vue:360；契约 §3：原版这里不是矢量图标） -->
+                <Button Grid.Column="2" Style="{StaticResource ConnectBtnGold}" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="＋" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="添加服务器" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+            </Grid>
+
+            <!-- .server-toolbar：flex wrap / gap 12（ServersView.vue:451 基线是 space-3，:509 压成 12） -->
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="250"/>
+                    <ColumnDefinition Width="12"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- .server-search：flex 1 1 250px / height row-h 42 / padding 0 16 / radius 10 / border 1 / card 底 /
+                        内层 svg 18×18 text-dim（ServersView.vue:452 + :454，内部 gap space-2 8 — :452） -->
+                <Border Grid.Column="0" Height="42" CornerRadius="10" Padding="16,0"
+                        Background="{DynamicResource Card}" BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <ContentControl Grid.Column="0" Width="18" Height="18" VerticalAlignment="Center"
+                                        Foreground="{DynamicResource Fg2}" Style="{DynamicResource Icon.Search}"/>
+                        <Grid Grid.Column="2">
+                            <TextBox x:Name="TxtSearch" Style="{StaticResource SrvSearchInput}"
+                                     TextChanged="Search_TextChanged"/>
+                            <!-- WPF 没有 placeholder，按 AccountsPage 的覆盖文字写法近似（原文 placeholder 见 :363） -->
+                            <TextBlock x:Name="SearchPh" Text="搜索名称、地址或服务器介绍" FontSize="13"
+                                       IsHitTestVisible="False" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource Fg2}"/>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!-- .connection-actions：flex wrap / align-center / gap space-2 8（connection.css:10）
+                     三个 .btn.btn-ghost 文案照 ServersView.vue:364 -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Style="{StaticResource ConnectBtnGhost}" Margin="0,0,8,0" Content="刷新状态"/>
+                    <Button Style="{StaticResource ConnectBtnGhost}" Margin="0,0,8,0" Content="同步游戏列表"/>
+                    <Button x:Name="BtnBatch" Style="{StaticResource ConnectBtnGhost}" Content="批量管理"
+                            Click="BatchToggle_Click"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- .connection-error：border 1 danger / padding 12 16 / radius 10 / 12px 行高 1.7（connection.css:67），
+                 模板 :366 的 v-if loadError 分支，本轮常置 Collapsed // 占位：等联机功能接入 -->
+            <Border x:Name="LoadErrorBar" Visibility="Collapsed" Margin="0,0,0,16" Padding="16,12"
+                    CornerRadius="10" BorderBrush="{DynamicResource Danger}" BorderThickness="1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" FontSize="12" LineHeight="20" TextWrapping="Wrap"
+                               Foreground="{DynamicResource Danger}" Text="读取服务器列表失败：等联机功能接入"/>
+                    <Button Grid.Column="2" Style="{StaticResource ConnectBtnGhost}" Content="重试"/>
+                </Grid>
+            </Border>
+
+            <!-- .server-batch：flex / gap 8 / padding 12 16 / radius 10 / accent-soft 底 / 内部 .btn margin-left auto
+                 （ServersView.vue:505-507 + :509 的 gap space-2 8）；v-if selectMode — 模板 :368 -->
+            <Border x:Name="BatchBar" Visibility="Collapsed" Margin="0,0,0,16" Padding="16,12"
+                    CornerRadius="10" BorderBrush="{DynamicResource Line}" BorderThickness="1"
+                    Background="{DynamicResource AccentSoft}">
+                <!-- margin-left auto（:507）用 * 空列把删除按钮顶到行尾（契约 §6.2） -->
+                <Grid VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="8"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <!-- .check-all：gap 8 / 12px（:505）；checkbox 18×18（:504） -->
+                    <CheckBox x:Name="SelectAllCheck" Grid.Column="0" Style="{StaticResource SrvCheck}"
+                              Checked="SelectAll_Changed" Unchecked="SelectAll_Changed"/>
+                    <TextBlock Grid.Column="2" Style="{StaticResource Micro}" VerticalAlignment="Center"
+                               Text="全选搜索结果"/>
+                    <!-- 文案是模板 :368 的「已选 selectedCount 项」 // 占位：等联机功能接入 -->
+                    <TextBlock x:Name="BatchCountText" Grid.Column="4" Style="{StaticResource Micro}"
+                               VerticalAlignment="Center" Text="已选 0 项"/>
+                    <Button x:Name="BtnBatchDelete" Grid.Column="6" Style="{StaticResource ConnectBtnDanger}"
+                            VerticalAlignment="Center" Content="删除所选" IsEnabled="False"/>
+                </Grid>
+            </Border>
+
+            <!-- ============ 主体两列 .server-workspace ============
+                 基线：minmax(260px,1fr) minmax(300px,1.05fr) / gap 16 / align-items start（ServersView.vue:461 + :512）
+                 @min-1121：minmax(360px,1.2fr) minmax(320px,1fr) + min-height 0 + flex 1（:510）
+                 @max-1120：单列 minmax(0,1fr) + .server-list max-height 360 + 详情取消 sticky（:530）
+                 两列各自 max-height calc(100vh - 270px) + overflow auto + scrollbar-gutter stable（:510）
+                 —— 全部由代码里的 ApplyMetrics() 落到 ColumnDefinition 与 ScrollViewer.MaxHeight。 -->
+            <Grid x:Name="WorkspaceGrid">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="260"/>
+                    <ColumnDefinition Width="16"/>
+                    <ColumnDefinition Width="1.05*" MinWidth="300"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 左列 · .server-list（列内 gap 0 — ServersView.vue:510） -->
+                <Border Grid.Column="0" Style="{StaticResource SrvList}" VerticalAlignment="Top">
+                    <!-- VerticalScrollBarVisibility=Visible 对应 scrollbar-gutter stable（契约 §6.5，槽宽 8 已由全局样式定）
+                         MaxHeight 560 只是设计期兜底，运行时由 ApplyMetrics() 写成 100vh 减 270 -->
+                    <ScrollViewer x:Name="ServerListScroll" VerticalScrollBarVisibility="Visible"
+                                  HorizontalScrollBarVisibility="Disabled" MaxHeight="560">
+                        <StackPanel x:Name="ServerListPanel">
+
+                            <!-- 行 1（选中态）。DOM 序是 checkbox / row-button / favorite，
+                                 而 .server-favorite 的 order 3（ServersView.vue:509）把它排到视觉最右；
+                                 .server-check 的 padding-left 16 —— :503。 -->
+                            <Border x:Name="Row1" Style="{StaticResource SrvRowActive}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox x:Name="Chk1" Grid.Column="0" Style="{StaticResource SrvCheck}"
+                                              Margin="16,0,0,0" Visibility="Collapsed"
+                                              Checked="RowCheck_Changed" Unchecked="RowCheck_Changed"/>
+                                    <Button x:Name="RowBtn1" Grid.Column="1" Style="{StaticResource SrvRowButton}"
+                                            Click="ServerRow_Click">
+                                        <!-- .server-row-button 内 gap 12 — :517 -->
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="36"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="Auto" MinWidth="66"/>
+                                            </Grid.ColumnDefinitions>
+                                            <!-- .server-monogram 36×36 / radius 6 / 16px 700（ServersView.vue:518 + :477） -->
+                                            <Border Grid.Column="0" Width="36" Height="36" CornerRadius="6"
+                                                    VerticalAlignment="Center"
+                                                    Background="{DynamicResource AccentSoft}">
+                                                <TextBlock Text="晨" FontSize="16" FontWeight="Bold"
+                                                           Foreground="{DynamicResource AccentHi}"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <!-- .server-row-copy：flex 1 / column gap 4（:480）；strong 13px 两行截断（:481 + :509）
+                                 两行 clamp 用 LineHeight 18 + MaxHeight 36 表达（契约 §6.6） -->
+                                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                                <TextBlock x:Name="Title1" Text="晨光生存服 · 长期建筑组" FontSize="13"
+                                                           FontWeight="Bold" TextWrapping="Wrap" LineHeight="18"
+                                                           MaxHeight="36" TextTrimming="CharacterEllipsis"
+                                                           Foreground="{DynamicResource AccentHi}"/>
+                                                <!-- copy 第二行：mono 12 text-dim（:483 + 模板 :13 的 mono class）// 占位：等联机功能接入 -->
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           FontFamily="{StaticResource MonoFont}"
+                                                           TextTrimming="CharacterEllipsis" Text="play.chenguang.cn"/>
+                                                <!-- copy 第三行：版本 · loader（:484 + 模板 :13）// 占位：等联机功能接入 -->
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           TextTrimming="CharacterEllipsis" Text="1.20.1 · Fabric 0.15.3"/>
+                                            </StackPanel>
+                                            <!-- .server-row-state：column / align-end / gap 4（:485 + :480）/ min-width 66（:519） -->
+                                            <StackPanel Grid.Column="4" MinWidth="66" HorizontalAlignment="Right"
+                                                        VerticalAlignment="Center">
+                                                <!-- 胶囊文案四态：检测中 / 在线 / 未连通 / 未检测 — ServerListItem.vue:14 -->
+                                                <ContentControl Style="{StaticResource SrvStatusOk}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Ellipse Width="6" Height="6" Margin="0,0,8,0"
+                                                                 Fill="{DynamicResource Ok}"/>
+                                                        <TextBlock Text="在线"/>
+                                                    </StackPanel>
+                                                </ContentControl>
+                                                <!-- 延迟：12px text-dim nowrap（:486 + 模板 :14 的 latencyMs）// 占位：等联机功能接入 -->
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           HorizontalAlignment="Right" Text="32 ms"/>
+                                                <!-- 人数：原版只在详情的 .server-facts 出现（ServerDetails.vue:17），
+                                                     行内这条按任务口径补 // 占位：等联机功能接入 -->
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           HorizontalAlignment="Right" Text="128/500 人"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Button>
+                                    <!-- 收藏是文字字形 ★ / ☆（ServerListItem.vue:10，契约 §3 允许的字形）// 占位：等联机功能接入 -->
+                                    <Button x:Name="Fav1" Grid.Column="2" Style="{StaticResource SrvFav}"
+                                            Margin="0,4" Content="★" Foreground="{DynamicResource Accent}"
+                                            Click="Fav_Click"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- 行 2 -->
+                            <Border x:Name="Row2" Style="{StaticResource SrvRow}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox x:Name="Chk2" Grid.Column="0" Style="{StaticResource SrvCheck}"
+                                              Margin="16,0,0,0" Visibility="Collapsed"
+                                              Checked="RowCheck_Changed" Unchecked="RowCheck_Changed"/>
+                                    <Button x:Name="RowBtn2" Grid.Column="1" Style="{StaticResource SrvRowButton}"
+                                            Click="ServerRow_Click">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="36"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="Auto" MinWidth="66"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" Width="36" Height="36" CornerRadius="6"
+                                                    VerticalAlignment="Center"
+                                                    Background="{DynamicResource AccentSoft}">
+                                                <TextBlock Text="友" FontSize="16" FontWeight="Bold"
+                                                           Foreground="{DynamicResource Fg2}"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                                <!-- // 占位：等联机功能接入 -->
+                                                <TextBlock x:Name="Title2" Text="好友的整合包服" FontSize="13"
+                                                           FontWeight="Bold" TextWrapping="Wrap" LineHeight="18"
+                                                           MaxHeight="36" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           FontFamily="{StaticResource MonoFont}"
+                                                           TextTrimming="CharacterEllipsis" Text="mc.heyou.net:25565"/>
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           TextTrimming="CharacterEllipsis" Text="1.19.2 · Forge 43.2.8"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="4" MinWidth="66" HorizontalAlignment="Right"
+                                                        VerticalAlignment="Center">
+                                                <ContentControl Style="{StaticResource SrvStatusOk}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Ellipse Width="6" Height="6" Margin="0,0,8,0"
+                                                                 Fill="{DynamicResource Ok}"/>
+                                                        <TextBlock Text="在线"/>
+                                                    </StackPanel>
+                                                </ContentControl>
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           HorizontalAlignment="Right" Text="78 ms"/>
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           HorizontalAlignment="Right" Text="12/80 人"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Button>
+                                    <Button x:Name="Fav2" Grid.Column="2" Style="{StaticResource SrvFav}"
+                                            Margin="0,4" Content="☆" Click="Fav_Click"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- 行 3：离线态（tone danger + 文案「未连通」— ServerListItem.vue:14 + connection.css:27） -->
+                            <Border x:Name="Row3" Style="{StaticResource SrvRow}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox x:Name="Chk3" Grid.Column="0" Style="{StaticResource SrvCheck}"
+                                              Margin="16,0,0,0" Visibility="Collapsed"
+                                              Checked="RowCheck_Changed" Unchecked="RowCheck_Changed"/>
+                                    <Button x:Name="RowBtn3" Grid.Column="1" Style="{StaticResource SrvRowButton}"
+                                            Click="ServerRow_Click">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="36"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="Auto" MinWidth="66"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" Width="36" Height="36" CornerRadius="6"
+                                                    VerticalAlignment="Center"
+                                                    Background="{DynamicResource AccentSoft}">
+                                                <TextBlock Text="空" FontSize="16" FontWeight="Bold"
+                                                           Foreground="{DynamicResource Fg2}"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                                <!-- // 占位：等联机功能接入 -->
+                                                <TextBlock x:Name="Title3" Text="空岛四人生存" FontSize="13"
+                                                           FontWeight="Bold" TextWrapping="Wrap" LineHeight="18"
+                                                           MaxHeight="36" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           FontFamily="{StaticResource MonoFont}"
+                                                           TextTrimming="CharacterEllipsis" Text="sky4.mcexample.top"/>
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           TextTrimming="CharacterEllipsis" Text="1.20.1 · Vanilla"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="4" MinWidth="66" HorizontalAlignment="Right"
+                                                        VerticalAlignment="Center">
+                                                <ContentControl Style="{StaticResource SrvStatusDanger}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Ellipse Width="6" Height="6" Margin="0,0,8,0"
+                                                                 Fill="{DynamicResource Danger}"/>
+                                                        <TextBlock Text="未连通"/>
+                                                    </StackPanel>
+                                                </ContentControl>
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           HorizontalAlignment="Right" Text="—"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Button>
+                                    <Button x:Name="Fav3" Grid.Column="2" Style="{StaticResource SrvFav}"
+                                            Margin="0,4" Content="☆" Click="Fav_Click"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- 行 4：pending 态（tone accent-2 — connection.css:28）+ 超长名称，验两行截断 -->
+                            <Border x:Name="Row4" Style="{StaticResource SrvRow}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox x:Name="Chk4" Grid.Column="0" Style="{StaticResource SrvCheck}"
+                                              Margin="16,0,0,0" Visibility="Collapsed"
+                                              Checked="RowCheck_Changed" Unchecked="RowCheck_Changed"/>
+                                    <Button x:Name="RowBtn4" Grid.Column="1" Style="{StaticResource SrvRowButton}"
+                                            Click="ServerRow_Click">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="36"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="Auto" MinWidth="66"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" Width="36" Height="36" CornerRadius="6"
+                                                    VerticalAlignment="Center"
+                                                    Background="{DynamicResource AccentSoft}">
+                                                <TextBlock Text="起" FontSize="16" FontWeight="Bold"
+                                                           Foreground="{DynamicResource Fg2}"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                                <!-- // 占位：等联机功能接入 -->
+                                                <TextBlock x:Name="Title4" FontSize="13" FontWeight="Bold"
+                                                           TextWrapping="Wrap" LineHeight="18" MaxHeight="36"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           Text="起床战争与空岛二合一长期测试服（周末开房，欢迎新建筑师）"/>
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           FontFamily="{StaticResource MonoFont}"
+                                                           TextTrimming="CharacterEllipsis" Text="bedwars.wuhuicl.cn:25565"/>
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           TextTrimming="CharacterEllipsis" Text="1.21.4 · Paper 1.21.4"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="4" MinWidth="66" HorizontalAlignment="Right"
+                                                        VerticalAlignment="Center">
+                                                <ContentControl Style="{StaticResource SrvStatusPending}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Ellipse Width="6" Height="6" Margin="0,0,8,0"
+                                                                 Fill="{DynamicResource AccentHi}"/>
+                                                        <TextBlock Text="检测中"/>
+                                                    </StackPanel>
+                                                </ContentControl>
+                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                                           HorizontalAlignment="Right" Text="—"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Button>
+                                    <Button x:Name="Fav4" Grid.Column="2" Style="{StaticResource SrvFav}"
+                                            Margin="0,4" Content="★" Foreground="{DynamicResource Accent}"
+                                            Click="Fav_Click"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- .server-list-hint：padding 8 / 12px（ServersView.vue:521 + :487），文案模板 :377 -->
+                            <TextBlock Style="{StaticResource Micro}" Padding="8" FontSize="12"
+                                       Text="选择查看详情 · 双击快速连接"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+
+                <!-- 右列 · .server-detail = .connection-panel（ServerDetails.vue:13 经 ConnectionPanel.vue:5-12）
+                     最终态 .server-detail：position sticky + top 0（ServersView.vue:488 + :529）。
+                     WPF 没有 position sticky；两列已是各自独立的滚动容器、align-items start 又让详情贴顶，
+                     观感与 sticky 等价，所以只留 VerticalAlignment=Top + x:Name=ServerDetail 供后续接线。 -->
+                <Border x:Name="ServerDetail" Grid.Column="2" Style="{StaticResource SrvPanel}"
+                        VerticalAlignment="Top">
+                    <ScrollViewer x:Name="ServerDetailScroll" VerticalScrollBarVisibility="Visible"
+                                  HorizontalScrollBarVisibility="Disabled" MaxHeight="560">
+                        <StackPanel>
+                            <!-- .connection-panel-head：padding 12 20 + h2 16（connection.css:114，压掉 :16 的 20 与 :17 的 13px）
+                                 + 1px 下边线（connection.css:16）
+                                 注：ServersView.vue:528 另有一条把详情头 h2 压成 14px/500/dim 的更高特异性规则，
+                                 与台账 §5 记的 16px 冲突；本页按台账最终值出 16px。 -->
+                            <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="20,12">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="连接服务器" FontSize="16" FontWeight="Bold"
+                                               VerticalAlignment="Center"/>
+                                    <!-- .connection-panel-action：flex / align-center / gap 8 / wrap（connection.css:114） -->
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button Style="{StaticResource ConnectBtnGhostSm}" Margin="0,0,8,0"
+                                                Content="刷新"/>
+                                        <ContentControl Style="{StaticResource SrvStatusOk}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <Ellipse Width="6" Height="6" Margin="0,0,8,0"
+                                                         Fill="{DynamicResource Ok}"/>
+                                                <TextBlock Text="在线"/>
+                                            </StackPanel>
+                                        </ContentControl>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <!-- .connection-panel-body：padding 20 / gap 16（connection.css:114 + ServersView.vue:522）；
+                                 gap 用子项 Margin 表达（契约 §6.2） -->
+                            <StackPanel Margin="20">
+
+                                <!-- .server-detail-title：row / gap 12（:489 + ServerDetails.vue:30）；
+                                     monogram large 变体 48×52 + 20px（:479）；h3 20px 行高 1.4（:523 覆盖 :491） -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="48"/>
+                                        <ColumnDefinition Width="12"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Width="48" Height="52" CornerRadius="6"
+                                            VerticalAlignment="Center" Background="{DynamicResource AccentSoft}">
+                                        <TextBlock Text="晨" FontSize="20" FontWeight="Bold"
+                                                   Foreground="{DynamicResource AccentHi}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                        <!-- // 占位：等联机功能接入（与列表第一行是同一条服务器） -->
+                                        <TextBlock Text="晨光生存服 · 长期建筑组" FontSize="20" FontWeight="Bold"
+                                                   TextWrapping="Wrap" LineHeight="28" MaxHeight="56"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <!-- .server-address：13px text-dim 等宽 + 复制字形 ⧉（ServerDetails.vue:15 + scoped :30） -->
+                                        <Button Style="{StaticResource SrvAddress}" Margin="0,4,0,0"
+                                                FontFamily="{StaticResource MonoFont}">
+                                            <TextBlock Text="play.chenguang.cn ⧉" TextTrimming="CharacterEllipsis"/>
+                                        </Button>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- .server-description：padding 10 12 / 12px / line-height 1.6 / card-2 底 / radius 10
+                                     （ServersView.vue:526 + :493）；正文是 MOTD // 占位：等联机功能接入 -->
+                                <Border Margin="0,16,0,0" CornerRadius="10" Padding="12,10"
+                                        Background="{DynamicResource CardSoft}">
+                                    <TextBlock FontSize="12" LineHeight="19" Foreground="{DynamicResource Fg2}"
+                                               TextWrapping="Wrap"
+                                               Text="欢迎来到晨光生存服｜建筑组长期招募，主世界 120 年无回档，进服请看告示牌规则。"/>
+                                </Border>
+
+                                <!-- .server-facts：grid 1fr 1fr / gap 12（:494）+ padding 12 0 上下各 1px 边线（:524）
+                                     + strong 18px（:525）+ tabular-nums（:497）+ span 12px dim（:496）
+                                     // 占位：等联机功能接入 -->
+                                <Border Margin="0,16,0,0" BorderBrush="{DynamicResource Line}"
+                                        BorderThickness="0,1,0,1" Padding="0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Style="{StaticResource Micro}" Text="在线玩家"/>
+                                            <TextBlock Margin="0,4,0,0" FontSize="18" FontWeight="Bold"
+                                                       Typography.NumeralAlignment="Tabular" Text="128 / 500"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock Style="{StaticResource Micro}" Text="网络延迟"/>
+                                            <TextBlock Margin="0,4,0,0" FontSize="18" FontWeight="Bold"
+                                                       Typography.NumeralAlignment="Tabular" Text="32 ms"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <!-- ServerDetails.vue:18 —— 详情面板在 .server-facts 之后只有一行「服务器版本」，
+                                     没有四列总览。原先这里铺了一块 repeat(4) 的 .network-metrics（Java 版本/协议/
+                                     最大人数/同步时间），那是 VoxLink 面板的配方，服务器详情里没有，已删。 -->
+                                <TextBlock Margin="0,16,0,0" Style="{StaticResource Micro}" LineHeight="19"
+                                           TextWrapping="Wrap"
+                                           Text="服务器版本：1.20.1"/>
+
+                                <!-- .connection-field：column gap 8 / 14px 600（connection.css:52 + ui-system.css:34 的 text-md），
+                                     small 12px dim 行高 1.6（connection.css:53 + :114）；文案 ServerDetails.vue:19 -->
+                                <StackPanel Margin="0,16,0,0">
+                                    <TextBlock FontSize="14" FontWeight="SemiBold" Text="使用此实例连接"/>
+                                    <!-- .select：min-height ctl-h 36 / padding 8 12 再 padding-right 32 让位箭头 /
+                                         radius 10 / card-2 底 / 13px ellipsis（connection.css:13-14 + 台账 §0 的 styles.css:336-340）
+                                         // 占位：等联机功能接入（文案是 targetLabel 的拼法，见 ServersView.vue:226-227） -->
+                                    <Border Margin="0,8,0,0" MinHeight="36" CornerRadius="10" Padding="12,8"
+                                            Background="{DynamicResource CardSoft}"
+                                            BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" FontSize="13" VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Text="默认文件夹 · 1.20.1 · Fabric 0.15.3"/>
+                                            <ContentControl Grid.Column="2" Width="14" Height="14"
+                                                            VerticalAlignment="Center"
+                                                            Foreground="{DynamicResource Fg2}"
+                                                            Style="{DynamicResource Icon.ChevronDown}"/>
+                                        </Grid>
+                                    </Border>
+                                    <TextBlock Margin="0,8,0,0" Style="{StaticResource Micro}" LineHeight="19"
+                                               TextWrapping="Wrap"
+                                               Text="只修改启动器记录，不会覆盖游戏内的 servers.dat。"/>
+                                </StackPanel>
+
+                                <!-- ServerDetails.vue:21-22 —— 实例关联说明 + 版本/最近使用两行 muted。
+                                     原先这里是「在公共大厅显示 / 关闭后，好友仍可凭房间码加入」开关，
+                                     那是 VoxLinkPanel.vue:406 的房间设置，属于「联机」不属于「服务器」，已删。
+                                     // 占位：等联机功能接入（missing 分支 :20 与 candidateVersionIds 分支 :21 互斥，
+                                     本轮按"已关联"走，所以 :21 那条不显示） -->
+                                <StackPanel Margin="0,16,0,0">
+                                    <TextBlock Style="{StaticResource Micro}" LineHeight="19"
+                                               Text="Minecraft 1.20.1 · Fabric 0.15.3"/>
+                                    <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}" LineHeight="19"
+                                               Text="最近使用：今天 14:22"/>
+                                </StackPanel>
+
+                                <!-- .connection-notice：border 1 + border-left 3 accent / radius 10 / padding 16 /
+                                     accent-soft 底 / 前置图标 19×19 margin-top 2 / gap space-3 12（connection.css:46-47）
+                                     正文取 ServersView.vue:437 的快速进入说明（原版在进服确认模态里；弹窗库由主控统一做，
+                                     本轮把这段说明按同族 notice 配方呈现在详情面板中） -->
+                                <Border Margin="0,16,0,0" CornerRadius="10" BorderBrush="{DynamicResource Line}"
+                                        BorderThickness="1" Background="{DynamicResource AccentSoft}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="3"/>
+                                            <ColumnDefinition Width="16"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <!-- WPF 的 Border 不支持四条边不同色，3px 左竖线用内嵌条近似 -->
+                                        <Border Grid.Column="0" Background="{DynamicResource Accent}"/>
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="0,16,16,16">
+                                            <ContentControl Width="19" Height="19" Margin="0,2,12,0"
+                                                            VerticalAlignment="Top"
+                                                            Foreground="{DynamicResource AccentHi}"
+                                                            Style="{DynamicResource Icon.Pulse}"/>
+                                            <TextBlock FontSize="12" LineHeight="22" MaxWidth="320"
+                                                       TextWrapping="Wrap" Foreground="{DynamicResource Fg2}"
+                                                       Text="Java 1.20 及以上会使用官方 Quick Play 直接进入；更旧版本只启动正确实例，并保留服务器记录。"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <!-- .connection-details 最终态：padding 12 0 / 只留 1px 下边线 / 透明底（ui-system.css:77），
+                                     summary min-height 36 / 13px（connection.css:42 + :114）。折叠由本页代码切 Visibility。 -->
+                                <Border Margin="0,16,0,0" BorderBrush="{DynamicResource Line}"
+                                        BorderThickness="0,0,0,1" Padding="0,12">
+                                    <StackPanel>
+                                        <Button x:Name="BtnLogSummary" Style="{StaticResource SrvSummary}"
+                                                HorizontalAlignment="Stretch" Click="DetailsToggle_Click">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="8"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <ContentControl x:Name="LogChevron" Grid.Column="0" Width="14"
+                                                                Height="14" VerticalAlignment="Center"
+                                                                Foreground="{DynamicResource Fg2}"
+                                                                Style="{DynamicResource Icon.ChevronRight}"/>
+                                                <!-- 条目数原文是日志条数（summary 结构见 FrpPanel.vue:148）// 占位：等联机功能接入 -->
+                                                <TextBlock Grid.Column="2" Text="同步与检测日志 · 3 条"
+                                                           VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </Button>
+
+                                        <!-- .connection-log-viewport：max-height 180 → 220（connection.css:83 + :114）/
+                                             padding 12 16（:92）/ radius 10（:91）/ card-2 底 + border 1（:89-90）/
+                                             等宽 12px 行高 1.7（:93-95）/ 行间距 2px（:88 的 gap 2px） -->
+                                        <Border x:Name="LogBlock" Visibility="Collapsed" Margin="0,12,0,0"
+                                                MaxHeight="220" CornerRadius="10" Padding="16,12"
+                                                Background="{DynamicResource CardSoft}"
+                                                BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                                            <ScrollViewer x:Name="LogViewport" VerticalScrollBarVisibility="Visible"
+                                                          HorizontalScrollBarVisibility="Disabled">
+                                                <!-- 每行一条，格式照 FrpPanel.vue:148 的 stream + text 拼法 // 占位：等联机功能接入 -->
+                                                <StackPanel>
+                                                    <TextBlock FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                                               Margin="0,0,0,2" LineHeight="20" TextWrapping="Wrap"
+                                                               Foreground="{DynamicResource Fg2}"
+                                                               Text="[stdout] 已从 默认文件夹 合并 4 条服务器记录"/>
+                                                    <TextBlock FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                                               Margin="0,0,0,2" LineHeight="20" TextWrapping="Wrap"
+                                                               Foreground="{DynamicResource Fg2}"
+                                                               Text="[stdout] ping play.chenguang.cn 32ms"/>
+                                                    <TextBlock FontFamily="{StaticResource MonoFont}" FontSize="12"
+                                                               Margin="0,0,0,2" LineHeight="20" TextWrapping="Wrap"
+                                                               Foreground="{DynamicResource Fg2}"
+                                                               Text="[stderr] sky4.mcexample.top 连接超时"/>
+                                                </StackPanel>
+                                            </ScrollViewer>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- .server-connect：width 100% / justify-content space-between / min-height row-h 42
+                                     （ServersView.vue:498）。ServerDetails.vue:30 的 scoped 另写了 min-height 44，
+                                     台账 §5 记的最终值是 42，本页按 42 出，冲突留在这条注释里。 -->
+                                <Button Margin="0,16,0,0" Style="{StaticResource ConnectBtnGold}" MinHeight="42"
+                                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="启动并连接" VerticalAlignment="Center"/>
+                                        <!-- 右上箭头是文字字形 ↗（ServerDetails.vue:23，契约 §3 允许的字形） -->
+                                        <TextBlock Grid.Column="1" Text="↗" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Button>
+
+                                <!-- .server-secondary（= .connection-actions）：gap space-1 4（:499）+ 每个 .btn flex 1 /
+                                     padding 4 8（:500）+ justify-content flex-end（ServerDetails.vue:30） -->
+                                <Grid Margin="0,16,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="4"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="4"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button Grid.Column="0" Style="{StaticResource ConnectBtnGhost}" Padding="8,4"
+                                            Content="编辑服务器"/>
+                                    <!-- 原版这里是 details/summary 浮层里再藏一个删除按钮（ServerDetails.vue:24 + scoped :30
+                                         的 position absolute / right 0 / z-index 4）。WPF 没有 position absolute，
+                                         浮层留独立命名元素 BtnDelete（默认 Collapsed），接线时可换成 Popup。 -->
+                                    <Button x:Name="BtnMore" Grid.Column="2" Style="{StaticResource ConnectBtnGhost}"
+                                            Padding="8,4" Content="更多" Click="More_Click"/>
+                                    <Button x:Name="BtnDelete" Grid.Column="4" Style="{StaticResource ConnectBtnDanger}"
+                                            Padding="8,4" Content="删除服务器" Visibility="Collapsed"/>
+                                </Grid>
+
+                                <!-- .server-footnote：12px（ServersView.vue:502），文案 ServerDetails.vue:25 -->
+                                <TextBlock Margin="0,16,0,0" Style="{StaticResource Micro}" LineHeight="20"
+                                           TextWrapping="Wrap"
+                                           Text="状态检测失败不一定代表无法进入游戏，仍可尝试连接。"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </Grid>
+
+            <!-- ============ 空态一：完全没有服务器（模板 :370-372 的 v-else-if 分支，与上面的 workspace 互斥）
+                 .connection-panel + .connection-empty：min-height 220 / padding 24 / column gap 16 / 居中 /
+                 h3 16px（text-lg）/ p 12px text-dim 行高 1.7 max-width 320 居中（connection.css:68-70）
+                 内层 .connection-symbol：48×48 + border 1 + radius 10 + accent-soft 底，内 svg 26×26（connection.css:21-23） -->
+            <Border x:Name="EmptyAll" Visibility="Collapsed" Style="{StaticResource SrvPanel}" Margin="0,16,0,0">
+                <StackPanel MinHeight="220" Margin="24" VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <Border Width="48" Height="48" CornerRadius="10" HorizontalAlignment="Center"
+                            Background="{DynamicResource AccentSoft}"
+                            BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                        <!-- 原版这里是一张手绘的「双层机箱」svg（ServersView.vue:371），§3 的 43 个图标没有对应项，
+                             契约 §3 禁止自造几何，故用 Icon.Apps 顶位。 -->
+                        <ContentControl Width="26" Height="26" Foreground="{DynamicResource AccentHi}"
+                                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                                        Style="{DynamicResource Icon.Apps}"/>
+                    </Border>
+                    <TextBlock Margin="0,16,0,0" FontSize="16" FontWeight="Bold" TextAlignment="Center"
+                               HorizontalAlignment="Center" Text="下一站，去哪个世界？"/>
+                    <TextBlock Margin="0,16,0,0" Style="{StaticResource Micro}" FontSize="12" LineHeight="20"
+                               MaxWidth="320" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"
+                               Text="添加好友的服务器地址，或同步游戏内的收藏。关联实例后即可快速进入。"/>
+                    <Button Style="{StaticResource ConnectBtnGold}" Margin="0,16,0,0"
+                            HorizontalAlignment="Center" Content="添加第一个服务器"/>
+                </StackPanel>
+            </Border>
+
+            <!-- ============ 空态二：搜索无结果（模板 :373 分支） ============ -->
+            <Border x:Name="EmptyNoMatch" Visibility="Collapsed" Style="{StaticResource SrvPanel}" Margin="0,16,0,0">
+                <StackPanel MinHeight="220" Margin="24" VerticalAlignment="Center" HorizontalAlignment="Center">
+                    <TextBlock FontSize="16" FontWeight="Bold" TextAlignment="Center"
+                               HorizontalAlignment="Center" Text="没有找到匹配的服务器"/>
+                    <TextBlock Margin="0,16,0,0" Style="{StaticResource Micro}" FontSize="12" LineHeight="20"
+                               MaxWidth="320" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center"
+                               Text="试试其他名称、地址或关键词。"/>
+                    <Button x:Name="BtnClearSearch" Style="{StaticResource ConnectBtnGhost}" Margin="0,16,0,0"
+                            HorizontalAlignment="Center" Content="清除搜索" Click="ClearSearch_Click"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </Grid>
+</UserControl>

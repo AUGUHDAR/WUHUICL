@@ -84,8 +84,19 @@ public sealed class LaunchSession : INotifyPropertyChanged
     public string MemorySummary => Settings.Value.MaxHeapMb >= 1024
         ? $"{Settings.Value.MaxHeapMb / 1024.0:0.#} GB"
         : $"{Settings.Value.MaxHeapMb} MB";
-    public string RunStateText => GameRunning ? "运行中" : Busy ? "任务进行中" : "就绪";
-    public string RunStateColor => GameRunning ? "Ok" : Busy ? "Warn" : "Accent";
+    // 原版 heroStatus 四态（HomeView.vue:192-200）：等待选择 / 正在准备 / 游戏运行中 / 需要检查 / 就绪
+    public string RunStateText => GameRunning ? "游戏运行中" : Busy ? "正在准备"
+        : InstalledList.Count == 0 ? "等待选择" : "就绪";
+
+    /// <summary>.runtime-state i 的点色：idle 灰、ready/running 绿（HomeView.vue:881-882），
+    /// 不是 accent —— 之前空状态点成蓝色就是这里错了。</summary>
+    public string RunStateColor => !GameRunning && !Busy && InstalledList.Count == 0 ? "Idle" : "Ok";
+
+    /// <summary>ready/running 才有 3px 光环 box-shadow 0 0 0 3px --ok-soft（:882）。</summary>
+    public string RunStateRing => RunStateColor == "Ok" ? "OkSoft" : "Transparent";
+
+    /// <summary>版本页第二个页签：原版是「已安装」，有实例时才带数量（GameView.vue:937）。</summary>
+    public string InstalledTabText => InstalledList.Count == 0 ? "已安装" : $"已安装（{InstalledList.Count}）";
 
     string _lastCommand = "";
     public string LastCommand { get => _lastCommand; set => Set(ref _lastCommand, value); }
@@ -230,6 +241,10 @@ public sealed class LaunchSession : INotifyPropertyChanged
         foreach (var v in sorted) InstalledList.Add(v);
         SelectedInstalled ??= InstalledList.FirstOrDefault();
         Raise(nameof(CanPlay));
+        Raise(nameof(RunStateText));
+        Raise(nameof(RunStateColor));
+        Raise(nameof(RunStateRing));
+        Raise(nameof(InstalledTabText));
     }
 
     static string DescribeKind(string k) => k switch

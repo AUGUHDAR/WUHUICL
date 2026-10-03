@@ -45,3 +45,14 @@ public sealed class BrushByKey : IValueConverter
     }
     public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
 }
+
+/// <summary>按键名取出图标样式（"Icon.Home" → ContentControl 的 Style），取不到就留空而不是崩。</summary>
+public sealed class StyleByKey : IValueConverter
+{
+    public object Convert(object v, Type t, object p, CultureInfo c)
+    {
+        if (v is not string key) return null!;
+        return Application.Current?.TryFindResource(key) as Style ?? null!;
+    }
+    public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
+}

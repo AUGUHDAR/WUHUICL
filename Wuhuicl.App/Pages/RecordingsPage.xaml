@@ -1,0 +1,485 @@
+<UserControl x:Class="Wuhuicl.App.Pages.RecordingsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- 资源管理 · 录像。复刻 KAMUCL-1.1.5/src/renderer/src/views/RecordingsView.vue。
+         该页有两个 scoped 块：基线 :91 与收紧块 :92，同一选择器出现两次时一律取 :92（docs/UI_GEOMETRY_PAGES.md §10）。
+         根是 .recordings-page（不是 .page）：max-width 1440 / display grid / gap 16（:92 覆盖 :91 的 20）/ margin 0 auto。
+         契约 §5 的 LaunchSession 白名单里没有任何录像字段，所以本页不写一个 Binding
+         （绑不存在的属性会静默失效 = 假实现），四行列表、库路径、分页文案全是占位，等 recordings:list 接入
+         （RecordingsView.vue:29 的 IPC）。页内样式键统一 Rec 前缀，避开契约 §4 的画刷键名。
+         注释里的 CSS 变量一律去掉前导负号写（border / text-dim / card-2 / accent-soft），XML 注释不允许连续两个减号。 -->
+    <UserControl.Resources>
+
+        <!-- .recording-row：最终 flex align-center / min-height 72 / padding 12 0 / gap 16 / border-bottom 1px — RecordingsView.vue:92
+             （基线 :91 是 padding 16 0、没有 min-height）；border 色在契约 §4 映射成 Line，与其他页对同一变量的取法一致 -->
+        <Style x:Key="RecRow" TargetType="Border">
+            <Setter Property="MinHeight" Value="72"/>
+            <Setter Property="Padding" Value="0,12"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        </Style>
+
+        <!-- .recording-info strong：字号继承 body 的 text-md 14（styles.css:127）+ strong 的 700；
+             :92 把 word-break 收回 normal、overflow-wrap 给 break-word → WPF 用 Wrap 表达「超长文件名不断版」 -->
+        <Style x:Key="RecName" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+
+        <!-- .recording-info > div.muted：.muted 只换色 text-dim（styles.css:677-678），字号仍是继承的 14；无省略号规则 → 允许换行 -->
+        <Style x:Key="RecMeta" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+
+        <!-- .path：font-size 12（:91）；.recording-info .path 才是单行省略（:91 overflow hidden + ellipsis + nowrap）；
+             等宽取契约 §2 的 MonoFont（路径类文案的规定字体） -->
+        <Style x:Key="RecPath" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="FontFamily" Value="{StaticResource MonoFont}"/>
+            <Setter Property="TextWrapping" Value="NoWrap"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        </Style>
+
+        <!-- details 的 summary：:92 只给了 cursor:pointer（.recording-help summary 另加 white-space:nowrap），
+             字号随宿主继承（.recording-library 12 — :92；.recording-results 内是继承的 14）。
+             WPF 没有原生 details，这里做成「无底无边的文字按钮 + 原生展开标记的替身图标」，
+             替身用契约 §3 的 Icon.ChevronDown，不造几何；开合由 .xaml.cs 切 Visibility（纯视觉状态）。 -->
+        <Style x:Key="RecSummary" TargetType="Button">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <StackPanel Orientation="Horizontal" Background="Transparent">
+                            <!-- 展开时原版把 marker 转 90°，属动效；本轮按契约 §6.8 留独立元素（Tag 标识）给它接 -->
+                            <ContentControl Tag="SummaryChevron" Width="14" Height="14" Margin="0,0,4,0"
+                                            VerticalAlignment="Center"
+                                            Style="{DynamicResource Icon.ChevronDown}"/>
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- .btn-ghost.btn-sm（:80 的定位文件按钮）：WPF 一条 Style 只能 BasedOn 一个，
+             所以把 §2 的 BtnSm（32 高 / radius 6 / 13px — Controls.xaml:205-206）和 BtnGhost 的 card-2 底 + 描边（:182-187）合成一条 -->
+        <Style x:Key="RecRowBtn" TargetType="Button" BasedOn="{StaticResource BtnSm}">
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- .status-strip：flex wrap / gap 12 / padding 12 16 / radius 10 / margin-bottom 12 / 13px / accent-soft 底 — ui-system.css:41
+             （契约 §2 未收录，与 SkinsPage 的 SkinStatusStrip 同一配方） -->
+        <Style x:Key="RecStatusStrip" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="16,12"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
+        </Style>
+    </UserControl.Resources>
+
+    <!-- 宿主 .content 是 scrollbar-gutter:stable（docs §0，App.vue:2398-2404）→ 滚动条槽常驻，契约 §6.5；
+         右侧 8 是滚动条槽宽（styles.css:139-142），留给内容不压住它 -->
+    <ScrollViewer VerticalScrollBarVisibility="Visible" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+
+        <!-- .recordings-page：max-width 1440 / margin 0 auto / gap 16（:92 覆盖 :91 的 20）/ min-width 0（:91，WPF 无对应概念，不需要表达）
+             display:grid 的单列网格 → 竖排 StackPanel，块间距 16 用子项 Margin 表达 -->
+        <StackPanel MaxWidth="1440" HorizontalAlignment="Center" VerticalAlignment="Top" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+
+            <!-- ==================== .page-head.recording-heading ====================
+                 :92 把它从 .page-head 的列流（styles.css:498-502 gap 4）改成 row：space-between / align-center / gap 16 / flex-wrap。
+                 WPF 没有 flex-wrap：窄窗口下右侧按钮不会换到下一行，只能靠 .content 横向压缩，这是本页第一处表达不了的几何。 -->
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel VerticalAlignment="Center">
+                    <!-- h1：.page-head h1 基线只有 margin 0 0 8（:91），字号由 :92 收到 24px（= §2 的 PageTitle 24/Bold）；
+                         small 13px / 400 / text-dim（:92）。模板里 small 前有一个字面空格（:57）→ 写进 Run 文本 -->
+                    <TextBlock Style="{StaticResource PageTitle}">
+                        <Run Text="录像"/><Run FontSize="13" FontWeight="Normal" Foreground="{DynamicResource Fg2}" Text=" 4 个"/>
+                        <!-- 占位：等录像列表接入（原版这里是 data.entries.length，:57） -->
+                    </TextBlock>
+                    <!-- p.muted：margin 4 0（:92）、14 继承（styles.css:127）、色 text-dim（styles.css:677-678）— 文案照 :57 原文 -->
+                    <TextBlock Margin="0,4" Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
+                               Text="汇总全部绑定目录的 ReplayMod 与 Flashback 录像。"/>
+                </StackPanel>
+
+                <!-- .actions：flex wrap，gap 最终 8（:92 覆盖 :91 的 10）；gap 16 = 与左侧文案列的间距（:92 .recording-heading gap 16） -->
+                <WrapPanel Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center" HorizontalAlignment="Right">
+                    <!-- 三个按钮的文案与顺序照 :57；样式：打开=btn-ghost、导入=btn-gold、刷新=btn-ghost（含原文字形 ↻，契约 §3） -->
+                    <Button x:Name="BtnOpenLibrary" Style="{StaticResource BtnGhost}" Content="打开收藏文件夹"
+                            Margin="0,0,8,0" ToolTip="打开收藏目录（未接入：原版是 recordings:open，:40）"/>
+                    <Button x:Name="BtnImport" Style="{StaticResource BtnGold}" Content="导入录像…"
+                            Margin="0,0,8,0" ToolTip="选择 .mcpr / Flashback .zip 导入（未接入：recordings:import，:46）"/>
+                    <Button x:Name="BtnRefresh" Style="{StaticResource BtnGhost}" Content="↻ 刷新" Click="Refresh_Click"
+                            ToolTip="重新读取录像目录（原版 15 秒还有静默自刷新，:51）"/>
+                </WrapPanel>
+            </Grid>
+
+            <!-- ==================== .recording-library ====================
+                 :92 定稿：flex / gap 8 / align-center / 12px（基线 :91 是 space-between + gap 20）；
+                 .recording-help 用 margin-left:auto 顶到行尾（:92）→ 等价表达是外层「星形列 + Auto 列」；
+                 Grid 没有 FontSize 依赖属性，继承型的字号要写成附加属性 TextElement.FontSize -->
+            <Grid Margin="0,0,0,16" TextElement.FontSize="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 行内左段：label + 路径，gap 8（:92） -->
+                <Grid VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="导入与收藏保存位置：" Foreground="{DynamicResource Fg2}"
+                               VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Grid.Column="1" x:Name="LibraryPathText" VerticalAlignment="Center"
+                               FontFamily="{StaticResource MonoFont}" TextWrapping="Wrap"
+                               ToolTip="完整库路径" Text="D:\Games\Wuhuicl\recordings\library">
+                        <!-- 占位：等 data.library 接入（:58）；.recording-library .path 是 overflow-wrap:anywhere（:92）→ 用换行而非省略号 -->
+                    </TextBlock>
+                </Grid>
+
+                <!-- .recording-help：margin-left:auto + line-height 1.7（:92）。WPF 无 line-height 的等价物，用 LineHeight=20（≈12×1.7）；
+                     MaxWidth 420 不是原版值——原版靠 flex 把段落挤到剩余宽度，这里给个上限防长句把行拉爆，工程近似 -->
+                <StackPanel Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center" MaxWidth="420">
+                    <Button x:Name="HelpSummary" Style="{StaticResource RecSummary}" Content="使用说明"
+                            Tag="HelpBody" Click="Disclosure_Toggle_Click"/>
+                    <TextBlock x:Name="HelpBody" Visibility="Collapsed" Margin="0,4,0,0"
+                               FontSize="12" Foreground="{DynamicResource Fg2}" TextWrapping="Wrap" LineHeight="20"
+                               Text="自动汇总全部已绑定目录中的实例、共享目录与收藏，原录像保持原位。按住录像名称可拖出，勾选后可一起拖出。复制时校验完整性，同名文件自动添加序号。播放、渲染请在对应模组内完成；跨版本复制前请确认兼容性。"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- ==================== .recording-workspace.card ====================
+                 最终：padding 16（:92 覆盖 :91 的 .card 22）/ display grid / gap 12 / min-height 240 / align-content start — :92。
+                 padding 16 与 §2 的 CardTight 完全同值，直接复用；卡片一律平面（契约 §6.4）。 -->
+            <Border Style="{StaticResource CardTight}" MinHeight="240" Margin="0,0,0,16">
+                <StackPanel VerticalAlignment="Top">
+
+                    <!-- ····· .recording-filters ·····
+                         最终列集 minmax(190px,1.5fr) minmax(160px,1fr) 130px 130px + gap 12 — :92
+                         （基线 :91 是 minmax(200px,1fr) minmax(180px,1fr) 150px 150px），minmax 按契约 §6.3 用 MinWidth 包住星形列。
+                         原版 DOM 顺序是「文件夹下拉、搜索框、格式、位置」，:92 用 grid-column:1 / grid-row:1 把搜索框提到首轨、
+                         首子（文件夹下拉）改 grid-column:2，所以这里的视觉顺序是 搜索 / 文件夹 / 格式 / 位置。
+                         @max-1150 的 1fr 1fr 与 @max-650 的 display:flex column（:92）、@max-800 的 ui-system.css:61 都依赖媒体查询，WPF 没有对应物。 -->
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.5*" MinWidth="190"/>
+                            <ColumnDefinition Width="*" MinWidth="160"/>
+                            <ColumnDefinition Width="130"/>
+                            <ColumnDefinition Width="130"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- 搜索框（:62 的 input.input，aria-label 搜索录像）：36 高 / padding 12 8 / radius 10 = §2 Input；
+                             WPF 无 placeholder，用覆盖文字顶位（契约 §2 之外无原生写法） -->
+                        <Grid>
+                            <TextBox x:Name="SearchBox" Style="{StaticResource Input}" FontSize="13"
+                                     TextChanged="Search_TextChanged"/>
+                            <TextBlock x:Name="SearchHint" Text="搜索录像名称、实例或路径…" FontSize="13"
+                                       Foreground="{DynamicResource Fg3}" Margin="13,0,0,0"
+                                       VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        </Grid>
+
+                        <!-- SelectMenu 的替身：.select-menu-btn 是 36 高 / padding 8 12 / radius 10 / 13px / 14px chevron（SelectMenu.vue:109-130），
+                             与 §2 的 Input 同源度量，故直接用隐式 ComboBox 样式；
+                             原版浮层靠 getBoundingClientRect 量按钮位置（SelectMenu.vue:33-41），WPF 的 Popup 自带这套测量 -->
+                        <ComboBox Grid.Column="1" x:Name="FolderSelect" Margin="12,0,0,0" FontSize="13"
+                                  SelectedIndex="0" SelectionChanged="Filter_Changed">
+                            <!-- 占位：等 settings.folders 接入（:16 的 folderOptions 由 folders 映射成「名 · 路径」） -->
+                            <ComboBoxItem>全部已绑定文件夹</ComboBoxItem>
+                            <ComboBoxItem>主库 · D:\Games\Wuhuicl</ComboBoxItem>
+                            <ComboBoxItem>外置盘 · E:\MC-Sessions</ComboBoxItem>
+                        </ComboBox>
+                        <ComboBox Grid.Column="2" x:Name="KindSelect" Margin="12,0,0,0" FontSize="13"
+                                  SelectedIndex="0" SelectionChanged="Filter_Changed">
+                            <!-- 三项照 :63 -->
+                            <ComboBoxItem>全部格式</ComboBoxItem>
+                            <ComboBoxItem>ReplayMod</ComboBoxItem>
+                            <ComboBoxItem>Flashback</ComboBoxItem>
+                        </ComboBox>
+                        <ComboBox Grid.Column="3" x:Name="SourceSelect" Margin="12,0,0,0" FontSize="13"
+                                  SelectedIndex="0" SelectionChanged="Filter_Changed">
+                            <!-- 三项照 :64 -->
+                            <ComboBoxItem>全部位置</ComboBoxItem>
+                            <ComboBoxItem>集中收藏</ComboBoxItem>
+                            <ComboBoxItem>游戏目录</ComboBoxItem>
+                        </ComboBox>
+                    </Grid>
+
+                    <!-- ····· v-if error 的 .card[role=alert]（:66）：本页没有 .card 之外的告警样式，
+                         .card 在本页是 padding 22（:91，覆盖 §2 Panel 的全局 20）；数据未接入，常态收起 ····· -->
+                    <Border x:Name="ErrorCard" Style="{StaticResource Panel}" Padding="22" Margin="0,0,0,12"
+                            Visibility="Collapsed">
+                        <WrapPanel VerticalAlignment="Center">
+                            <!-- 占位：等 recordings:list 的错误文案接入（:30 的 errText） -->
+                            <TextBlock Text="录像目录读取失败。" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <Button x:Name="ErrorRetryBtn" Style="{StaticResource BtnGhost}" Content="重试"
+                                    Click="Refresh_Click"/>
+                        </WrapPanel>
+                    </Border>
+
+                    <!-- ····· v-if warnings.length 的 details.card（:67）：同样 .card padding 22（:91） ····· -->
+                    <Border x:Name="WarningBlock" Style="{StaticResource Panel}" Padding="22" Margin="0,0,0,12"
+                            Visibility="Collapsed">
+                        <StackPanel>
+                            <Button x:Name="WarningSummary" Style="{StaticResource RecSummary}" FontSize="14"
+                                    Content="部分目录未读取（2）" Tag="WarningBody" Click="Disclosure_Toggle_Click"/>
+                            <StackPanel x:Name="WarningBody" Visibility="Collapsed" Margin="0,8,0,0">
+                                <TextBlock FontSize="14" Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
+                                           Text="E:\MC-Sessions\旧存档盘：卷不可访问（未插入）。"/>
+                                <TextBlock FontSize="14" Foreground="{DynamicResource Fg2}" TextWrapping="Wrap" Margin="0,4,0,0"
+                                           Text="D:\Games\Wuhuicl\instances\1.8.9-Forge：recordings 目录权限不足。"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ····· v-if loading 的 .status-strip（:73）：常态收起，Refresh_Click 里做「读取中」态 ····· -->
+                    <Border x:Name="StatusStrip" Style="{StaticResource RecStatusStrip}" Visibility="Collapsed">
+                        <TextBlock Text="正在更新录像列表…" FontSize="13" VerticalAlignment="Center"/>
+                    </Border>
+
+                    <!-- ····· .recording-controls ·····
+                         最终：display grid / gap 8（:92 覆盖 :91 的 16）/ padding 8 0 / border-bottom 1px（:92）；
+                         内部 .actions 的 gap 也被 :92 收成 8。整块 v-if="filtered.length"（:68） -->
+                    <Border x:Name="ControlsRow" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="0,8">
+                        <StackPanel>
+                            <WrapPanel>
+                                <!-- 四项照 :69；「已选 0 项」那个 span 没有按钮样式，字号继承 14 -->
+                                <Button x:Name="SelectPageBtn" Style="{StaticResource BtnGhost}" Content="选择当前页"
+                                        Margin="0,0,8,8" Click="SelectPage_Click"/>
+                                <Button x:Name="SelectAllBtn" Style="{StaticResource BtnGhost}"
+                                        Content="全选筛选结果（4）" Margin="0,0,8,8" Click="SelectAll_Click"/>
+                                <TextBlock x:Name="SelectedCount" Text="已选 0 项" FontSize="14"
+                                           VerticalAlignment="Center" Margin="0,0,8,8"/>
+                                <Button x:Name="ClearSelectionBtn" Style="{StaticResource BtnGhost}" Content="清空"
+                                        Margin="0,0,0,8" Visibility="Collapsed" Click="ClearSelection_Click"/>
+                            </WrapPanel>
+
+                            <!-- .operation-row：v-if selected.length（:70）→ 常态收起；
+                                 .operation-row :deep(.select-menu-btn){max-width:360px} — :91（:92 没改，仍取 :91） -->
+                            <WrapPanel x:Name="OperationRow" Visibility="Collapsed" Margin="0,8,0,0">
+                                <Button Style="{StaticResource BtnGold}" Content="收集到当前文件夹收藏" Margin="0,0,8,8"
+                                        ToolTip="未接入：recordings:operate collect（:46）"/>
+                                <Button Style="{StaticResource BtnGhost}" Content="提取到文件夹…" Margin="0,0,8,8"
+                                        ToolTip="未接入：recordings:operate export（:46）"/>
+                                <ComboBox x:Name="TargetSelect" MaxWidth="360" FontSize="13"
+                                          Margin="0,0,8,8" SelectedIndex="0" SelectionChanged="Target_Changed">
+                                    <!-- 第一项是 SelectMenu 的 placeholder 槽（:70 的 placeholder 选择目标实例，文案取 SelectMenu.vue:27 的回落逻辑） -->
+                                    <ComboBoxItem>选择目标实例</ComboBoxItem>
+                                    <ComboBoxItem>1.20.1 · Fabric</ComboBoxItem>
+                                    <ComboBoxItem>1.21.4 · NeoForge</ComboBoxItem>
+                                </ComboBox>
+                                <Button x:Name="CopyToInstanceBtn" Style="{StaticResource BtnGhost}" Content="复制到实例"
+                                        Margin="0,0,8,8" IsEnabled="False"
+                                        ToolTip="未接入：确认弹窗后 recordings:operate dispatch（:70/:86）"/>
+                                <Button Style="{StaticResource BtnDanger}" Content="移入回收站" Margin="0,0,0,8"
+                                        ToolTip="未接入：确认弹窗后 recordings:operate trash（:70/:86）"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ····· .recording-list（:76 v-else-if rows.length）：flex column / overflow visible — :91
+                         每行 .recording-row：checkbox（gap 16 — :92）/ .recording-info（flex 1 min-width 0 / grid gap 6 — :91）/ btn-sm
+                         行内容分三段照 :79：strong 名称、div.muted 元信息、div.muted.path 目录。
+                         元信息里的「时长 + 版本」是任务口径要求补的段，原版 :79 只有 格式 · 来源 · 大小 · 修改时间 → 一并标占位。 -->
+                    <StackPanel x:Name="RecordingList" Margin="0,4,0,0">
+
+                        <Border x:Name="Row1" Style="{StaticResource RecRow}" Tag="Flashback|集中收藏">
+                            <!-- .recording-info 的列间 gap 16（:92）→ 中间列左右各 16 -->
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- :78 的 checkbox（13px，§2 Check） -->
+                                <CheckBox x:Name="RowCheck1" Style="{StaticResource Check}" VerticalAlignment="Center"
+                                          Checked="Row_Check_Changed" Unchecked="Row_Check_Changed"
+                                          ToolTip="选择 2026-09-30_21-44-07.mp4"/>
+                                <!-- .recording-info：draggable=true 时 cursor:grab（:91）；WPF 光标表里没有 grab，
+                                     取 SizeAll 表达「整块可拖出」，Hand 会被读成点击而非拖动 -->
+                                <StackPanel Grid.Column="1" Margin="16,0" Cursor="SizeAll"
+                                            ToolTip="按住拖出录像文件（:79 title；拖放需 recordings:drag，:36 未接入）">
+                                    <TextBlock x:Name="RowName1" Style="{StaticResource RecName}"
+                                               ToolTip="2026-09-30_21-44-07.mp4" Text="2026-09-30_21-44-07.mp4"/>
+                                    <TextBlock x:Name="RowMeta1" Style="{StaticResource RecMeta}" Margin="0,6,0,0"
+                                               Text="Flashback · 集中收藏 · 184 MB · 03:12 · 1.20.1 · Fabric · 2026/9/30 21:47:00"/>
+                                    <TextBlock x:Name="RowPath1" Style="{StaticResource RecPath}" Margin="0,6,0,0"
+                                               ToolTip="D:\Games\Wuhuicl\recordings\library\2026-09-30_21-44-07.mp4"
+                                               Text="D:\Games\Wuhuicl\recordings\library"/>
+                                </StackPanel>
+                                <Button Grid.Column="2" Style="{StaticResource RecRowBtn}" Content="定位文件"
+                                        ToolTip="未接入：recordings:open（:40）"/>
+                            </Grid>
+                        </Border>
+
+                        <Border x:Name="Row2" Style="{StaticResource RecRow}" Tag="ReplayMod|游戏目录">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <CheckBox x:Name="RowCheck2" Style="{StaticResource Check}" VerticalAlignment="Center"
+                                          Checked="Row_Check_Changed" Unchecked="Row_Check_Changed"
+                                          ToolTip="选择 replay_2026-09-28_19-02-33.mcpr"/>
+                                <StackPanel Grid.Column="1" Margin="16,0" Cursor="SizeAll"
+                                            ToolTip="按住拖出录像文件（:79 title）">
+                                    <TextBlock x:Name="RowName2" Style="{StaticResource RecName}"
+                                               ToolTip="replay_2026-09-28_19-02-33.mcpr"
+                                               Text="replay_2026-09-28_19-02-33.mcpr"/>
+                                    <TextBlock x:Name="RowMeta2" Style="{StaticResource RecMeta}" Margin="0,6,0,0"
+                                               Text="ReplayMod · 游戏目录 · 6.4 MB · 12:05 · 1.20.1 · Fabric · 2026/9/28 19:14:02"/>
+                                    <TextBlock x:Name="RowPath2" Style="{StaticResource RecPath}" Margin="0,6,0,0"
+                                               ToolTip="D:\Games\Wuhuicl\instances\1.20.1_Fabric\saves\run_01\replay"
+                                               Text="D:\Games\Wuhuicl\instances\1.20.1_Fabric\saves\run_01\replay"/>
+                                </StackPanel>
+                                <Button Grid.Column="2" Style="{StaticResource RecRowBtn}" Content="定位文件"/>
+                            </Grid>
+                        </Border>
+
+                        <Border x:Name="Row3" Style="{StaticResource RecRow}" Tag="Flashback|游戏目录">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <CheckBox x:Name="RowCheck3" Style="{StaticResource Check}" VerticalAlignment="Center"
+                                          Checked="Row_Check_Changed" Unchecked="Row_Check_Changed"
+                                          ToolTip="选择 2026-10-01_20-16-52.zip"/>
+                                <StackPanel Grid.Column="1" Margin="16,0" Cursor="SizeAll"
+                                            ToolTip="按住拖出录像文件（:79 title）">
+                                    <TextBlock x:Name="RowName3" Style="{StaticResource RecName}"
+                                               ToolTip="2026-10-01_20-16-52.zip" Text="2026-10-01_20-16-52.zip"/>
+                                    <TextBlock x:Name="RowMeta3" Style="{StaticResource RecMeta}" Margin="0,6,0,0"
+                                               Text="Flashback · 游戏目录 · 41.7 MB · 07:48 · 1.21.4 · NeoForge · 2026/10/1 20:24:31"/>
+                                    <TextBlock x:Name="RowPath3" Style="{StaticResource RecPath}" Margin="0,6,0,0"
+                                               ToolTip="D:\Games\Wuhuicl\instances\1.21.4_NeoForge\flashback\sessions"
+                                               Text="D:\Games\Wuhuicl\instances\1.21.4_NeoForge\flashback\sessions"/>
+                                </StackPanel>
+                                <Button Grid.Column="2" Style="{StaticResource RecRowBtn}" Content="定位文件"/>
+                            </Grid>
+                        </Border>
+
+                        <!-- 第四行是「超长文本」用例：名称要能折行（:92 overflow-wrap break-word）、路径要能省略号（:91 ellipsis），
+                             两者都不许把 72 高的行撑破。
+                             :last-child 的无边框（:91）不在这里写死：筛选会改变「最后一条可见行」，由 ApplyFilter 现算 -->
+                        <Border x:Name="Row4" Style="{StaticResource RecRow}" Tag="ReplayMod|集中收藏">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <CheckBox x:Name="RowCheck4" Style="{StaticResource Check}" VerticalAlignment="Center"
+                                          Checked="Row_Check_Changed" Unchecked="Row_Check_Changed"
+                                          ToolTip="选择 2026-08-17_13-30-11_replay_final_run_with_all_friends_long_name.mp4"/>
+                                <StackPanel Grid.Column="1" Margin="16,0" Cursor="SizeAll"
+                                            ToolTip="按住拖出录像文件（:79 title）">
+                                    <TextBlock x:Name="RowName4" Style="{StaticResource RecName}"
+                                               Text="2026-08-17_13-30-11_replay_final_run_with_all_friends_long_name.mp4"/>
+                                    <TextBlock x:Name="RowMeta4" Style="{StaticResource RecMeta}" Margin="0,6,0,0"
+                                               Text="ReplayMod · 集中收藏 · 812.0 MB · 41:26 · 1.8.9 · Forge · 2026/8/17 14:12:08"/>
+                                    <TextBlock x:Name="RowPath4" Style="{StaticResource RecPath}" Margin="0,6,0,0"
+                                               Text="E:\MC-Sessions\2026-归档\好友联机存档与录像合集\服务器主存档\world\replay-sessions\exports"/>
+                                </StackPanel>
+                                <Button Grid.Column="2" Style="{StaticResource RecRowBtn}" Content="定位文件"/>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- ····· 空态 ·····
+                         .card.empty：text-align center / padding 40（:91，压住全局 .content .empty 的 32 16 — ui-system.css:44），
+                         再被 :92 的 .recording-workspace > .empty 收成透明底 / 无边框 / min-height 220 / 无阴影；
+                         .empty 本体是 flex column 居中 gap 16（styles.css:515-524）。
+                         两条文案按 :75 由 data.entries.length 二选一，常态收起（有 4 条占位数据） -->
+                    <Border x:Name="EmptyBlock" MinHeight="220" Padding="40" Background="Transparent"
+                            BorderThickness="0" Visibility="Collapsed">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="520">
+                            <TextBlock x:Name="EmptyTextNoMatch" TextAlignment="Center" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource Fg2}" FontSize="14"
+                                       Visibility="Collapsed"
+                                       Text="没有匹配的录像，请调整搜索或筛选。"/>
+                            <!-- 占位：等录像列表接入（这条只在目录真的为空时出，:75；静态四行下永远走上一条） -->
+                            <TextBlock x:Name="EmptyTextNoData" TextAlignment="Center" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource Fg2}" FontSize="14"
+                                       Text="暂无录像。可导入 .mcpr 或 Flashback .zip，或在游戏中完成录制并保存。"/>
+                            <!-- v-if data.entries.length 的清除筛选（:75） -->
+                            <Button x:Name="ClearFilterBtn" Style="{StaticResource BtnGhost}" Content="清除筛选"
+                                    Margin="0,16,0,0" HorizontalAlignment="Center" Visibility="Collapsed"
+                                    Click="ClearFilter_Click"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ····· .actions.pagination：v-if pages > 1（:83），每页 40 条（:22）→ 4 条数据恒为 1 页，常态收起。
+                         justify-content:center（:91）→ WrapPanel 水平居中；gap 8 沿用 .recording-controls 之外的一层 .actions（:92 的 .actions gap 8） -->
+                    <WrapPanel x:Name="PaginationRow" HorizontalAlignment="Center" Margin="0,12,0,0" Visibility="Collapsed">
+                        <Button x:Name="PrevPageBtn" Style="{StaticResource BtnGhost}" Content="上一页"
+                                Margin="0,0,8,0" IsEnabled="False"/>
+                        <TextBlock x:Name="PageText" Text="1 / 1 · 4 个录像" FontSize="14" VerticalAlignment="Center"
+                                   Margin="0,0,8,0"/>
+                        <Button x:Name="NextPageBtn" Style="{StaticResource BtnGhost}" Content="下一页" IsEnabled="False"/>
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- ==================== .card.recording-results（:85，工作区之外） ====================
+                 details.card 基线 padding 22（:91）→ :92 收成 padding 12 16；max-height 300 + overflow auto（:91）
+                 → MaxHeight 300 配 ScrollViewer（overflow:auto 是按需出槽，不套 §6.5 的常驻槽）。
+                 v-if results.length 且带 open 属性（:85）→ 常态收起，正文默认展开 -->
+            <Border x:Name="ResultsBlock" Style="{StaticResource Panel}" Padding="12,16" MaxHeight="300"
+                    Visibility="Collapsed">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel>
+                        <Button x:Name="ResultsSummary" Style="{StaticResource RecSummary}" FontSize="14"
+                                Content="上次操作结果" Tag="ResultsBody" Click="Disclosure_Toggle_Click"/>
+                        <StackPanel x:Name="ResultsBody" Margin="0,8,0,0">
+                            <!-- 原文是「name：已完成 → path」（:85），箭头段套 .muted.path（12px + text-dim，:91）；
+                                 WPF 里 TextBlock 的 Text 属性与 Inlines 互斥，所以整句用 Run 拼 -->
+                            <TextBlock FontSize="14" TextWrapping="Wrap">
+                                <Run Text="2026-09-30_21-44-07.mp4：已完成"/>
+                                <Run FontSize="12" Foreground="{DynamicResource Fg2}"
+                                     Text=" → D:\Games\Wuhuicl\recordings\library\2026-09-30_21-44-07.mp4"/>
+                            </TextBlock>
+                            <!-- .failed{color:danger}（:91）；占位：等 recordings:operate 的返回结果接入（:47） -->
+                            <TextBlock FontSize="14" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Foreground="{DynamicResource Danger}"
+                                       Text="replay_2026-09-28_19-02-33.mcpr：目标实例正在运行，需先关闭游戏"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+
+            <!-- ConfirmModal（:86）：本页无自定义模态 → 走 docs §0 的通用 .modal 配方（width min(460, 100vw 减 48) —
+                 styles.css:545-555，再被 ui-system.css:38 收 max-width/max-height）。按任务口径本轮不做弹窗，
+                 所以「复制到实例」「移入回收站」两个按钮只留确认前的 disabled 态，不铺浮层。 -->
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

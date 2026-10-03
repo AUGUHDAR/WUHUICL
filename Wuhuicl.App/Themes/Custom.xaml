@@ -37,11 +37,30 @@
   <SolidColorBrush x:Key="BorderStrong" Color="#969ead"/>
   <SolidColorBrush x:Key="AccentSoft" Color="#242563EB"/>
   <SolidColorBrush x:Key="Hover" Color="#0D1B2437"/>
-  <SolidColorBrush x:Key="ChipBg" Color="#0D1B2437"/>
   <SolidColorBrush x:Key="HeroChipBg" Color="#7A090D0E"/>
-  <SolidColorBrush x:Key="LoaderBg" Color="#4C2563EB"/>
   <SolidColorBrush x:Key="LoaderFg" Color="#FFF6FFF8"/>
   <SolidColorBrush x:Key="Overlay" Color="#6B1B2437"/>
+  <!-- BEGIN 运行时派生色（tools/gen_theme_mixins.py 生成，勿手改） -->
+  <Color x:Key="C.NavActiveFg">#1D2E54</Color>
+  <SolidColorBrush x:Key="NavActiveFg" Color="{StaticResource C.NavActiveFg}"/>
+  <LinearGradientBrush x:Key="NavPill" StartPoint="0,0" EndPoint="1,1">
+    <GradientStop Offset="0" Color="#1D2563EB"/>
+    <GradientStop Offset="1" Color="#0D1B2437"/>
+  </LinearGradientBrush>
+  <SolidColorBrush x:Key="AccentHiSoft" Color="#571F53C5"/>
+  <SolidColorBrush x:Key="OkSoft" Color="#1A168A42"/>
+  <SolidColorBrush x:Key="CyanSoft" Color="#1A0E7490"/>
+  <SolidColorBrush x:Key="DangerSoft" Color="#14DC2626"/>
+  <SolidColorBrush x:Key="DangerBorder" Color="#4CDC2626"/>
+  <SolidColorBrush x:Key="ChipBg" Color="#2468718A"/>
+  <SolidColorBrush x:Key="LoaderBg" Color="#9F1C3F7E"/>
+  <SolidColorBrush x:Key="LogBody" Color="#6BEDF0F7"/>
+  <SolidColorBrush x:Key="Idle" Color="#FF9CA3AF"/>
+  <LinearGradientBrush x:Key="BarFill" StartPoint="0,0" EndPoint="1,0">
+    <GradientStop Offset="0" Color="{StaticResource C.AccentHi}"/>
+    <GradientStop Offset="1" Color="{StaticResource C.Accent}"/>
+  </LinearGradientBrush>
+  <!-- END 运行时派生色 -->
   <SolidColorBrush x:Key="Scroll" Color="#5268718A"/>
 
   <LinearGradientBrush x:Key="WindowGrad" StartPoint="0,0" EndPoint="0.35,1">

@@ -2,12 +2,16 @@
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
   <assemblyIdentity version="1.0.0.0" name="Wuhuicl.App"/>
 
-  <!-- Per-Monitor V2：不声明的话，在 125%/150%/160% 缩放屏上 Windows 会把整个
-       窗口当位图拉伸，文字发虚、截图尺寸也对不上。 -->
+  <!-- 只声明 System aware，不声明 PerMonitorV2。
+       实测：WPF 的渲染缩放不跟屏走（副屏 96 DPI 时 GetDpiForWindow=96，但内容仍按主屏 192 画），
+       于是 100% 屏上整套界面被画成两倍大，且窗口在两块屏之间来回一次尺寸会翻倍
+       （1360×860 DIP → 2720×1720 → 搬回主屏 5440×3440，直接掉到屏外）。
+       改成 system aware 后由 DWM 负责跨屏缩放：DIP 尺寸恒为真值，物理尺寸 = DIP × 系统缩放 × (屏DPI/系统DPI)，
+       往返不再放大；代价是副屏上文字略有位图缩放，但几何与比例正确。 -->
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
-      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
-      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">system</dpiAwareness>
       <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
     </windowsSettings>
   </application>

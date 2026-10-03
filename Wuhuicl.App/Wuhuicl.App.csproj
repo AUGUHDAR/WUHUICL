@@ -13,7 +13,15 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
+  <!-- 素材按文件读取（SkinRenderer.LoadAsset 走 AppContext.BaseDirectory），
+       所以必须 CopyToOutputDirectory；用 Resource 内嵌进 exe 的话磁盘上没有文件，
+       界面就会静默降级成无图——之前 hero.png 就是这么"加载不出来"的。 -->
   <ItemGroup>
-    <Resource Include="Assets\hero.png" />
+    <None Include="Assets\skin.png" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Assets\hero\*.png" CopyToOutputDirectory="PreserveNewest" LinkBase="Assets\hero" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="Assets\hero\" />
   </ItemGroup>
 </Project>

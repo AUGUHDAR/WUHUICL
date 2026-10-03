@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Windows;
 using System.Windows.Media;
@@ -26,6 +27,9 @@ public static class ThemeManager
     // 主题字典固定在 MergedDictionaries[1]：[0] 是控件样式，绝不能被覆盖
     static int ThemeIndex = 1;
 
+    /// <summary>换主题后广播：DynamicResource 的调用点会自动跟上，但代码里自绘的画刷需要重取。</summary>
+    public static event Action? Applied;
+
     public static void Apply(string id)
     {
         var dict = new ResourceDictionary
@@ -38,6 +42,7 @@ public static class ThemeManager
         // 标题栏与窗体背景要跟着走，否则深色主题下窗口边框仍是白的
         foreach (Window w in Application.Current.Windows)
             Native.SetImmersiveDarkMode(w, IsDark(id));
+        Applied?.Invoke();
     }
 
     static string FileOf(string id) =>
@@ -71,7 +76,29 @@ static class Native
     [System.Runtime.InteropServices.DllImport("dwmapi.dll")]
     static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
 
+    /// <summary>开机页要跟随系统光标做力场扰动，而它自己是点击穿透窗口，拿不到鼠标事件。</summary>
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out WinPoint p);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    public struct WinPoint { public int X; public int Y; }
+
     const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
+    const int DWMWCP_ROUND = 2;
+
+    /// <summary>窗口本体不透明时，圆角只能交给 DWM：原版 Electron 就是 roundedCorners:true。</summary>
+    public static void RoundCorners(Window w)
+    {
+        try
+        {
+            var h = new System.Windows.Interop.WindowInteropHelper(w).Handle;
+            if (h == IntPtr.Zero) return;
+            int v = DWMWCP_ROUND;
+            DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, ref v, sizeof(int));
+        }
+        catch { /* Win10 没有圆角属性，方角即可 */ }
+    }
 
     /// <summary>让系统标题栏/边框跟随主题，避免深色界面配一条白边框。</summary>
     public static void SetImmersiveDarkMode(Window w, bool dark)
@@ -156,44 +183,59 @@ public static class SkinRenderer
         return wb;
     }
 
-    /// <summary>脸部（皮肤 (8,8) 起 8×8），最近邻放大，保持像素风。</summary>
+    /// <summary>
+    /// 脸部（皮肤 (8,8) 起 8×8）整数倍放大。逐像素自己铺而不是用 TransformedBitmap：
+    /// .NET 的 WPF 没有 BitmapTransformOptions，TransformedBitmap 只能走 WIC 插值，
+    /// 像素头像会被抹成一团糊，而原版是 image-rendering:pixelated /
+    /// ctx.imageSmoothingEnabled=false（splash.ts:19）。
+    /// </summary>
     public static BitmapSource Face(int size = 64)
     {
-        var crop = new CroppedBitmap(Skin(), new Int32Rect(8, 8, 8, 8));
-        var scaled = new TransformedBitmap(crop, new ScaleTransform(size / 8.0, size / 8.0));
-        scaled.Freeze();
-        return scaled;
+        int cell = Math.Max(1, size / 8), side = cell * 8;
+        var src = new FormatConvertedBitmap(Skin(), PixelFormats.Bgra32, null, 0);
+        var px = new byte[src.PixelWidth * src.PixelHeight * 4];
+        src.CopyPixels(px, src.PixelWidth * 4, 0);
+        var outPx = new byte[side * side * 4];
+        for (var y = 0; y < 8; y++)
+            for (var x = 0; x < 8; x++)
+            {
+                var i = ((8 + y) * src.PixelWidth + 8 + x) * 4;
+                for (var dy = 0; dy < cell; dy++)
+                    for (var dx = 0; dx < cell; dx++)
+                    {
+                        var o = (((y * cell + dy) * side) + x * cell + dx) * 4;
+                        outPx[o] = px[i]; outPx[o + 1] = px[i + 1];
+                        outPx[o + 2] = px[i + 2]; outPx[o + 3] = px[i + 3];
+                    }
+            }
+        var wb = new WriteableBitmap(side, side, 96, 96, PixelFormats.Bgra32, null);
+        wb.WritePixels(new Int32Rect(0, 0, side, side), outPx, side * 4, 0);
+        wb.Freeze();
+        return wb;
     }
 
-    /// <summary>
-    /// 正面纸娃娃：头/身/双臂/双腿按 64×64 皮肤布局拼出来。
-    /// 真正的 3D 预览下一轮做，这里先保证"用的是玩家自己的皮肤"。
-    /// </summary>
-    public static BitmapSource PaperDoll(int height = 190, bool reload = false)
+    /// <summary>3D 查看器用的皮肤源；reload=true 清缓存，之后 Face()/IsSlimSkin() 读到的就是新文件。</summary>
+    public static BitmapSource SkinSource(bool reload = false)
     {
         if (reload) _skin = null;
-        var s = Skin();
-        double scale = height / 32.0;                 // 头 8 + 身 12 + 腿 12
-        int w = (int)Math.Round(16 * scale), h = (int)Math.Round(32 * scale);
-        var dv = new DrawingVisual();
-        using (var dc = dv.RenderOpen())
+        return Skin();
+    }
+
+    /// <summary>slim（Alex）判定：classic 右臂背面右缘一列（x=54,y=20..32）有像素（skin-render.ts:28-40）。</summary>
+    public static bool IsSlimSkin()
+    {
+        try
         {
-            void Part(int sx, int sy, int sw, int sh, double dx, double dy)
-                => dc.DrawImage(new CroppedBitmap(s, new Int32Rect(sx, sy, sw, sh)),
-                                new Rect(dx, dy, sw * scale, sh * scale));
-            double cx = w / 2.0;
-            Part(8, 8, 8, 8, cx - 4 * scale, 0);                       // 头
-            Part(20, 20, 8, 12, cx - 4 * scale, 8 * scale);            // 身
-            Part(44, 16, 8, 4, cx - 8 * scale, 8 * scale);             // 左臂
-            Part(52, 16, 4, 4, cx - 8 * scale, 12 * scale);            // 左臂下
-            Part(40, 16, 8, 4, cx + 4 * scale, 8 * scale);             // 右臂
-            Part(44, 16, 4, 4, cx + 8 * scale, 12 * scale);            // 右臂下
-            Part(16, 16, 4, 12, cx - 4 * scale, 20 * scale);           // 左腿
-            Part(20, 16, 4, 12, cx, 20 * scale);                       // 右腿
+            var src = new System.Windows.Media.Imaging.FormatConvertedBitmap(Skin(), System.Windows.Media.PixelFormats.Bgra32, null, 0);
+            var px = new byte[src.PixelWidth * src.PixelHeight * 4];
+            src.CopyPixels(px, src.PixelWidth * 4, 0);
+            for (var y = 20; y < 32; y++)
+            {
+                var i = (y * src.PixelWidth + 54) * 4;
+                if (px[i + 3] != 0) return false;
+            }
+            return true;
         }
-        var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
-        rtb.Render(dv);
-        rtb.Freeze();
-        return rtb;
+        catch { return true; }
     }
 }

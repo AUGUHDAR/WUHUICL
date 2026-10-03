@@ -1,0 +1,473 @@
+<UserControl x:Class="Wuhuicl.App.Pages.HomePage"
+               xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+               xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+               xmlns:ctl="clr-namespace:Wuhuicl.App.Controls">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="290"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- 左列：hero + 三格状态条 + 最近游戏，gap 14 -->
+                    <ScrollViewer VerticalScrollBarVisibility="Visible" Padding="0,0,8,0">
+                        <StackPanel>
+                            <!-- .hero-card：430 被 max-height 360 夹住 → 实高 360，radius 20 -->
+                            <Border Height="360" CornerRadius="20" Background="#FF17231F"
+                                    BorderBrush="{DynamicResource Line}" BorderThickness="1"
+                                    ClipToBounds="True">
+                                <Grid>
+                                    <!-- 原版 .hero-image 是多张叠放、各自 opacity 500ms 交叉淡入，
+                                         object-position: center 42% 用 TranslateTransform 补（UniformToFill 默认居中＝50%） -->
+                                    <!-- 原版 .hero-image 是多张叠放、各自 opacity 500ms 交叉淡入。
+                                         object-fit:cover + object-position:center 42% 用 ImageBrush 的
+                                         Viewbox（相对图片的归一化裁剪窗）精确表达：
+                                         Image + RenderTransform 的基准对齐随布局变化，实测会在卡片顶部露一条缝。 -->
+                                    <Grid x:Name="HeroStage" ClipToBounds="True" SizeChanged="HeroStage_SizeChanged">
+                                        <Border x:Name="HeroImageA" Opacity="1"/>
+                                        <Border x:Name="HeroImageB" Opacity="0"/>
+                                    </Grid>
+                                    <Border>
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Offset="0" Color="#29000000"/>
+                                                <GradientStop Offset="0.3" Color="#2E000000"/>
+                                                <GradientStop Offset="1" Color="#AD000000"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <!-- .hero-content：padding 24，space-between -->
+                                    <Grid Margin="24">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="*"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <Border Grid.Row="1" Style="{StaticResource HeroKicker}">
+                                            <TextBlock Text="当前版本" FontSize="12" FontWeight="SemiBold"
+                                                       Foreground="#FFFFFFFF"/>
+                                        </Border>
+
+                                        <StackPanel Grid.Row="2" VerticalAlignment="Top" Margin="0,18,0,0">
+                                            <TextBlock x:Name="HeroTitle" Text="还没有安装版本" FontSize="30"
+                                                       FontWeight="ExtraBold" Foreground="#FFFFFFFF"
+                                                       LineHeight="38" MaxWidth="620" TextWrapping="Wrap"
+                                                       MaxHeight="76" TextTrimming="CharacterEllipsis"/>
+                                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                                <TextBlock x:Name="HeroGameVersion" Text="" FontSize="15"
+                                                           FontWeight="SemiBold" Foreground="#FFFFFFFF"
+                                                           VerticalAlignment="Center"/>
+                                                <Border x:Name="HeroLoader" Style="{StaticResource LoaderBadge}">
+                                                    <TextBlock x:Name="HeroLoaderText" Text="原版" FontSize="11"
+                                                               FontWeight="SemiBold" Foreground="#FFF6FFF8"/>
+                                                </Border>
+                                            </StackPanel>
+                                            <TextBlock x:Name="HeroSub" FontSize="12.5" Foreground="#CCE8EDF5"
+                                                       Margin="0,10,0,0" MaxWidth="480" TextWrapping="Wrap"/>
+                                        </StackPanel>
+
+                                        <!-- .hero-actions：左副动作 / 右启动组合 -->
+                                        <Grid Grid.Row="3">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left"
+                                                        VerticalAlignment="Bottom">
+                                                <Button x:Name="HeroSettings" Style="{StaticResource HeroSettings}"
+                                                        Click="VersionSettings_Click">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <ContentControl Width="18" Height="18"
+                                                                        VerticalAlignment="Center"
+                                                                        Style="{DynamicResource Icon.Gear}"/>
+                                                        <TextBlock Text="版本设置" Margin="10,0,0,0"
+                                                                   VerticalAlignment="Center"/>
+                                                    </StackPanel>
+                                                </Button>
+                                                <Button x:Name="HeroMore" Style="{StaticResource HeroMore}"
+                                                        Click="MoreVersion_Click">
+                                                    <ContentControl Width="19" Height="19"
+                                                                    Style="{DynamicResource Icon.Ellipsis}"/>
+                                                </Button>
+                                            </StackPanel>
+
+                                            <!-- .launch-combo：min-width 310，高 76，radius 14 -->
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                                                        VerticalAlignment="Bottom" Height="76">
+                                                <Button x:Name="HeroPlay" Style="{StaticResource LaunchMain}"
+                                                        Height="76" Click="Play_Click"
+                                                        IsEnabled="{Binding CanPlay}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <ContentControl Width="22" Height="22"
+                                                                        VerticalAlignment="Center"
+                                                                        Style="{DynamicResource Icon.Play}"/>
+                                                        <TextBlock x:Name="HeroPlayText" Text="开始游戏"
+                                                                   Margin="12,0,0,0" VerticalAlignment="Center"/>
+                                                    </StackPanel>
+                                                </Button>
+                                                <Button x:Name="HeroArrow" Style="{StaticResource LaunchArrow}"
+                                                        Height="76" ToolTip="选择游戏实例"
+                                                        Click="PlayOptions_Click">
+                                                    <ContentControl Width="22" Height="22"
+                                                                    Style="{DynamicResource Icon.ChevronDown}"/>
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+
+                            <!-- .runtime-strip：1.12fr 0.95fr 0.92fr，min-height 68，radius 15，padding 8 -->
+                            <Border MinHeight="68" Margin="0,14,0,0" Padding="8" CornerRadius="15"
+                                    Background="{DynamicResource Card}" BorderBrush="{DynamicResource Line}"
+                                    BorderThickness="1">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="1.12*"/>
+                                        <ColumnDefinition Width="1"/>
+                                        <ColumnDefinition Width="0.95*"/>
+                                        <ColumnDefinition Width="1"/>
+                                        <ColumnDefinition Width="0.92*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="1" Background="{DynamicResource Line}"/>
+                                    <Border Grid.Column="3" Background="{DynamicResource Line}"/>
+
+                                    <Button Grid.Column="0" Style="{StaticResource RuntimeCell}"
+                                            Click="PickJava_Click">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="34"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="15"/>
+                                            </Grid.ColumnDefinitions>
+                                            <ContentControl Grid.Column="0" Width="27" Height="27"
+                                                            VerticalAlignment="Center"
+                                                            Style="{DynamicResource Icon.Java}"/>
+                                            <StackPanel Grid.Column="1" Margin="11,0,0,0" VerticalAlignment="Center">
+                                                <TextBlock Text="运行环境" FontSize="12"
+                                                           Foreground="{DynamicResource Fg2}"/>
+                                                <TextBlock Text="{Binding RuntimeSummary}" FontSize="13"
+                                                           FontWeight="SemiBold" Margin="0,4,0,0"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
+                                            <ContentControl Grid.Column="2" Width="14" Height="14"
+                                                            VerticalAlignment="Center" Opacity="0.7"
+                                                            Style="{DynamicResource Icon.ChevronRight}"/>
+                                        </Grid>
+                                    </Button>
+
+                                    <Button Grid.Column="2" Style="{StaticResource RuntimeCell}"
+                                            Click="GotoMemory_Click">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="34"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="15"/>
+                                            </Grid.ColumnDefinitions>
+                                            <ContentControl Grid.Column="0" Width="27" Height="27"
+                                                            VerticalAlignment="Center"
+                                                            Style="{DynamicResource Icon.Memory}"/>
+                                            <StackPanel Grid.Column="1" Margin="11,0,0,0" VerticalAlignment="Center">
+                                                <TextBlock Text="内存分配" FontSize="12"
+                                                           Foreground="{DynamicResource Fg2}"/>
+                                                <TextBlock Text="{Binding MemorySummary}" FontSize="13"
+                                                           FontWeight="SemiBold" Margin="0,4,0,0"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
+                                            <ContentControl Grid.Column="2" Width="14" Height="14"
+                                                            VerticalAlignment="Center" Opacity="0.7"
+                                                            Style="{DynamicResource Icon.ChevronRight}"/>
+                                        </Grid>
+                                    </Button>
+
+                                    <!-- 第 3 格点击打开日志弹窗（原版日志是模态窗，不是首页卡片） -->
+                                    <Button Grid.Column="4" Style="{StaticResource RuntimeCell}"
+                                            Click="ToggleLog_Click">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="34"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="15"/>
+                                            </Grid.ColumnDefinitions>
+                                            <ContentControl Grid.Column="0" Width="27" Height="27"
+                                                            VerticalAlignment="Center"
+                                                            Style="{DynamicResource Icon.Pulse}"/>
+                                            <StackPanel Grid.Column="1" Margin="11,0,0,0" VerticalAlignment="Center">
+                                                <TextBlock Text="运行状态" FontSize="12"
+                                                           Foreground="{DynamicResource Fg2}"/>
+                                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                                    <!-- .runtime-state i：7×7 圆点 + ready/running 时
+                                                         box-shadow 0 0 0 3px ok-soft（HomeView.vue:881-882）。
+                                                         光环不占布局，所以放在 7×7 网格里向外溢出画。 -->
+                                                    <Grid Width="7" Height="7" VerticalAlignment="Center">
+                                                        <Ellipse Width="13" Height="13" HorizontalAlignment="Center"
+                                                                 VerticalAlignment="Center"
+                                                                 Fill="{Binding RunStateRing, Converter={StaticResource BrushByKey}}"/>
+                                                        <Ellipse Width="7" Height="7" HorizontalAlignment="Center"
+                                                                 VerticalAlignment="Center"
+                                                                 Fill="{Binding RunStateColor, Converter={StaticResource BrushByKey}}"/>
+                                                    </Grid>
+                                                    <TextBlock Text="{Binding RunStateText}" FontSize="13"
+                                                               FontWeight="SemiBold" Margin="7,0,0,0"
+                                                               Foreground="{DynamicResource AccentHi}"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                </StackPanel>
+                                            </StackPanel>
+                                            <ContentControl Grid.Column="2" Width="14" Height="14"
+                                                            VerticalAlignment="Center" Opacity="0.7"
+                                                            Style="{DynamicResource Icon.ChevronRight}"/>
+                                        </Grid>
+                                    </Button>
+                                </Grid>
+                            </Border>
+
+                            <!-- .instances-block：radius 14，padding 16，标题带 4×17 主题色短竖线 -->
+                            <Border Margin="0,14,0,0" Padding="16" CornerRadius="14"
+                                    Background="{DynamicResource Card}" BorderBrush="{DynamicResource Line}"
+                                    BorderThickness="1">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,8">
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                                            <Border Width="4" Height="17" CornerRadius="2"
+                                                    Background="{DynamicResource AccentGrad}"
+                                                    VerticalAlignment="Center"/>
+                                            <TextBlock Text="最近游戏" Style="{StaticResource H2}" Margin="9,0,0,0"/>
+                                        </StackPanel>
+                                        <Button Style="{StaticResource BtnGhost}" MinHeight="34" Padding="12,0"
+                                                HorizontalAlignment="Right" Click="NavVersionsFromButton">
+                                            <StackPanel Orientation="Horizontal">
+                                                <ContentControl Width="15" Height="15" VerticalAlignment="Center"
+                                                                Style="{DynamicResource Icon.Apps}"/>
+                                                <TextBlock Text="管理实例" FontSize="12" Margin="7,0,0,0"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Button>
+                                    </Grid>
+
+                                    <!-- 空态 empty-instances（HomeView.vue:913）：min-height 110 / dashed 1px
+                                         border-strong / radius 13 / card 底 / 居中纯文字，没有按钮 -->
+                                    <Grid x:Name="EmptyHint" MinHeight="110" Cursor="Hand"
+                                          Background="{DynamicResource Card}"
+                                          Visibility="Collapsed" MouseLeftButtonDown="NavVersionsFromButton">
+                                        <Rectangle RadiusX="13" RadiusY="13" StrokeThickness="1"
+                                                   Stroke="{DynamicResource BorderStrong}"
+                                                   StrokeDashArray="4 2" StrokeDashCap="Flat"/>
+                                        <TextBlock x:Name="EmptyHintText" FontSize="12.5"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource Fg2}"
+                                                   Text="尚未安装游戏实例，点击前往版本管理"/>
+                                    </Grid>
+
+                                    <ListBox x:Name="HomeInstalled" Style="{StaticResource CardList}"
+                                             ItemContainerStyle="{StaticResource RowItem}"
+                                             ItemsSource="{Binding InstalledList}"
+                                             SelectedItem="{Binding SelectedInstalled}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <!-- 36 / 1fr / auto / 36 / 40，gap 12 -->
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="36"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="36"/>
+                                                        <ColumnDefinition Width="40"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <ContentControl Grid.Column="0" Width="36" Height="36"
+                                                                    VerticalAlignment="Center"
+                                                                    Style="{DynamicResource Icon.GrassBlock}"/>
+                                                    <StackPanel Grid.Column="1" Margin="12,0,0,0"
+                                                                VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Label}" FontSize="13"
+                                                                   FontWeight="SemiBold" LineHeight="18"
+                                                                   MaxHeight="36" TextWrapping="Wrap"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding Subtitle}" FontSize="11"
+                                                                   Foreground="{DynamicResource Fg2}" Margin="0,2,0,0"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                    </StackPanel>
+                                                    <TextBlock Grid.Column="2" Text="{Binding LastPlayed}"
+                                                               FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                               VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                                    <Button Grid.Column="3" Style="{StaticResource IconBtn}"
+                                                            Width="36" Height="28" Background="Transparent"
+                                                            Tag="{Binding}" Click="RowMore_Click">
+                                                        <ContentControl Width="15" Height="15"
+                                                                        Style="{DynamicResource Icon.Ellipsis}"/>
+                                                    </Button>
+                                                    <Button Grid.Column="4" Style="{StaticResource SquareBtn}"
+                                                            Tag="{Binding}" Click="RowPlay_Click">
+                                                        <ContentControl Width="15" Height="15"
+                                                                        Style="{DynamicResource Icon.Play}"/>
+                                                    </Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- 右列：账号卡 + 皮肤卡连成一张，再接说明卡，gap 16 -->
+                    <StackPanel Grid.Column="2" VerticalAlignment="Top">
+                        <Border CornerRadius="14" Background="{DynamicResource Card}"
+                                BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                            <StackPanel>
+                                <!-- .account-panel：padding 16 -->
+                                <StackPanel Margin="16">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid Width="62" Height="62">
+                                            <!-- .mc-avatar 外环 box-shadow 0 0 0 4px text 8%（HomeView.vue:920）。
+                                                 盒阴影跟随元素自身的 border-radius:12px ⇒ 是**圆角方环**不是圆环，
+                                                 外沿 54+4+4=62、外圆角 12+4=16。之前画成 Ellipse 就成了圆圈。 -->
+                                            <Border Width="62" Height="62" CornerRadius="16"
+                                                    BorderThickness="4" BorderBrush="{DynamicResource Fg}"
+                                                    Opacity="0.08"/>
+                                            <Border Width="54" Height="54" CornerRadius="12"
+                                                    Background="{DynamicResource CardSoft}"
+                                                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                <Image x:Name="AvatarImg" Width="54" Height="54"
+                                                       RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                                            </Border>
+                                        </Grid>
+                                        <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding SelectedAccount.Name, FallbackValue=未登录}"
+                                                       FontSize="16" TextTrimming="CharacterEllipsis"
+                                                       FontWeight="SemiBold"/>
+                                            <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                                                <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                                                         Fill="{DynamicResource Ok}"/>
+                                                <!-- .offline-state（未登录）字色 text-dim；已登录才是 accent-2（HomeView.vue:923-925） -->
+                                                <TextBlock Text="{Binding SelectedAccount.KindText, FallbackValue=请选择账户}"
+                                                           FontSize="11" Margin="7,0,0,0" VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource Fg2}"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <Button Grid.Column="2" Style="{StaticResource IconBtn}" Width="30"
+                                                Height="30" Click="AccountMenu_Click">
+                                            <ContentControl Width="17" Height="17"
+                                                            Style="{DynamicResource Icon.Ellipsis}"/>
+                                        </Button>
+                                    </Grid>
+
+                                    <!-- .account-provider：26 / 1fr / 15，min-height 44，margin-top 15，radius 9 -->
+                                    <Button Style="{StaticResource BtnGhost}" MinHeight="44" Padding="11,0"
+                                            Margin="0,15,0,0" HorizontalContentAlignment="Stretch"
+                                            Click="AddAccount_Click">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="26"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="15"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0" Width="24" Height="24" CornerRadius="6"
+                                                    Background="{DynamicResource CardSoft}">
+                                                <ContentControl Width="22" Height="22"
+                                                                Style="{DynamicResource Icon.Microsoft}"/>
+                                            </Border>
+                                            <TextBlock Grid.Column="1" Text="离线账号" FontSize="12"
+                                                       FontWeight="SemiBold" Margin="10,0,0,0"
+                                                       VerticalAlignment="Center"/>
+                                            <ContentControl Grid.Column="2" Width="15" Height="15"
+                                                            VerticalAlignment="Center"
+                                                            Style="{DynamicResource Icon.ChevronRight}"/>
+                                        </Grid>
+                                    </Button>
+
+                                    <ListBox x:Name="AcctList" Style="{StaticResource CardList}"
+                                             ItemContainerStyle="{StaticResource RowCard}" Margin="0,8,0,0"
+                                             MaxHeight="190" ItemsSource="{Binding AccountList}"
+                                             SelectedItem="{Binding SelectedAccount}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Border Width="30" Height="30" CornerRadius="7"
+                                                            Background="{DynamicResource CardSoft}">
+                                                        <Image Source="{Binding Avatar}"
+                                                               RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                                                    </Border>
+                                                    <StackPanel Grid.Column="1" Margin="10,0,0,0"
+                                                                VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Name}" FontSize="13"
+                                                                   FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                        <TextBlock Text="{Binding KindText}" FontSize="11"
+                                                                   Foreground="{DynamicResource Fg2}"/>
+                                                    </StackPanel>
+                                                    <Button Grid.Column="2" Style="{StaticResource IconBtn}"
+                                                            Width="28" Height="28" Tag="{Binding}"
+                                                            Click="RemoveAccount_Click">
+                                                        <ContentControl Width="14" Height="14"
+                                                                        Style="{DynamicResource Icon.Close2}"/>
+                                                    </Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+
+                                <Border Height="1" Background="{DynamicResource Line}"/>
+
+                                <!-- .skin-panel：padding 16，舞台 230 高 radius 12 -->
+                                <StackPanel Margin="16">
+                                    <Grid Margin="0,0,0,8">
+                                        <StackPanel HorizontalAlignment="Left">
+                                            <TextBlock Text="皮肤预览" FontSize="14" FontWeight="Bold"/>
+                                            <!-- 原版副标题是模型类型（HomeView 右列皮肤卡）：纤细 Slim / 经典 -->
+                                            <TextBlock x:Name="SkinModelText" Text="纤细模型" FontSize="10"
+                                                       Foreground="{DynamicResource Fg2}" Margin="0,3,0,0"/>
+                                        </StackPanel>
+                                        <Button HorizontalAlignment="Right" Style="{StaticResource IconBtn}"
+                                                Width="30" Height="30" Click="ReloadSkin_Click">
+                                            <ContentControl Width="17" Height="17"
+                                                            Style="{DynamicResource Icon.Refresh}"/>
+                                        </Button>
+                                    </Grid>
+                                    <!-- .skin-stage：230 高；3D 查看器透明底、占满（HomeView.vue:947） -->
+                                    <Border Height="230" CornerRadius="12" BorderThickness="1"
+                                            BorderBrush="{DynamicResource Line}" ClipToBounds="True">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                                <GradientStop Offset="0" Color="#14FFFFFF"/>
+                                                <GradientStop Offset="1" Color="#28000000"/>
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                        <ctl:SkinDoll3D x:Name="SkinDoll" Margin="8"/>
+                                    </Border>
+                                    <!-- 舞台下方的提示行（原版不是舞台内覆盖条） -->
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,8,0,0">
+                                        <TextBlock Text="拖动可旋转 · 行走动画" FontSize="11"
+                                                   Foreground="{DynamicResource Fg2}" VerticalAlignment="Center"/>
+                                        <ContentControl Width="11" Height="11" Margin="4,0,0,0"
+                                                        VerticalAlignment="Center" Foreground="{DynamicResource Fg2}"
+                                                        Style="{DynamicResource Icon.ChevronRight}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- CreatorCard 位：这一版能做什么 -->
+                        <Border Margin="0,16,0,0" Padding="20" CornerRadius="14"
+                                Background="{DynamicResource Card}"
+                                BorderBrush="{DynamicResource AccentSoft}" BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock Text="这一版能做什么" FontSize="14" FontWeight="SemiBold"/>
+                                <TextBlock Text="ALPHA · 0.1.0" FontSize="11" Margin="0,4,0,0"
+                                           Foreground="{DynamicResource Fg2}"/>
+                                <TextBlock FontSize="12" LineHeight="20" Margin="0,12,0,0"
+                                           Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
+                                           Text="已接通：版本清单与继承链、客户端与库与资源的并发下载与 SHA1 校验、Java 自动匹配、classpath 组装与游戏启动、离线账号、6 套主题。下一轮接入：微软正版与外置登录、整合包与 MOD、皮肤上传、3D 预览、联机。"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Grid>
+</UserControl>
