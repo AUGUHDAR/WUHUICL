@@ -1,6 +1,7 @@
 <UserControl x:Class="Wuhuicl.App.Pages.VersionsPage"
                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-               xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+               xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+               xmlns:ctl="clr-namespace:Wuhuicl.App.Controls">
 
     <!-- 版式来源：docs/UI_GEOMETRY_PAGES.md §1（GameView.vue）。
          凡基线与最终值不同的，一律取最终值：
@@ -11,6 +12,277 @@
            .installed-row min-height 80 / padding 12 0 / radius 0（:2185 覆盖 :1819 的 42 + border-bottom）
            .game-tab height 36 / padding 0 20 / radius 6（:2169 覆盖 :1892 的 24 与 ctl-h）
          注释里不写 CSS 自定义属性名的双横杠前缀：XAML 注释不允许连续两个减号。 -->
+
+    <!-- ==================================================================
+         本页私有样式：键名一律 Vp 前缀（共享主题的画刷键是裸名，同名会在
+         XAML 加载期把 SolidColorBrush 喂给 Style 直接抛异常）。
+         数值全部取 GameView.vue 的最终值（尾部 :2164-2206 覆盖块之后）。
+         ================================================================== -->
+    <UserControl.Resources>
+
+        <!-- .loader-option（GameView.vue:2020-2035）：36 高 / padding 0 16 / radius 999（浏览器收缩成 18）/
+             border 1 border / 底 card-2 / 字 text / 13px / nowrap。
+             与共享的 Capsule 有两处实差，故另立键：静止字色是 text（capsule 是 text-dim），
+             hover 只把描边换成 text-dim（capsule 是改字色、描边不动）—— :2036-2038。 -->
+        <Style x:Key="VpLoaderOption" TargetType="Button">
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="Padding" Value="16,0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                ctl:CssRadius.Pill="True" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Fg2}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- .loader-option.active（:2039-2043）：边 accent、底 accent-soft、字 accent-2（AccentHi） -->
+        <Style x:Key="VpLoaderOptionOn" TargetType="Button" BasedOn="{StaticResource VpLoaderOption}">
+            <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+            <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+            <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+        </Style>
+
+        <!-- .menu-item 的圆角与字重：共享 MenuItem2 已给出 min-height 34 / padding 0 10 / 12px
+             （GameView 的实例菜单走的是紧凑版式），这里只补 radius 7 与 font-weight 500，
+             并把 .btn 的 1px 透明描边归零（.menu-item 是 border:0）。 -->
+        <Style x:Key="VpMenuItem" TargetType="Button" BasedOn="{StaticResource MenuItem2}">
+            <Setter Property="ctl:CssRadius.Round" Value="7"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        </Style>
+
+        <!-- label.menu-item 里带 input[type=checkbox] 的那一项（GameView.vue:1190「实例隔离」）。
+             原版没给 checkbox 写任何规则，走 Chromium UA 默认：13×13、radius 2、1px 描边。
+             勾选底色用主题 accent 而不是系统蓝，保持整套界面同色。 -->
+        <Style x:Key="VpMenuCheck" TargetType="CheckBox">
+            <Setter Property="MinHeight" Value="34"/>
+            <Setter Property="Padding" Value="10,0"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="7"
+                                Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                            <StackPanel Orientation="Horizontal">
+                                <Border x:Name="box" Width="13" Height="13" CornerRadius="2"
+                                        VerticalAlignment="Center" BorderThickness="1"
+                                        BorderBrush="{DynamicResource BorderStrong}">
+                                    <Path x:Name="tick" Width="9" Height="9" Stretch="Uniform"
+                                          Visibility="Collapsed" Data="M2,6 L5,9 L10,2"
+                                          Stroke="{DynamicResource AccentFg}" StrokeThickness="2"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round"/>
+                                </Border>
+                                <ContentPresenter Margin="8,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="box" Property="Background" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="tick" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- .installed-row 的行几何（:1819-1833 叠 :2185 最终值）：min-height 80 / padding 12 0 /
+             无圆角 / 底部 1px 描边 / hover 底色 hover。安装中、失败行都套这个几何。 -->
+        <Style x:Key="VpRow" TargetType="Border">
+            <Setter Property="MinHeight" Value="80"/>
+            <Setter Property="Padding" Value="0,12"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource Hover}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- .btn.btn-danger.btn-sm（styles.css:239-244 叠 :258-263）：BtnDanger 是 36/14/radius 10 的
+             本体，小尺寸档共享字典里没有键，这里就地叠 32 / 13px / radius 6。 -->
+        <Style x:Key="VpBtnSmDanger" TargetType="Button" BasedOn="{StaticResource BtnDanger}">
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="Padding" Value="12,4"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="ctl:CssRadius.Round" Value="6"/>
+        </Style>
+
+        <!-- .spin（styles.css:683-691）：14×14 的细环 + 一段亮弧，inline-block / border 2 accent-soft /
+             border-top-color accent / radius 50%。CSS 还带 0.8s linear infinite 的旋转，
+             那是动画契约里的事，这里先把静态几何摆对。 -->
+
+        <!-- .float-menu（styles.css:582-596）叠 .instance-more-menu（GameView.vue:2202）：
+             min-width 150 / padding 8 / radius 10 / border 1 / 阴影 lg / 底 surface-raised；
+             width 290、max-width 100vw 减 16、max-height 100vh 减 24 且自身可滚动。
+             底色 surface-raised（card-solid 97%）在主题字典里没有独立键，取 Card，与 PopupCard 同一处理。 -->
+        <Style x:Key="VpFloatMenu" TargetType="Border">
+            <Setter Property="Width" Value="290"/>
+            <Setter Property="MinWidth" Value="150"/>
+            <Setter Property="Background" Value="{DynamicResource Card}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="8"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Effect" Value="{DynamicResource PopShadow}"/>
+        </Style>
+
+        <!-- .modal-mask（styles.css:527-537）：fixed inset 0 / z 10000 / flex 居中 / 底 mask + blur 10。
+             这里的 Padding 24,48 是为了让面板拿到 min(460, 100vw 减 48) 与 calc(100vh 减 96)：
+             WPF 没有视口单位，把减掉的量交给外层的内边距，子元素再怎么撑也越不出这块可用区。
+             backdrop-filter 只能由 Services/MaskBlur.cs 在代码里快照底层，XAML 表达不了。 -->
+        <Style x:Key="VpModalMask" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource Overlay}"/>
+            <Setter Property="Padding" Value="24,48"/>
+        </Style>
+        <!-- .modal（styles.css:545-556）：width min(460, 100vw 减 48) / max-height calc(100vh 减 96) /
+             自身 overflow-y auto / 底 surface-raised（ui-system.css:33）/ border 1 / radius 14 / padding 24 / 阴影 lg -->
+        <Style x:Key="VpModal" TargetType="Border">
+            <Setter Property="Width" Value="460"/>
+            <Setter Property="MaxWidth" Value="460"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Background" Value="{DynamicResource Card}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Effect" Value="{DynamicResource PopShadow}"/>
+        </Style>
+
+        <!-- .modal-title（GameView.vue:2005-2009）：16px / 700 / margin 0 0 16（space-4 是 16，不是 12）。
+             .modal 是普通块容器，相邻兄弟的上下外边距会折叠，所以紧跟标题的那条 label 把上边距归零。 -->
+        <Style x:Key="VpModalTitle" TargetType="TextBlock" BasedOn="{StaticResource Lbl14}">
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Margin" Value="0,0,0,16"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+        <!-- .modal-label（:2010-2014）：13px / text-dim / margin 16 0 8 -->
+        <Style x:Key="VpModalLabel" TargetType="TextBlock" BasedOn="{StaticResource Dim}">
+            <Setter Property="Margin" Value="0,16,0,8"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+        <!-- .modal-actions（:2082-2088）：flex / align center / justify flex-end / gap 12 / margin-top 24 -->
+        <Style x:Key="VpModalActions" TargetType="StackPanel">
+            <Setter Property="Orientation" Value="Horizontal"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="Margin" Value="0,24,0,0"/>
+        </Style>
+        <!-- .loaders-error（:2050-2054）：margin-top 8 / 13px / danger。默认不显示（v-if 有错才渲染） -->
+        <Style x:Key="VpModalError" TargetType="TextBlock" BasedOn="{StaticResource Dim}">
+            <Setter Property="Margin" Value="0,8,0,0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="{DynamicResource Danger}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Visibility" Value="Collapsed"/>
+        </Style>
+
+        <!-- .content .empty（ui-system.css:44 叠 styles.css:515-524）：min-height 120 / padding 32 16 /
+             flex column 居中 / gap 16 / 字 text-dim。原版这几块只有文字与按钮，没有图标位。 -->
+        <Style x:Key="VpEmpty" TargetType="Border">
+            <Setter Property="MinHeight" Value="120"/>
+            <Setter Property="Padding" Value="16,32"/>
+            <Setter Property="Visibility" Value="Collapsed"/>
+        </Style>
+
+        <!-- 图标字典里没有这三个键，直接从 GameView.vue 的内联 svg 逐段搬过来：
+             更换图标 :1208、启动卡图片 :1212、窗口设置 :1220（viewBox 均为 0 0 24 24，stroke-width 2）。
+             矩形 rx 与圆按 gen_icons.py 的同一路子展开成弧线，颜色仍走 IconStroke 的继承取色。 -->
+        <Style x:Key="VpIcon.Image" TargetType="ContentControl">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContentControl">
+                        <Viewbox Stretch="Uniform">
+                            <Canvas Width="24" Height="24">
+                                <Path Style="{StaticResource IconStroke}"
+                                      Data="M5,3 H19 A2,2 0 0,1 21,5 V19 A2,2 0 0,1 19,21 H5 A2,2 0 0,1 3,19 V5 A2,2 0 0,1 5,3 Z"/>
+                                <Path Style="{StaticResource IconStroke}" Data="M7,9 A2,2 0 0,1 11,9 A2,2 0 0,1 7,9 Z"/>
+                                <Path Style="{StaticResource IconStroke}" Data="M21,15 L17.9,11.9 A2,2 0 0,0 15.1,11.9 L6,21"/>
+                            </Canvas>
+                        </Viewbox>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="VpIcon.Thumbnail" TargetType="ContentControl">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContentControl">
+                        <Viewbox Stretch="Uniform">
+                            <Canvas Width="24" Height="24">
+                                <Path Style="{StaticResource IconStroke}"
+                                      Data="M5,4 H19 A2,2 0 0,1 21,6 V18 A2,2 0 0,1 19,20 H5 A2,2 0 0,1 3,18 V6 A2,2 0 0,1 5,4 Z"/>
+                                <Path Style="{StaticResource IconStroke}" Data="M3,16 L8,11 L12,15 L15,12 L21,18"/>
+                                <Path Style="{StaticResource IconStroke}"
+                                      Data="M15,8.5 A1.5,1.5 0 0,1 18,8.5 A1.5,1.5 0 0,1 15,8.5 Z"/>
+                            </Canvas>
+                        </Viewbox>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="VpIcon.Monitor" TargetType="ContentControl">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ContentControl">
+                        <Viewbox Stretch="Uniform">
+                            <Canvas Width="24" Height="24">
+                                <Path Style="{StaticResource IconStroke}"
+                                      Data="M5,4 H19 A2,2 0 0,1 21,6 V16 A2,2 0 0,1 19,18 H5 A2,2 0 0,1 3,16 V6 A2,2 0 0,1 5,4 Z"/>
+                                <Path Style="{StaticResource IconStroke}" Data="M8,21 H16 M12,18 V21"/>
+                            </Canvas>
+                        </Viewbox>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <!-- 根层是 Grid：ScrollViewer 会裁掉越界内容，而原版的浮层与弹窗都是 Teleport 到 body 的
+         fixed 元素（.menu-overlay z 90 / .float-menu z 95 / .modal-mask z 10000），
+         必须与 ScrollViewer 平级才铺得满。 -->
+    <Grid>
     <ScrollViewer VerticalScrollBarVisibility="Visible" Padding="0,0,8,0">
         <StackPanel MaxWidth="1240">
 
@@ -53,10 +325,15 @@
                 </Grid>
             </Border>
 
-            <!-- .folder-manager：padding 12 16（:2171）；主行 grid auto minmax(160,320) minmax(60,1fr)（:2173），
-                 单行：label 12px dim + select + 路径 mono 12 + 管理文件夹（btn-ghost btn-sm）贴右。
-                 原版没有第二行按钮——目录管理动作收进「管理文件夹」的浮层（对应 InstanceCenter 入口） -->
+            <!-- .folder-manager：padding 12 16 / gap 8 / border 0（:2171）；主行 .folder-manager-main 是
+                 row / center / gap 16（:2172），里面 .folder-select-wrap 又是 grid
+                 auto minmax(160,320) minmax(60,1fr) + gap 12（:2173）：
+                 单行 label 12px dim + select + 路径 mono 12，然后 16 间距后贴右的「管理文件夹」触发钮。
+                 触发钮展开的是主行下面的 .folder-manager-actions 整排动作（:958-988），不是浮层 -->
             <Border Background="{DynamicResource Card}" CornerRadius="14" Padding="16,12" Margin="0,16,0,0">
+                <!-- .folder-manager 是 flex column / gap 8 / padding 12 16 / border 0（:2171），
+                     主行之外还有三块条件渲染的兄弟节点，所以这里换成 StackPanel 承接 -->
+                <StackPanel>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -64,7 +341,7 @@
                         <ColumnDefinition MinWidth="160" MaxWidth="320" Width="260"/>
                         <ColumnDefinition Width="12"/>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="16"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Style="{StaticResource Micro}" Text="新版本安装位置"
@@ -94,6 +371,68 @@
                         </Popup>
                     </Grid>
                 </Grid>
+
+                <!-- .folder-manager-actions（GameView.vue:958-988）：folderToolsOpen 为真才渲染，
+                     与「管理文件夹」那颗触发钮同生同灭。基线 :1552-1559 是 flex / align center /
+                     justify flex-end / gap 8 / flex 1 / wrap；尾部 :2176 把 flex 收回 initial、
+                     justify 改 flex-start，并补 padding-top 8 + border-top 1（媒体块 :1617 也要求 flex-start）。
+                     父级 gap 8（:2171）→ 这块与主行相距 8。六个按钮文案逐字取 :959-987，
+                     其中「设为默认」是 v-if="currentFolder 非默认"（:973）、「刷新」在 folderBusy 时换 .spin + 扫描中（:963-964），
+                     两条都要代码侧决定，这里全按可见态铺出来。 -->
+                <Border x:Name="FolderActions" Margin="0,8,0,0" Padding="0,8,0,0"
+                        BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1"
+                        Visibility="Collapsed">
+                    <WrapPanel>
+                        <Button Style="{StaticResource BtnSmGhost}" Content="+ 添加新的绑定游戏文件夹"
+                                Margin="0,0,8,0"/>
+                        <Button Style="{StaticResource BtnSmGhost}" Content="刷新" Margin="0,0,8,0"/>
+                        <Button Style="{StaticResource BtnSmGhost}" Content="打开" Margin="0,0,8,0"/>
+                        <Button Style="{StaticResource BtnSmGhost}" Content="重命名" Margin="0,0,8,0"/>
+                        <Button Style="{StaticResource BtnSmGhost}" Content="设为默认" Margin="0,0,8,0"/>
+                        <!-- 原版 title="只解除 KAMUCL 登记，不删除磁盘文件"（:983） -->
+                        <Button Style="{StaticResource VpBtnSmDanger}" Content="解除绑定"
+                                ToolTip="只解除 KAMUCL 登记，不删除磁盘文件"/>
+                    </WrapPanel>
+                </Border>
+
+                <!-- .folder-missing-card（:989-998，CSS :1561-1576）：flex row / center /
+                     space-between / gap 16 / wrap，padding 12 16，margin-top 12（叠父级 gap 8 = 20），
+                     描边是 color-mix(danger 40%) → DangerBorder，底是 color-mix(danger 8%) → DangerSoft，
+                     radius radius-md 10。左列 .folder-missing-text 是 column gap 2，
+                     strong 走 text-sm 13 + danger，.muted 走 text-xs 12；
+                     右列 .folder-missing-actions 是 row gap 8、flex-shrink 0。 -->
+                <Border x:Name="FolderMissing" Margin="0,20,0,0" Padding="16,12" CornerRadius="10"
+                        Background="{DynamicResource DangerSoft}" BorderBrush="{DynamicResource DangerBorder}"
+                        BorderThickness="1" Visibility="Collapsed">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="检测不到该文件夹" FontSize="13" FontWeight="Bold"
+                                       Foreground="{DynamicResource Danger}"/>
+                            <!-- 原文前缀是「文件夹名」（完整路径），端口里还没有游戏文件夹登记表，
+                                 先留后半句整句，前半截等代码侧拼 // 占位 -->
+                            <TextBlock x:Name="FolderMissingText" Margin="0,2,0,0" FontSize="12"
+                                       Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
+                                       Text="该文件夹可能已被删除或重命名，暂时无法识别其中的版本。"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Style="{StaticResource VpBtnSmDanger}" Content="在启动器内移除该绑定"/>
+                            <Button Style="{StaticResource BtnSmGhost}" Content="稍后处理" Margin="8,0,0,0"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- .folder-scan-error（:999）：基线 :1601-1608 是 nowrap + ellipsis + margin-left auto，
+                     尾部 :2177 整段翻成 margin 0 / white-space normal / overflow-wrap anywhere / 12px，
+                     颜色仍是 danger。父级 gap 8 负责与上面的间距，自身 margin 归零。 -->
+                <TextBlock x:Name="FolderScanError" Margin="0,8,0,0" FontSize="12"
+                           Foreground="{DynamicResource Danger}" TextWrapping="Wrap"
+                           Visibility="Collapsed"/>
+                </StackPanel>
             </Border>
 
             <!-- ================= 下载页签 ================= -->
@@ -161,8 +500,44 @@
                     </StackPanel>
                 </Border>
 
-                <!-- .list-card：padding 8（:1710）；.version-row：min-height 42 padding 8 12 radius 10（:1718） -->
-                <Border Style="{StaticResource Panel}" Padding="8" Margin="0,12,0,0">
+                <!-- .card.latest-release（GameView.vue:1050-1055，样式 :1504-1509）：
+                     .card 本体给底 Card / 描边 1 Line / radius 14 / padding 20（ui-system.css:12 抹掉阴影），
+                     latest-release 再叠 flex row / center / space-between / gap 16 / padding 20 / margin-bottom 16；
+                     左子 div 是 row / center / gap 14 / wrap / min-width 0（:1505），
+                     strong 24px（:1506）、time 13px text-dim（:1507），右侧按钮 flex-shrink 0（:1508）。
+                     原版条件是 tab==='download' && latestRelease && !keyword（:1050）：
+                     LaunchSession 没有 latestRelease，就绑到 OnlineList 首项——清单本来就是新→旧，
+                     与 :378 的 manifest.find(v => v.type==='release') 是同一条；整块显隐交代码侧。 -->
+                <Border x:Name="CardLatestRelease" Style="{StaticResource Panel}" Margin="0,12,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <WrapPanel Grid.Column="0" VerticalAlignment="Center">
+                            <!-- span.tag.tag-gold（styles.css:474-477）：底 accent-soft、字 accent-2 -->
+                            <Border Style="{StaticResource Tag}" Background="{DynamicResource AccentSoft}"
+                                    Margin="0,0,14,0">
+                                <TextBlock Text="最新正式版" Style="{StaticResource TagText}"
+                                           Foreground="{DynamicResource AccentHi}"/>
+                            </Border>
+                            <TextBlock Text="{Binding OnlineList[0].Label}" FontSize="24" FontWeight="Bold"
+                                       VerticalAlignment="Center" Margin="0,0,14,0"/>
+                            <TextBlock FontSize="13" Foreground="{DynamicResource Fg2}" VerticalAlignment="Center"
+                                       Text="{Binding OnlineList[0].Subtitle, StringFormat=发布于 {0}}"/>
+                        </WrapPanel>
+                        <!-- 三态文案：下载中 / 再次安装 / 安装（:1054） -->
+                        <Button x:Name="BtnLatestInstall" Grid.Column="2" Style="{StaticResource BtnGold}"
+                                Content="安装" VerticalAlignment="Center" Click="Install_Click"/>
+                    </Grid>
+                </Border>
+
+                <!-- .list-card：padding 8（:1710）；.version-row：min-height 42 padding 8 12 radius 10（:1718）。
+                     上面 latest-release 的 margin-bottom 16 就是这块与上卡的间距。 -->
+                <Border Style="{StaticResource Panel}" Padding="8" Margin="0,16,0,0">
+                    <!-- .list-card 的四个分支是 v-if / v-else-if 互斥：骨架、.empty 报错、.empty 空、列表 -->
+                    <Grid>
                     <ListBox Style="{StaticResource CardList}" ItemContainerStyle="{StaticResource RowCard}"
                              ItemsSource="{Binding OnlineList}" SelectedItem="{Binding SelectedOnline}"
                              MouseDoubleClick="Install_Click" MaxHeight="560">
@@ -223,6 +598,28 @@
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
+
+                    <!-- .empty（GameView.vue:1059-1062）：加载失败分支，一行文案 + 一颗 .btn.btn-ghost.btn-sm 重试。
+                         .content .empty（ui-system.css:44 叠 styles.css:515-524）＝ min-height 120 /
+                         padding 32 16 / flex column 居中 / gap 16 / 字 text-dim，字号继承 14。
+                         原版这块没有图标位，只有一个 span（:1060），所以这里也不摆图标。 -->
+                    <Border x:Name="EmptyDownloadError" Style="{StaticResource VpEmpty}">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock x:Name="EmptyDownloadErrorText" FontSize="14" TextAlignment="Center"
+                                       HorizontalAlignment="Center" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource Fg2}" Text="加载失败：清单请求未返回"/>
+                            <Button Style="{StaticResource BtnSmGhost}" Content="重试" Margin="0,16,0,0"
+                                    HorizontalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- .empty（:1063-1065）：没有匹配的版本 / 版本列表为空，二选一由 keyword 与 typeFilter 决定（:1064） -->
+                    <Border x:Name="EmptyDownloadList" Style="{StaticResource VpEmpty}">
+                        <TextBlock x:Name="EmptyDownloadListText" FontSize="14" TextAlignment="Center"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource Fg2}" Text="版本列表为空"/>
+                    </Border>
+                    </Grid>
                 </Border>
             </StackPanel>
 
@@ -231,6 +628,83 @@
                 <!-- .installed-card：padding 0 16 / border 0 / radius 10（:2178） -->
                 <Border Background="{DynamicResource Card}" CornerRadius="10" Padding="16,0" Margin="0,16,0,0">
                     <StackPanel>
+                        <!-- .installing-block（GameView.vue:1100-1116，样式 :1919-1922）：
+                             border-bottom 1 Line + margin-bottom 4，是 .installed-card 的第一个子节点。
+                             行几何完全走 .installed-row 的最终值（:2185 叠 :1819-1829）：
+                             min-height 80 / padding 12 0 / gap 12 / 无圆角 / nowrap，底边线 1px。
+                             原版 :1831 用 :last-child 抹掉末行边线，避免它与块的边线隔 4px 重复一次；
+                             XAML 没有 last-child，这里就让末行的边线兼任块的那条线（差 4px，比双线好）。
+                             N 行 ＝ v-for="id in installingVersions"（:1101），所以做成 ItemsControl，
+                             ItemsSource 由代码侧喂版本号字符串列表（模板里 {Binding} 就是那个 id）。 -->
+                        <Border x:Name="InstallingBlock" Margin="0,0,0,4" Visibility="Collapsed">
+                            <ItemsControl x:Name="InstallingRows">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource VpRow}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="12"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <!-- .inst-names：flex column / gap 8（:2187） -->
+                                                <StackPanel Grid.Column="0">
+                                                    <TextBlock Text="{Binding}" FontSize="14" FontWeight="SemiBold"
+                                                               Typography.NumeralAlignment="Tabular"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="正在下载安装…" FontSize="14"
+                                                               Foreground="{DynamicResource Fg2}" Margin="0,8,0,0"/>
+                                                </StackPanel>
+                                                <!-- .row-progress（:1787-1791）：row / center / gap 8 -->
+                                                <StackPanel Grid.Column="2" Orientation="Horizontal"
+                                                            VerticalAlignment="Center">
+                                                    <!-- .row-bar（:1792-1799）：90×6、radius 999（Pill 收缩成 3）、
+                                                         1px 描边、底 card-2、overflow hidden；
+                                                         .row-bar-fill（:1800-1803）高度铺满、宽度＝百分比 -->
+                                                    <Border Width="90" Height="6" ctl:CssRadius.Pill="True"
+                                                            VerticalAlignment="Center" ClipToBounds="True"
+                                                            BorderBrush="{DynamicResource Line}" BorderThickness="1"
+                                                            Background="{DynamicResource CardSoft}">
+                                                        <ProgressBar Height="4" BorderThickness="0"
+                                                                     Background="Transparent" Maximum="100"
+                                                                     Value="{Binding DataContext.Progress, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"/>
+                                                    </Border>
+                                                    <!-- .row-progress-text（:1805-1809）：12px / tabular-nums / nowrap -->
+                                                    <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                               VerticalAlignment="Center" Typography.NumeralAlignment="Tabular"
+                                                               Text="{Binding DataContext.Progress, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}, StringFormat={}{0:0}%}"/>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Border>
+
+                        <!-- .installed-row.failed-row（GameView.vue:1118-1125，样式 :1923-1925）：
+                             行几何同 .installed-row；右边那颗 .btn.btn-ghost.btn-sm 文案是「重试」，
+                             原版靠 .failed-row .installed-folder 的 margin-left:auto 钉右，
+                             这里由 Grid 的 Auto 列实现同一件事。id 逐行渲染（v-for failedInstalls），
+                             端口没有失败清单，先留一行占位、默认收起。 -->
+                        <Border x:Name="FailedRow" Style="{StaticResource VpRow}" Visibility="Collapsed">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock x:Name="FailedRowId" FontSize="14" FontWeight="SemiBold"
+                                               Typography.NumeralAlignment="Tabular"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="上次安装失败" FontSize="14"
+                                               Foreground="{DynamicResource Fg2}" Margin="0,8,0,0"/>
+                                </StackPanel>
+                                <Button x:Name="BtnFailedRetry" Grid.Column="2" Style="{StaticResource BtnSmGhost}"
+                                        Content="重试" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+
                         <!-- .installed-scope：padding 12 0 / gap 12（:2179） -->
                         <Grid Margin="0,12">
                             <Grid.ColumnDefinitions>
@@ -258,6 +732,34 @@
                             <TextBlock Grid.Column="4" Text="{Binding InstalledList.Count, StringFormat=共 {0} 个}"
                                        FontSize="12" Foreground="{DynamicResource Fg2}" VerticalAlignment="Center"/>
                         </Grid>
+
+                        <!-- .error（GameView.vue:1134）：注意它没有任何配套规则——
+                             GameView 的 scoped 块里只有 :2193 那条 .instance-meta>span.error，
+                             全局 styles.css 通篇没有 .error 选择器，所以这就是一个被
+                             * { margin:0; padding:0 }（styles.css:82）抹平外边距的普通 p：
+                             14px、继承 text 色，不带红。字面照抄，别顺手刷成 Danger。 -->
+                        <TextBlock x:Name="InstalledErrorText" FontSize="14" TextWrapping="Wrap"
+                                   Visibility="Collapsed"/>
+
+                        <!-- .empty.installed-empty（GameView.vue:1135-1138）：
+                             .content .empty 给 min-height 120 + gap 16（ui-system.css:44），
+                             但 .installed-empty 自己那条 padding:24（:1812）来自 SFC scoped 块，
+                             注入顺序在公共样式之后、与 .content .empty 特指度打平（都是 0,2,0），
+                             按「取最终值」的规矩这里吃 24，不吃 32 16。
+                             文案三态在 :1136（读取中 / 没有匹配 / 当前范围没有已安装版本），
+                             按钮 .btn.btn-gold.btn-sm「去版本下载看看」在 :1137。 -->
+                        <Border x:Name="EmptyInstalled" Style="{StaticResource VpEmpty}" Padding="24">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <TextBlock x:Name="EmptyInstalledText" FontSize="14" TextAlignment="Center"
+                                           HorizontalAlignment="Center" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource Fg2}" Text="当前范围没有已安装版本"/>
+                                <Button x:Name="BtnGoDownload" Style="{StaticResource BtnGold}"
+                                        Content="去版本下载看看" Margin="0,16,0,0" HorizontalAlignment="Center"
+                                        MinHeight="32" Padding="12,4" FontSize="13"
+                                        ctl:CssRadius.Round="6"/>
+                            </StackPanel>
+                        </Border>
+
                         <!-- .installed-row：min-height 80 / padding 12 0 / gap 12 / 无圆角（:2185） -->
                         <ListBox Style="{StaticResource CardList}" ItemContainerStyle="{StaticResource RowItem}"
                                  ItemsSource="{Binding InstalledList}" SelectedItem="{Binding SelectedInstalled}">
@@ -289,9 +791,24 @@
                                             <TextBlock Text="{Binding Label}" FontSize="13" FontWeight="SemiBold"
                                                        LineHeight="18" MaxHeight="36" TextWrapping="Wrap"
                                                        TextTrimming="CharacterEllipsis"/>
-                                            <!-- .instance-meta：gap 4 10 / 12px（:2191） -->
-                                            <TextBlock Text="{Binding Subtitle}" FontSize="12"
-                                                       Foreground="{DynamicResource Fg2}" Margin="0,2,0,0"/>
+                                            <!-- .instance-meta（GameView.vue:1158-1164，样式 :2191-2194）：
+                                                 flex wrap / gap 4 10 / 12px / text-dim，每个 span 单行截断，
+                                                 相邻 span 之间由 ::before 补一个 opacity .5 的「·」，左右各 10。
+                                                 .instance-directory（:1160）＝ folderShortName(v.folder)：
+                                                 端口只有一个绑定目录，取 LaunchSession.Paths.Root（真实存在的路径），
+                                                 长了走省略号，完整值在 title 里。
+                                                 .inst-names 的列间距最终是 8（:2187 覆盖 :1840 的 4）。 -->
+                                            <WrapPanel Margin="0,8,0,0">
+                                                <TextBlock Text="{Binding Subtitle}" FontSize="12"
+                                                           Foreground="{DynamicResource Fg2}"/>
+                                                <TextBlock Text="·" FontSize="12" Opacity="0.5"
+                                                           Foreground="{DynamicResource Fg2}" Margin="10,0,10,0"/>
+                                                <!-- span.instance-directory：12px / nowrap / ellipsis（:2192） -->
+                                                <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding DataContext.Paths.Root, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
+                                                           Text="{Binding DataContext.Paths.Root, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"/>
+                                            </WrapPanel>
                                         </StackPanel>
                                         <StackPanel Grid.Column="6" VerticalAlignment="Center">
                                             <!-- 右侧按钮组 gap 8（:2196）：管理 + ▶启动（min-width 78，:2198） -->
@@ -321,4 +838,452 @@
             </StackPanel>
         </StackPanel>
     </ScrollViewer>
+
+    <!-- ====================================================================
+         浮层与弹窗：原版全是 Teleport 到 body 的 fixed 节点，所以与 ScrollViewer 平级。
+         面板只铺满 .content 这块区域（MainWindow.xaml:261 的 Grid），
+         原版 inset 0 是整窗口——要真铺满窗口得把这几块搬进 MainWindow，超出本页所有权。
+         ==================================================================== -->
+
+    <!-- .menu-overlay（GameView.vue:1181，样式 styles.css:577-581）：fixed inset 0 / z 90，
+         只有背景透明的点击捕获层，没有任何绘制内容 -->
+    <Border x:Name="VpMenuOverlay" Panel.ZIndex="90" Background="Transparent" Visibility="Collapsed"/>
+
+    <!-- .float-menu.instance-more-menu（GameView.vue:1182-1227）：
+         top/left 原版由 JS 量出来写内联（:1185），所以挂在 Canvas 上，代码侧改 Canvas.Left/Top。
+         max-height 是 calc(100vh 减 24)，WPF 无视口单位：绑到本页实际高度、再靠下面 12 的外边距收边。
+         菜单本体 :2202 定宽 290、:585 保底 min-width 150、padding 8、radius 10、描边 1、阴影 lg。 -->
+    <Canvas x:Name="VpMenuHost" Panel.ZIndex="95" Visibility="Collapsed">
+        <Border x:Name="MenuInstance" Canvas.Left="0" Canvas.Top="0" Style="{StaticResource VpFloatMenu}"
+                MaxHeight="{Binding ActualHeight, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <!-- .instance-technical（:1187，样式 :2203-2204）：flex column / gap 6 / padding 12 /
+                         12px / text-dim / overflow-wrap anywhere / border-bottom 1；strong 回到 text 色。
+                         四行分别是实例名、实例 ID、绑定目录、游戏目录。值没有数据源（VersionRow 不带 folder
+                         与 gameDirectory），整行留代码侧填，标签文字按原文。 -->
+                    <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="12">
+                        <StackPanel>
+                            <TextBlock x:Name="MenuTechName" FontSize="12" FontWeight="Bold"
+                                       Foreground="{DynamicResource Fg}" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="MenuTechId" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                       TextWrapping="Wrap" Margin="0,6,0,0" Text="实例 ID："/>
+                            <TextBlock x:Name="MenuTechFolder" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                       TextWrapping="Wrap" Margin="0,6,0,0" Text="绑定目录："/>
+                            <TextBlock x:Name="MenuTechDir" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                       TextWrapping="Wrap" Margin="0,6,0,0" Text="游戏目录："/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- .menu-item（styles.css:597-616 的紧凑档，VpMenuItem 补 radius 7 与 500）：
+                         min-height 34 / padding 0 10 / 12px / gap 8 / 内层 svg 13×13（:1192 起每个按钮都写死 13）。
+                         前两项原版没有图标（:1188-1189），照抄不加。 -->
+                    <Button x:Name="MenuOpenFolder" Style="{StaticResource VpMenuItem}" Content="打开实例文件夹"/>
+                    <Button x:Name="MenuInstanceCenter" Style="{StaticResource VpMenuItem}" Content="实例设置与详情"/>
+
+                    <!-- label.menu-item + input[type=checkbox]（:1190）：整行就是开关，v-if 排除了整合包 /
+                         残缺 / 失败三种实例。勾选态由代码侧同步。 -->
+                    <CheckBox x:Name="MenuIsolate" Style="{StaticResource VpMenuCheck}" Content="实例隔离"/>
+
+                    <Button x:Name="MenuMods" Style="{StaticResource VpMenuItem}">
+                        <StackPanel Orientation="Horizontal">
+                            <ContentControl Width="13" Height="13" VerticalAlignment="Center"
+                                            Style="{DynamicResource Icon.Mods}"/>
+                            <TextBlock Text="模组" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="MenuPacks" Style="{StaticResource VpMenuItem}">
+                        <StackPanel Orientation="Horizontal">
+                            <ContentControl Width="13" Height="13" VerticalAlignment="Center"
+                                            Style="{DynamicResource Icon.ResourcePacks}"/>
+                            <TextBlock Text="资源包" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="MenuShaders" Style="{StaticResource VpMenuItem}">
+                        <StackPanel Orientation="Horizontal">
+                            <ContentControl Width="13" Height="13" VerticalAlignment="Center"
+                                            Style="{DynamicResource Icon.Shaders}"/>
+                            <TextBlock Text="光影包" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="MenuRename" Style="{StaticResource VpMenuItem}">
+                        <StackPanel Orientation="Horizontal">
+                            <ContentControl Width="13" Height="13" VerticalAlignment="Center"
+                                            Style="{DynamicResource Icon.Edit}"/>
+                            <TextBlock Text="重命名" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="MenuIcon" Style="{StaticResource VpMenuItem}">
+                        <StackPanel Orientation="Horizontal">
+                            <ContentControl Width="13" Height="13" VerticalAlignment="Center"
+                                            Style="{StaticResource VpIcon.Image}"/>
+                            <TextBlock Text="更换图标" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="MenuThumbnail" Style="{StaticResource VpMenuItem}">
+                        <StackPanel Orientation="Horizontal">
+                            <ContentControl Width="13" Height="13" VerticalAlignment="Center"
+                                            Style="{StaticResource VpIcon.Thumbnail}"/>
+                            <TextBlock Text="启动卡图片" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="MenuJava" Style="{StaticResource VpMenuItem}">
+                        <StackPanel Orientation="Horizontal">
+                            <ContentControl Width="13" Height="13" VerticalAlignment="Center"
+                                            Style="{DynamicResource Icon.Java}"/>
+                            <TextBlock Text="指定 Java" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="MenuResolution" Style="{StaticResource VpMenuItem}">
+                        <StackPanel Orientation="Horizontal">
+                            <ContentControl Width="13" Height="13" VerticalAlignment="Center"
+                                            Style="{StaticResource VpIcon.Monitor}"/>
+                            <TextBlock Text="窗口设置" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+
+                    <!-- .menu-danger-zone（:1223-1226，样式 :2205-2206）：border-top 1 / margin-top 6 /
+                         padding-top 6，区内 .menu-item 一律 danger（#ff6b73 那族，取 Danger 画刷）。
+                         两条互斥：failed 时是「清理安装残留」，否则「删除实例」（:1224 / :1225）。 -->
+                    <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0"
+                            Margin="0,6,0,0" Padding="0,6,0,0">
+                        <StackPanel>
+                            <Button x:Name="MenuCleanup" Style="{StaticResource VpMenuItem}"
+                                    Content="清理安装残留" Visibility="Collapsed"
+                                    Foreground="{DynamicResource Danger}"/>
+                            <Button x:Name="MenuDelete" Style="{StaticResource VpMenuItem}" Content="删除实例"
+                                    Foreground="{DynamicResource Danger}"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Canvas>
+
+    <!-- ==================== 弹窗一：窗口设置（GameView.vue:1232-1264） ==================== -->
+    <Border x:Name="ModalResolution" Panel.ZIndex="10000" Style="{StaticResource VpModalMask}"
+            Visibility="Collapsed">
+        <Border Style="{StaticResource VpModal}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
+                <StackPanel>
+                    <!-- .modal-title（:1234）：标题带实例 id，id 由代码侧拼 -->
+                    <TextBlock x:Name="ModalResolutionTitle" Style="{StaticResource VpModalTitle}"
+                               Text="窗口设置 ·"/>
+                    <!-- .modal-label（:1235）紧跟标题，上边距按块级折叠归零 -->
+                    <TextBlock Style="{StaticResource VpModalLabel}" Margin="0,0,0,8"
+                               Text="实例设置优先于全局设置；选择“跟随全局”可删除覆盖。"/>
+                    <!-- select.select（:1236-1241）四个模式 -->
+                    <ComboBox x:Name="ResMode" SelectedIndex="0" FontSize="14">
+                        <ComboBoxItem>跟随全局</ComboBoxItem>
+                        <ComboBoxItem>窗口化</ComboBoxItem>
+                        <ComboBoxItem>最大化</ComboBoxItem>
+                        <ComboBoxItem>全屏</ComboBoxItem>
+                    </ComboBox>
+                    <!-- .instance-resolution-size（:1242-1252，样式 :2089-2101）：flex align-end gap 12
+                         margin-top 16；两个 label 各 grid / flex 1 / gap 8 / min-width 0 / 12px，
+                         中间夹一个 muted 的 × -->
+                    <Grid Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Style="{StaticResource Micro}" Text="宽"/>
+                            <TextBox x:Name="ResWidth" Margin="0,8,0,0" FontSize="14"/>
+                        </StackPanel>
+                        <!-- align-items:flex-end → × 的底与两侧输入的底齐平 -->
+                        <TextBlock Grid.Column="2" Style="{StaticResource Micro}" Text="×"
+                                   VerticalAlignment="Bottom"/>
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Style="{StaticResource Micro}" Text="高"/>
+                            <TextBox x:Name="ResHeight" Margin="0,8,0,0" FontSize="14"/>
+                        </StackPanel>
+                    </Grid>
+                    <!-- .instance-resolution-tip（:1253-1255，样式 :2102-2106）：margin-top 12 / 12px / 行高 1.55 -->
+                    <TextBlock Margin="0,12,0,0" FontSize="12" LineHeight="19" LineStackingStrategy="BlockLineHeight"
+                               Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
+                               Text="最大化会使用启动时所在显示器的可用工作区；全屏不会修改系统显示器分辨率。"/>
+                    <!-- .loaders-error（:1256，样式 :2050-2054）：有错才渲染 -->
+                    <TextBlock x:Name="ResError" Style="{StaticResource VpModalError}"/>
+                    <!-- .modal-actions（:1257-1262）：两颗全尺寸 .btn（36 高），取消是 ghost、保存是 gold -->
+                    <StackPanel Style="{StaticResource VpModalActions}">
+                        <Button x:Name="ResCancel" Style="{StaticResource BtnGhost}" Content="取消"/>
+                        <Button x:Name="ResSave" Style="{StaticResource BtnGold}" Content="保存" Margin="12,0,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Border>
+
+    <!-- ==================== 弹窗二：Java 运行时（GameView.vue:1268-1290） ==================== -->
+    <Border x:Name="ModalJava" Panel.ZIndex="10000" Style="{StaticResource VpModalMask}"
+            Visibility="Collapsed">
+        <Border Style="{StaticResource VpModal}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
+                <StackPanel>
+                    <TextBlock x:Name="ModalJavaTitle" Style="{StaticResource VpModalTitle}" Text="指定 Java ·"/>
+                    <TextBlock Style="{StaticResource VpModalLabel}" Margin="0,0,0,8"
+                               Text="选择该版本使用的 Java（默认自动匹配）"/>
+                    <!-- .loaders-loading（:1273-1275，样式 :2044-2049）：flex center gap 12 / padding 12 0，
+                         内含 .spin + .muted。v-if busy 才渲染，默认收起 -->
+                    <StackPanel x:Name="JavaLoading" Orientation="Horizontal" Margin="0,12" Visibility="Collapsed">
+                        <ContentControl Style="{StaticResource Spin}"/>
+                        <TextBlock Style="{StaticResource Dim}" Margin="12,0,0,0" Text="读取 Java 列表…"/>
+                    </StackPanel>
+                    <!-- select.select（:1277-1282）：首项固定，其余 v-for javaModal.list -->
+                    <ComboBox x:Name="JavaPick" SelectedIndex="0" FontSize="14">
+                        <ComboBoxItem>自动匹配（按版本需求选择，推荐）</ComboBoxItem>
+                    </ComboBox>
+                    <StackPanel Style="{StaticResource VpModalActions}">
+                        <Button x:Name="JavaCancel" Style="{StaticResource BtnGhost}" Content="取消"/>
+                        <Button x:Name="JavaOk" Style="{StaticResource BtnGold}" Content="确定" Margin="12,0,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Border>
+
+    <!-- ==================== 弹窗三：实例重命名（GameView.vue:1293-1313） ==================== -->
+    <Border x:Name="ModalRename" Panel.ZIndex="10000" Style="{StaticResource VpModalMask}"
+            Visibility="Collapsed">
+        <Border Style="{StaticResource VpModal}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource VpModalTitle}" Text="重命名实例"/>
+                    <!-- 原文含 versions/&lt;名&gt;/ 的尖括号，XAML 文本里必须转义 -->
+                    <TextBlock Style="{StaticResource VpModalLabel}" Margin="0,0,0,8"
+                               Text="新实例名（将作为文件夹名 versions/&lt;名&gt;/）"/>
+                    <!-- input.input.mono（:1298-1303）：等宽、不开拼写检查 -->
+                    <TextBox x:Name="RenameInput" Style="{StaticResource Input}" FontSize="14"
+                             FontFamily="{StaticResource MonoFont}"/>
+                    <TextBlock x:Name="RenameError" Style="{StaticResource VpModalError}"/>
+                    <StackPanel Style="{StaticResource VpModalActions}">
+                        <Button Style="{StaticResource BtnGhost}" Content="取消"/>
+                        <Button x:Name="RenameConfirm" Style="{StaticResource BtnGold}" Content="确认重命名"
+                                Margin="12,0,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Border>
+
+    <!-- ==================== 弹窗四：游戏文件夹重命名（GameView.vue:1334-1355） ==================== -->
+    <Border x:Name="ModalFolderRename" Panel.ZIndex="10000" Style="{StaticResource VpModalMask}"
+            Visibility="Collapsed">
+        <Border Style="{StaticResource VpModal}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource VpModalTitle}" Text="重命名游戏文件夹"/>
+                    <TextBlock Style="{StaticResource VpModalLabel}" Margin="0,0,0,8"
+                               Text="只修改 KAMUCL 中的显示名称，不会改动磁盘路径。"/>
+                    <!-- input.input，maxlength 64（:1342） -->
+                    <TextBox x:Name="FolderRenameInput" Style="{StaticResource Input}" FontSize="14" MaxLength="64"/>
+                    <TextBlock x:Name="FolderRenameError" Style="{StaticResource VpModalError}"/>
+                    <StackPanel Style="{StaticResource VpModalActions}">
+                        <Button Style="{StaticResource BtnGhost}" Content="取消"/>
+                        <Button x:Name="FolderRenameConfirm" Style="{StaticResource BtnGold}" Content="保存名称"
+                                Margin="12,0,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Border>
+
+    <!-- ==================== 弹窗五：开启版本隔离（GameView.vue:1367-1400） ==================== -->
+    <!-- .modal.isolation-modal 把宽度改成 min(620px, 100vw 减 40px)（:2107-2109）；
+         蒙层的横向内边距按 460 那档给的是 24，窗口 MinWidth 960 下两档都不会触到上限 -->
+    <Border x:Name="ModalIsolation" Panel.ZIndex="10000" Style="{StaticResource VpModalMask}"
+            Visibility="Collapsed">
+        <Border Style="{StaticResource VpModal}" Width="620" MaxWidth="620">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
+                <StackPanel>
+                    <TextBlock x:Name="IsoTitle" Style="{StaticResource VpModalTitle}" Text="开启版本隔离 ·"/>
+                    <!-- .modal-label.isolation-intro（:1371-1373，样式 :2110-2112）：行高 1.65 → 13×1.65≈21 -->
+                    <TextBlock Style="{StaticResource VpModalLabel}" Margin="0,0,0,8"
+                               LineHeight="21" LineStackingStrategy="BlockLineHeight"
+                               Text="以下共享数据将复制到版本独立目录。源文件会保留，目标中已存在的同名项不会被覆盖；失败时会回滚本次新增内容。"/>
+                    <!-- .isolation-paths（:1374-1377，样式 :2113-2128）：grid 36px + minmax(0,1fr)、
+                         gap 8 12、margin-top 16、12px text-dim；code 单行截断、回到 text 色、等宽 -->
+                    <Grid Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="36"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="8"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource Micro}" Text="来源"/>
+                        <!-- 来源就是当前绑定的共享目录，端口里是真实值 -->
+                        <TextBlock Grid.Row="0" Grid.Column="2" FontSize="12" FontFamily="{StaticResource MonoFont}"
+                                   Foreground="{DynamicResource Fg}" TextTrimming="CharacterEllipsis"
+                                   Text="{Binding Paths.Root}"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource Micro}" Text="目标"/>
+                        <TextBlock x:Name="IsoDestination" Grid.Row="2" Grid.Column="2" FontSize="12"
+                                   FontFamily="{StaticResource MonoFont}" Foreground="{DynamicResource Fg}"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </Grid>
+                    <!-- .isolation-summary（:1378-1380，样式 :2129-2133）：margin-top 16 / 12px / text-dim，
+                         原文是「N 项 · M 个文件 · 体积」，三个量都来自迁移计划，没有数据源 -->
+                    <TextBlock x:Name="IsoSummary" Margin="0,16,0,0" Style="{StaticResource Micro}"/>
+                    <!-- .isolation-items（:1381-1390，样式 :2134-2140）：grid gap 8 / max-height 230 /
+                         margin-top 8 / overflow auto。行数＝plan.items，所以做成 ItemsControl -->
+                    <ScrollViewer MaxHeight="230" Margin="0,8,0,0" VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl x:Name="IsoItems">
+                            <!-- grid gap 8 → 逐行补 8 的下外边距（XAML 的 StackPanel 没有 gap） -->
+                            <ItemsControl.ItemContainerStyle>
+                                <Style TargetType="ContentPresenter">
+                                    <Setter Property="Margin" Value="0,0,0,8"/>
+                                </Style>
+                            </ItemsControl.ItemContainerStyle>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <!-- .isolation-item（样式 :2141-2150）：flex center space-between gap 12 /
+                                         padding 8 12 / border 1 / radius 6 / 底 card-2；
+                                         左列 grid gap 2，strong 12px、.muted 12px -->
+                                    <Border Padding="12,8" CornerRadius="6" BorderBrush="{DynamicResource Line}"
+                                            BorderThickness="1" Background="{DynamicResource CardSoft}"
+                                            SnapsToDevicePixels="True">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0">
+                                                <!-- 原版 strong 是 item.name（:1384），muted 那行是
+                                                     「文件夹 / 文件 · N 个文件 · 体积」（:1385）：
+                                                     三个量都来自迁移计划，端口里没有，整行留给代码侧填，
+                                                     不编数值 -->
+                                                <TextBlock Text="{Binding}" FontSize="12" FontWeight="Bold"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock FontSize="12"
+                                                           Foreground="{DynamicResource Fg2}" Margin="0,2,0,0"/>
+                                            </StackPanel>
+                                            <!-- 命中冲突时才是 tag-gold（:1387），否则普通 .tag「将复制」（:1388）。
+                                                 两态互斥，默认摆非冲突那态 -->
+                                            <Border Grid.Column="2" Style="{StaticResource Tag}"
+                                                    Background="{DynamicResource AccentSoft}"
+                                                    Visibility="Collapsed">
+                                                <TextBlock Text="目标已存在，跳过" Style="{StaticResource TagText}"
+                                                           Foreground="{DynamicResource AccentHi}"/>
+                                            </Border>
+                                            <Border Grid.Column="2" Style="{StaticResource Tag}">
+                                                <TextBlock Text="将复制" Style="{StaticResource TagText}"/>
+                                            </Border>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                    <TextBlock x:Name="IsoError" Style="{StaticResource VpModalError}"/>
+                    <StackPanel Style="{StaticResource VpModalActions}">
+                        <Button Style="{StaticResource BtnGhost}" Content="取消"/>
+                        <Button x:Name="IsoConfirm" Style="{StaticResource BtnGold}" Content="确认并开启"
+                                Margin="12,0,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Border>
+
+    <!-- ==================== 弹窗六：安装（GameView.vue:1413-1495） ==================== -->
+    <Border x:Name="ModalInstall" Panel.ZIndex="10000" Style="{StaticResource VpModalMask}"
+            Visibility="Collapsed">
+        <Border Style="{StaticResource VpModal}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
+                <StackPanel>
+                    <!-- .modal-title（:1416）「安装 + 版本号」 -->
+                    <TextBlock x:Name="InstallTitle" Style="{StaticResource VpModalTitle}" Text="安装"/>
+                    <TextBlock Style="{StaticResource VpModalLabel}" Margin="0,0,0,8" Text="选择模组加载器"/>
+                    <!-- .loader-options（:1419-1429，样式 :2015-2019）：flex wrap gap 8；
+                         .loader-option 是 36 高 / padding 0 16 / radius 999 / 13px 的胶囊（:2020-2035）。
+                         五个取值与 label 逐字取 :383-389，默认 loader 为空（:394）→「不安装」是 active 态 -->
+                    <WrapPanel>
+                        <Button x:Name="LoaderNone" Style="{StaticResource VpLoaderOptionOn}" Content="不安装"
+                                Margin="0,0,8,0"/>
+                        <Button x:Name="LoaderForge" Style="{StaticResource VpLoaderOption}" Content="Forge"
+                                Margin="0,0,8,0"/>
+                        <Button x:Name="LoaderFabric" Style="{StaticResource VpLoaderOption}" Content="Fabric"
+                                Margin="0,0,8,0"/>
+                        <Button x:Name="LoaderQuilt" Style="{StaticResource VpLoaderOption}" Content="Quilt"
+                                Margin="0,0,8,0"/>
+                        <Button x:Name="LoaderNeoForge" Style="{StaticResource VpLoaderOption}" Content="NeoForge"/>
+                    </WrapPanel>
+
+                    <!-- template v-if="modal.loader"（:1431-1473）：选了加载器才出现，默认整段收起 -->
+                    <StackPanel x:Name="LoaderDetail" Visibility="Collapsed">
+                        <TextBlock Style="{StaticResource VpModalLabel}" Text="加载器版本"/>
+                        <!-- .loaders-loading（:1433-1436）：spin + 文案，v-if loadingLoaders -->
+                        <StackPanel x:Name="LoaderLoading" Orientation="Horizontal" Margin="0,12"
+                                    Visibility="Collapsed">
+                            <ContentControl Style="{StaticResource Spin}"/>
+                            <TextBlock x:Name="LoaderLoadingText" Style="{StaticResource Dim}" Margin="12,0,0,0"/>
+                        </StackPanel>
+                        <ComboBox x:Name="LoaderVersions" FontSize="14"/>
+                        <TextBlock x:Name="LoaderVersionsError" Style="{StaticResource VpModalError}"/>
+
+                        <!-- template v-if="modal.loader==='fabric'"（:1445-1472） -->
+                        <StackPanel x:Name="FapiBlock" Visibility="Collapsed">
+                            <!-- .fapi-head（:1446-1455，样式 :2061-2077）：flex center space-between gap 12
+                                 margin-top 16；里面的 .modal-label 上边距归零（:2068-2070）。
+                                 .fapi-switch 是 flex center gap 8 / 13px：说明文字 + .switch 开关 -->
+                            <Grid Margin="0,16,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Style="{StaticResource VpModalLabel}" Margin="0"
+                                           Text="Fabric API"/>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right"
+                                            VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource Dim}" VerticalAlignment="Center"
+                                               Text="同时安装（大多数 Fabric 模组需要）"/>
+                                    <CheckBox x:Name="FapiOn" Style="{StaticResource Switch}" Margin="8,0,0,0"
+                                              VerticalAlignment="Center" IsChecked="True"/>
+                                </StackPanel>
+                            </Grid>
+                            <ComboBox x:Name="FapiVersions" FontSize="14"/>
+                            <TextBlock x:Name="FapiError" Style="{StaticResource VpModalError}"/>
+                            <!-- 出错时多一颗重试按钮（:1468），默认收起 -->
+                            <Button x:Name="FapiRetry" Style="{StaticResource BtnSmGhost}"
+                                    Content="重试获取 Fabric API" HorizontalAlignment="Left"
+                                    Visibility="Collapsed"/>
+                            <!-- .fapi-tip（:1469，样式 :2078-2081）：margin-top 8 / 12px -->
+                            <TextBlock x:Name="FapiTip" Margin="0,8,0,0" FontSize="12"
+                                       Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
+                                       Text="安装完成后将自动放入该实例使用的 mods 文件夹"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- 实例名（:1478-1487）。:1475 那颗 RecordingModPicker 是独立组件，不在本页所有权内 -->
+                    <TextBlock Style="{StaticResource VpModalLabel}" Text="实例名"/>
+                    <!-- input.input.mono，placeholder 是 defaultInstanceName（:1479-1485）：
+                         WPF 的 TextBox 没有 placeholder，初值由代码侧写进 Text -->
+                    <TextBox x:Name="InstallInstanceName" Style="{StaticResource Input}" FontSize="14"
+                             FontFamily="{StaticResource MonoFont}"/>
+                    <TextBlock x:Name="InstallNameError" Style="{StaticResource VpModalError}"/>
+                    <!-- .inst-hint（:1487，样式 :2055-2059）：margin-top 8 / 12px / 行高 1.5 → 18 -->
+                    <TextBlock x:Name="InstallHint" Margin="0,8,0,0" FontSize="12" LineHeight="18"
+                               LineStackingStrategy="BlockLineHeight" Foreground="{DynamicResource Fg2}"
+                               TextWrapping="Wrap"
+                               Text="实例将安装为 versions/&lt;实例名&gt;/，可自定义（同 MC 版本可共存多个实例）"/>
+                    <StackPanel Style="{StaticResource VpModalActions}">
+                        <Button Style="{StaticResource BtnGhost}" Content="取消"/>
+                        <Button x:Name="InstallConfirm" Style="{StaticResource BtnGold}" Content="确认安装"
+                                Margin="12,0,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Border>
+    </Grid>
 </UserControl>

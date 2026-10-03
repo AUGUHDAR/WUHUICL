@@ -82,9 +82,157 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
+
+        <!-- ============ Cm 前缀的本页局部资源（不与主题画刷键同名） ============ -->
+
+        <!-- .spin（styles.css:683-691）：inline-block 14×14 / border 2 accent-soft / border-top-color accent
+             / radius 50% / animation spin 0.8s linear infinite → 14×14 的细环 + 一段亮弧转圈。
+             WPF 没有 backdrop/CSS border 单边色，这里用 accent-soft 环 + accent 四分之一弧旋转复刻；
+             旋转用模板 EventTrigger(Loaded) 常驻 Storyboard，RepeatBehavior=Forever。本页所有加载态共用它。 -->
+
+        <!-- .result-icon box-shadow 0 2px 8px color-mix(accent 8%, transparent) — CommunityView.vue:868。
+             色取主题的 C.Accent 本体（DynamicResource 跟主题走），不透明度 0.08 = 8%，ShadowDepth 2/Direction 270 复刻 CSS 的 0 2px 偏移。 -->
+        <DropShadowEffect x:Key="CmResultIconShadow" Color="{DynamicResource C.Accent}"
+                          BlurRadius="8" ShadowDepth="2" Direction="270" Opacity="0.08"/>
+
+        <!-- .file-row.active box-shadow: inset 0 0 0 1px accent, 0 4px 14px accent-soft — :1027。
+             inset 1px + border 1px（同 accent）→ WPF 用 2px accent 边框等价；外阴影用 accent 16%（accent-soft）DropShadow。 -->
+        <DropShadowEffect x:Key="CmActiveRowShadow" Color="{DynamicResource C.Accent}"
+                          BlurRadius="14" ShadowDepth="4" Direction="270" Opacity="0.16"/>
+
+        <!-- .modal（styles.css:545-555）＋ .download-modal/.modinstall-modal 共用的面板底：
+             底 card-solid 96%（主题里即 Card）、border 1 border、radius radius-lg 14、padding space-5 24、shadow-lg（主题 PopShadow）。
+             居中（原版 .modal-mask 是 flex center）。宽度/最大高在各自弹窗上单独给。 -->
+        <Style x:Key="CmModal" TargetType="Border">
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Background" Value="{DynamicResource Card}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Padding" Value="24"/>
+            <Setter Property="Effect" Value="{DynamicResource PopShadow}"/>
+        </Style>
+
+        <!-- .file-row（:1004-1018）：它是 button，flex gap 12 / padding 12 16 / border 1 / radius radius-md 10
+             / 底 card-2（CardSoft）/ 字 text / 左对齐。常态。 -->
+        <Style x:Key="CmFileRow" TargetType="Button">
+            <Setter Property="MinHeight" Value="48"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="10" Padding="16,12" SnapsToDevicePixels="True">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource Hover}"/>
+                                <Setter Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- .file-row.active（:1024-1028）：底 accent-soft + 边 accent + inset ring 1px accent + 外阴影 accent-soft。 -->
+        <Style x:Key="CmFileRowActive" TargetType="Button">
+            <Setter Property="MinHeight" Value="48"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+            <Setter Property="BorderThickness" Value="2"/>
+            <Setter Property="Effect" Value="{DynamicResource CmActiveRowShadow}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="10" Padding="16,12" SnapsToDevicePixels="True">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 结果卡的下载钮 .result-dl：原版虽写 class="btn btn-gold btn-sm"，但 ui-system.css:47 强制
+             background card-2 / color text / box-shadow none / border 1 border —— 也就是最终态是"中性 ghost"，不是金色（本轮的修正点）。
+             hover（ui-system.css:48）才翻成 accent 实心。尺寸沿用 .btn-sm（32/padding 12 4/13/radius 6）。 -->
+        <Style x:Key="CmResultDl" TargetType="Button" BasedOn="{StaticResource BtnSm}">
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource Accent}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource AccentFg}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- .menu-item（styles.css:597-616）：min-height row-h 42 / padding 4 12 / radius radius-sm 6 / 13px
+             / 透明底 + text 字；hover 与 .active 都是 底 accent-soft + 字 accent-2（:617-624）。版本下拉的行用它。 -->
+        <Style x:Key="CmMenuItem" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="MinHeight" Value="42"/>
+            <Setter Property="Padding" Value="12,4"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="ctl:CssRadius.Round" Value="6"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- .select-menu-option（SelectMenu.vue:147-166）：flex align-center gap 8 / min-height row-h 42 / padding 4 12
+             / radius radius-sm 6 / 透明底 + text 13px / 左对齐；hover 与 [data-focused] 是 底 hover（:165）。
+             .active 版（:166 底 accent-soft + 字 混 accent + 600）由实例内联覆盖 Background。 -->
+        <Style x:Key="CmSelectOption" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="MinHeight" Value="42"/>
+            <Setter Property="Padding" Value="12,4"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="ctl:CssRadius.Round" Value="6"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource Hover}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
 
     <!-- .content：overflow-y auto + scrollbar-gutter:stable，padding 24 由宿主 Grid.Margin 给 — App.vue:2398-2404（契约 §6.5） -->
+    <!-- 根容器改为 Grid：原版 .modal-mask / .menu-overlay / .float-menu / .select-menu-float 都是 position fixed
+         （视口级、z-index 高于内容）。WPF 等价物 = 与 ScrollViewer 同级、声明在后并带 Panel.ZIndex 的覆盖层：
+         既盖得住整页，又不被外层 ScrollViewer 的裁剪/滚动带跑。所有此类浮层默认 Collapsed，由主控在代码里定位与开关
+         （SelectMenu.vue:33-41、ver-filter-menu 的 top calc(100%+4px)/left/right 都是运行时按锚点矩形算的）。 -->
+    <Grid>
     <ScrollViewer VerticalScrollBarVisibility="Visible" Padding="0,0,8,0">
 
         <!-- .page：max-width 940 + margin 0 auto — :708-714（:1081 只换了 display/gap，940 这条仍然生效）
@@ -246,6 +394,150 @@
             <!-- .list-card{padding:0;background:transparent;border:0;box-shadow:none} — :818-823 → 外壳整个脱掉，只剩布局 -->
             <StackPanel Grid.Row="6">
 
+                <!-- ============ .status-strip（CommunityView.vue:543 标记 + ui-system.css:41 样式）============
+                     flex align-center wrap gap 12 / padding 12 16 / radius radius-md 10 / 底 accent-soft / 13px / margin-bottom 12。
+                     触发条件 v-if="results.length && (loading || loadError)"：有结果且正在加载/出错时显示 → 默认 Collapsed。
+                     文案二选一（loading / error），下面按错误态写并挂 重试 钮（:543 的 class 是 btn btn-ghost btn-sm → BtnSmGhost）。 -->
+                <Border x:Name="StatusStrip" Visibility="Collapsed" Background="{DynamicResource AccentSoft}"
+                        CornerRadius="10" Padding="16,12" Margin="0,0,0,12">
+                    <WrapPanel>
+                        <TextBlock x:Name="StatusStripText" FontSize="13" VerticalAlignment="Center"
+                                   TextWrapping="Wrap" MaxWidth="720"
+                                   Text="更新失败，以下为上次结果："/>
+                        <!-- .btn.btn-ghost.btn-sm 重试 — :543（占位，无对应代码处理器 → 由主控接 retry） -->
+                        <Button x:Name="StatusRetryBtn" Style="{StaticResource BtnSmGhost}" Content="重试"
+                                Margin="12,0,0,0" VerticalAlignment="Center"/>
+                    </WrapPanel>
+                </Border>
+
+                <!-- ============ .search-warning（:544 标记 + :825 样式）============
+                     每个 warning 一条 <p>：12px text-xs / 色 text-dim / padding 8。v-for searchWarnings。
+                     容器壳 ItemsControl，ItemTemplate 用 {Binding}（绑集合里的字符串本身，非 DataContext 路径）；
+                     集合为空 → 不渲染任何条 → 默认 Collapsed。 -->
+                <ItemsControl x:Name="SearchWarnings" Visibility="Collapsed">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}" Padding="8"
+                                       TextWrapping="Wrap" Text="{Binding}"/>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- ============ ContentSkeleton（:546 引用 → components/ContentSkeleton.vue）============
+                     v-if="loading && !results.length" → 默认 Collapsed。label="正在搜索社区资源…" :rows="6"。
+                     .content-skeleton grid gap 12 padding 16 0（:18）；先一行 .muted（14px text-dim），再 6 个 .skeleton-row。
+                     .skeleton-row height 48 / flex align-center gap 16（:19）；三块共用 底 color-mix(text 9%, card) + radius radius-sm 6（:20，
+                     WPF 无此混色 → 用主题 Hover ≈ text 7% 过底 近似，见 CmSpin 上方注释与台账）。
+                     i 36×36（:21）；span flex:1 height 18 max-width 65%（:22）；b 76×32 margin-left auto（:23）。 -->
+                <StackPanel x:Name="ContentSkeleton" Visibility="Collapsed">
+                    <!-- .muted 行：label 文案，色 text-dim，字号取 body text-md 14（styles.css:125） -->
+                    <TextBlock Margin="0,16,0,12" FontSize="14" Foreground="{DynamicResource Fg2}"
+                               Text="正在搜索社区资源…"/>
+                    <!-- 6 行，逐行同构。列：[i 36][gap 16][span *][gap 16][b 76]；b margin-left:auto 已由 * 列顶到右侧 -->
+                    <Grid Height="48" Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="36"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="76"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Width="36" Height="36" CornerRadius="6" VerticalAlignment="Center"
+                                Background="{DynamicResource Hover}"/>
+                        <Border Grid.Column="2" Height="18" CornerRadius="6" VerticalAlignment="Center"
+                                HorizontalAlignment="Left" MaxWidth="585" Background="{DynamicResource Hover}"/>
+                        <Border Grid.Column="4" Width="76" Height="32" CornerRadius="6" VerticalAlignment="Center"
+                                HorizontalAlignment="Right" Background="{DynamicResource Hover}"/>
+                    </Grid>
+                    <Grid Height="48" Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="36"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="76"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Width="36" Height="36" CornerRadius="6" VerticalAlignment="Center"
+                                Background="{DynamicResource Hover}"/>
+                        <Border Grid.Column="2" Height="18" CornerRadius="6" VerticalAlignment="Center"
+                                HorizontalAlignment="Left" MaxWidth="585" Background="{DynamicResource Hover}"/>
+                        <Border Grid.Column="4" Width="76" Height="32" CornerRadius="6" VerticalAlignment="Center"
+                                HorizontalAlignment="Right" Background="{DynamicResource Hover}"/>
+                    </Grid>
+                    <Grid Height="48" Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="36"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="76"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Width="36" Height="36" CornerRadius="6" VerticalAlignment="Center"
+                                Background="{DynamicResource Hover}"/>
+                        <Border Grid.Column="2" Height="18" CornerRadius="6" VerticalAlignment="Center"
+                                HorizontalAlignment="Left" MaxWidth="585" Background="{DynamicResource Hover}"/>
+                        <Border Grid.Column="4" Width="76" Height="32" CornerRadius="6" VerticalAlignment="Center"
+                                HorizontalAlignment="Right" Background="{DynamicResource Hover}"/>
+                    </Grid>
+                    <Grid Height="48" Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="36"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="76"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Width="36" Height="36" CornerRadius="6" VerticalAlignment="Center"
+                                Background="{DynamicResource Hover}"/>
+                        <Border Grid.Column="2" Height="18" CornerRadius="6" VerticalAlignment="Center"
+                                HorizontalAlignment="Left" MaxWidth="585" Background="{DynamicResource Hover}"/>
+                        <Border Grid.Column="4" Width="76" Height="32" CornerRadius="6" VerticalAlignment="Center"
+                                HorizontalAlignment="Right" Background="{DynamicResource Hover}"/>
+                    </Grid>
+                    <Grid Height="48" Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="36"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="76"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Width="36" Height="36" CornerRadius="6" VerticalAlignment="Center"
+                                Background="{DynamicResource Hover}"/>
+                        <Border Grid.Column="2" Height="18" CornerRadius="6" VerticalAlignment="Center"
+                                HorizontalAlignment="Left" MaxWidth="585" Background="{DynamicResource Hover}"/>
+                        <Border Grid.Column="4" Width="76" Height="32" CornerRadius="6" VerticalAlignment="Center"
+                                HorizontalAlignment="Right" Background="{DynamicResource Hover}"/>
+                    </Grid>
+                    <Grid Height="48">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="36"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="76"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Width="36" Height="36" CornerRadius="6" VerticalAlignment="Center"
+                                Background="{DynamicResource Hover}"/>
+                        <Border Grid.Column="2" Height="18" CornerRadius="6" VerticalAlignment="Center"
+                                HorizontalAlignment="Left" MaxWidth="585" Background="{DynamicResource Hover}"/>
+                        <Border Grid.Column="4" Width="76" Height="32" CornerRadius="6" VerticalAlignment="Center"
+                                HorizontalAlignment="Right" Background="{DynamicResource Hover}"/>
+                    </Grid>
+                </StackPanel>
+
+                <!-- ============ 错误空态 .empty（:548-551 标记，:515-524 + ui-system.css:44 样式）============
+                     v-else-if="loadError && !results.length" → 默认 Collapsed。
+                     .empty：column center gap 16 / min-height 120 / padding 32 16 / 色 text-dim（最终值取 ui-system.css:44 覆盖）。
+                     文案 span "搜索失败：{loadError}"（14px text-md，色即 .empty 的 text-dim）+ .btn.btn-ghost.btn-sm 重试（:550）。 -->
+                <StackPanel x:Name="ErrorEmpty" Visibility="Collapsed" MinHeight="120">
+                    <TextBlock x:Name="ErrorEmptyText" Margin="16,32" HorizontalAlignment="Center"
+                               TextAlignment="Center" FontSize="14" Foreground="{DynamicResource Fg2}"
+                               TextWrapping="Wrap" Text="搜索失败："/>
+                    <Button x:Name="ErrorRetryBtn" Style="{StaticResource BtnSmGhost}" Content="重试"
+                            HorizontalAlignment="Center" Margin="0,0,0,32"/>
+                </StackPanel>
+
                 <!-- ·· 结果网格 .result-list：repeat(auto-fit, minmax(min(100%,300px),1fr)) gap 16 — :1080（覆盖 :826-830 的 auto-fill 260/gap 12）
                      WPF 无 auto-fit：940 宽下 (940+16)/(300+16)=2.99 → 实测 3 列，故用 3 个 * 列 + 16 间隔列精确复刻该断点；
                      窄窗口不会自动减列，是近似（UniformGrid/WrapPanel 能换列但丢掉 1fr 拉伸）。
@@ -283,14 +575,22 @@
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
 
-                                <!-- .result-icon 46×46 / radius 10 / 底 card / border 1 — :857-869
-                                     注：:868 那条 `box-shadow:0 2px 8px color-mix(accent 8%)` 不是令牌色，且契约 §6.4 要平面，未复刻 -->
+                                <!-- .result-icon 46×46 / radius radius-md 10 / 底 card / border 1 — :857-869
+                                     + :868 的 box-shadow 0 2px 8px color-mix(accent 8%, transparent)（本轮补上：见 CmResultIconShadow）
+                                     overflow hidden → ClipToBounds ＋ 给 img 挂 46×46 r10 圆角裁剪 -->
                                 <Border Width="46" Height="46" CornerRadius="10" Background="{DynamicResource Card}"
-                                        BorderBrush="{DynamicResource Line}" BorderThickness="1">
-                                    <!-- .icon-placeholder：取标题首字母，16px/700 text-dim — :575 / :876-880 -->
-                                    <TextBlock Text="R" FontSize="16" FontWeight="Bold"
-                                               Foreground="{DynamicResource Fg2}"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        BorderBrush="{DynamicResource Line}" BorderThickness="1" ClipToBounds="True"
+                                        Effect="{DynamicResource CmResultIconShadow}">
+                                    <Grid>
+                                        <!-- .result-icon img：100%/cover（object-fit cover ＝ UniformToFill），:870-875。
+                                             有图时盖住占位；无图/图坏时 Collapsed（v-if r.iconUrl && !brokenIcons.has，:568-575）→ 默认收起，等检索注入 Source -->
+                                        <Image x:Name="ResultIconImg1" Visibility="Collapsed" Stretch="UniformToFill"
+                                               ><Image.Clip><RectangleGeometry RadiusX="10" RadiusY="10" Rect="0,0,46,46"/></Image.Clip></Image>
+                                        <!-- .icon-placeholder：取标题首字母，16px/700 text-dim — :575 / :876-880 -->
+                                        <TextBlock Text="R" FontSize="16" FontWeight="Bold"
+                                                   Foreground="{DynamicResource Fg2}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Grid>
                                 </Border>
 
                                 <!-- .result-head：flex wrap gap 6（:882-889 的 8 被 :1080 改成 6） -->
@@ -359,10 +659,9 @@
                                         </Button>
                                     </StackPanel>
 
-                                    <!-- .btn.btn-gold.btn-sm.result-dl — :608-615；svg 13×13 在 .btn 内生效（UI_ICONS C11 → :609）
-                                         .btn-sm：32 高 / padding 12,4 / 13px（§0:19 + 契约 §2） -->
-                                    <Button Grid.Column="2" Style="{StaticResource BtnGold}" MinHeight="32"
-                                            Padding="12,4" FontSize="13" Click="Download_Click">
+                                    <!-- .btn.btn-gold.btn-sm.result-dl — :608；但 ui-system.css:47 把它压成 中性 ghost（card-2/text/无边阴影/border 1），
+                                         CmResultDl 即该最终态（hover 才翻 accent）。尺寸走 .btn-sm，故不再写内联 MinHeight/Padding/FontSize。 -->
+                                    <Button Grid.Column="2" Style="{StaticResource CmResultDl}" Click="Download_Click">
                                         <StackPanel Orientation="Horizontal">
                                             <ContentControl Width="13" Height="13" VerticalAlignment="Center"
                                                             Style="{DynamicResource Icon.Download}"/>
@@ -395,10 +694,16 @@
                                     <ColumnDefinition Width="12"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
+                                <!-- .result-icon + accent-8 shadow + img 槽，同上（:857-875 / :868） -->
                                 <Border Width="46" Height="46" CornerRadius="10" Background="{DynamicResource Card}"
-                                        BorderBrush="{DynamicResource Line}" BorderThickness="1">
-                                    <TextBlock Text="J" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource Fg2}"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        BorderBrush="{DynamicResource Line}" BorderThickness="1" ClipToBounds="True"
+                                        Effect="{DynamicResource CmResultIconShadow}">
+                                    <Grid>
+                                        <Image x:Name="ResultIconImg2" Visibility="Collapsed" Stretch="UniformToFill"
+                                               ><Image.Clip><RectangleGeometry RadiusX="10" RadiusY="10" Rect="0,0,46,46"/></Image.Clip></Image>
+                                        <TextBlock Text="J" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource Fg2}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Grid>
                                 </Border>
                                 <StackPanel Grid.Column="2" MinWidth="0">
                                     <TextBlock Text="JEI 物品管理器（Just Enough Items）" FontSize="16"
@@ -444,8 +749,8 @@
                                             <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.Changelog}"/>
                                         </Button>
                                     </StackPanel>
-                                    <Button Grid.Column="2" Style="{StaticResource BtnGold}" MinHeight="32"
-                                            Padding="12,4" FontSize="13" Click="Download_Click">
+                                    <!-- .result-dl：ui-system.css:47 强制中性 ghost，非金色 → CmResultDl -->
+                                    <Button Grid.Column="2" Style="{StaticResource CmResultDl}" Click="Download_Click">
                                         <StackPanel Orientation="Horizontal">
                                             <ContentControl Width="13" Height="13" VerticalAlignment="Center"
                                                             Style="{DynamicResource Icon.Download}"/>
@@ -478,10 +783,16 @@
                                     <ColumnDefinition Width="12"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
+                                <!-- .result-icon + accent-8 shadow + img 槽，同上（:857-875 / :868） -->
                                 <Border Width="46" Height="46" CornerRadius="10" Background="{DynamicResource Card}"
-                                        BorderBrush="{DynamicResource Line}" BorderThickness="1">
-                                    <TextBlock Text="全" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource Fg2}"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        BorderBrush="{DynamicResource Line}" BorderThickness="1" ClipToBounds="True"
+                                        Effect="{DynamicResource CmResultIconShadow}">
+                                    <Grid>
+                                        <Image x:Name="ResultIconImg3" Visibility="Collapsed" Stretch="UniformToFill"
+                                               ><Image.Clip><RectangleGeometry RadiusX="10" RadiusY="10" Rect="0,0,46,46"/></Image.Clip></Image>
+                                        <TextBlock Text="全" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource Fg2}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Grid>
                                 </Border>
                                 <StackPanel Grid.Column="2" MinWidth="0">
                                     <TextBlock FontSize="16" FontWeight="SemiBold" LineHeight="23.2" MaxHeight="46.4"
@@ -527,8 +838,8 @@
                                             <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.Changelog}"/>
                                         </Button>
                                     </StackPanel>
-                                    <Button Grid.Column="2" Style="{StaticResource BtnGold}" MinHeight="32"
-                                            Padding="12,4" FontSize="13" Click="Download_Click">
+                                    <!-- .result-dl：ui-system.css:47 强制中性 ghost，非金色 → CmResultDl -->
+                                    <Button Grid.Column="2" Style="{StaticResource CmResultDl}" Click="Download_Click">
                                         <StackPanel Orientation="Horizontal">
                                             <ContentControl Width="13" Height="13" VerticalAlignment="Center"
                                                             Style="{DynamicResource Icon.Download}"/>
@@ -540,6 +851,20 @@
                         </Grid>
                     </Border>
                 </Grid>
+
+                <!-- ============ .more-row（:622-627 标记，:955-959 样式）============
+                     flex justify-content center / padding space-4 0 space-2（16 0 8）。v-if !usesPagination && hasMore → 默认 Collapsed。
+                     里面是 .btn.btn-ghost（:623 原类没有 btn-sm，按源文件走 → 默认 36 高的 BtnGhost），
+                     内含 v-if loadingMore 的 .spin（:624）＋ 文案（加载中…/加载更多，:625）。 -->
+                <Border x:Name="MoreRow" Visibility="Collapsed" Padding="0,16,0,8">
+                    <Button x:Name="LoadMoreBtn" Style="{StaticResource BtnGhost}" HorizontalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <ContentControl Style="{StaticResource Spin}" Margin="0,0,8,0" Visibility="Collapsed"
+                                    x:Name="LoadMoreSpin"/>
+                            <TextBlock x:Name="LoadMoreText" Text="加载更多" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </Border>
 
                 <!-- ·· 空态 .empty（:553-561，样式 :515-524 + ui-system.css:44）··
                      column center gap 16 — styles.css:515-521；最终 min-height 120 / padding 32 16 — ui-system.css:44；color text-dim — styles.css:522
@@ -567,16 +892,350 @@
                     <!-- 页码：.btn.btn-sm，当前页加 .btn-gold — :632 -->
                     <Button Style="{StaticResource BtnGold}" MinHeight="32" Padding="12,4" FontSize="13"
                             Margin="0,4,8,4" Content="1"/>
-                    <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="12,4" FontSize="13"
-                            Margin="0,4,8,4" Content="2" Click="Page_Click"/>
-                    <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="12,4" FontSize="13"
-                            Margin="0,4,8,4" Content="3" Click="Page_Click"/>
-                    <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="12,4" FontSize="13"
-                            Margin="0,4,8,4" Content="4" Click="Page_Click"/>
+                    <!-- 原版按 pageCount 渲染页码（:632-638）。搜索结果未接入、当前只有 3 条演示数据
+                         → 1 页，所以只留第 1 页；多出来的 2/3/4 是死的演示按钮，与左边"第 1 / 1 页"自相矛盾，删掉 -->
                     <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="12,4" FontSize="13"
                             Margin="0,4,0,4" Content="下一页" IsEnabled="False"/>
                 </WrapPanel>
             </StackPanel>
         </Grid>
     </ScrollViewer>
+
+    <!-- ==================== 视口级浮层（fixed / absolute 的等价层，都在 ScrollViewer 之外） ==================== -->
+
+    <!-- .menu-overlay（:518 标记 + styles.css:577-581）：fixed inset 0 / z 90，透明的点击捕获层（点外面关下拉）。
+         v-if versionDropdownOpen 与浮层同开关 → 默认 Collapsed；捕获点击＝代码（Popup 关闭 / 事件路由）。 -->
+    <Border x:Name="VerMenuOverlay" Panel.ZIndex="90" Visibility="Collapsed"
+            HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent"/>
+
+    <!-- .float-menu.ver-filter-menu（:519-534 标记，:582-596 的 .float-menu 基 + :801-809 的 .ver-filter-menu 覆盖）
+         底 card-solid 96%（＝Card）/ border 1 border / radius radius-md 10 / padding space-2 8 / shadow-lg / z 9001，
+         覆盖项：top calc(100%+4px) / left 0 / right 0（＝贴 .ver-filter 宽）/ max-height 260 / overflow-y auto。
+         绝对定位相对 .ver-filter（left/right/top）是运行时按锚点矩形算的 → 下面给标称位置，宽度/Left/Top 由主控代码定。 -->
+    <Border x:Name="VerFilterMenu" Panel.ZIndex="9001" Visibility="Collapsed" Width="260"
+            HorizontalAlignment="Left" VerticalAlignment="Top" Margin="230,150,0,0"
+            Background="{DynamicResource Card}" BorderBrush="{DynamicResource Line}" BorderThickness="1"
+            CornerRadius="10" Padding="8">
+        <ScrollViewer MaxHeight="260" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <!-- .menu-item 全部版本，!query.mcVersion 时 .active（底 accent-soft + 字 accent-2）— :520 -->
+                <Button Style="{StaticResource CmMenuItem}" Content="全部版本" Background="{DynamicResource AccentSoft}"
+                        Foreground="{DynamicResource AccentHi}"/>
+                <!-- .menu-item v-for filteredVersionOptions（≤60 个），query.mcVersion===v 时 .active — :523-532；写死三条代表几何 -->
+                <Button Style="{StaticResource CmMenuItem}" Content="1.21.4"/>
+                <Button Style="{StaticResource CmMenuItem}" Content="1.20.6"/>
+                <Button Style="{StaticResource CmMenuItem}" Content="1.20.1"/>
+                <!-- .ver-menu-empty（:533 标记 + :810-815）：padding 12 / 居中 / text-dim / 12px，无匹配版本时显示 -->
+                <TextBlock x:Name="VerMenuEmpty" Visibility="Collapsed" Padding="12" TextAlignment="Center"
+                           FontSize="12" Foreground="{DynamicResource Fg2}" Text="无匹配版本"/>
+            </StackPanel>
+        </ScrollViewer>
+    </Border>
+
+    <!-- ==================== 下载模态框 .modal-mask + .modal.download-modal（:639-698） ====================
+         .modal-mask（styles.css:527-538）：fixed inset 0 / z 10000 / flex center / 底 mask（＝Overlay）/ blur 10。
+         backdrop-filter blur 需 MaskBlur.Attach 在代码里快照底层（Services/MaskBlur.cs），XAML 表达不了，这里只铺 Overlay 底色。
+         v-if modal.open → 默认 Collapsed。 -->
+    <Border x:Name="DownloadModal" Panel.ZIndex="10000" Visibility="Collapsed"
+            HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource Overlay}">
+        <!-- .download-modal（:962-966）：width min(740, 100vw-40) / max-height 88vh / overflow-y auto。
+             88vh 在 XAML 里拿不到视口高，取字面 720 近似（主控可改绑 ActualHeight）。 -->
+        <Border Style="{StaticResource CmModal}" Width="740" MaxHeight="720">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <!-- .modal-title 16/700 margin-bottom 12 ellipsis nowrap（:975-982）；子节点是 MarqueeText（跑马灯动画代码驱动）— :641 -->
+                    <TextBlock x:Name="DownloadTitle" FontSize="16" FontWeight="Bold" Margin="0,0,0,12"
+                               TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Text="下载 "/>
+
+                    <!-- .modal-links（:642-649，样式 :946-950）：flex gap 8 wrap，两个 .btn.btn-ghost.btn-sm -->
+                    <WrapPanel Margin="0,0,0,4">
+                        <Button x:Name="DownloadSourceBtn" Style="{StaticResource BtnSmGhost}" Content="Modrinth 源页面"
+                                Margin="0,0,8,8" Click="SourcePage_Click"/>
+                        <Button x:Name="DownloadMcmodBtn" Style="{StaticResource BtnSmGhost}" Content="MC 百科介绍"
+                                Margin="0,0,8,8" Click="Mcmod_Click"/>
+                    </WrapPanel>
+
+                    <!-- .filter-row（:650-654）：flex gap 12 wrap，两个 .modal-field（grid flex1 gap4 / 12px / text-dim，label 在上 input 在下）-->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <!-- modal-field 1：Minecraft 版本 + input（placeholder 全部版本）— :651 -->
+                        <StackPanel Grid.Column="0">
+                            <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}" Margin="0,0,0,4" Text="Minecraft 版本"/>
+                            <Grid>
+                                <TextBox x:Name="ModalMcVersion" Style="{StaticResource Input}"/>
+                                <TextBlock x:Name="ModalPhMcVersion" Text="全部版本" IsHitTestVisible="False"
+                                           Margin="12,0,0,0" VerticalAlignment="Center" FontSize="13"
+                                           Foreground="{DynamicResource Fg3}"/>
+                            </Grid>
+                        </StackPanel>
+                        <!-- modal-field 2：Loader + SelectMenu（v-if usesCommunityLoader）— :652 -->
+                        <StackPanel Grid.Column="2">
+                            <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}" Margin="0,0,0,4" Text="Loader"/>
+                            <Button x:Name="ModalLoaderSelect" Style="{StaticResource SelectBtn}"
+                                    Click="FilterSelect_Click">
+                                <TextBlock Text="全部加载器"/>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- .modal-label（:983-987）：13px text-sm / text-dim / margin 16 0 8 — :656 -->
+                    <TextBlock Style="{StaticResource Dim}" FontSize="13" Margin="0,16,0,8" Text="选择文件版本"/>
+
+                    <!-- .files-loading（:657-660，样式 :988-993）：flex center gap 12 / padding 16 0，.spin + .muted。v-if loadingFiles → 默认 Collapsed -->
+                    <StackPanel x:Name="FilesLoading" Visibility="Collapsed" Orientation="Horizontal"
+                                HorizontalAlignment="Center" Margin="0,16">
+                        <ContentControl Style="{StaticResource Spin}" Margin="0,0,12,0"/>
+                        <TextBlock Style="{StaticResource Dim}" VerticalAlignment="Center" Text="正在获取文件列表…"/>
+                    </StackPanel>
+
+                    <!-- .file-list（:662-679，样式 :995-1003）：column gap 8 / max-height 280 / scroll / padding 4 4 4 0。
+                         v-if files.length；下面两条是几何占位（一 active 一常态），等 communityFiles 接入。 -->
+                    <ScrollViewer x:Name="FileListHost" MaxHeight="280" Visibility="Collapsed" Padding="4,4,4,0"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <!-- .file-row.active — :666-668。file-main（flex1 column gap3）：file-name(13/650 等宽 ellipsis) + file-sub(12 text-dim ellipsis)；
+                                 file-side（column align-end gap4 shrink0）：.tag(release→gold) + .file-meta(12 nowrap text-dim) -->
+                            <Button Style="{StaticResource CmFileRowActive}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="12"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}"
+                                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                                   Text="sodium-0.5.8+mc1.20.1.jar"/>
+                                        <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}" Margin="0,3,0,0"
+                                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                                   Text="版本 0.5.8 · MC 1.20.1 · Fabric"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" HorizontalAlignment="Right">
+                                        <Border Style="{StaticResource Tag}" Background="{DynamicResource AccentSoft}">
+                                            <TextBlock Style="{StaticResource TagText}" Foreground="{DynamicResource AccentHi}"
+                                                       Text="正式版"/>
+                                        </Border>
+                                        <!-- .file-meta 12 nowrap text-dim — :1060-1063 -->
+                                        <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}" Margin="0,4,0,0"
+                                                   Text="2024-02-16 · 812.4 KB"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
+                            <!-- .file-row 常态（beta → tag-cyan）-->
+                            <Button Style="{StaticResource CmFileRow}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="12"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock FontSize="13" FontWeight="SemiBold" FontFamily="{DynamicResource MonoFont}"
+                                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                                   Text="sodium-0.5.8+mc1.20.1-sources.jar"/>
+                                        <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}" Margin="0,3,0,0"
+                                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                                   Text="版本 0.5.8 · MC 1.20.1 · Fabric"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" HorizontalAlignment="Right">
+                                        <Border Style="{StaticResource Tag}" Background="{DynamicResource CyanSoft}">
+                                            <TextBlock Style="{StaticResource TagText}" Foreground="{DynamicResource Cyan}"
+                                                       Text="Beta"/>
+                                        </Border>
+                                        <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}" Margin="0,4,0,0"
+                                                   Text="2024-02-16 · 64.1 KB"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Button>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- .files-error（:680，样式 :1064-1068）：13px / danger / padding 4 0 — 无文件提示，v-if filesError → 默认 Collapsed -->
+                    <TextBlock x:Name="DownloadFilesError" Visibility="Collapsed" FontSize="13"
+                               Foreground="{DynamicResource Danger}" Margin="0,4" TextWrapping="Wrap"
+                               Text="当前 Minecraft / Loader 条件下没有文件，可手动调整筛选。"/>
+
+                    <!-- 目标版本（v-if !isModpack — :684-688）：第二个 .modal-label + SelectMenu(targetOptions)，无兼容实例时是 .files-error -->
+                    <TextBlock x:Name="DownloadTargetLabel" Style="{StaticResource Dim}" FontSize="13"
+                               Margin="0,16,0,8" Text="下载到版本"/>
+                    <Button x:Name="DownloadTargetSelect" Style="{StaticResource SelectBtn}">
+                        <TextBlock Text="选择实例…"/>
+                    </Button>
+                    <!-- :687 的 files-error「没有与所选文件兼容的已安装实例…」— 与上面 SelectMenu 二选一，默认 Collapsed -->
+                    <TextBlock x:Name="DownloadNoInstance" Visibility="Collapsed" FontSize="13"
+                               Foreground="{DynamicResource Danger}" Margin="0,4" TextWrapping="Wrap"
+                               Text="没有与所选文件兼容的已安装实例；可调整文件筛选，或在游戏版本页安装。"/>
+
+                    <!-- .pack-tip（:689，样式 :1069-1072）：muted 13px / margin-top 16 — 整合包分支（v-else）才显示 → 默认 Collapsed -->
+                    <TextBlock x:Name="DownloadPackTip" Visibility="Collapsed" Style="{StaticResource Dim}"
+                               FontSize="13" Margin="0,16,0,0" TextWrapping="Wrap"
+                               Text="整合包将下载后自动创建独立实例并安装"/>
+
+                    <!-- .modal-actions（:691-697，样式 :1073-1079）：flex end / gap 12 / margin-top 24 / wrap。
+                         .btn.btn-ghost 取消 + .btn.btn-gold（含 v-if downloading 的 .spin，文案 确认下载/下载中…）。都是全尺寸 .btn(36)。 -->
+                    <WrapPanel HorizontalAlignment="Right" Margin="0,24,0,0">
+                        <Button x:Name="DownloadCancelBtn" Style="{StaticResource BtnGhost}" Content="取消"
+                                Margin="0,0,12,0"/>
+                        <Button x:Name="DownloadConfirmBtn" Style="{StaticResource BtnGold}">
+                            <StackPanel Orientation="Horizontal">
+                                <ContentControl Style="{StaticResource Spin}" Margin="0,0,8,0" Visibility="Collapsed"
+                                        x:Name="DownloadSpin"/>
+                                <TextBlock x:Name="DownloadConfirmText" Text="确认下载" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                    </WrapPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Border>
+
+    <!-- ==================== ModInstallDialog（:701 引用 → components/ModInstallDialog.vue） ====================
+         .modal-mask（:31 内联 z-index 10020）＋ .modal.modinstall-modal（:48-52 width min(640,100vw-40) / max-height 85vh / scroll）＋
+         通用 .modal 底（card-solid/border/radius 14/padding 24/shadow-lg）。v-if modRequest → 默认 Collapsed。 -->
+    <Border x:Name="ModInstallModal" Panel.ZIndex="10020" Visibility="Collapsed"
+            HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{DynamicResource Overlay}">
+        <Border Style="{StaticResource CmModal}" Width="640" MaxHeight="700">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <!-- .modal-title 16/700 margin 0 0 8（:33 + :53-57） -->
+                    <TextBlock FontSize="16" FontWeight="Bold" Margin="0,0,0,8" Text="安装 MOD 与前置"/>
+                    <!-- .modinstall-sub（:34 + :58-63）：muted 12 / margin 0 / line-height 1.6 / word-break；主行 + 换行 folder。代码注入实例信息 -->
+                    <TextBlock x:Name="ModInstallSub" FontSize="12" Foreground="{DynamicResource Fg2}" LineHeight="19"
+                               LineStackingStrategy="BlockLineHeight" TextWrapping="Wrap"
+                               Text="实例 · MC 版本 · Loader&#10;实例目录"/>
+                    <!-- .modal-loading（:35 + :64-69）：flex center gap 12 / padding 16 0，.spin + .muted。v-if busy → 默认 Collapsed -->
+                    <StackPanel x:Name="ModInstallLoading" Visibility="Collapsed" Orientation="Horizontal"
+                                HorizontalAlignment="Center" Margin="0,16">
+                        <ContentControl Style="{StaticResource Spin}" Margin="0,0,12,0"/>
+                        <TextBlock Style="{StaticResource Dim}" VerticalAlignment="Center"
+                                   Text="正在读取 MOD 元数据与递归前置关系…"/>
+                    </StackPanel>
+
+                    <!-- .dependency-row（:37 + :70）：flex center gap 12 / min-height row-h 42 / padding 8 0 / border-bottom 1。
+                         v-for plan.files → 有 .tag（缺失前置/所选 MOD，用基态 .tag＝ChipBg+Fg2）+ .dependency-name（flex1，两行 MarqueeText：文件/版本）。
+                         两条几何占位，plan 未载入时整块 Collapsed。 -->
+                    <StackPanel x:Name="ModInstallDeps" Visibility="Collapsed">
+                        <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="0,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource Tag}">
+                                    <TextBlock Style="{StaticResource TagText}" Text="所选 MOD"/>
+                                </Border>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock FontSize="14" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                               Text="sodium-0.5.8+mc1.20.1.jar"/>
+                                    <TextBlock FontSize="14" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                               Text="0.5.8"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                        <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" Padding="0,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Style="{StaticResource Tag}">
+                                    <TextBlock Style="{StaticResource TagText}" Text="缺失前置"/>
+                                </Border>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock FontSize="14" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                               Text="fabric-api-0.92.1.jar"/>
+                                    <TextBlock FontSize="14" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                               Text="0.92.1"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- .modal-note（:38 + :72）：13px / line-height 1.6 / text-dim。v-if plan.missing.length → 默认 Collapsed -->
+                    <TextBlock x:Name="ModInstallMissing" Visibility="Collapsed" FontSize="13" LineHeight="21"
+                               LineStackingStrategy="BlockLineHeight" Foreground="{DynamicResource Fg2}"
+                               TextWrapping="Wrap" Text="元数据要求："/>
+                    <!-- .modal-error（:39 + :73）：danger / pre-wrap / 13px，v-for plan.warnings → 默认 Collapsed -->
+                    <TextBlock x:Name="ModInstallWarning" Visibility="Collapsed" FontSize="13"
+                               Foreground="{DynamicResource Danger}" TextWrapping="Wrap"/>
+                    <!-- :40 固定的那条 .modal-note（有 plan 时常驻） -->
+                    <TextBlock x:Name="ModInstallNote" Visibility="Collapsed" FontSize="13" LineHeight="21"
+                               LineStackingStrategy="BlockLineHeight" Foreground="{DynamicResource Fg2}"
+                               TextWrapping="Wrap"
+                               Text="是否一键下载缺失前置并安装？已有兼容前置将复用；若检测到冲突，将停止且不覆盖原文件。"/>
+                    <!-- .modal-error（:42 + :73）：v-if error，出错文案 → 默认 Collapsed -->
+                    <TextBlock x:Name="ModInstallError" Visibility="Collapsed" FontSize="13"
+                               Foreground="{DynamicResource Danger}" TextWrapping="Wrap"/>
+
+                    <!-- .modal-actions（:43 + :74）：flex end / gap 12 / margin-top 24 / wrap。
+                         .btn.btn-ghost（取消 / 关闭并重新选择）+ .btn.btn-gold（v-if plan：确认安装 / 一键下载前置并安装）。 -->
+                    <WrapPanel HorizontalAlignment="Right" Margin="0,24,0,0">
+                        <Button x:Name="ModInstallCancel" Style="{StaticResource BtnGhost}" Content="取消"
+                                Margin="0,0,12,0"/>
+                        <Button x:Name="ModInstallConfirm" Style="{StaticResource BtnGold}" Visibility="Collapsed"
+                                Content="确认安装"/>
+                    </WrapPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Border>
+
+    <!-- ==================== SelectMenu 浮层 .select-menu-float（SelectMenu.vue:86-103，样式 :131-170） ====================
+         closed 按钮（.select-menu-btn）本页已用 SelectBtn 表达（:74-84）；这里补 open 列表。
+         .select-menu-float（:131-146）：fixed / z 11000 / column gap space-1 4 / padding space-2 8 / border 1 border / radius radius-md 10 /
+         底 card-solid 96%（＝Card）+ blur 24（代码 MaskBlur）/ shadow。left/top/minWidth/maxHeight 由 :33-41 按锚点矩形算 → 标称位，主控代码定位。
+         .select-menu-option（:147-166）：flex gap 8 / min-height row-h 42 / padding 4 12 / radius radius-sm 6 / 13px / text；
+         hover＝底 hover(:165)；.active＝底 accent-soft + 字混 accent(:166) + 600。右侧 v-if 选中项有 check svg（accent，:100）。
+         标签是 .select-menu-option-label：grid gap 3，含 label + 可选 small（12px text-dim，:170）。
+         .select-menu-empty（:102 + :168）：flex center / min-height row-h 42 / padding 12 / text-dim / 12px。
+         一个代表浮层（三条选项 + 空态），v-if open → 默认 Collapsed。 -->
+    <Border x:Name="SelectMenuFloat" Panel.ZIndex="11000" Visibility="Collapsed" MinWidth="180" MaxWidth="360"
+            HorizontalAlignment="Left" VerticalAlignment="Top" Margin="24,150,0,0"
+            Background="{DynamicResource Card}" BorderBrush="{DynamicResource Line}" BorderThickness="1"
+            CornerRadius="10" Padding="8">
+        <ScrollViewer MaxHeight="320" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <!-- 选中项：底 accent-soft + 右侧 check -->
+                <Button Style="{StaticResource CmSelectOption}" Background="{DynamicResource AccentSoft}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource Fg}"
+                                       TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Text="全部来源"/>
+                            <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}" Margin="0,3,0,0"
+                                       TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Text="Modrinth / CurseForge"/>
+                        </StackPanel>
+                        <ContentControl Grid.Column="2" Width="14" Height="14" VerticalAlignment="Center"
+                                        Foreground="{DynamicResource Accent}" Style="{DynamicResource Icon.Check}"/>
+                    </Grid>
+                </Button>
+                <!-- 普通项（label 单行，无描述） -->
+                <Button Style="{StaticResource CmSelectOption}">
+                    <TextBlock FontSize="13" Foreground="{DynamicResource Fg}" TextTrimming="CharacterEllipsis"
+                               TextWrapping="NoWrap" Text="Modrinth"/>
+                </Button>
+                <Button Style="{StaticResource CmSelectOption}">
+                    <TextBlock FontSize="13" Foreground="{DynamicResource Fg}" TextTrimming="CharacterEllipsis"
+                               TextWrapping="NoWrap" Text="CurseForge"/>
+                </Button>
+                <!-- .select-menu-empty「无可选项」：无选项时显示 → 默认 Collapsed -->
+                <Border x:Name="SelectMenuEmpty" Visibility="Collapsed" MinHeight="42">
+                    <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}" TextAlignment="Center"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" Text="无可选项"/>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </Border>
+
+    </Grid>
 </UserControl>

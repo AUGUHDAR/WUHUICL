@@ -374,6 +374,29 @@
         <Setter Property="HorizontalAlignment" Value="Right"/>
     </Style>
 
+    <!-- .spin：加载指示环。原版 14×14、border 2 color-mix(accent 16%)、顶边 accent、50% 圆角
+         （GameView.vue:2016 / HomeView.vue:944 / ContentSkeleton.vue）。
+         必须挂在 ContentControl 上：WPF 的 Border 没有 Template 属性，样式里给 Template 会报 MC4005。
+         旋转动画归 UI_MOTION 待办（0.8s linear infinite）。 -->
+    <Style x:Key="Spin" TargetType="ContentControl">
+        <Setter Property="Width" Value="14"/>
+        <Setter Property="Height" Value="14"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ContentControl">
+                    <Grid>
+                        <Border CornerRadius="7" BorderThickness="2"
+                                BorderBrush="{DynamicResource AccentSoft}"/>
+                        <Path Data="M1,7 A6,6 0 0,1 13,7" Stroke="{DynamicResource Accent}"
+                              StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                              Fill="{x:Null}"/>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- .win-btn：38×36 -->
     <Style x:Key="WinBtn" TargetType="Button">
         <Setter Property="Width" Value="38"/>
