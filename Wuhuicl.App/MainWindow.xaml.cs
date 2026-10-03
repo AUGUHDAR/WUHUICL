@@ -688,6 +688,8 @@ public partial class MainWindow : Window
     /// .theme-preview：46×32 radius 5（:1865），内部 .tp-side 9px、.tp-top 6px、.tp-dot 4×4、.tp-btn 4px（:1869）
     /// .tp-check：14×14 贴右上（:1869）——原版靠 JS 换选中态，这里在重建列表时按当前主题给可见性。
     /// </summary>
+    const double ChipMin = 145, ChipGap = 8;   // .theme-options：auto-fit minmax(145px,1fr) gap 8（SettingsView.vue:1862）
+
     void BuildThemeChips(string current)
     {
         ThemePanel.Children.Clear();
@@ -700,12 +702,26 @@ public partial class MainWindow : Window
                 Tag = t.Id,
                 IsChecked = current == t.Id,
                 FontSize = 13,
-                Margin = new Thickness(0, 0, 8, 8),
+                Margin = new Thickness(0, 0, ChipGap, ChipGap),
                 Style = (Style)FindResource("ThemeChip"),
             };
             rb.Checked += Theme_Changed;
             ThemePanel.Children.Add(rb);
         }
+        LayoutThemeChips();
+        ThemePanel.SizeChanged += (_, _) => LayoutThemeChips();
+    }
+
+    /// <summary>WPF 的 WrapPanel 没有 auto-fit：列数按可用宽度取，列宽再等分回去，
+    /// 否则卡片会缩成内容宽度（原版是一排等宽铺满）。</summary>
+    void LayoutThemeChips()
+    {
+        double w = ThemePanel.ActualWidth;
+        if (w <= 0 || ThemePanel.Children.Count == 0) return;
+        int cols = Math.Max(1, (int)((w + ChipGap) / (ChipMin + ChipGap)));
+        double col = (w - ChipGap * (cols - 1)) / cols;
+        foreach (var c in ThemePanel.Children.OfType<RadioButton>())
+            c.Width = col;
     }
 
     static FrameworkElement BuildThemeOption((string Id, string Name, string File, bool Dark) t, bool selected)
@@ -735,13 +751,14 @@ public partial class MainWindow : Window
         Grid.SetColumn(top, 1);
         grid.Children.Add(top);
 
-        var body = new Grid { Margin = new Thickness(4, 3, 4, 3) };
+        var body = new Grid { Margin = new Thickness(3) };   // .tp-body{padding:3px}（:1869）
         body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(4) });
         body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         body.Children.Add(new Border
         {
             Width = 4, Height = 4, CornerRadius = new CornerRadius(2),
-            Background = B("C.Fg2"), HorizontalAlignment = HorizontalAlignment.Left,
+            // .tp-dot 的底色是这套主题自己的 accent（SettingsView.vue:640 内联），不是 text-dim
+            Background = B("C.Accent"), HorizontalAlignment = HorizontalAlignment.Left,
         });
         var btn = new Border
         {

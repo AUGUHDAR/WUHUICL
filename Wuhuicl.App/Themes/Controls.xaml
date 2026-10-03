@@ -1292,7 +1292,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="b" Background="{DynamicResource CardSoft}"
+                    <Border x:Name="b" Background="{DynamicResource CardSoft}" MinHeight="48"
                             BorderBrush="{DynamicResource Line}" BorderThickness="1"
                             CornerRadius="6" Padding="8,6">
                         <ContentPresenter VerticalAlignment="Center"/>
