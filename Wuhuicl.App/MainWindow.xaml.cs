@@ -502,12 +502,7 @@ public partial class MainWindow : Window
         Show("settings", sender as RadioButton);
         TxtJava.Focus();
     }
-    void OpenDl_Click(object sender, RoutedEventArgs e)
-    {
-        NavVersions.IsChecked = true;
-        Show("versions", sender as RadioButton);
-        _s.Log("下载中心：原版在这里列出所有在传任务；当前任务进度显示在安装卡的进度条上。");
-    }
+    void OpenDl_Click(object sender, RoutedEventArgs e) => ShowFloat(DlPanel);
     internal void GotoMemory_Click(object sender, RoutedEventArgs e)
     {
         NavSettings.IsChecked = true;
@@ -531,14 +526,33 @@ public partial class MainWindow : Window
     }
 
     System.Windows.Controls.Image? _logBlur;
-    void History_Click(object sender, RoutedEventArgs e)
-        => _s.Log("更新日志（changelog）下一轮接入。");
+    void History_Click(object sender, RoutedEventArgs e) => ShowFloat(NotesPanel);
 
     /// <summary>App.vue:1342 onImportClick：拉起文件选择，把外部 MOD/世界/皮肤导入当前实例。</summary>
     void Import_Click(object sender, RoutedEventArgs e)
         => _s.Log("导入向导下一轮接入。");
-    void Notice_Click(object sender, RoutedEventArgs e)
-        => _s.Log("通知中心下一轮接入。");
+    void Notice_Click(object sender, RoutedEventArgs e) => ShowFloat(NoticePanel);
+
+    /// <summary>
+    /// 通知 / 更新日志 / 下载中心三个浮层：原版是各自 v-if，配一个 z:9000 的 .notice-mask
+    /// 点空白关闭（App.vue:1396-1443）。这里同样互斥，再点一次或点遮罩收起。
+    /// </summary>
+    void ShowFloat(FrameworkElement panel)
+    {
+        bool open = panel.Visibility != Visibility.Visible;
+        NoticePanel.Visibility = open && ReferenceEquals(panel, NoticePanel) ? Visibility.Visible : Visibility.Collapsed;
+        NotesPanel.Visibility = open && ReferenceEquals(panel, NotesPanel) ? Visibility.Visible : Visibility.Collapsed;
+        DlPanel.Visibility = open && ReferenceEquals(panel, DlPanel) ? Visibility.Visible : Visibility.Collapsed;
+        FloatMask.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        if (open)
+        {
+            // .notice-mask 是透明的，只负责点外面关掉面板
+            Panel.SetZIndex(FloatMask, 0);
+            Panel.SetZIndex(panel, 1);
+        }
+    }
+
+    void FloatMask_Click(object sender, MouseButtonEventArgs e) => ShowFloat(FloatMask);
     internal void AccountMenu_Click(object sender, RoutedEventArgs e)
     {
         // 原版账号卡上的 ⋯ 是切到 accounts 视图，不是跳设置

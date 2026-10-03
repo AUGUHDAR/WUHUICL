@@ -5,6 +5,7 @@
   NavPill       .nav-bubble 的底色            = 135°(accent-soft 80%→transparent → hover)  App.vue:1842
   AccentHiSoft  .loader-badge 的边框          = color-mix(accent-2 34%, transparent) HomeView.vue:831
   BarFill       .dl-bar-fill / .mem-slider-fill = 90°(accent-2 → accent)            App.vue:2281 / SettingsView.vue:1719
+  AccentPick    勾选行底 = color-mix(accent 5%, transparent)          FileManager.vue:719
   ChipBg        .tag 的底                     = color-mix(text-dim 14%, transparent) styles.css:469
   LoaderBg      .loader-badge 的底            = color-mix(accent 30%, rgba(20,30,24,.46)) HomeView.vue:831
   LogBody       .log-body 的底                = color-mix(bg 42%, transparent)      HomeView.vue:978
@@ -36,6 +37,9 @@ SOFT_LIGHT = .10    # 同上（浅色）；--danger-soft 浅色是 .08，单列
 DANGER_SOFT_LIGHT = .08
 DANGER_BORDER_DARK = .34
 DANGER_BORDER_LIGHT = .30
+PANEL_16 = .16     # .drop-mask 底 = accent 16%      App.vue:2421
+PANEL_8 = .08      # .drop-box 底 = accent 8% 叠 card  App.vue:2432
+PICK_MIX = .05      # .fm-row:has(>input:checked) 底 = color-mix(accent 5%, transparent)  FileManager.vue:719
 CHIP_MIX = .14      # .tag 底 = color-mix(text-dim 14%, transparent)  styles.css:469
 LOADER_MIX = .30    # .loader-badge 底 = color-mix(accent 30%, rgba(20,30,24,.46))  HomeView.vue:831
 LOADER_BASE = (20, 30, 24, .46)
@@ -119,6 +123,9 @@ def build_block(text):
         f"  <SolidColorBrush x:Key=\"DangerSoft\" Color=\"{rgba(danger[:3], danger_soft_a)}\"/>\n"
         f"  <SolidColorBrush x:Key=\"DangerBorder\" Color=\"{rgba(danger[:3], danger_border_a)}\"/>\n"
         f"  <SolidColorBrush x:Key=\"ChipBg\" Color=\"{rgba(fg2[:3], CHIP_MIX)}\"/>\n"
+        f"  <SolidColorBrush x:Key=\"AccentPick\" Color=\"{rgba(accent[:3], PICK_MIX)}\"/>\n"
+        f"  <SolidColorBrush x:Key=\"Accent16\" Color=\"{rgba(accent[:3], PANEL_16)}\"/>\n"
+        f"  <SolidColorBrush x:Key=\"Accent8\" Color=\"{rgba(accent[:3], PANEL_8)}\"/>\n"
         f"  <SolidColorBrush x:Key=\"LoaderBg\" Color=\"{loader_bg(accent[:3])}\"/>\n"
         f"  <SolidColorBrush x:Key=\"LogBody\" Color=\"{rgba(bg[:3], LOG_MIX)}\"/>\n"
         f"  <SolidColorBrush x:Key=\"Idle\" Color=\"#FF9CA3AF\"/>\n"

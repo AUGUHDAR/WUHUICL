@@ -202,19 +202,21 @@
                         <StackPanel Grid.Column="2" Orientation="Horizontal"
                                     HorizontalAlignment="Right" VerticalAlignment="Center">
                             <!-- App.vue:1333 下载按钮 v-if currentView !== home；首页只有有下载任务时才出图标钮 -->
-                            <Button x:Name="BtnTopDownload" Style="{StaticResource TopBtn}" Click="OpenDl_Click">
+                            <Button x:Name="BtnTopDownload" Style="{StaticResource TopBtn}" Margin="0" Click="OpenDl_Click">
                                 <StackPanel Orientation="Horizontal">
                                     <ContentControl Width="15" Height="15" VerticalAlignment="Center"
                                                     Style="{DynamicResource Icon.Download}"/>
                                     <TextBlock Text="下载" Margin="8,0,0,0" VerticalAlignment="Center"/>
-                                    <Border x:Name="DlBadge" Style="{StaticResource Tag}" Margin="8,0,0,0"
-                                            Background="{DynamicResource Accent}" Visibility="Collapsed">
-                                        <TextBlock x:Name="DlBadgeText" Text="0" FontSize="11" Foreground="#FFFFFFFF"/>
+                                    <Border x:Name="DlBadge" Style="{StaticResource DlBadge}"
+                                            Margin="8,0,0,0" Visibility="Collapsed">
+                                        <TextBlock x:Name="DlBadgeText" Text="0" FontSize="12" FontWeight="Bold"
+                                                   Foreground="{DynamicResource AccentFg}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                     </Border>
                                 </StackPanel>
                             </Button>
                             <!-- App.vue:1342 导入按钮：与下载同为 .top-btn，同样只在非首页出现 -->
-                            <Button x:Name="BtnTopImport" Style="{StaticResource TopBtn}" Margin="8,0,0,0"
+                            <Button x:Name="BtnTopImport" Style="{StaticResource TopBtn}" Margin="4,0,0,0"
                                     Click="Import_Click">
                                 <StackPanel Orientation="Horizontal">
                                     <ContentControl Width="15" Height="15" VerticalAlignment="Center"
@@ -224,15 +226,23 @@
                             </Button>
                             <!-- App.vue:1359 首页那个图标钮是「更新日志」而不是历史列表（Icon.Changelog 本来就对）；
                                  App.vue:1351 另有一个「下载中心」图标钮，只在首页且有活动任务时出现，等下载队列接入再补 -->
-                            <Button x:Name="BtnTopHistory" Style="{StaticResource IconBtn}" Width="36" Margin="4,0,0,0"
+                            <Button x:Name="BtnTopHistory" Style="{StaticResource TopIconBtn}" Margin="4,0,0,0"
                                     ToolTip="更新日志" Click="History_Click">
-                                <ContentControl Width="15" Height="15" Style="{DynamicResource Icon.Changelog}"/>
+                                <ContentControl Width="17" Height="17" Style="{DynamicResource Icon.Changelog}"/>
                             </Button>
-                            <Button Style="{StaticResource IconBtn}" Width="36" Margin="2,0,0,0"
+                            <Button Style="{StaticResource TopIconBtn}" Margin="4,0,0,0"
                                     ToolTip="通知" Click="Notice_Click">
-                                <ContentControl Width="15" Height="15" Style="{DynamicResource Icon.Bell}"/>
+                                <Grid>
+                                    <ContentControl Width="17" Height="17" Style="{DynamicResource Icon.Bell}"/>
+                                    <!-- .bell-dot：7×7 圆点，absolute top 7 / right 8，描边 1.5 走 bg-2
+                                         （App.vue:1371 + :2121-2129），有未读通知时才出现 -->
+                                    <Ellipse x:Name="BellDot" Width="7" Height="7" Fill="{DynamicResource Accent}"
+                                             Stroke="{DynamicResource NavBg}" StrokeThickness="1.5"
+                                             HorizontalAlignment="Right" VerticalAlignment="Top"
+                                             Margin="0,7,8,0" Visibility="Collapsed"/>
+                                </Grid>
                             </Button>
-                            <Border Width="1" Height="18" Background="{DynamicResource Line}" Margin="10,0"/>
+                            <Border Width="1" Height="20" Background="{DynamicResource Line}" Margin="8,0"/>
                             <Button x:Name="BtnMin" Style="{StaticResource WinBtn}" Click="Min_Click">
                                 <ContentControl Width="15" Height="15" Style="{DynamicResource Icon.Minimize}"/>
                             </Button>
@@ -379,6 +389,126 @@
                         </Border>
                     </DockPanel>
                 </Border>
+            </Border>
+
+            <!-- ============ 浮层族：Toast / 通知 / 更新日志 / 下载中心 / 拖拽遮罩 ============
+                 原版这些都是 Teleport 到 body 的 fixed 层，这里统一挂在 ShellHost 顶层。
+                 .notice-mask：fixed inset 0 / z 9000，透明，点空白处关闭（App.vue:2141-2145）。 -->
+            <Border x:Name="FloatMask" Background="Transparent" Visibility="Collapsed"
+                    MouseLeftButtonUp="FloatMask_Click"/>
+
+            <!-- .toasts：fixed top 76 / right 24 / column gap 8 / z 200 / pointer-events none
+                 （Toasts.vue:38-43） -->
+            <ItemsControl x:Name="ToastHost" IsHitTestVisible="False" Visibility="Collapsed"
+                          HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,76,24,0">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><StackPanel/></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource Toast}" Margin="0,0,0,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="3"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- .toast 左边线是 3px 的 tone 色（border-left-width:3）；
+                                     WPF 的 Border 不能四边异色，用一条 3 宽色条等价表达 -->
+                                <Border Grid.Column="0" Background="{Binding Tone, Converter={StaticResource BrushByKey}}"
+                                        CornerRadius="10,0,0,10"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0">
+                                    <Ellipse Width="8" Height="8" VerticalAlignment="Center"
+                                             Fill="{Binding Tone, Converter={StaticResource BrushByKey}}"/>
+                                    <TextBlock Text="{Binding Text}" Margin="12,0,0,0" FontSize="13"
+                                               LineHeight="20" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- .notice-panel：fixed top 82 / right 92 / w 320 / max-h 420 / column /
+                 radius 14 / border 1 / shadow-lg（App.vue:2176-2195） -->
+            <Border x:Name="NoticePanel" Style="{StaticResource FloatPanel}"
+                    Width="320" MaxHeight="420" HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Margin="0,82,92,0">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Style="{StaticResource FloatPanelHead}">
+                        <Grid>
+                            <TextBlock FontSize="14" FontWeight="Bold" Text="通知"/>
+                            <Button Style="{StaticResource IconBtn}" Width="28" Height="28"
+                                    HorizontalAlignment="Right" Content="&#xE711;" Click="Notice_Click"/>
+                        </Grid>
+                    </Border>
+                    <!-- .notice-empty：min-height 96 / padding 16 / 居中 / text-dim 13（App.vue:2208-2216） -->
+                    <StackPanel x:Name="NoticeEmpty" MinHeight="96">
+                        <TextBlock Text="暂时没有通知" FontSize="13" Foreground="{DynamicResource Fg2}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   Margin="16" TextAlignment="Center"/>
+                    </StackPanel>
+                    <!-- .notice-list：overflow-y auto（App.vue:2217）。列表数据未接入 → 这里不放 ItemsSource：
+                         绑一个不存在的属性只会静默失效，接线等通知源就绪后由主控完成 -->
+                    <ItemsControl x:Name="NoticeList" MaxHeight="330"/>
+                </DockPanel>
+            </Border>
+
+            <!-- .notice-panel.notes-panel：w 380 / max-h 480；.notes-list padding 2 16 16（App.vue:2146-2175） -->
+            <Border x:Name="NotesPanel" Style="{StaticResource FloatPanel}"
+                    Width="380" MaxHeight="480" HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Margin="0,82,92,0">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Style="{StaticResource FloatPanelHead}">
+                        <Grid>
+                            <TextBlock FontSize="14" FontWeight="Bold" Text="更新日志"/>
+                            <Button Style="{StaticResource IconBtn}" Width="28" Height="28"
+                                    HorizontalAlignment="Right" Content="&#xE711;" Click="History_Click"/>
+                        </Grid>
+                    </Border>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16,2,16,16">
+                        <ItemsControl x:Name="NotesList"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <!-- .notice-panel.dl-panel：w 380；.dl-item padding 12 16 + 下边线（App.vue:2236-2312） -->
+            <Border x:Name="DlPanel" Style="{StaticResource FloatPanel}"
+                    Width="380" MaxHeight="480" HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Margin="0,82,92,0">
+                <DockPanel>
+                    <Border DockPanel.Dock="Top" Style="{StaticResource FloatPanelHead}">
+                        <Grid>
+                            <TextBlock FontSize="14" FontWeight="Bold" Text="下载中心"/>
+                            <Button Style="{StaticResource IconBtn}" Width="28" Height="28"
+                                    HorizontalAlignment="Right" Content="&#xE711;" Click="OpenDl_Click"/>
+                        </Grid>
+                    </Border>
+                    <StackPanel x:Name="DlEmpty" MinHeight="96">
+                        <TextBlock Text="当前没有下载任务" FontSize="13" Foreground="{DynamicResource Fg2}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" Margin="16"/>
+                    </StackPanel>
+                    <ItemsControl x:Name="DlList" MaxHeight="380"/>
+                </DockPanel>
+            </Border>
+
+            <!-- .drop-mask：fixed inset 0 / z 9999 / 居中 / 底 accent 16%（App.vue:2419-2426）
+                 .drop-box：column 居中 gap 16 / padding 48 / border 2 dashed accent / radius 14 /
+                 底 accent 8% / 字 accent；svg 48×48；.drop-title 16/600（App.vue:2428-2449）。
+                 WPF 的 Border 画不出 dashed，虚线用同位置 Rectangle 叠出来。 -->
+            <Border x:Name="DropMask" Background="{DynamicResource Accent16}" Visibility="Collapsed">
+                <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Width="320" Height="180">
+                    <Border Background="{DynamicResource Accent8}" CornerRadius="14"/>
+                    <Rectangle RadiusX="14" RadiusY="14" Stroke="{DynamicResource Accent}" StrokeThickness="2"
+                               StrokeDashArray="4 3"/>
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <ContentControl Width="48" Height="48" HorizontalAlignment="Center"
+                                        Foreground="{DynamicResource Accent}"
+                                        Style="{DynamicResource Icon.Upload}"/>
+                        <TextBlock Text="松开即导入" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Accent}"
+                                   HorizontalAlignment="Center" Margin="0,16,0,0"/>
+                    </StackPanel>
+                </Grid>
             </Border>
         </Grid>
     </Border>

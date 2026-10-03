@@ -53,6 +53,9 @@
   <SolidColorBrush x:Key="DangerSoft" Color="#21FF6B73"/>
   <SolidColorBrush x:Key="DangerBorder" Color="#57FF6B73"/>
   <SolidColorBrush x:Key="ChipBg" Color="#24B4B4B4"/>
+  <SolidColorBrush x:Key="AccentPick" Color="#0D9475ED"/>
+  <SolidColorBrush x:Key="Accent16" Color="#299475ED"/>
+  <SolidColorBrush x:Key="Accent8" Color="#149475ED"/>
   <SolidColorBrush x:Key="LoaderBg" Color="#9F52487F"/>
   <SolidColorBrush x:Key="LogBody" Color="#6B232323"/>
   <SolidColorBrush x:Key="Idle" Color="#FF9CA3AF"/>

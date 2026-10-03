@@ -234,6 +234,18 @@
         <Setter Property="ctl:CssRadius.Round" Value="6"/>
     </Style>
 
+    <!-- .btn.btn-sm.btn-ghost：32 高 / 13px / radius 6 / card-2 底 + 描边，hover 描边转强
+         （styles.css:220-238 的 .btn-ghost 叠 :258-263 的 .btn-sm，原版版本行每行一个） -->
+    <Style x:Key="BtnSmGhost" TargetType="Button" BasedOn="{StaticResource BtnSm}">
+        <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="BorderBrush" Value="{DynamicResource BorderStrong}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
     <!-- .icon-btn：32×32，radius 6，内层 svg 16×16 -->
     <Style x:Key="IconBtn" TargetType="Button">
         <Setter Property="Width" Value="32"/>
@@ -241,15 +253,19 @@
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
         <Setter Property="Cursor" Value="Hand"/>
+        <!-- 圆角走 CssRadius.Round，默认 6 = .icon-btn（styles.css:281）；顶栏图标钮要 10 -->
+        <Setter Property="ctl:CssRadius.Round" Value="6"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="6"
+                    <Border x:Name="b" Background="{TemplateBinding Background}"
+                            CornerRadius="{Binding Path=(ctl:CssRadius.Round), RelativeSource={RelativeSource TemplatedParent}}"
                             RenderTransformOrigin="0.5,0.5">
                         <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
                         <Grid>
                             <!-- hover 底色用独立覆盖层做透明度渐变：直接动画 Background 会改到共享的主题画刷 -->
-                            <Border x:Name="hv" Background="{DynamicResource CardSoft}" CornerRadius="6" Opacity="0"/>
+                            <Border x:Name="hv" Background="{DynamicResource CardSoft}" Opacity="0"
+                                    CornerRadius="{Binding Path=(ctl:CssRadius.Round), RelativeSource={RelativeSource TemplatedParent}}"/>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Grid>
                     </Border>
@@ -294,6 +310,68 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <!-- .top-icon-btn：36×36、radius-md 10、底透明、字 text-dim，hover 底 card-2 + 字 text，
+         内层 svg 17×17（App.vue:2099-2118）。跟 .icon-btn（32/r6/hover accent-2/15px）不是一种东西，
+         之前顶栏直接复用 IconBtn，尺寸、圆角、hover 色全偏。 -->
+    <Style x:Key="TopIconBtn" TargetType="Button" BasedOn="{StaticResource IconBtn}">
+        <Setter Property="Width" Value="36"/>
+        <Setter Property="Height" Value="36"/>
+        <Setter Property="ctl:CssRadius.Round" Value="10"/>
+        <Style.Triggers>
+            <!-- 样式触发器优先级高于模板触发器，所以这里能压住 IconBtn 的 hover accent-2 -->
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- .dl-badge：下载数角标，min-width 16 / 高 16 / padding 0 4 / radius 999（=8）/
+         底 accent / 字 on-accent 12·700 居中（App.vue:2224-2235）。
+         别用 .tag 的 Tag 样式：那是 padding 2 8 + 1px 边框 + line-height 1.6 ≈ 25 高，大一圈。 -->
+    <Style x:Key="DlBadge" TargetType="Border">
+        <Setter Property="MinWidth" Value="16"/>
+        <Setter Property="Height" Value="16"/>
+        <Setter Property="Padding" Value="4,0"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Background" Value="{DynamicResource Accent}"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+
+    <!-- ============ 浮层面板（通知 / 更新日志 / 下载中心） ============ -->
+    <!-- .notice-panel 基线：radius var(radius) 14、border 1 border、底 card-solid 94%、shadow-lg、overflow hidden
+         （App.vue:2176-2195）。宽度与 top/right 各面板不同，写在宿主上。
+         原版还有 backdrop-filter blur(24) saturate(130%)：WPF 没有窗口内实时背景模糊，
+         这里用不透明 Card 底近似（面板本来就压在内容上），差值记在 UI_LAYERS.md。 -->
+    <Style x:Key="FloatPanel" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource Card}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="14"/>
+        <Setter Property="ClipToBounds" Value="True"/>
+        <Setter Property="Effect" Value="{DynamicResource PopShadow}"/>
+        <Setter Property="Visibility" Value="Collapsed"/>
+    </Style>
+
+    <!-- .notice-head：flex / space-between / padding 12 16 / 下边线 1（App.vue:2196-2201） -->
+    <Style x:Key="FloatPanelHead" TargetType="Border">
+        <Setter Property="Padding" Value="16,12"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+        <Setter Property="BorderThickness" Value="0,0,0,1"/>
+    </Style>
+
+    <!-- .toast：flex gap 12 / max-width 360 / padding 12 16 / radius 10 / 底 surface-raised /
+         border 1 + 左边 3（tone 色）/ shadow-lg / 13px lh 1.5（Toasts.vue:44-56） -->
+    <Style x:Key="Toast" TargetType="Border">
+        <Setter Property="MaxWidth" Value="360"/>
+        <Setter Property="Padding" Value="16,12"/>
+        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="Background" Value="{DynamicResource Card}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Effect" Value="{DynamicResource PopShadow}"/>
+        <Setter Property="HorizontalAlignment" Value="Right"/>
     </Style>
 
     <!-- .win-btn：38×36 -->
@@ -1092,7 +1170,8 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="track" Property="Background" Value="{DynamicResource AccentGrad}"/>
+                            <!-- 原版选中态是纯色 accent（styles.css:396-399），不是 accent-grad -->
+                            <Setter TargetName="track" Property="Background" Value="{DynamicResource Accent}"/>
                             <Setter TargetName="track" Property="BorderBrush" Value="{DynamicResource Accent}"/>
                             <Setter TargetName="knob" Property="Fill" Value="{DynamicResource AccentFg}"/>
                             <Setter TargetName="knob" Property="Margin" Value="21,0,0,0"/>

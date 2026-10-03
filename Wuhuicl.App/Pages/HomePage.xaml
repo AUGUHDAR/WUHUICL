@@ -455,17 +455,49 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- CreatorCard 位：这一版能做什么 -->
-                        <Border Margin="0,16,0,0" Padding="20" CornerRadius="14"
+                        <!-- ============ CreatorCard（components/CreatorCard.vue:11-32）============
+                             原版右侧栏最后一张卡是「参与测试及创作者」，鼠标进入才展开 20 个名字气泡。
+                             之前这里是我自造的「这一版能做什么」说明卡，原版没有这个东西，删掉。
+                             .creator-card：padding card-pad 20 / border 1 border / radius radius-lg 14 /
+                             底 surface-content（=Card）/ overflow hidden — CreatorCard.vue:13 -->
+                        <Border x:Name="CreatorCard" Margin="0,16,0,0" Padding="20" CornerRadius="14"
                                 Background="{DynamicResource Card}"
-                                BorderBrush="{DynamicResource AccentSoft}" BorderThickness="1">
+                                BorderBrush="{DynamicResource Line}" BorderThickness="1" ClipToBounds="True">
                             <StackPanel>
-                                <TextBlock Text="这一版能做什么" FontSize="14" FontWeight="SemiBold"/>
-                                <TextBlock Text="ALPHA · 0.1.0" FontSize="11" Margin="0,4,0,0"
-                                           Foreground="{DynamicResource Fg2}"/>
-                                <TextBlock FontSize="12" LineHeight="20" Margin="0,12,0,0"
-                                           Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
-                                           Text="已接通：版本清单与继承链、客户端与库与资源的并发下载与 SHA1 校验、Java 自动匹配、classpath 组装与游戏启动、离线账号、6 套主题。下一轮接入：微软正版与外置登录、整合包与 MOD、皮肤上传、3D 预览、联机。"/>
+                                <!-- .creator-heading：flex / center / space-between / gap 12（:14） -->
+                                <Grid>
+                                    <StackPanel HorizontalAlignment="Left">
+                                        <!-- .creator-toggle：14px / 600 / 字色 text（:15） -->
+                                        <TextBlock Text="参与测试及创作者" FontSize="14" FontWeight="SemiBold"/>
+                                        <!-- small：display block / 11px / letter-spacing 1px / text-dim / margin-top 4（:16）
+                                             WPF 的 TextBlock 没有 letter-spacing，只能近似：这里保留字号与间距，
+                                             字距差记进 UI_SPEC 的已知偏差（不影响盒高） -->
+                                        <!-- small 没重置 font-weight，跟着 .creator-toggle 继承 600（CreatorCard.vue:16） -->
+                                        <TextBlock Text="TESTERS &amp; CREATORS" FontSize="11" FontWeight="SemiBold"
+                                                   Margin="0,4,0,0" Foreground="{DynamicResource Fg2}"/>
+                                    </StackPanel>
+                                    <!-- 站内链：.icon-btn 32×32 + radius 6，内容是字符 ↗（:17） -->
+                                    <Button Style="{StaticResource IconBtn}" Width="32" Height="32"
+                                            HorizontalAlignment="Right" VerticalAlignment="Center"
+                                            FontSize="16" Content="&#x2197;"
+                                            ToolTip="https://space.bilibili.com/9596327"/>
+                                </Grid>
+                                <!-- .creator-intro：12px / line-height 1.7 / text-dim / margin 12 0 0（:19）
+                                     文案逐字抄 CreatorCard.vue:18 -->
+                                <TextBlock FontSize="12" LineHeight="20" LineStackingStrategy="BlockLineHeight"
+                                           Margin="0,12,0,0" Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
+                                           Text="好想做卡慕的狗啊，别的狗至少还图口饭，我不一样，我只希望他发视频的时候能允许我在评论区汪两声。卡慕但凡回我一个“？”我都能截图裱起来当传家宝。"/>
+                                <!-- .creator-reveal：grid-template-rows 0fr→1fr + opacity 0→1，
+                                     240ms ease-out / 200ms（:29-30），由 pointerenter/focus 触发。
+                                     WPF 没有 0fr→1fr，用 MaxHeight 0→240 等价表达（.creator-name-layer
+                                     本身就是 max-height 240 + overflow auto） -->
+                                <Border x:Name="CreatorReveal" MaxHeight="0" Opacity="0">
+                                    <!-- .creator-name-layer：wrap / gap 8 / padding 16 8 12 / max-height 240 /
+                                         overflow auto（:20 与 :31，后者覆盖前者的 padding） -->
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8,16,8,12">
+                                        <WrapPanel x:Name="CreatorNames"/>
+                                    </ScrollViewer>
+                                </Border>
                             </StackPanel>
                         </Border>
                     </StackPanel>

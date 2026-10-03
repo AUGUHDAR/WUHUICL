@@ -18,6 +18,21 @@ public sealed class VersionRow
     public string Kind { get; init; } = "release";
     public bool Installed { get; set; }
     public string Subtitle { get; init; } = "";
+
+    /// <summary>标签文字＝原版 typeText（GameView.vue:344-349）。之前直接把 'release' 显示在标签上。</summary>
+    public string KindText => Kind switch
+    {
+        "release" => "正式版",
+        "snapshot" => "快照",
+        "old_beta" => "Beta 旧版",
+        "old_alpha" => "Alpha 旧版",
+        _ => Kind,
+    };
+
+    /// <summary>标签配色＝原版 typeTagClass（:352-353）：release 走 tag-gold、snapshot 走 tag-cyan、
+    /// 其余是 .tag 基态。给 BrushByKey 当键名用，避免在 XAML 里堆三层 DataTrigger。</summary>
+    public string KindTagBg => Kind == "release" ? "AccentSoft" : Kind == "snapshot" ? "CyanSoft" : "ChipBg";
+    public string KindTagFg => Kind == "release" ? "AccentHi" : Kind == "snapshot" ? "Cyan" : "Fg2";
     public override string ToString() => Label;
 }
 
@@ -281,7 +296,8 @@ public sealed class LaunchSession : INotifyPropertyChanged
                         Label = m.Id,
                         Kind = m.Type,
                         Installed = File.Exists(Paths.VersionJson(m.Id)),
-                        Subtitle = DescribeKind(m.Type) + (m.ReleaseTime is null ? "" : " · " + m.ReleaseTime[..Math.Min(10, m.ReleaseTime.Length)]),
+                        // .version-date 只有日期：类型已经由左边的 .tag 表达了（GameView.vue:1070-1071）
+                        Subtitle = m.ReleaseTime is null ? "" : m.ReleaseTime[..Math.Min(10, m.ReleaseTime.Length)],
                     });
                 SelectedOnline = OnlineList.FirstOrDefault(v => !v.Installed) ?? OnlineList.FirstOrDefault();
                 Status = $"版本列表已就绪（{OnlineList.Count} 个）";

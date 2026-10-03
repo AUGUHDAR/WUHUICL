@@ -168,40 +168,57 @@
                              MouseDoubleClick="Install_Click" MaxHeight="560">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
+                                <!-- .version-row：flex / space-between / gap 12 / min-height 42 / padding 8 12 /
+                                     radius 10 / hover card-2（GameView.vue:1718-1730）。
+                                     外层 RowCard 已经给了 padding 12,8 + radius 10 + hover 底色，这里只管两列。
+                                     原版这行没有图标：左 .version-info、右 .version-actions（:1066-1092）。 -->
                                 <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="34"/>
-                                        <ColumnDefinition Width="12"/>
                                         <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="12"/>
-                                        <ColumnDefinition Width="90"/>
+                                        <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <!-- .inst-icon：34×34 padding 4 border 1 radius 6（:1751） -->
-                                    <Border Grid.Column="0" Width="34" Height="34" CornerRadius="6"
-                                            BorderBrush="{DynamicResource Line}" BorderThickness="1"
-                                            Background="{DynamicResource CardSoft}">
-                                        <ContentControl Width="20" Height="20"
-                                                        Style="{DynamicResource Icon.GrassBlock}"/>
-                                    </Border>
-                                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding Label}" FontSize="13" FontWeight="SemiBold"
-                                                   TextTrimming="CharacterEllipsis"/>
-                                        <!-- .version-date：12px（:1776） -->
-                                        <TextBlock Text="{Binding Subtitle}" FontSize="12"
-                                                   Foreground="{DynamicResource Fg2}"/>
+                                    <!-- .version-info：row / center / gap 12 / min-width 0（:1731） -->
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal">
+                                        <!-- .version-id：继承 14px / 600 / tabular-nums（:1737） -->
+                                        <TextBlock Text="{Binding Label}" FontSize="14" FontWeight="SemiBold"
+                                                   Typography.NumeralAlignment="Tabular"
+                                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                        <!-- .tag + tag-gold / tag-cyan（:1070 + :352） -->
+                                        <Border Margin="12,0,0,0" Style="{StaticResource Tag}"
+                                                Background="{Binding KindTagBg, Converter={StaticResource BrushByKey}}">
+                                            <TextBlock Text="{Binding KindText}" Style="{StaticResource TagText}"
+                                                       Foreground="{Binding KindTagFg, Converter={StaticResource BrushByKey}}"/>
+                                        </Border>
+                                        <!-- .version-date：12px muted（:1776） -->
+                                        <TextBlock Text="{Binding Subtitle}" FontSize="12" Margin="12,0,0,0"
+                                                   Foreground="{DynamicResource Fg2}" VerticalAlignment="Center"/>
                                     </StackPanel>
-                                    <Border Grid.Column="3" Style="{StaticResource Tag}">
-                                        <TextBlock Text="{Binding Kind}" Style="{StaticResource TagText}"/>
-                                    </Border>
-                                    <!-- .row-bar：90×6 radius 999（:1787）。原版只在"该版本正在下载"时出现，
-                                         数据里没有逐版本进度 → 先 Collapsed 占位，绑不存在的属性会静默失效 -->
-                                    <Border Grid.Column="5" Width="90" Height="6" CornerRadius="3"
-                                            Background="{DynamicResource CardSoft}" VerticalAlignment="Center"
-                                            Visibility="Collapsed">
-                                        <Border Width="34" CornerRadius="3" Background="{DynamicResource Accent}"
-                                                HorizontalAlignment="Left"/>
-                                    </Border>
+                                    <!-- .version-actions：row / center / gap 12 / flex none（:1781） -->
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                        <!-- .row-progress：bar 90×6 radius 999 + 12px 文本，gap 8（:1787-1799）
+                                             原版 v-if 该版本正在下载；逐版本进度数据未接入 → 先占位不显示 -->
+                                        <StackPanel Orientation="Horizontal" Visibility="Collapsed">
+                                            <Border Width="90" Height="6" CornerRadius="3" VerticalAlignment="Center"
+                                                    BorderBrush="{DynamicResource Line}" BorderThickness="1"
+                                                    Background="{DynamicResource CardSoft}">
+                                                <Border Width="34" CornerRadius="3" HorizontalAlignment="Left"
+                                                        Background="{DynamicResource BarFill}"/>
+                                            </Border>
+                                            <TextBlock Text="0%" FontSize="12" Margin="8,0,0,0"
+                                                       Foreground="{DynamicResource Fg2}" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <!-- .tag.tag-success：底 ok-soft、字 ok（styles.css:487-490） -->
+                                        <Border Style="{StaticResource Tag}" Background="{DynamicResource OkSoft}"
+                                                Visibility="{Binding Installed, Converter={StaticResource BoolVis}}">
+                                            <TextBlock Text="已安装" Style="{StaticResource TagText}"
+                                                       Foreground="{DynamicResource Ok}"/>
+                                        </Border>
+                                        <!-- .btn.btn-sm.btn-ghost：32 高 / 13px / radius 6（styles.css:258-263）
+                                             文案三态：下载中 / 再次安装 / 安装（:1090） -->
+                                        <Button Style="{StaticResource BtnSmGhost}" Content="安装"
+                                                Margin="12,0,0,0" Click="Install_Click"/>
+                                    </StackPanel>
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>

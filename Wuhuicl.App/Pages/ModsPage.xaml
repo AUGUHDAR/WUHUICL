@@ -318,9 +318,9 @@
 
                     <!-- ============ 行 2：选中态演示（占位：等资源管理接入） ============
                          .fm-row:has(>input:checked){background:color-mix(in srgb,var(accent) 5%,transparent)} — :719
-                         WPF 没有 :has()、也没有 color-mix，这里用白名单里的 AccentSoft（≈accent 14%）代替，色会比原版重一档；
+                         WPF 没有 :has()，勾选行用生成器按公式出的 AccentPick（accent 5%，见 gen_theme_mixins.py）；
                          真正接线时应由数据行的容器样式给 5% 的自定义底。 -->
-                    <Border Style="{StaticResource FmRow}" Background="{DynamicResource AccentSoft}">
+                    <Border Style="{StaticResource FmRow}" Background="{DynamicResource AccentPick}">
                         <Grid x:Name="FmRow2">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="18"/><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/>
