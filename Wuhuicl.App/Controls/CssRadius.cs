@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 
 namespace Wuhuicl.App.Controls;
 
@@ -24,9 +25,10 @@ public static class CssRadius
     public static void SetPill(DependencyObject d, bool v) => d.SetValue(PillProperty, v);
 
     /// <summary>
-    /// 按钮模板圆角。原版 .btn 是 radius-md(10)，.btn-sm 是 radius-sm(6)，.capsule/.loader-option
-    /// 是 999（= 18）；模板里写死一个值会让这三种长得一样，所以圆角由宿主样式设进来。
-    /// 默认 10 ＝ .btn 基线，未显式设置的按钮外观不变。
+    /// 按钮与输入框模板圆角。原版 .btn 是 radius-md(10)，.btn-sm 是 radius-sm(6)，.capsule/.loader-option
+    /// 是 999（= 18）；.input/.select 基线 radius-md(10)，安装弹窗里覆写成 12（GameView.vue:1501）。
+    /// 模板里写死一个值会让这几种长得一样，所以圆角由宿主样式设进来。
+    /// 默认 10 ＝ .btn / .input 基线，未显式设置的控件外观不变。
     /// </summary>
     public static readonly DependencyProperty RoundProperty =
         DependencyProperty.RegisterAttached(
@@ -35,6 +37,20 @@ public static class CssRadius
 
     public static CornerRadius GetRound(DependencyObject d) => (CornerRadius)d.GetValue(RoundProperty);
     public static void SetRound(DependencyObject d, CornerRadius v) => d.SetValue(RoundProperty, v);
+
+    /// <summary>
+    /// 图标按钮 hover 覆盖层的底色。IconBtn 模板里不能写死 CardSoft：
+    /// .icon-btn:hover 用 --card-2（styles.css:281-282），而 .log-close:hover 用 --hover（HomeView.vue:975），
+    /// 两者深浅不同（Light 主题下 Hover 是 5% 透明、CardSoft 是实色），所以底色由宿主样式设进来。
+    /// 默认 null，由 IconBtn 样式给 CardSoft；未走该模板的按钮不受影响。
+    /// </summary>
+    public static readonly DependencyProperty HoverProperty =
+        DependencyProperty.RegisterAttached(
+            "Hover", typeof(Brush), typeof(CssRadius),
+            new PropertyMetadata(null));
+
+    public static Brush? GetHover(DependencyObject d) => (Brush?)d.GetValue(HoverProperty);
+    public static void SetHover(DependencyObject d, Brush? v) => d.SetValue(HoverProperty, v);
 
     static void OnPill(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {

@@ -10,6 +10,10 @@ public partial class VersionsPage : UserControl
     {
         InitializeComponent();
         Loaded += (_, _) => MoveTabBlob();
+        // label.installed-search 里那个 input 的 placeholder（GameView.vue:1129）：
+        // WPF 的 TextBox 没有 placeholder，用覆盖文字顶位，有内容就藏。
+        InstalledSearch.TextChanged += (_, _) => InstalledSearchHint.Visibility =
+            InstalledSearch.Text.Length == 0 ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
     }
 
     /// <summary>.game-tabs-blob 的 left/width 原版由 JS 量 offsetLeft/offsetWidth 写内联（GameView.vue:120-124）。
@@ -24,6 +28,25 @@ public partial class VersionsPage : UserControl
         TabsBlob.Width = b.Width;
         TabsBlob.Height = b.Height;
         TabsBlob.Opacity = 1;
+    }
+
+    /// <summary>调试用（--open=install）：把安装弹窗撑开截图。
+    /// 只往控件里塞内存假数据，不碰 versions 目录、不写 settings.json。</summary>
+    internal void DebugOpenInstall()
+    {
+        ModalInstall.Visibility = System.Windows.Visibility.Visible;
+        InstallTitle.Text = "安装 1.20.1";
+        // 选中态是样式键切换（逻辑待办），截图里要让「Fabric」这颗真的是 active，
+        // 否则下面的加载器版本／Fabric API 两块与上方磁贴自相矛盾。
+        LoaderNone.Style = (System.Windows.Style)FindResource("VpLoaderOption");
+        LoaderFabric.Style = (System.Windows.Style)FindResource("VpLoaderOptionOn");
+        LoaderDetail.Visibility = System.Windows.Visibility.Visible;
+        LoaderVersions.Items.Add("0.15.11");
+        LoaderVersions.SelectedIndex = 0;
+        FapiBlock.Visibility = System.Windows.Visibility.Visible;
+        FapiVersions.Items.Add("0.92.2+1.20.1（2024-05-12）");
+        FapiVersions.SelectedIndex = 0;
+        InstallInstanceName.Text = "fabric-0.15.11-1.20.1";
     }
 
     // 事件一律转回 Shell：逻辑只有一份，页面不碰状态。

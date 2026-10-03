@@ -2,14 +2,15 @@
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- GENERATED FILE - DO NOT EDIT BY HAND.
-         Produced by tools/gen_icons.py from the inline SVGs of
-         KAMUCL-1.1.5/src/renderer/src (read-only source of truth).
+         Rewritten by tools/gen_icons.py from D:/桌面/WUHUICL/KAMUCL-1.1.10/src/renderer/src (read-only source of truth):
+         the inline SVGs listed in the ICONS catalogue, plus every entry of
+         components/UiGlyph.vue's JS path table as Icon.G.<name> (stroke-width 1.7).
          Each Style is a ContentControl template: Viewbox > Canvas(viewBox size) > Path.
          Path colour comes from Themes/Controls.xaml IconStroke / IconFill styles;
          StrokeThickness is set only where the source stroke-width differs from 2. -->
 
 
-<!-- Icon.Home  <-  App.vue:109  stroke-width 2 -->
+<!-- Icon.Home  <-  App.vue:125  stroke-width 2 -->
 <Style x:Key="Icon.Home" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -26,7 +27,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Game  <-  App.vue:114  stroke-width 2 -->
+<!-- Icon.Game  <-  App.vue:130  stroke-width 2 -->
 <Style x:Key="Icon.Game" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -44,7 +45,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Friends  <-  App.vue:119  stroke-width 2 -->
+<!-- Icon.Friends  <-  App.vue:135  stroke-width 2 -->
 <Style x:Key="Icon.Friends" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -60,7 +61,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Keys  <-  App.vue:124  stroke-width 2 -->
+<!-- Icon.Keys  <-  App.vue:140  stroke-width 2 -->
 <Style x:Key="Icon.Keys" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -76,7 +77,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Skin  <-  App.vue:129  stroke-width 2 -->
+<!-- Icon.Skin  <-  App.vue:145  stroke-width 2 -->
 <Style x:Key="Icon.Skin" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -91,7 +92,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Community  <-  App.vue:134  stroke-width 2 -->
+<!-- Icon.Community  <-  App.vue:150  stroke-width 2 -->
 <Style x:Key="Icon.Community" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -109,7 +110,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Settings  <-  App.vue:139  stroke-width 2 -->
+<!-- Icon.Settings  <-  App.vue:155  stroke-width 2 -->
 <Style x:Key="Icon.Settings" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -125,7 +126,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Resources  <-  App.vue:1273  stroke-width 2 -->
+<!-- Icon.Resources  <-  App.vue:1283  stroke-width 2 -->
 <Style x:Key="Icon.Resources" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -141,7 +142,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.CaretRight  <-  App.vue:1276  stroke-width 2 -->
+<!-- Icon.CaretRight  <-  App.vue:1286  stroke-width 2 -->
 <Style x:Key="Icon.CaretRight" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -156,7 +157,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Mods  <-  App.vue:162  stroke-width 2 -->
+<!-- Icon.Mods  <-  App.vue:178  stroke-width 2 -->
 <Style x:Key="Icon.Mods" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -173,7 +174,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.ResourcePacks  <-  App.vue:167  stroke-width 2 -->
+<!-- Icon.ResourcePacks  <-  App.vue:183  stroke-width 2 -->
 <Style x:Key="Icon.ResourcePacks" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -188,7 +189,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Shaders  <-  App.vue:172  stroke-width 2 -->
+<!-- Icon.Shaders  <-  App.vue:188  stroke-width 2 -->
 <Style x:Key="Icon.Shaders" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -204,7 +205,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Download  <-  App.vue:1334  stroke-width 2 -->
+<!-- Icon.Download  <-  App.vue:1344  stroke-width 2 -->
 <Style x:Key="Icon.Download" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -221,7 +222,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Changelog  <-  App.vue:1360  stroke-width 2 -->
+<!-- Icon.Changelog  <-  App.vue:1370  stroke-width 2 -->
 <Style x:Key="Icon.Changelog" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -238,7 +239,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Bell  <-  App.vue:1367  stroke-width 2 -->
+<!-- Icon.Bell  <-  App.vue:1377  stroke-width 2 -->
 <Style x:Key="Icon.Bell" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -254,7 +255,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Back  <-  App.vue:1328  stroke-width 2.2 -->
+<!-- Icon.Back  <-  App.vue:1338  stroke-width 2.2 -->
 <Style x:Key="Icon.Back" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -269,7 +270,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Minimize  <-  App.vue:1378  stroke-width 2 -->
+<!-- Icon.Minimize  <-  App.vue:1388  stroke-width 2 -->
 <Style x:Key="Icon.Minimize" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -284,7 +285,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Maximize  <-  App.vue:1383  stroke-width 2 -->
+<!-- Icon.Maximize  <-  App.vue:1393  stroke-width 2 -->
 <Style x:Key="Icon.Maximize" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -299,7 +300,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Restore  <-  App.vue:1383  stroke-width 2  |  same square as Icon.Maximize: the source has ONE button (title 'maximize/restore', App.vue:1383) and no separate restore glyph -->
+<!-- Icon.Restore  <-  App.vue:1393  stroke-width 2  |  same square as Icon.Maximize: the source has ONE button (title 'maximize/restore', App.vue:1383) and no separate restore glyph -->
 <Style x:Key="Icon.Restore" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -314,7 +315,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Close  <-  App.vue:1388  stroke-width 2 -->
+<!-- Icon.Close  <-  App.vue:1398  stroke-width 2 -->
 <Style x:Key="Icon.Close" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -329,7 +330,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Gear  <-  views/HomeView.vue:511  stroke-width 1.9  |  HomeView simplified 8-tooth gear, distinct from Icon.Settings (Feather gear, App.vue:139) -->
+<!-- Icon.Gear  <-  views/HomeView.vue:509  stroke-width 1.9  |  HomeView simplified 8-tooth gear, distinct from Icon.Settings (Feather gear, App.vue:139) -->
 <Style x:Key="Icon.Gear" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -345,7 +346,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Ellipsis  <-  views/HomeView.vue:520  fill=currentColor -->
+<!-- Icon.Ellipsis  <-  views/HomeView.vue:518  fill=currentColor -->
 <Style x:Key="Icon.Ellipsis" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -362,7 +363,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Play  <-  views/HomeView.vue:533  fill=currentColor -->
+<!-- Icon.Play  <-  views/HomeView.vue:531  fill=currentColor -->
 <Style x:Key="Icon.Play" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -377,7 +378,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.ChevronDown  <-  views/HomeView.vue:538  stroke-width 2.2  |  stroke-width 2.2 hero variant (HomeView.vue:538); SelectMenu.vue:82 uses the identical d at stroke-width 2 -->
+<!-- Icon.ChevronDown  <-  views/HomeView.vue:536  stroke-width 2.2  |  stroke-width 2.2 hero variant (HomeView.vue:538); SelectMenu.vue:82 uses the identical d at stroke-width 2 -->
 <Style x:Key="Icon.ChevronDown" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -392,7 +393,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Java  <-  views/HomeView.vue:548  stroke-width 1.8  |  the runtime-strip Java slot is a calendar/Java-cup hybrid (HomeView.vue:548); the literal coffee cup is GameView.vue:1216 -->
+<!-- Icon.Java  <-  views/HomeView.vue:546  stroke-width 1.8  |  the runtime-strip Java slot is a calendar/Java-cup hybrid (HomeView.vue:548); the literal coffee cup is GameView.vue:1216 -->
 <Style x:Key="Icon.Java" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -408,7 +409,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Memory  <-  views/HomeView.vue:553  stroke-width 1.8 -->
+<!-- Icon.Memory  <-  views/HomeView.vue:551  stroke-width 1.8 -->
 <Style x:Key="Icon.Memory" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -424,7 +425,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Pulse  <-  views/HomeView.vue:558  stroke-width 1.8 -->
+<!-- Icon.Pulse  <-  views/HomeView.vue:556  stroke-width 1.8 -->
 <Style x:Key="Icon.Pulse" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -439,7 +440,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.ChevronRight  <-  views/HomeView.vue:550  stroke-width 2 -->
+<!-- Icon.ChevronRight  <-  views/HomeView.vue:548  stroke-width 2 -->
 <Style x:Key="Icon.ChevronRight" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -454,7 +455,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Apps  <-  views/HomeView.vue:568  stroke-width 1.8 -->
+<!-- Icon.Apps  <-  views/HomeView.vue:566  stroke-width 1.8 -->
 <Style x:Key="Icon.Apps" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -472,7 +473,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Star  <-  views/GameView.vue:1150  fill=currentColor -->
+<!-- Icon.Star  <-  views/GameView.vue:1157  fill=currentColor -->
 <Style x:Key="Icon.Star" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -487,7 +488,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.StarOutline  <-  views/GameView.vue:1150  fill=currentColor  |  source only ships the filled star; this reuses that exact silhouette with IconStroke (KAMUCL's empty state is the text glyph U+2606) -->
+<!-- Icon.StarOutline  <-  views/GameView.vue:1157  fill=currentColor  |  source only ships the filled star; this reuses that exact silhouette with IconStroke (KAMUCL's empty state is the text glyph U+2606) -->
 <Style x:Key="Icon.StarOutline" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -502,7 +503,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Search  <-  views/GameView.vue:1006  stroke-width 2 -->
+<!-- Icon.Search  <-  views/GameView.vue:1013  stroke-width 2 -->
 <Style x:Key="Icon.Search" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -518,7 +519,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Folder  <-  views/GameView.vue:1196  stroke-width 2 -->
+<!-- Icon.Folder  <-  views/GameView.vue:1203  stroke-width 2 -->
 <Style x:Key="Icon.Folder" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -533,7 +534,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Edit  <-  views/GameView.vue:1204  stroke-width 2 -->
+<!-- Icon.Edit  <-  views/GameView.vue:1211  stroke-width 2 -->
 <Style x:Key="Icon.Edit" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -549,7 +550,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Refresh  <-  views/GameView.vue:1027  stroke-width 2 -->
+<!-- Icon.Refresh  <-  views/GameView.vue:1034  stroke-width 2 -->
 <Style x:Key="Icon.Refresh" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -595,7 +596,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.ChevronLeft  <-  App.vue:1313  stroke-width 2 -->
+<!-- Icon.ChevronLeft  <-  App.vue:1323  stroke-width 2 -->
 <Style x:Key="Icon.ChevronLeft" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -610,7 +611,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Upload  <-  App.vue:1551  stroke-width 2 -->
+<!-- Icon.Upload  <-  App.vue:1561  stroke-width 2 -->
 <Style x:Key="Icon.Upload" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -627,7 +628,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.User  <-  views/SkinsView.vue:416  stroke-width 1.5 -->
+<!-- Icon.User  <-  views/SkinsView.vue:420  stroke-width 1.5 -->
 <Style x:Key="Icon.User" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -643,7 +644,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Sliders  <-  views/SettingsView.vue:679  stroke-width 2 -->
+<!-- Icon.Sliders  <-  views/SettingsView.vue:682  stroke-width 2 -->
 <Style x:Key="Icon.Sliders" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -659,7 +660,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.GrassBlock  <-  views/HomeView.vue:584 -->
+<!-- Icon.GrassBlock  <-  views/HomeView.vue:582 -->
 <Style x:Key="Icon.GrassBlock" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -678,7 +679,7 @@
     </Setter>
 </Style>
 
-<!-- Icon.Microsoft  <-  views/HomeView.vue:623 -->
+<!-- Icon.Microsoft  <-  views/HomeView.vue:621 -->
 <Style x:Key="Icon.Microsoft" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -696,16 +697,15 @@
     </Setter>
 </Style>
 
-
-<!-- Icon.Bridge  <-  App.vue:179 MOD 面板（十字准星）  stroke-width 2 -->
-<Style x:Key="Icon.Bridge" TargetType="ContentControl">
+<!-- Icon.Recordings  <-  App.vue:191  stroke-width 2 -->
+<Style x:Key="Icon.Recordings" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
             <ControlTemplate TargetType="ContentControl">
                 <Viewbox Stretch="Uniform">
                     <Canvas Width="24" Height="24">
-                        <Path Style="{StaticResource IconStroke}" Data="M12,2 V6 M12,18 V22 M2,12 H6 M18,12 H22" />
-                        <Path Style="{StaticResource IconStroke}" Data="M8.5,12 A3.5,3.5 0 0,1 15.5,12 A3.5,3.5 0 0,1 8.5,12" />
+                        <Path Style="{StaticResource IconStroke}" Data="M6,5 H14 A3,3 0 0,1 17,8 V16 A3,3 0 0,1 14,19 H6 A3,3 0 0,1 3,16 V8 A3,3 0 0,1 6,5 Z" />
+                        <Path Style="{StaticResource IconStroke}" Data="M17,10 L21,7 V17 L17,14" />
                     </Canvas>
                 </Viewbox>
             </ControlTemplate>
@@ -713,7 +713,38 @@
     </Setter>
 </Style>
 
-<!-- Icon.Servers  <-  App.vue:184 服务器（双机箱）  stroke-width 2 -->
+<!-- Icon.Projections  <-  App.vue:192  stroke-width 2 -->
+<Style x:Key="Icon.Projections" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" Data="M12,3 L21,8 V16 L12,21 L3,16 V8 Z M3,8 L12,13 L21,8 M12,13 V21" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.Bridge  <-  App.vue:196  stroke-width 2 -->
+<Style x:Key="Icon.Bridge" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" Data="M12,2 V6 M12,18 V22 M2,12 H6 M18,12 H22" />
+                        <Path Style="{StaticResource IconStroke}" Data="M8.5,12 A3.5,3.5 0 0,1 15.5,12 A3.5,3.5 0 0,1 8.5,12 Z" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.Servers  <-  App.vue:201  stroke-width 2 -->
 <Style x:Key="Icon.Servers" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -730,9 +761,7 @@
     </Setter>
 </Style>
 
-
-<!-- Icon.Bars / Icon.Gamepad / Icon.Cube  <-  FriendConnectView.vue:17/:22/:27 三张联机方式卡的图标
-     源里 stroke-width 全是 1.7（不是全局的 2），所以每条 Path 单独覆写。 -->
+<!-- Icon.Bars  <-  views/FriendConnectView.vue:22  stroke-width 1.7 -->
 <Style x:Key="Icon.Bars" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -747,6 +776,7 @@
     </Setter>
 </Style>
 
+<!-- Icon.Gamepad  <-  views/FriendConnectView.vue:30  stroke-width 1.7 -->
 <Style x:Key="Icon.Gamepad" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
@@ -755,6 +785,8 @@
                     <Canvas Width="24" Height="24">
                         <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M7.5,7 H16.5 A5,5 0 0,1 21.5,12 A5,5 0 0,1 16.5,17 H7.5 A5,5 0 0,1 2.5,12 A5,5 0 0,1 7.5,7 Z" />
                         <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M8,12 H10 M14,12 H16" />
+                        <Path Style="{StaticResource IconFill}" Data="M8.2,12 A0.8,0.8 0 0,1 9.8,12 A0.8,0.8 0 0,1 8.2,12 Z" />
+                        <Path Style="{StaticResource IconFill}" Data="M14.2,12 A0.8,0.8 0 0,1 15.8,12 A0.8,0.8 0 0,1 14.2,12 Z" />
                     </Canvas>
                 </Viewbox>
             </ControlTemplate>
@@ -762,13 +794,14 @@
     </Setter>
 </Style>
 
+<!-- Icon.Cube  <-  views/FriendConnectView.vue:38  stroke-width 1.7 -->
 <Style x:Key="Icon.Cube" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
             <ControlTemplate TargetType="ContentControl">
                 <Viewbox Stretch="Uniform">
                     <Canvas Width="24" Height="24">
-                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M12,3 L4,7 V17 L12,21 L20,17 V7 Z" />
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M12,3 L4,7 V17 L12,21 L20,17 V7 L12,3 Z" />
                         <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M4,7 L12,11 L20,7 M12,11 V21" />
                     </Canvas>
                 </Viewbox>
@@ -777,16 +810,330 @@
     </Setter>
 </Style>
 
-
-<!-- Icon.ResetView  <-  SkinsView.vue:395-398 回正视角（圆圈 + 四向刻度）  stroke-width 1.8 -->
+<!-- Icon.ResetView  <-  views/SkinsView.vue:399  stroke-width 1.8 -->
 <Style x:Key="Icon.ResetView" TargetType="ContentControl">
     <Setter Property="Template">
         <Setter.Value>
             <ControlTemplate TargetType="ContentControl">
                 <Viewbox Stretch="Uniform">
                     <Canvas Width="24" Height="24">
-                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.8" Data="M4.5,12 A7.5,7.5 0 0,1 19.5,12 A7.5,7.5 0 0,1 4.5,12" />
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.8" Data="M4.5,12 A7.5,7.5 0 0,1 19.5,12 A7.5,7.5 0 0,1 4.5,12 Z" />
                         <Path Style="{StaticResource IconStroke}" StrokeThickness="1.8" Data="M12,2.5 V5.5 M12,18.5 V21.5 M2.5,12 H5.5 M18.5,12 H21.5" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.brush  <-  components/UiGlyph.vue:2  stroke-width 1.7 -->
+<Style x:Key="Icon.G.brush" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M15,5 L19,9 M4,20 L8,19 L20,7 A2.8,2.8 0 0,0 16,3 L4,15 Z" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.erase  <-  components/UiGlyph.vue:3  stroke-width 1.7 -->
+<Style x:Key="Icon.G.erase" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M4,14 L13,4 A2,2 0 0,1 16,4 L21,9 A2,2 0 0,1 21,12 L13,21 H8 Z M8,10 L17,18 M13,21 H21" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.pick  <-  components/UiGlyph.vue:4  stroke-width 1.7 -->
+<Style x:Key="Icon.G.pick" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M15,4 L20,9 M14,3 L21,10 M16,8 L5,19 H3 V17 L14,6" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.fill  <-  components/UiGlyph.vue:5  stroke-width 1.7 -->
+<Style x:Key="Icon.G.fill" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M5,11 L12,4 L20,12 L12,20 L4,12 Z M8,2 L12,6 M20,15 C20,15 17,18 17,20 A3,3 0 0,0 23,20 C23,18 20,15 20,15" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.undo  <-  components/UiGlyph.vue:6  stroke-width 1.7 -->
+<Style x:Key="Icon.G.undo" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M8,4 L3,9 L8,14 M3,9 H13 A7,7 0 0,1 13,23" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.redo  <-  components/UiGlyph.vue:7  stroke-width 1.7 -->
+<Style x:Key="Icon.G.redo" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M16,4 L21,9 L16,14 M21,9 H11 A7,7 0 0,0 11,23" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.cube  <-  components/UiGlyph.vue:7  stroke-width 1.7 -->
+<Style x:Key="Icon.G.cube" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M12,3 L21,8 V17 L12,22 L3,17 V8 Z M3,8 L12,13 L21,8 M12,13 V22 M7,5 L17,11" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.eye  <-  components/UiGlyph.vue:9  stroke-width 1.7 -->
+<Style x:Key="Icon.G.eye" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M2,12 C2,12 6,5 12,5 C18,5 22,12 22,12 C22,12 18,19 12,19 C6,19 2,12 2,12 Z M15,12 A3,3 0 1,1 9,12 A3,3 0 0,1 15,12" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.sun  <-  components/UiGlyph.vue:10  stroke-width 1.7 -->
+<Style x:Key="Icon.G.sun" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M16,12 A4,4 0 1,1 8,12 A4,4 0 0,1 16,12 M12,2 V4 M12,20 V22 M2,12 H4 M20,12 H22 M5,5 L6,6 M18,18 L19,19 M5,19 L6,18 M18,6 L19,5" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.expand  <-  components/UiGlyph.vue:12  stroke-width 1.7 -->
+<Style x:Key="Icon.G.expand" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M8,3 H3 V8 M16,3 H21 V8 M3,16 V21 H8 M21,16 V21 H16" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.file  <-  components/UiGlyph.vue:12  stroke-width 1.7 -->
+<Style x:Key="Icon.G.file" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M14,2 H5 V22 H19 V7 Z M14,2 V7 H19" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.image  <-  components/UiGlyph.vue:12  stroke-width 1.7 -->
+<Style x:Key="Icon.G.image" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M3,3 H21 V21 H3 Z M3,17 L9,11 L13,15 L16,12 L21,17 M8,7 H8.01" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.folder  <-  components/UiGlyph.vue:13  stroke-width 1.7 -->
+<Style x:Key="Icon.G.folder" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M2,6 H10 L12,9 H22 V21 H2 Z" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.download  <-  components/UiGlyph.vue:14  stroke-width 1.7 -->
+<Style x:Key="Icon.G.download" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M12,2 V15 M7,10 L12,15 L17,10 M3,16 V21 H21 V16" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.upload  <-  components/UiGlyph.vue:15  stroke-width 1.7 -->
+<Style x:Key="Icon.G.upload" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M12,16 V3 M7,8 L12,3 L17,8 M3,16 V21 H21 V16" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.close  <-  components/UiGlyph.vue:16  stroke-width 1.7 -->
+<Style x:Key="Icon.G.close" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M5,5 L19,19 M19,5 L5,19" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.none  <-  components/UiGlyph.vue:17  stroke-width 1.7 -->
+<Style x:Key="Icon.G.none" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M21,12 A9,9 0 1,1 3,12 A9,9 0 0,1 21,12 M6,6 L18,18" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.forge  <-  components/UiGlyph.vue:18  stroke-width 1.7 -->
+<Style x:Key="Icon.G.forge" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M3,7 H21 V10 L15,13 V18 H18 V21 H6 V18 H9 V13 L3,10 Z" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.fabric  <-  components/UiGlyph.vue:20  stroke-width 1.7 -->
+<Style x:Key="Icon.G.fabric" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M7,3 L21,10 L14,21 L3,14 Z M7,3 L14,21 M3,14 L21,10 M9,6 L5,15 M16,8 L11,18" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.quilt  <-  components/UiGlyph.vue:21  stroke-width 1.7 -->
+<Style x:Key="Icon.G.quilt" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M12,2 L16,6 L12,10 L8,6 Z M6,8 L10,12 L6,16 L2,12 Z M18,8 L22,12 L18,16 L14,12 Z M12,14 L16,18 L12,22 L8,18 Z" />
+                    </Canvas>
+                </Viewbox>
+            </ControlTemplate>
+        </Setter.Value>
+    </Setter>
+</Style>
+
+<!-- Icon.G.neoforge  <-  components/UiGlyph.vue:22  stroke-width 1.7 -->
+<Style x:Key="Icon.G.neoforge" TargetType="ContentControl">
+    <Setter Property="Template">
+        <Setter.Value>
+            <ControlTemplate TargetType="ContentControl">
+                <Viewbox Stretch="Uniform">
+                    <Canvas Width="24" Height="24">
+                        <Path Style="{StaticResource IconStroke}" StrokeThickness="1.7" Data="M13,2 C13,2 14,8 10,11 C9,8 7,7 7,7 C7,7 2,12 3,17 C5,25 20,25 21,16 C22,12 18,9 18,9 C18,9 18,13 16,14 C17,7 13,2 13,2 Z" />
                     </Canvas>
                 </Viewbox>
             </ControlTemplate>

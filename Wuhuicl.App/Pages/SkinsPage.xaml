@@ -122,6 +122,15 @@
         </Style>
     </UserControl.Resources>
 
+    <!-- 外层 Grid 只为承载 .drag-hint（模板 :493，样式 :747-758）：
+         原版是 position absolute / inset 0，理论上的包含块是 .row-sub（:661 给过 position relative），
+         但后块 :1085 把 .row-main/.row-sub 全改成了 display:contents —— 不生成盒子就当不成包含块，
+         于是 .drag-hint 实际是按初始包含块（整个视口）铺满的，且 .content 的 overflow 也裁不掉它。
+         WPF 没有「按视口定位」这一说，页面元素最多铺满自己所在的宿主区，所以这里做成铺满本页；
+         与原版的一致部分是：accent 18% 底（DragTint）／accent-2 字／13px／600／居中／padding 0 24／
+         radius-lg 14／pointer-events none；差异是原版连侧栏和顶栏一起罩住。记进 UI_PARITY_LEDGER。
+         dragover 本身属功能 → 先 Collapsed。 -->
+    <Grid>
     <!-- .content：overflow-y auto + scrollbar-gutter stable（槽宽 8，已由全局样式定）— UI_GEOMETRY_PAGES.md §0 / App.vue:2398-2404；页边距 24 由宿主给 -->
     <ScrollViewer VerticalScrollBarVisibility="Visible" Padding="0,0,8,0">
 
@@ -148,18 +157,47 @@
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- ============ 行1 · grid-column 1/-1：页头（:1084） ============ -->
-            <!-- .content .page-head{margin-bottom:8} — ui-system.css:11；列内 gap 4 — styles.css:498-502 -->
-            <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,0,8">
-                <!-- .skins-page .page-title：20px（text-xl）/700 — :616-619。
-                     等特异性（0,2,0）下 scoped 块在 main.ts 的全局 css 之后注入（main.ts:4-5），
-                     所以它压过 .content .page-title 的 24px（ui-system.css:12）；LineHeight 1.35 仍按 ui-system.css:12。 -->
-                <TextBlock Text="皮肤与披风" FontSize="20" FontWeight="Bold" LineHeight="27"/>
-                <!-- .skins-page .page-sub：12px text-dim — :620-623（覆盖 styles.css:509-512 的 13px）
-                     // 占位：等皮肤档案接入 —— 文案取 :347 的非外置分支；外置分支是「查看 {providerName} 的角色材质」 -->
-                <TextBlock Style="{StaticResource Micro}" Margin="0,4,0,0" TextWrapping="Wrap"
-                           Text="管理微软正版账号的皮肤与披风"/>
-            </StackPanel>
+            <!-- ============ 行1 · grid-column 1/-1：.page-head（模板 :347；scoped :1088 让 .skins-page > :is(.page-head,...) 跨整行）============
+                 .page-head 基线 styles.css:542-546 是 flex column + gap 4；整条被 scoped :1089「.skins-page > .page-head」改写成
+                 flex-direction row / align-items center / justify-content space-between / gap 12（scoped 带 data-v 属性选择器，特异性(0,3,0) 高于
+                 styles.css 的 .page-head(0,1,0) 与 ui-system.css 的 .content .page-head(0,2,0)）。
+                 margin-bottom 8（space-2）来自 ui-system.css:11「.content .page-head」，:1089 没动 margin，两值并存。
+                 ui-system.css:62「.content :is(.page-head,...){flex-wrap:wrap;gap:12px}」在 @media(max-width:900) 内，1360 宽窗口不生效（死样式，仅注释）。 -->
+            <Grid Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3" Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="12"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- .skin-page-heading：1.1.10 模板 :348 新增的包裹层（1.1.5 里 title/sub 直接散在 .page-head 内）。
+                     scoped :1090 只给它 min-width:0，没有设 display → 仍是普通块（等价竖排 title+sub）。
+                     WPF 里 min-width:0 的可收缩语义由上面的 * 列承担（列可压缩、文字靠 Wrap 折行，不会把按钮挤出）。 -->
+                <StackPanel Grid.Column="0">
+                    <!-- .page-title：模板 :348「h1 皮肤与披风」。scoped SkinsView.vue:620-623「.skins-page .page-title」= text-xl 20 / 700，
+                         它（带 data-v 属性）压过 ui-system.css:12「.content .page-title」的 var(text-title) 24px（text-title 只在 ui-system.css:6 定义为 24，styles.css 没有它）；
+                         ui-system.css:60 的 22px 在 @media(max-width:900) 内 → 1360 宽不生效（死样式）。
+                         letter-spacing 0 / line-height 1.35 仍来自 styles.css:547-552「.page-title」→ LineHeight 27。
+                         （不用 §2 的 PageTitle 样式，那是 24px，压不过本页的 20px 覆盖。） -->
+                    <TextBlock Text="皮肤与披风" FontSize="20" FontWeight="Bold" LineHeight="27"/>
+                    <!-- .page-sub：模板 :349-351「p」。scoped SkinsView.vue:624-627「.skins-page .page-sub」= text-xs 12 / text-dim，
+                         压过 styles.css:553-555「.page-sub」的 text-sm 13（§2 Micro 即 12px + Fg2）。
+                         margin-top 4 来自 scoped :1090「.skin-page-heading .page-sub{margin:4px 0 0}」——styles.css:111-115 的星号通配重置把 p/h1 的基础 margin 归零，
+                         这 4 现在是唯一的顶距（不再靠旧版 .page-head 的 flex gap 4）。
+                         // 占位：等皮肤档案接入 —— 文案取模板 :350 的非外置分支；外置分支是「查看 {providerName} 的角色材质」 -->
+                    <TextBlock Style="{StaticResource Micro}" Margin="0,4,0,0" TextWrapping="Wrap"
+                               Text="管理微软正版账号的皮肤与披风"/>
+                </StackPanel>
+
+                <!-- .skin-editor-entry：模板 :352「button.btn.btn-gold 绘制皮肤」。scoped :1091 覆盖 padding 8px 14px / min-height 36 / flex none / width auto；
+                     底 accent-grad、字 on-accent、600、radius-md 10 全走 §2 的 BtnGold（其内 .btn 基线 styles.css:199-220、.btn-gold styles.css:241；
+                     ui-system.css:16「.content :is(.btn,.icon-btn){flex-shrink:0}」在 WPF 里由 Auto 列天然满足）。
+                     §2 Btn 默认 padding 16,8（CSS 上 8 左 16），skin-editor-entry 把横向收到 14（CSS padding 上下 8 左右 14 → WPF 14,8），min-height 36 = ctl-h 与默认同值。
+                     align-items center → VerticalAlignment Center（行高由左侧 title+sub 撑高，按钮居中）。
+                     // 占位：等皮肤编辑器接入 —— 原版 @click 置 editorOpen=true（:352，另 :346 挂 SkinEditor 本体），契约 §1 本轮不挂事件、不碰编辑器本体。 -->
+                <Button Grid.Column="2" Style="{StaticResource BtnGold}" Content="绘制皮肤"
+                        Padding="14,8" MinHeight="36" VerticalAlignment="Center"/>
+            </Grid>
 
             <!-- ============ 行3 · 列1：.pane-preview（grid-column:1 / grid-row:2）— :1086 ============
                  .skins-page .card：padding 20（card-pad）/ radius 14（radius-lg）— :625-630 → §2 Panel
@@ -267,7 +305,8 @@
                         </Border>
                     </Grid>
 
-                    <!-- .viewer-tip：margin-top 8 / 12px text-dim / 居中 — :729-734，文案 :411
+                    <!-- .muted.viewer-tip（styles.css:677 ＋ :729-734）：margin-top 8 / 12px text-dim / 居中，
+                         文案 :411
                          原版挂在 v-if="!loadingProfile && currentSkin?.dataUrl" 分支里（:403-411）；本页无状态源，先按静态文案铺出来 -->
                     <TextBlock Style="{StaticResource Micro}" Margin="0,8,0,0" TextAlignment="Center"
                                Text="拖动旋转 · 滚轮缩放 · 双击回正"/>
@@ -380,6 +419,9 @@
                         <!-- .skin-actions：row wrap / align center / gap 12 / margin-top 8，内部 .btn min-height 36 — :859-871
                              WPF WrapPanel 无 gap：子项用 Margin 0,0,12,12 表达双向 12（行尾多出的 12 由 pane 的 padding 20 吞掉）
                              契约 §1：按钮不跳转、不回调 MainWindow，本轮不挂 Click。 -->
+                        <!-- .hidden-input（模板 :485-490，样式 :886 只有一条 display:none）：
+                             那是给「选择皮肤文件…」按钮代理的原生 input[type=file]，不产生任何像素，
+                             所以这边不复刻节点，等文件选择接入时直接挂 OpenFileDialog -->
                         <WrapPanel Margin="0,8,0,0">
                             <Button x:Name="BtnPickSkin" Style="{StaticResource BtnGhost}" Content="选择皮肤文件…"
                                     Margin="0,0,12,12"/>
@@ -387,7 +429,7 @@
                                     Margin="0,0,12,12"/>
                         </WrapPanel>
 
-                        <!-- .skin-hint：margin-top 8 / 12px text-dim — :872-876，文案 :478 -->
+                        <!-- .muted.skin-hint（styles.css:677 ＋ :872-876）：margin-top 8 / 12px text-dim，文案 :478 -->
                         <TextBlock Style="{StaticResource Micro}" Margin="0,8,0,0" TextWrapping="Wrap"
                                    Text="支持 64×64 的 PNG 皮肤文件"/>
 
@@ -636,16 +678,25 @@
                                         HorizontalAlignment="Left" Background="{DynamicResource CyanSoft}">
                                     <TextBlock Text="纤细" Style="{StaticResource TagText}" Foreground="{DynamicResource Cyan}"/>
                                 </Border>
-                                <!-- .history-time：12px / 不换行 — :1024-1027；文案来自 fmtTime(item.time)（:574）// 占位：等皮肤历史接入 -->
+                                <!-- .muted.history-time（styles.css:677 ＋ :1024-1027）：12px / 不换行；
+                                     文案来自 fmtTime(item.time)（:574）// 占位：等皮肤历史接入 -->
                                 <TextBlock Grid.Column="2" Style="{StaticResource Micro}" FontSize="12"
                                            HorizontalAlignment="Right" VerticalAlignment="Center"
                                            TextTrimming="CharacterEllipsis" Text="0 天前"/>
                             </Grid>
-                            <!-- .history-name-row：min-height 20 — :1028-1030
-                                 .history-name：block / 12px text-dim / 单行 ellipsis / radius 6 / padding 3 1 — :1031-1042 -->
+                            <!-- .history-name-row：min-height 20 — :1028-1030。
+                                 两支互斥：静止是 .history-name（block / 12px text-dim / 单行 ellipsis /
+                                 radius 6 / padding 3 1 — :1031-1042）；
+                                 改名时（v-if historyRenaming === item.id，:577-586）换成
+                                 input.input.history-name-input（:1046：宽 100% / 高 ctl-h 36 / padding 0 8 / 12px，
+                                 叠 .input 的 card-2 底＋1px border＋radius 10）// 占位：等历史接入 -->
                             <Border MinHeight="20">
-                                <TextBlock Style="{StaticResource Micro}" Padding="3,1"
-                                           TextTrimming="CharacterEllipsis" Text="steve.png"/>
+                                <Grid>
+                                    <TextBlock Style="{StaticResource Micro}" Padding="3,1"
+                                               TextTrimming="CharacterEllipsis" Text="steve.png"/>
+                                    <TextBox x:Name="HistoryNameInput" Style="{StaticResource Input}"
+                                             Height="36" Padding="8,0" FontSize="12" Visibility="Collapsed"/>
+                                </Grid>
                             </Border>
                         </StackPanel>
 
@@ -717,4 +768,13 @@
             </Border>
         </Grid>
     </ScrollViewer>
+        <!-- .drag-hint：见文件末尾外层 Grid 的注释。文案照抄 :493 的「松开以选择皮肤文件」 -->
+        <Border x:Name="SkinDragHint" CornerRadius="14" Background="{DynamicResource DragTint}"
+                TextElement.Foreground="{DynamicResource AccentHi}" IsHitTestVisible="False"
+                Visibility="Collapsed">
+            <TextBlock FontSize="13" FontWeight="SemiBold" TextAlignment="Center" TextWrapping="Wrap"
+                       Margin="24,0" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Text="松开以选择皮肤文件"/>
+        </Border>
+    </Grid>
 </UserControl>

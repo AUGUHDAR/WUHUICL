@@ -348,8 +348,13 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <!-- .fm-head-left{flex:1;min-width:140px}；.page-title 24px/Bold — ui-system.css:12（契约 §2 PageTitle） -->
-                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal">
+                <!-- .page-head.fm-head-left（模板 :334）：.page-head 是 flex column / gap 4（styles.css:495），
+                     并且 .content .page-head 还带 margin-bottom space-2 8（ui-system.css:6）——
+                     .fm-head 是 align-items flex-end，所以这 8 会把标题从行底抬起 8px，与右侧按钮组错开；
+                     .fm-head-left 自己 flex 1 / min-width 140（:517）。这里只包一个 h1，column 与 gap 不产生差别。
+                     .page-title 24px/Bold — ui-system.css:12（契约 §2 PageTitle） -->
+                <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal"
+                            VerticalAlignment="Bottom" Margin="0,0,0,8">
                     <TextBlock x:Name="HeadTitle" Style="{StaticResource PageTitle}" Text="模组"/>
                     <!-- .fm-head .page-title small：13px / 400 / text-dim / margin-left 8 — :719。// 占位：等资源管理接入（resourceCount） -->
                     <TextBlock FontSize="13" Foreground="{DynamicResource Fg2}" Margin="8,0,0,0"

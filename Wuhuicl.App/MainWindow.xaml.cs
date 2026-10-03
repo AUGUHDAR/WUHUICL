@@ -38,6 +38,13 @@ public partial class MainWindow : Window
         StateChanged += (_, _) => UpdateMaxGlyph();
         // 弹窗宽度里的 100vw/vh 减项要跟窗口尺寸走（ApplyViewportCaps）
         SizeChanged += (_, _) => ApplyViewportCaps();
+        // 原版 watch(store.logs.length)：日志窗开着时把 .log-body 滚到底（HomeView.vue:255-262）。
+        // 要 BeginInvoke：Extents 是排版之后才算得出的，同步调 ScrollToEnd 会滚不过去。
+        _s.LogLines.CollectionChanged += (_, _) =>
+        {
+            if (LogOverlay.Visibility != Visibility.Visible) return;
+            Dispatcher.BeginInvoke(() => LogScroll.ScrollToEnd(), System.Windows.Threading.DispatcherPriority.Background);
+        };
     }
 
     async void OnLoaded(object sender, RoutedEventArgs e)
@@ -208,8 +215,9 @@ public partial class MainWindow : Window
         WindowState == WindowState.Maximized ? "Icon.Restore" : "Icon.Maximize");
 
     /// <summary>
-    /// 逐屏自测用：`Wuhuicl.App.exe --page=accounts` 直接打开某一页。
-    /// 只认已知页名，其它一律忽略，不影响正常使用。
+    /// 逐屏自测用：`Wuhuicl.App.exe --page=accounts` 直接打开某一页，
+    /// `--open=log` 之类把只有交互才会出现的浮层直接点开（不然截图永远拍不到它们）。
+    /// 只认已知名字，其它一律忽略，不影响正常使用。
     /// </summary>
     void OpenDebugPage()
     {
@@ -225,6 +233,11 @@ public partial class MainWindow : Window
                     if (ThemePanel != null) BuildThemeChips(id);
                     SetThemeNote(id);   // 截图核对时说明文字也要跟得上，否则看着像切了没生效
                 }
+                continue;
+            }
+            if (a.StartsWith("--open=", StringComparison.OrdinalIgnoreCase))
+            {
+                OpenDebugLayer(a[7..].ToLowerInvariant());
                 continue;
             }
             if (!a.StartsWith("--page=", StringComparison.OrdinalIgnoreCase)) continue;
@@ -248,6 +261,53 @@ public partial class MainWindow : Window
                 case "servers": NavResources.IsChecked = true; NavServers.IsChecked = true; break;
                 case "bridge": NavResources.IsChecked = true; NavBridge.IsChecked = true; break;
             }
+        }
+    }
+
+    /// <summary>浮层的自测入口：原版这些都要点出来（日志窗是首页「运行状态」那一格，
+    /// HomeView.vue:557），截图拍不到，所以给个开关直接开。
+    /// log 是空日志态（.log-empty，:722），logfail 再叠上 launchFailed 那条 .log-failure（:717）。</summary>
+    void OpenDebugLayer(string which)
+    {
+        switch (which)
+        {
+            case "log":
+                ToggleLog_Click(this, new RoutedEventArgs());
+                break;
+            case "logfail":
+                _s.LaunchFailed = true;
+                foreach (var line in new[]
+                {
+                    "启动 Java：C:\\Java\\jdk-21\\bin\\javaw.exe",
+                    "启动命令：java -Xmx2G -cp <classpath> net.minecraft.client.main.Main --username 测试",
+                    "[stderr] Exception in thread \"main\" java.lang.NoClassDefFoundError: com/mojang/bridge/Session",
+                    "游戏退出代码 1",
+                }) _s.Log(line);
+                ToggleLog_Click(this, new RoutedEventArgs());
+                break;
+            case "installed":
+                // 本机一个实例都没装时，已安装行的版式永远拍不到（列表是空的）。
+                // 只往内存集合塞两条假行，不动 SelectedInstalled、不写 settings.json，进程一退就没。
+                _s.InstalledList.Add(new VersionRow { Id = "1.20.1", Label = "1.20.1", Subtitle = "正式版" });
+                _s.InstalledList.Add(new VersionRow
+                {
+                    Id = "fabric-loader-0.15.11-1.20.4",
+                    Label = "Fabric 1.20.4 这个实例名故意取长一点用来验证两行截断",
+                    Kind = "loader", Subtitle = "Fabric 0.15.11",
+                });
+                NavVersions.IsChecked = true;
+                PageVersions.TabInstalled.IsChecked = true;
+                break;
+            case "install":
+                // 安装弹窗只能从版本行点出来；截图脚本没有可点的行（本机不一定装了实例），
+                // 这里直接把弹窗撑开，数据全在控件内存里，不碰 versions 目录。
+                NavVersions.IsChecked = true;
+                PageVersions.DebugOpenInstall();
+                break;
+            case "creator":
+                // 创作者卡的展开态只有 hover 才有，截图脚本没有指针，这里直接把它撑开
+                PageHome.DebugOpenCreator();
+                break;
         }
     }
 
@@ -368,7 +428,9 @@ public partial class MainWindow : Window
     /// 当前视图落在 mods/packs/shaders/bridge/servers/recordings 里时，父项「资源管理」
     /// 既要保持展开（子菜单与尖角的 open 都是 resourceExpanded || inResourceGroup），
     /// 字色还要转 text（.nav-parent.group-active，App.vue:1881）。
-    /// Foreground 给 null 就是清掉本地值，回到样式/模板触发器自己的取色（hover 也是 text，视觉不损失）。
+    /// 不在组里时要 ClearValue 而不是赋 null：Foreground=null 是「用空笔刷画」，
+    /// 图标与文字会整行隐形（实测就是这样把侧栏那一行抹白的），只有 ClearValue 才是「清掉本地值、
+    /// 回到样式与模板触发器自己的取色」（hover 转 text 也还在）。
     /// </summary>
     static readonly string[] ResourceGroupViews = { "mods", "packs", "shaders", "bridge", "servers", "recordings" };
 
@@ -376,7 +438,8 @@ public partial class MainWindow : Window
     {
         if (NavResources is null) return;
         bool inGroup = ResourceGroupViews.Contains(_view);
-        NavResources.Foreground = inGroup ? (Brush)FindResource("Fg") : null;
+        if (inGroup) NavResources.Foreground = (Brush)FindResource("Fg");
+        else NavResources.ClearValue(Control.ForegroundProperty);
         if (inGroup && NavResources.IsChecked != true) NavResources.IsChecked = true;
     }
 
@@ -517,7 +580,7 @@ public partial class MainWindow : Window
         }
         HeroPlayText.Text = "正在启动…";
         await _s.PlayAsync();
-        HeroPlayText.Text = _s.GameRunning ? "重新启动" : "开始游戏";
+        HeroPlayText.Text = _s.LaunchText;
         RefreshHero();
     }
 
@@ -549,7 +612,9 @@ public partial class MainWindow : Window
         // .log-mask 的 blur(5px)（HomeView.vue:968）：先快照再显示，快照里才不含遮罩自己
         _logBlur ??= MaskBlur.Attach(ShellHost, LogOverlay, ShellRoot, 5);
         LogOverlay.Visibility = Visibility.Visible;
-        LogList.ScrollIntoView(LogList.Items.Count > 0 ? LogList.Items[^1] : null!);
+        // 原版没有「开窗滚到底」这一条，是 watch 日志条数时判 logOpen（:255-262）；
+        // 这里等价：刚显示时先滚一次，之后由 ctor 里那个 CollectionChanged 接手
+        Dispatcher.BeginInvoke(() => LogScroll.ScrollToEnd(), System.Windows.Threading.DispatcherPriority.Background);
     }
 
     void CloseLog_Click(object sender, RoutedEventArgs e)
@@ -565,6 +630,13 @@ public partial class MainWindow : Window
     /// <summary>App.vue:1342 onImportClick：拉起文件选择，把外部 MOD/世界/皮肤导入当前实例。</summary>
     void Import_Click(object sender, RoutedEventArgs e)
         => _s.Log("导入向导下一轮接入。");
+
+    /// <summary>.brand-avatar（1.1.10 新增，App.vue:1247）：点侧栏头像开「卡慕互动彩蛋」，
+    /// 原版是 MascotStage 那一整块（11 个类＋mascotFrame/mascotAudio 等 6 个模块），
+    /// 端口还没做，所以这里只留入口与提示；打开时原版还会给 .shell 挂 mascots-active
+    /// 把全局 backdrop-filter 关掉（:1734）。</summary>
+    void OpenMascots_Click(object sender, RoutedEventArgs e)
+        => _s.Log("卡慕互动彩蛋（MascotStage）是 1.1.10 新增界面，还没移植。");
     void Notice_Click(object sender, RoutedEventArgs e) => ShowFloat(NoticePanel);
 
     /// <summary>
@@ -612,6 +684,9 @@ public partial class MainWindow : Window
         LaunchFailCard.MaxWidth = Math.Min(480, w - 32);
         LaunchFailCard.MaxHeight = h - 32;
         CfgMismatchCard.MaxWidth = Math.Min(460, w * 0.9);
+        // .log-dialog：宽 min(760, 100vw 减 64)、最高 min(620, 100vh 减 80)（HomeView.vue:969）
+        LogCard.MaxWidth = Math.Min(760, w - 64);
+        LogCard.MaxHeight = Math.Min(620, h - 80);
     }
 
     void FloatMask_Click(object sender, MouseButtonEventArgs e) => ShowFloat(FloatMask);
@@ -872,13 +947,21 @@ public partial class MainWindow : Window
         if ((sender as FrameworkElement)?.Tag is VersionRow v)
             _s.Log($"{v.Id} 的实例菜单下一轮接入（管理 / 收藏 / 打开文件夹 / 删除）。");
     }
-    void CopyCmd_Click(object sender, RoutedEventArgs e)
+    /// <summary>.log-dialog footer 的「清空日志」（HomeView.vue:725 store.logs = []）。</summary>
+    void ClearLog_Click(object sender, RoutedEventArgs e) => _s.ClearLogs();
+
+    /// <summary>.log-failure 里的「导出错误日志」（HomeView.vue:264-275 exportFailureLogs）：
+    /// 导出期间按钮 disabled ＋ 文案转「导出中…」，结束再切回来。真正的导出要等 launch 日志落盘接口。</summary>
+    async void ExportFailureLogs_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrEmpty(_s.LastCommand)) { _s.Status = "还没有启动记录可复制"; return; }
-        try { Clipboard.SetText(_s.LastCommand); _s.Status = "启动命令已复制（token 已打码）"; }
-        catch (Exception ex) { _s.Status = "复制失败：" + ex.Message; }
+        var btn = (Button)sender;
+        btn.IsEnabled = false;
+        ExportFailureText.Text = "导出中…";
+        await Task.Delay(400);
+        ExportFailureText.Text = "导出错误日志";
+        btn.IsEnabled = true;
+        _s.Log("导出错误日志下一轮接入：要等 crash-report 与 latest.log 的落盘路径。");
     }
-    void ClearLog_Click(object sender, RoutedEventArgs e) => _s.LogLines.Clear();
 
     // ---------------- 版本 ----------------
     internal async void Install_Click(object sender, RoutedEventArgs e)
@@ -1012,65 +1095,132 @@ public partial class MainWindow : Window
             Source = new Uri($"pack://application:,,,/Themes/{t.File}.xaml", UriKind.Absolute),
         };
         Brush B(string key) => new SolidColorBrush((Color)d[key]);
+        Brush K(string key) => (Brush)d[key];
 
-        // 预览块：底色 bg，左侧栏 9px，顶栏 6px，内容区一张卡片 + 强调色小按钮 + 4px 圆点
+        // .theme-preview（模板 :628-631，样式 :1551 被尾部 :1864 收成 46×32 / radius 5 / flex:none）
+        // ＋ border 1.5px border ＋ overflow hidden  position relative。
+        // hover 只把描边转 border-strong（:1561 的位移被 :1865 取消），
+        // 选中态描边转 accent 且光环被 :1866 取消。原版靠 :hover 伪类，这里在行元素上挂事件。
         var preview = new Border
         {
             Width = 46, Height = 32, CornerRadius = new CornerRadius(5),
-            Background = B("C.Bg"), ClipToBounds = true,
+            Background = B("C.Bg"), BorderThickness = new Thickness(1.5),
+            BorderBrush = selected ? B("C.Accent") : K("Line"),
+            ClipToBounds = true,
         };
+
+        // 迷你界面（.tp-side ＋ .tp-main）对所有主题都建：原版模板 :634-660 没有 v-if，
+        // 自定义主题只是再往上盖一层 .tp-custom-grad（:1637，inset 0 的 135° 彩虹、opacity .85）
+        // 加一个 20×20 的白色调色盘 .tp-palette（:1643 ＋ 尾部 :1869，带 drop-shadow），
+        // 并把 .preview-custom（:1631）的底色换成写死的 #16161d。
         var grid = new Grid();
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(6) });
-        grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(9) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-        var side = new Border { Background = B("C.Nav") };
-        Grid.SetRowSpan(side, 2);
-        grid.Children.Add(side);
-        var top = new Border { Background = B("C.Nav") };
-        Grid.SetColumn(top, 1);
-        grid.Children.Add(top);
-
-        var body = new Grid { Margin = new Thickness(3) };   // .tp-body{padding:3px}（:1869）
-        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(4) });
-        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        body.Children.Add(new Border
         {
-            Width = 4, Height = 4, CornerRadius = new CornerRadius(2),
-            // .tp-dot 的底色是这套主题自己的 accent（SettingsView.vue:640 内联），不是 text-dim
-            Background = B("C.Accent"), HorizontalAlignment = HorizontalAlignment.Left,
-        });
-        var btn = new Border
-        {
-            Height = 4, CornerRadius = new CornerRadius(2), Background = B("C.Accent"),
-            VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 2, 0, 0),
-        };
-        Grid.SetRow(btn, 1);
-        body.Children.Add(btn);
-        Grid.SetColumn(body, 1);
-        Grid.SetRow(body, 1);
-        grid.Children.Add(body);
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(9) });   // .tp-side（:1581→尾部 9 宽）
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // .tp-main（:1594）
 
-        // 选中勾：14×14 贴右上角 1px
+            // .tp-side：display flex / justify center / padding-top 4，里面才是 4×4 的 .tp-dot
+            // （:1589→尾部 4×4，圆点底色是这套主题自己的 accent（:640 内联），不是 text-dim）；
+            // 右缘那条 1px 分隔线也是内联写的 borderRight: 1px solid theme.border
+            var side = new Border
+            {
+                Background = B("C.Nav"),
+                BorderBrush = K("Line"), BorderThickness = new Thickness(0, 0, 1, 0),
+                Padding = new Thickness(0, 4, 0, 0),
+                Child = new Border
+                {
+                    Width = 4, Height = 4, CornerRadius = new CornerRadius(2),
+                    Background = B("C.Accent"), HorizontalAlignment = HorizontalAlignment.Center,
+                },
+            };
+            grid.Children.Add(side);
+
+            var main = new StackPanel();
+            // .tp-top：高 6（:1600→尾部 6）、底 card、border-bottom 1px border（:645 内联）
+            main.Children.Add(new Border
+            {
+                Height = 6, Background = B("C.Card"),
+                BorderBrush = K("Line"), BorderThickness = new Thickness(0, 0, 0, 1),
+            });
+            // .tp-body：flex 1 / column / gap 2 / padding 3（:1604→尾部 :1869）。
+            // 里面是 block（flex 1）＋ btn（高 4），WPF 用两行栅格表达 star＋auto
+            var body = new Grid { Margin = new Thickness(3) };
+            body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            // .tp-block：flex 1 / radius 4 / 底 card / border 1px border（:1611 ＋ :652 内联）
+            body.Children.Add(new Border
+            {
+                CornerRadius = new CornerRadius(4), Background = B("C.Card"),
+                BorderBrush = K("Line"), BorderThickness = new Thickness(1),
+            });
+            // .tp-btn：高 4 / radius 4（4 高即胶囊）/ 底 accent（:1615→尾部 4），与上面隔 gap 2
+            var btn = new Border
+            {
+                Height = 4, CornerRadius = new CornerRadius(2), Background = B("C.Accent"),
+                Margin = new Thickness(0, 2, 0, 0),
+            };
+            Grid.SetRow(btn, 1);
+            body.Children.Add(btn);
+            main.Children.Add(body);
+            Grid.SetColumn(main, 1);
+            grid.Children.Add(main);
+        }
+
+        // 自定义主题：盖一层彩虹渐变（opacity .85，所以底下的迷你界面还会透出 15%），
+        // 再放居中的白色调色盘；.preview-custom 的底色是写死的 #16161d（:1631）
+        var host = new Grid();
+        host.Children.Add(grid);
+        if (t.Id == "custom")
+        {
+            preview.Background = new SolidColorBrush(Color.FromRgb(0x16, 0x16, 0x1d));
+            host.Children.Add(new Border
+            {
+                Opacity = 0.85,
+                Background = new LinearGradientBrush
+                {
+                    // linear-gradient(135deg, ...) → 左上到右下
+                    StartPoint = new Point(0, 0), EndPoint = new Point(1, 1),
+                    GradientStops = new GradientStopCollection
+                    {
+                        new(Color.FromRgb(0xf4, 0x3f, 0x5e), 0.00),
+                        new(Color.FromRgb(0xf9, 0x73, 0x16), 0.25),
+                        new(Color.FromRgb(0xea, 0xb3, 0x08), 0.45),
+                        new(Color.FromRgb(0x22, 0xc5, 0x5e), 0.65),
+                        new(Color.FromRgb(0x3b, 0x82, 0xf6), 0.85),
+                        new(Color.FromRgb(0xa8, 0x55, 0xf7), 1.00),
+                    },
+                },
+            });
+            host.Children.Add(new Viewbox
+            {
+                Width = 20, Height = 20, Stretch = Stretch.Uniform,
+                // .tp-palette 的 color 是写死的 #fff，滤镜 drop-shadow(0 1px 3px rgba(0,0,0,.45))
+                Child = PaletteIcon(),
+                Effect = new System.Windows.Media.Effects.DropShadowEffect
+                { BlurRadius = 3, ShadowDepth = 1, Direction = 270, Color = Colors.Black, Opacity = 0.45 },
+            });
+        }
+        preview.Child = host;
+
+        // .tp-check（模板 :670，样式 :1620→尾部 :1869）：14×14 圆（radius 50%）、padding 2、
+        // 底 accent、字色 on-accent，里面是那个 viewBox 24、stroke-width 3 的圆头对勾；
+        // 位置是 absolute top 1 / right 1。
         var check = new Border
         {
-            Width = 14, Height = 14, CornerRadius = new CornerRadius(3),
-            Background = B("C.Accent"), HorizontalAlignment = HorizontalAlignment.Right,
+            Width = 14, Height = 14, CornerRadius = new CornerRadius(7),
+            Background = B("C.Accent"), Padding = new Thickness(2),
+            HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 1, 1, 0),
             Child = new System.Windows.Shapes.Path
             {
-                Data = Geometry.Parse("M3,7 L6,10 L11,4"),
-                Stroke = B("C.AccentFg"), StrokeThickness = 1.6,
+                // viewBox 24 → 10（14 减两侧 padding 2），所以整条路径按 10/24 缩过
+                Data = Geometry.Parse("M8.33,2.5 L3.75,7.08 L1.67,5.0"),
+                Stroke = B("C.AccentFg"), StrokeThickness = 1.25,
                 StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
                 StrokeLineJoin = PenLineJoin.Round,
             },
             Visibility = selected ? Visibility.Visible : Visibility.Collapsed,
         };
-        var host = new Grid();
-        host.Children.Add(grid);
-        host.Children.Add(check);
-        preview.Child = host;
+        if (preview.Child is Grid hostGrid) hostGrid.Children.Add(check);
 
         var row = new StackPanel { Orientation = Orientation.Horizontal };
         row.Children.Add(preview);
@@ -1079,7 +1229,36 @@ public partial class MainWindow : Window
             Text = t.Name, FontSize = 13, Margin = new Thickness(10, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
         });
+        // .theme-option:hover .theme-preview { border-color: border-strong }（:1561）
+        var idleBrush = preview.BorderBrush;
+        row.MouseEnter += (_, _) => preview.BorderBrush = K("BorderStrong");
+        row.MouseLeave += (_, _) => preview.BorderBrush = idleBrush;
         return row;
+    }
+
+    /// <summary>自定义主题预览里的那个调色盘图标（SettingsView.vue:663-668）：
+    /// 一条 24 viewBox 的描边轮廓 ＋ 三颗 fill=currentColor 的 r=1 圆点，颜色 #fff。</summary>
+    static FrameworkElement PaletteIcon()
+    {
+        var canvas = new Canvas { Width = 24, Height = 24 };
+        canvas.Children.Add(new System.Windows.Shapes.Path
+        {
+            Data = Geometry.Parse(
+                "M12,22 C6.49,22 2,17.51 2,12 S6.49,2 12,2 s10,4.04 10,9 c0,3.31 -2.69,6 -6,6 h-1.77 " +
+                "c-0.28,0 -0.5,0.22 -0.5,0.5 c0,0.12 0.05,0.23 0.13,0.33 c0.41,0.47 0.64,1.06 0.64,1.67 " +
+                "A2.5,2.5 0 0 1 12,22 Z"),
+            Stroke = Brushes.White, StrokeThickness = 1.8,
+            StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+        });
+        foreach (var (cx, cy) in new[] { (7.5, 11.5), (12.0, 7.5), (16.5, 11.5) })
+        {
+            var dot = new System.Windows.Shapes.Ellipse { Width = 2, Height = 2, Fill = Brushes.White };
+            Canvas.SetLeft(dot, cx - 1);
+            Canvas.SetTop(dot, cy - 1);
+            canvas.Children.Add(dot);
+        }
+        return canvas;
     }
 
     void SetThemeNote(string id) => TxtThemeNote.Text =
@@ -1092,6 +1271,7 @@ public partial class MainWindow : Window
         _s.SaveSettings();
         ThemeManager.Apply(id);
         BuildThemeChips(id);   // 勾标是静态可见性，换主题后要重建才跟得上
+        ApplyResourceGroup();  // 侧栏父项的字色是 FindResource 取的本地值，换主题后要按新主题重取
         SetThemeNote(id);
     }
 

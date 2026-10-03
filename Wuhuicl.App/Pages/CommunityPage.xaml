@@ -170,6 +170,52 @@
             </Setter>
         </Style>
 
+        <!-- CmSectionTab ＝ .community-section（模板 :484 页签；样式 :735）。基础/未选中态：
+             min-height var(ctl-h)=36 / padding 0 16 / radius var(radius-sm)=6 / 底 transparent /
+             字色 var(text-dim)=Fg2 / font-size 13（=text-sm，font:inherit 只换字号）/ border 0 /
+             display flex、align+justify center（ContentPresenter 居中）。
+             transition background/color 160ms：原样无 :hover 规则改这两值，只有 .active 会切换，
+             属静态渲染不出像素的死动画，故 WPF 不做动画、也不加 hover 触发器。
+             .community-section:focus-visible（:738）outline 2 accent 只在键盘焦点态出现 → 本轮不画。 -->
+        <Style x:Key="CmSectionTab" TargetType="Button">
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Padding" Value="16,0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="{TemplateBinding Background}"
+                                CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- CmSectionTabOn ＝ .community-section.active（样式 :736）：底 var(accent-soft)=AccentSoft、
+             字色 var(accent-2)=AccentHi、字重 600（SemiBold）。默认 communityTab=browse（:55）→ 首枚「找资源」用本态。 -->
+        <Style x:Key="CmSectionTabOn" TargetType="Button" BasedOn="{StaticResource CmSectionTab}">
+            <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+            <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+
+        <!-- CmSectionBadge ＝ .community-section span 计数徽标（样式 :737）：min-width 20 / height 20 /
+             padding 0 5 / 底 var(card)=Card / radius 6（硬编码非令牌）/ 字号 11（硬编码）/ tabular-nums。
+             文本色未写 → 继承所在页签的 text-dim（Fg2），故本样式不钉 Foreground、内部 TextBlock 也不写死。 -->
+        <Style x:Key="CmSectionBadge" TargetType="Border">
+            <Setter Property="MinWidth" Value="20"/>
+            <Setter Property="Height" Value="20"/>
+            <Setter Property="Padding" Value="5,0"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Background" Value="{DynamicResource Card}"/>
+        </Style>
+
         <!-- 结果卡的下载钮 .result-dl：原版虽写 class="btn btn-gold btn-sm"，但 ui-system.css:47 强制
              background card-2 / color text / box-shadow none / border 1 border —— 也就是最终态是"中性 ghost"，不是金色（本轮的修正点）。
              hover（ui-system.css:48）才翻成 accent 实心。尺寸沿用 .btn-sm（32/padding 12 4/13/radius 6）。 -->
@@ -238,7 +284,11 @@
         <!-- .page：max-width 940 + margin 0 auto — :708-714（:1081 只换了 display/gap，940 这条仍然生效）
              .community-page：display grid / grid-template-columns minmax(0,1fr)（单列）/ gap 12px !important — :1081 -->
         <Grid MaxWidth="940" HorizontalAlignment="Center" VerticalAlignment="Top" Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+            <!-- 单列 grid gap 12（:1116）下的行序：page-head / community-sections / instance-row / search-card / results。
+                 新增分区页签占 Row2，其后各项整体下移一行（instance-row→4 / search-card→6 / results→8）。 -->
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="12"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="12"/>
                 <RowDefinition Height="Auto"/>
@@ -257,11 +307,45 @@
                            Text="搜索并下载 Modrinth / CurseForge 上的 Mod、整合包、资源包、光影与数据包"/>
             </StackPanel>
 
+            <!-- ============ 分区页签条 .community-sections（模板 :484；样式 :734）============
+                 role=tablist。它是 .community-page（:1116 单列 grid）的网格项：align-self flex-start → 顶对齐、取内容高；
+                 justify-self 默认 stretch → 横轴撑满列宽（≤940），并非 fit-content（只有 .kind-capsules 才 fit-content）。
+                 flex / align-items center / gap 6 / padding 4 / 底 var(card-2)=CardSoft / border 1 var(border)=Line /
+                 radius var(radius-md)=10（styles.css:59，非 999 → 用 CornerRadius 不用 Pill）。 -->
+            <Border Grid.Row="2" Background="{DynamicResource CardSoft}" BorderBrush="{DynamicResource Line}"
+                    BorderThickness="1" CornerRadius="10" Padding="4"
+                    HorizontalAlignment="Stretch" VerticalAlignment="Top">
+                <!-- 页签横排 gap 6（:734）→ 首枚右留 6，第二枚不加左距 -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                    <!-- .community-section（模板 :484 / 样式 :735）；默认 communityTab=browse（:55）→ 本页签落 .active（:736） -->
+                    <Button Style="{StaticResource CmSectionTabOn}" Content="找资源" Margin="0,0,6,0"/>
+                    <!-- 第二枚 .community-section（未选中：transparent 底 / text-dim=Fg2 字）。内含 .community-section span 徽标（:737）。
+                         徽标数字源 favorites.length（:484），无数据源 → 几何按 :737 出壳、计数占位。 -->
+                    <Button Style="{StaticResource CmSectionTab}">
+                        <!-- .community-section gap 8（:735）＝文本与徽标横向间距 -->
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="已收藏 MOD" VerticalAlignment="Center"/>
+                            <Border Style="{StaticResource CmSectionBadge}" Margin="8,0,0,0">
+                                <!-- 占位：等 favorites.length 接入 -->
+                                <TextBlock Text="0" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Border>
+
             <!-- ============ 版本行 .filter-row.instance-row（:466-470）============ -->
             <!-- margin/padding 0 + justify-content flex-end — :1080（gap 12 同为 :1080）；
                  align-items baseline — :706。注：:1081 在单列下把它改回 flex-start，本处按台账 §7 的右对齐做 -->
-            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-                <TextBlock Style="{StaticResource Dim}" Text="选择版本" VerticalAlignment="Center"
+            <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+                <!-- .instance-label（模板 :467，样式 :706）：只有 align-self baseline / line-height 1.4 /
+                     white-space nowrap，字号与字色都没写 → 跟 body 的 text-md 14 与 text 色，
+                     所以这里不能用 Dim（那是 13＋text-dim，是给 .muted 用的）。
+                     align-items:baseline 在 WPF 的横向 StackPanel 里没有对应物（基线对齐只在文本内部），
+                     这里按垂直居中做，与相邻按钮的文字基线差约 2px，记进已知偏差。 -->
+                <TextBlock Text="选择版本" FontSize="14" LineHeight="19.6"
+                           LineStackingStrategy="BlockLineHeight"
+                           Foreground="{DynamicResource Fg}" VerticalAlignment="Center"
                            Margin="0,0,12,0"/>
                 <!-- .instance-filter{max-width:420px} — :1080；.filter-select{flex:1;min-width:140} — :786-790
                      flex:1 在本行（宽 ≈916）会被 max-width 夹到 420 → WPF 直接写 420 -->
@@ -277,7 +361,7 @@
 
             <!-- ============ 搜索卡 .card.search-card（:472-539）============ -->
             <!-- padding 16 / column / gap 12 — :1080（基线 :717-721 也是 column gap 12）；卡片平面、无阴影（契约 §6.4） -->
-            <Border Grid.Row="4" Style="{StaticResource CardTight}">
+            <Border Grid.Row="6" Style="{StaticResource CardTight}">
                 <StackPanel>
 
                     <!-- ·· 分类胶囊 .kind-capsules（:473-485，样式 :734-744）··
@@ -392,7 +476,7 @@
 
             <!-- ============ 结果区 .card.list-card（:542-635）============ -->
             <!-- .list-card{padding:0;background:transparent;border:0;box-shadow:none} — :818-823 → 外壳整个脱掉，只剩布局 -->
-            <StackPanel Grid.Row="6">
+            <StackPanel Grid.Row="8">
 
                 <!-- ============ .status-strip（CommunityView.vue:543 标记 + ui-system.css:41 样式）============
                      flex align-center wrap gap 12 / padding 12 16 / radius radius-md 10 / 底 accent-soft / 13px / margin-bottom 12。
@@ -601,7 +685,11 @@
                                                LineHeight="23.2" MaxHeight="46.4" TextWrapping="Wrap"
                                                TextTrimming="CharacterEllipsis"/>
                                     <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                        <!-- .tag radius 999 / padding 8,2（契约 §2）；:1080 把 .result-head .tag 改成 11px + card-2 底 + text-dim + 无边框 -->
+                                        <!-- .tag radius 999 / padding 8,2（契约 §2）；:1080 把 .result-head .tag 改成 11px + card-2 底 + text-dim + 无边框。
+                                             元素上还挂着 .tag-cf（:902，橙 12% 底＋#f97316 字）与 .tag-success（styles.css:486，ok-soft 底＋ok 字），
+                                             但两者都是单类（特异性 0,1,0），被 .result-head .tag（0,2,0，且在尾部压缩块里）压掉
+                                             → 在这个位置它们不产生任何像素，别照着上色。
+                                             .tag-success 真正生效的地方是版本列表的「已安装」（GameView.vue:1085，不在 .result-head 里）。 -->
                                         <Border Style="{StaticResource Tag}" Background="{DynamicResource CardSoft}"
                                                 BorderThickness="0">
                                             <TextBlock Text="来源：CurseForge" Style="{StaticResource TagTextSm}"
@@ -656,6 +744,19 @@
                                             <!-- 原版 :605 是「书」，§3 无该键 → 用 Icon.Changelog（文档）代位 -->
                                             <ContentControl Width="16" Height="16"
                                                             Style="{DynamicResource Icon.Changelog}"/>
+                                        </Button>
+                                        <!-- .result-favorite（模板 :629）：v-if query.kind='mod'（默认 kind=mod :172 → 可见）。
+                                             该类本身无基础几何规则，尺寸全走 .icon-btn 基态（styles.css:310）——
+                                             但 :1115 的 .result-links .icon-btn{width:34px;height:34px}（两类 0,2,0）压过
+                                             全局单类 .icon-btn（0,1,0）→ 34×34；内层 svg 由 styles.css:342 强制 16×16。
+                                             ui-system.css:16 的 .content .icon-btn 只加 flex-shrink:0，不改尺寸 → 无像素影响。
+                                             未收藏态 fill=none（描边星）→ Icon.StarOutline，字色继承 .icon-btn 的 text-dim（不写死）。
+                                             .result-favorite.active（:979，收藏后 AccentHi(accent-2) 字 + AccentSoft 底）与
+                                             .result-favorite:disabled（:980，favoriteBusy 时 opacity .55）均非默认态 → 占位不画。 -->
+                                        <Button Style="{StaticResource IconBtn}" Width="34" Height="34"
+                                                Margin="4,0,0,0" ToolTip="收藏模组">
+                                            <ContentControl Width="16" Height="16"
+                                                            Style="{DynamicResource Icon.StarOutline}"/>
                                         </Button>
                                     </StackPanel>
 
@@ -748,6 +849,13 @@
                                                 Click="Mcmod_Click" ToolTip="在 MC 百科查看介绍与教程">
                                             <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.Changelog}"/>
                                         </Button>
+                                        <!-- .result-favorite（模板 :629）：v-if query.kind='mod'（默认 kind=mod :172 → 可见）。
+                                             尺寸走 :1115 .result-links .icon-btn 34×34（0,2,0 > 全局 .icon-btn 0,1,0）；svg 16×16（styles.css:342）。
+                                             未收藏态描边星 Icon.StarOutline，字色继承 .icon-btn text-dim；.active（:979）/.disabled（:980）非默认态 → 占位不画。 -->
+                                        <Button Style="{StaticResource IconBtn}" Width="34" Height="34"
+                                                Margin="4,0,0,0" ToolTip="收藏模组">
+                                            <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.StarOutline}"/>
+                                        </Button>
                                     </StackPanel>
                                     <!-- .result-dl：ui-system.css:47 强制中性 ghost，非金色 → CmResultDl -->
                                     <Button Grid.Column="2" Style="{StaticResource CmResultDl}" Click="Download_Click">
@@ -836,6 +944,13 @@
                                         <Button Style="{StaticResource IconBtn}" Width="34" Height="34" Margin="4,0,0,0"
                                                 Click="Mcmod_Click" ToolTip="在 MC 百科查看介绍与教程">
                                             <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.Changelog}"/>
+                                        </Button>
+                                        <!-- .result-favorite（模板 :629）：v-if query.kind='mod'（默认 kind=mod :172 → 可见）。
+                                             尺寸走 :1115 .result-links .icon-btn 34×34（0,2,0 > 全局 .icon-btn 0,1,0）；svg 16×16（styles.css:342）。
+                                             未收藏态描边星 Icon.StarOutline，字色继承 .icon-btn text-dim；.active（:979）/.disabled（:980）非默认态 → 占位不画。 -->
+                                        <Button Style="{StaticResource IconBtn}" Width="34" Height="34"
+                                                Margin="4,0,0,0" ToolTip="收藏模组">
+                                            <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.StarOutline}"/>
                                         </Button>
                                     </StackPanel>
                                     <!-- .result-dl：ui-system.css:47 强制中性 ghost，非金色 → CmResultDl -->

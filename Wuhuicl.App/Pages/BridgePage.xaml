@@ -287,8 +287,9 @@
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock FontSize="13" FontWeight="SemiBold"
                                                                VerticalAlignment="Center" Text="显示帧率与坐标"/>
-                                                    <!-- .tag（radius 999 / padding 2 8 / 12px，styles.css:460-467）
-                                                         被 :318 压成 padding 1px 8px；APPLY_HINT 四值见 :132-137 -->
+                                                    <!-- .tag.bridge-apply-tag（模板 :224，样式 :318）：
+                                                         .tag 基态是 radius 999 / padding 2 8 / 12px（styles.css:460-467），
+                                                         这里被 :318 压成 padding 1 8；APPLY_HINT 四值见 :132-137 -->
                                                     <Border Style="{StaticResource Tag}" Padding="8,1" Margin="8,0,0,0">
                                                         <TextBlock Style="{StaticResource TagText}"
                                                                    Foreground="{DynamicResource Fg2}"
@@ -385,7 +386,7 @@
                                         </Grid>
                                     </Border>
 
-                                    <!-- 行 4：下拉 SelectMenu（:260-267，width 160 见 :324），
+                                    <!-- 行 4：下拉 .bridge-select（模板 :260-267，样式 :324 → width 160），
                                          并演示 scope === 'SERVER' 的只读态：.bridge-row.disabled 把 info 压到 opacity .55（:313），
                                          控件本身 disabled（:265），tooltip 见 :225 的 title 文案 -->
                                     <Border Style="{StaticResource BridgeRow}">

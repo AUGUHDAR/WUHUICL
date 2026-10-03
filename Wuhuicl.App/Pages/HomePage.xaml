@@ -544,14 +544,22 @@
 
     <!-- C. 结构规矩：页根是 Grid，滚动主体与固定浮层是它的兄弟节点。
          固定层（遮罩、浮起菜单、模态）绝不能塞进 ScrollViewer：那会跟着滚并被裁。
-         与 Pages/VersionsPage.xaml:285-835 同构（Grid → ScrollViewer ＋ 浮层兄弟）。 -->
+         滚动的是「整页」（原版的 .content 就是 overflow-y auto 包住 .home-dashboard 两列），
+         所以 ScrollViewer 在 .home-dashboard 外面；早先把它放进左列里，右列就永远不参与滚动，
+         而且更糟：dashboard 变成 ScrollViewer 的兄弟、又是 HorizontalAlignment=Center，
+         星号列在按内容测量时不贡献宽度 → 整页塌成内容宽（实测首页只有 766 宽，正版是 1104）。 -->
     <Grid>
 
         <!-- .home-dashboard（HomeView.vue:782-791 与尾部 :1030）：
              grid minmax(0,1fr) minmax(250px,290px) / gap 16（尾部覆盖基础 14）/ max-width 1160 / margin 0 auto。
              右列 minmax(250,290) 在本项目的最小窗口（960）下也取满 290（可用宽远大于 250），
-             按 docs/UI_GEOMETRY_HOME.md §7 的阶梯先写死 290。 -->
-        <Grid MaxWidth="1160" HorizontalAlignment="Center">
+             按 docs/UI_GEOMETRY_HOME.md §7 的阶梯先写死 290。
+             宽度靠外层 ScrollViewer 的横向拉伸拿到视口宽（这里必须保持默认的 Stretch，
+             一旦写 HorizontalAlignment=Center，Grid 就按"内容想要的宽度"排版，星号列不再摊开，
+             整页会塌成 766 宽并居中——实测首页左列因此只有 460，正版是 798）；
+             MaxWidth 1160 夹住后由 Stretch 自己居中，与 VersionsPage.xaml:402 的 MaxWidth 同一套写法。 -->
+        <ScrollViewer VerticalScrollBarVisibility="Visible" Padding="0,0,8,0">
+        <Grid MaxWidth="1160">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="16"/>
@@ -559,8 +567,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- 左列 .home-main：flex 列，gap 14（:792-798，尾部未覆盖）→ hero / 状态条 / 最近游戏 -->
-            <ScrollViewer VerticalScrollBarVisibility="Visible" Padding="0,0,8,0">
-                <StackPanel>
+            <StackPanel>
                     <!-- .hero-card（模板 :480，样式 :799-809 + 尾部 :1030/:1031）：
                          height var(banner-h) 430 被 max-height 360 夹住 → 实高 360，min-height 320，
                          radius 20，描边 1px color-mix(border 95%, white 4%)（端口没有该混合键，取 Line），
@@ -605,6 +612,13 @@
                                                Foreground="#FFFFFFFF"/>
                                 </Border>
 
+                                <!-- .hero-metadata-slot（模板 :496，样式 :821）：width 100% / position relative，
+                                     :821 写的 min-height 130 已被尾部 :1030 的 .hero-metadata-slot{min-height:0} 收掉，
+                                     所以这里不预留占位高；里面那层 .hero-metadata（:498 ＋ :822）只有 width 100%，
+                                     两层的用处是给 instance-switch 过渡当 key 容器（WPF 没有 Vue 的 Transition 组件，
+                                     换实例的淡出淡入记在动效待办）。
+                                     .hero-content h1 同样被尾部 :1030 改过：clamp(24,2.6vw,32) ＋ line-height 1.25
+                                     ＋ 两行截断，:819 那套 clamp(46,5.2vw,64) ＋ nowrap 已经不生效。 -->
                                 <StackPanel Grid.Row="2" VerticalAlignment="Top" Margin="0,18,0,0">
                                     <!-- .hero-content h1（模板 :499，样式 :819 ＋ 尾部 :1030）：
                                          clamp(24px, 2.6vw, 32px)（1360 窗口下 2.6vw=35 → 取上限 32）、
@@ -841,12 +855,14 @@
                                                     Style="{DynamicResource Icon.Pulse}"/>
                                     <StackPanel Grid.Column="1" Margin="11,0,0,0" VerticalAlignment="Center">
                                         <TextBlock Text="运行状态" FontSize="12" Foreground="{DynamicResource Fg2}"/>
-                                        <!-- .runtime-state strong（:880-882）：flex / align center / gap 7 /
-                                             字色 accent-2；i（:881-882）7×7 圆点，
-                                             ready/running → var(ok) ＋ box-shadow 0 0 0 3px var(ok-soft)。
-                                             光环不占布局，所以放在 7×7 的网格里向外溢出画；
-                                             点色与光环色走 RunStateColor / RunStateRing ＋ BrushByKey
-                                             （Services/LaunchSession.cs:106-111 给的是 Idle/Ok 与 OkSoft/Transparent）。 -->
+                                        <!-- .runtime-state strong（:880 与 :883）＋ i（:881-882、:884）：
+                                             i 是 7×7 圆点，ready/running 底色 ok、光环 0 0 0 3px ok-soft，
+                                             error 换成 danger ＋ danger-soft，idle 只有灰点没有光环；
+                                             strong 是 flex / align center / gap 7 / 字色 accent-2，error 档转 danger。
+                                             光环不占布局，所以放在 7×7 的网格里向外溢出画。
+                                             三档色调全部由 LaunchSession 的 RunStateColor / RunStateRing / RunStateFg
+                                             提供（Services/LaunchSession.cs:108-133），
+                                             这里不再摆一对「等数据源接入」的 Collapsed 副本。 -->
                                         <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                             <Grid Width="7" Height="7" VerticalAlignment="Center">
                                                 <Ellipse Width="13" Height="13" HorizontalAlignment="Center"
@@ -858,31 +874,8 @@
                                             </Grid>
                                             <TextBlock Text="{Binding RunStateText}" FontSize="13"
                                                        FontWeight="SemiBold" Margin="7,0,0,0"
-                                                       Foreground="{DynamicResource AccentHi}"
+                                                       Foreground="{Binding RunStateFg, Converter={StaticResource BrushByKey}}"
                                                        TextTrimming="CharacterEllipsis"/>
-                                            <!-- A.3 错误态（.runtime-state.error，:883-884）：strong 字色 danger，
-                                                 i 底 danger ＋ 0 0 0 3px var(danger-soft) 光环。
-                                                 LaunchSession 给不出 error 态：RunStateColor 只会返回 Idle 或 Ok
-                                                 （Services/LaunchSession.cs:108），RunStateText 的四档文案
-                                                 （:103-104）里也没有原版的「需要检查」（HomeView.vue:197-198）。
-                                                 没有数据源就不硬造 → 这一对常收起，等会话层补出 error 色调后
-                                                 由代码把它切 Visible、把上面那对切 Collapsed。
-                                                 文案按契约写死与原版一致的那句「需要检查」（模板 :198）。 -->
-                                            <Grid x:Name="RunStateErrorDot" Width="7" Height="7"
-                                                  VerticalAlignment="Center" Visibility="Collapsed">
-                                                <Ellipse Width="13" Height="13" HorizontalAlignment="Center"
-                                                         VerticalAlignment="Center"
-                                                         Fill="{DynamicResource DangerSoft}"/>
-                                                <Ellipse Width="7" Height="7" HorizontalAlignment="Center"
-                                                         VerticalAlignment="Center"
-                                                         Fill="{DynamicResource Danger}"/>
-                                            </Grid>
-                                            <TextBlock x:Name="RunStateErrorText" FontSize="13"
-                                                       FontWeight="SemiBold" Margin="7,0,0,0"
-                                                       Foreground="{DynamicResource Danger}"
-                                                       Text="需要检查"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       Visibility="Collapsed"/>
                                         </StackPanel>
                                     </StackPanel>
                                     <ContentControl Grid.Column="2" Width="14" Height="14"
@@ -1035,8 +1028,7 @@
                             </ListBox>
                         </StackPanel>
                     </Border>
-                </StackPanel>
-            </ScrollViewer>
+            </StackPanel>
 
             <!-- 右列 .home-side（模板 :609，样式 :915 ＋ 尾部 :1030/:1033）：flex 列 / gap 16 / align-self start -->
             <StackPanel Grid.Column="2" VerticalAlignment="Top">
@@ -1209,7 +1201,11 @@
                                                Foreground="{DynamicResource Fg2}" Margin="0,3,0,0"/>
                                 </StackPanel>
                                 <!-- .skin-refresh（模板 :643，样式 :926-928 ＋ :944）：30×30 / radius 8 /
-                                     svg 17×17 / disabled opacity .4（原版 disabled＝skinLoading 或没有账户） -->
+                                     svg 17×17 / disabled opacity .4（原版 disabled＝skinLoading 或没有账户）。
+                                     :945 的 .spinning（skinLoading 时给里面那个 svg 加 animation: spin .8s linear infinite）
+                                     在本端口没有对应状态：ReloadSkin_Click 读的是本地 Assets/skin.png，同步返回，
+                                     不存在「转圈等网络」的中间态 → 这条动画无处可挂，
+                                     等皮肤改走远端拉取时再补（动效待办 §13）。 -->
                                 <Button HorizontalAlignment="Right" Style="{StaticResource IconBtn}"
                                         Width="30" Height="30" ctl:CssRadius.Round="8"
                                         Click="ReloadSkin_Click">
@@ -1316,42 +1312,47 @@
                     </StackPanel>
                 </Border>
 
-                <!-- ============ CreatorCard（components/CreatorCard.vue:11-32）============
-                     原版右侧栏最后一张卡是「参与测试及创作者」，鼠标进入才展开 20 个名字气泡。
+                <!-- ============ CreatorCard（components/CreatorCard.vue:11-33）============
+                     原版这张卡是「参与测试及创作者」，鼠标进入才展开名字气泡。
+                     本项目实际只有作者一个人（原版那串名字是官方 1.1.10 的测试名单，与本作无关），
+                     所以标题与名单都改成单人；文案由作者本人指定要重写。其余度量照原版。
                      .creator-card：padding card-pad 20 / border 1 border / radius radius-lg 14 /
-                     底 surface-content（＝Card）/ overflow hidden（:13）；
+                     底 surface-content（＝Card）/ overflow hidden（:18）；
                      尾部 :1030 的 .home-creator：margin-top 0、box-shadow none、
-                     描边色 color-mix(accent 26%, border)（主题字典没有该混合键，取 Line）。 -->
+                     描边色 color-mix(accent 26%, border)（主题字典没有该混合键，取 Line）。
+                     整张卡可点：原版只有右上角 ↗ 是链接，作者要求点卡片任意处都开他的 B 站空间。 -->
                 <Border x:Name="CreatorCard" Margin="0,16,0,0" Padding="20" CornerRadius="14"
-                        Background="{DynamicResource Card}"
-                        BorderBrush="{DynamicResource Line}" BorderThickness="1" ClipToBounds="True">
+                        Background="{DynamicResource Card}" Cursor="Hand" ClipToBounds="True"
+                        BorderBrush="{DynamicResource Line}" BorderThickness="1"
+                        MouseLeftButtonUp="CreatorCard_Click">
                     <StackPanel>
-                        <!-- .creator-heading：flex / center / space-between / gap 12（:14） -->
+                        <!-- .creator-heading：flex / center / space-between / gap 12（:19） -->
                         <Grid>
                             <StackPanel HorizontalAlignment="Left">
-                                <!-- .creator-toggle：14px / 600 / 字色 text（:15） -->
-                                <TextBlock Text="参与测试及创作者" FontSize="14" FontWeight="SemiBold"/>
-                                <!-- small：display block / 11px / letter-spacing 1px / text-dim / margin-top 4（:16）。
+                                <!-- .creator-toggle：14px / 600 / 字色 text（:20） -->
+                                <TextBlock Text="创作者" FontSize="14" FontWeight="SemiBold"/>
+                                <!-- small：display block / 11px / letter-spacing 1px / text-dim / margin-top 4（:21）。
                                      没重置字重，跟着 .creator-toggle 继承 600；
                                      WPF 的 TextBlock 没有 letter-spacing，字距差记进 UI_SPEC -->
-                                <TextBlock Text="TESTERS &amp; CREATORS" FontSize="11" FontWeight="SemiBold"
+                                <TextBlock Text="CREATOR" FontSize="11" FontWeight="SemiBold"
                                            Margin="0,4,0,0" Foreground="{DynamicResource Fg2}"/>
                             </StackPanel>
-                            <!-- 站内链：.icon-btn 32×32 ＋ radius 6，内容是字符 ↗（:17） -->
-                            <Button Style="{StaticResource IconBtn}" Width="32" Height="32"
+                            <!-- 站内链 a.icon-btn：32×32 ＋ radius 6，内容是字符 ↗（:12） -->
+                            <Button x:Name="CreatorLink" Style="{StaticResource IconBtn}" Width="32" Height="32"
                                     HorizontalAlignment="Right" VerticalAlignment="Center"
-                                    FontSize="16" Content="&#x2197;"
-                                    ToolTip="https://space.bilibili.com/9596327"/>
+                                    FontSize="16" Content="&#x2197;" Click="CreatorLink_Click"
+                                    ToolTip="https://space.bilibili.com/526277131"/>
                         </Grid>
-                        <!-- .creator-intro：12px / line-height 1.7 / text-dim / margin 12 0 0（:19），
-                             文案逐字抄 CreatorCard.vue:18 -->
-                        <TextBlock FontSize="12" LineHeight="20" LineStackingStrategy="BlockLineHeight"
+                        <!-- .creator-intro：12px / line-height 1.7 / text-dim / margin 12 0 0（:22），
+                             原文是官方那串「好想做卡慕的狗啊…」，作者要求换成关于自己的文案 -->
+                        <TextBlock FontSize="12" LineHeight="20.4" LineStackingStrategy="BlockLineHeight"
                                    Margin="0,12,0,0" Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
-                                   Text="好想做卡慕的狗啊，别的狗至少还图口饭，我不一样，我只希望他发视频的时候能允许我在评论区汪两声。卡慕但凡回我一个“？”我都能截图裱起来当传家宝。"/>
+                                   Text="一个人把启动器从浏览器壳里搬出来，不为别的：它躺着不动也要占我几百兆。这里没有第二个作者，也没有客服；卡住了就提 issue，我看到就回。"/>
                         <!-- .creator-reveal：grid-template-rows 0fr→1fr ＋ opacity 0→1，240ms / 200ms（:29-30），
-                             由 pointerenter / focus 触发；WPF 没有 0fr→1fr，用 MaxHeight 0→240 等价表达 -->
+                             由 pointerenter / pointerleave / focusin / focusout 开合（:11）。
+                             WPF 没有 0fr→1fr，用 MaxHeight 0→240 的动画等价表达（SetCreatorOpen）。 -->
                         <Border x:Name="CreatorReveal" MaxHeight="0" Opacity="0">
-                            <!-- .creator-name-layer：wrap / gap 8 / padding 16 8 12 / max-height 240 / overflow auto -->
+                            <!-- .creator-name-layer：wrap / gap 8 / padding 16 8 12 / max-height 240 / overflow auto（:23 ＋ :32） -->
                             <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8,16,8,12">
                                 <WrapPanel x:Name="CreatorNames"/>
                             </ScrollViewer>
@@ -1360,6 +1361,7 @@
                 </Border>
             </StackPanel>
         </Grid>
+        </ScrollViewer>
 
         <!-- ====================================================================
              B. 浮层与模态：原版全是 Teleport 到 body 的 fixed 节点，所以与滚动主体平级。

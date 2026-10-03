@@ -11,6 +11,7 @@
 第二阶段（--parity）：把这些类拿去我的 XAML 里找。命中判据是类名在页面文件里出现过——
 依据是本项目约定：每个还原元素都带注明原版类名的注释，或复用同名 Style 键（.tag → Tag）。
 所以"命中"只代表"这个类有人管"，不代表数值一定对；未命中则是确定没做的东西。
+原版 Teleport 到 body 的模态层落在壳里，由 TELEPORT_HOST 补进检索范围（见该字典的注释）。
 
 用法：python tools/ui_element_inventory.py            # 每页元素/类汇总
       python tools/ui_element_inventory.py --parity   # 对表台账（markdown）
@@ -23,7 +24,13 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT.parent / "KAMUCL-1.1.5" / "src" / "renderer" / "src"
+# 基准版本：2026-10-03 起从 KAMUCL-1.1.5 换成 KAMUCL-1.1.10（用户把 1.1.10 的源码与成品都放进了工作区）。
+# 要看旧基线：python tools/ui_element_inventory.py --base=1.1.5
+base = "1.1.10"
+for _a in sys.argv[1:]:
+    if _a.startswith("--base="):
+        base = _a[7:]
+SRC = ROOT.parent / f"KAMUCL-{base}" / "src" / "renderer" / "src"
 APP = ROOT / "Wuhuicl.App"
 OUT = ROOT / "docs" / "ui_inventory.json"
 
@@ -51,6 +58,30 @@ MAP = {
     "RecordingsView.vue": ["Pages/RecordingsPage.xaml", "Themes/Controls.xaml"],
     "SettingsView.vue": ["Pages/SettingsPage.xaml", "Themes/Controls.xaml"],
     "AccountsView.vue": ["Pages/AccountsPage.xaml", "Themes/Controls.xaml"],
+    # ↓ 1.1.10 新增的界面。落点写"该放哪儿"，文件还不存在就是 0 命中，缺口会直接显在表上。
+    # Mods/Packs/Shaders 三页在原版只是 FileManager 的薄壳（各 500 字节，只换 title/rel/icon），
+    # 所以不单独列，统一算在 FileManager.vue 那一行。
+    "ProjectionsView.vue": ["Pages/ProjectionsPage.xaml", "Themes/Controls.xaml"],
+    "ProjectionConvert.vue": ["Pages/ProjectionsPage.xaml", "Themes/Controls.xaml"],
+    "MascotStage.vue": ["MainWindow.xaml", "Themes/Controls.xaml", "Themes/Icons.xaml"],
+    "SupplementalModsResult.vue": ["MainWindow.xaml", "Themes/Controls.xaml"],
+    "SkinEditor.vue": ["Pages/SkinsPage.xaml", "Themes/Controls.xaml"],
+    "SkinColorPalette.vue": ["Pages/SkinsPage.xaml", "Themes/Controls.xaml"],
+    "CommunityFavorites.vue": ["Pages/CommunityPage.xaml", "Themes/Controls.xaml"],
+    "CommunityModDetails.vue": ["Pages/CommunityPage.xaml", "Themes/Controls.xaml"],
+    "FavoriteModsPicker.vue": ["Pages/VersionsPage.xaml", "Themes/Controls.xaml"],
+    "MemoryOrganizer.vue": ["Pages/SettingsPage.xaml", "Themes/Controls.xaml"],
+    "UiGlyph.vue": ["Themes/Icons.xaml", "Themes/Controls.xaml"],
+}
+
+# 有些原版的样式块根本不在对应页面的 XAML 里，硬拿页面文件去找会永远算成缺口：
+# 1) 原版用 <Teleport to="body"> 把模态层挂到 body 上，这些层在 WPF 里归壳（MainWindow.xaml）；
+# 2) 由 C# 画出来的界面（主题选择卡是 BuildThemeOption 现建的），落点在 MainWindow.xaml.cs。
+# 加了这一条，每条命中都要能在指出的文件里搜到注释或 Style 键名。
+TELEPORT_HOST = {
+    "App.vue": ["MainWindow.xaml", "MainWindow.xaml.cs"],   # .nav-parent.group-active 在 Show() 里按视图算
+    "HomeView.vue": ["MainWindow.xaml"],        # .log-mask / .log-dialog / .log-body / .log-empty / .card-float-menu
+    "SettingsView.vue": ["MainWindow.xaml.cs"],  # .theme-preview 与整族 tp-*（BuildThemeOption）
 }
 
 
@@ -123,7 +154,8 @@ def parity(inv):
             continue
         real = [r for r in d["rows"] if r["ownRule"] or r["global"]]
         blob = "".join((APP / rel).read_text(encoding="utf-8")
-                       for rel in targets if (APP / rel).exists())
+                       for rel in targets + TELEPORT_HOST.get(view, [])
+                       if (APP / rel).exists())
         # 归一化后再比：CSS 用 kebab、XAML 用 Pascal（.switch-ui ↔ SwitchUi、.page-title ↔ PageTitle），
         # 区分大小写的子串匹配会把已实现的东西算成缺口（首版台账 54.5% 就是这么虚低的）
         hay = re.sub(r"[^0-9a-z]", "", blob.lower())
@@ -150,8 +182,27 @@ def parity(inv):
     return "\n".join(lines), misses
 
 
+def misses(inv):
+    """只打印未命中的类名（--parity 的表格里每组只留 12 个，这里给全量）。"""
+    for view, targets in MAP.items():
+        d = inv.get(view)
+        if not d:
+            continue
+        real = [r for r in d["rows"] if r["ownRule"] or r["global"]]
+        blob = "".join((APP / rel).read_text(encoding="utf-8")
+                       for rel in targets + TELEPORT_HOST.get(view, [])
+                       if (APP / rel).exists())
+        hay = re.sub(r"[^0-9a-z]", "", blob.lower())
+        out = [r["class"] for r in real
+               if re.sub(r"[^0-9a-z]", "", r["class"].lower()) not in hay]
+        print("%s (%d): %s" % (view, len(out), ", ".join(sorted(out))))
+
+
 def main():
     inv = build_inv()
+    if "--misses" in sys.argv:
+        misses(inv)
+        return 0
     if "--parity" in sys.argv:
         table, _ = parity(inv)
         print(table)

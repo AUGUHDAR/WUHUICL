@@ -30,7 +30,7 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
-SRC = r"D:/桌面/WUHUICL/KAMUCL-1.1.5/src/renderer/src"
+SRC = os.environ.get("KAMUCL_SRC", r"D:/桌面/WUHUICL/KAMUCL-1.1.10/src/renderer/src")
 OUT = r"D:/桌面/WUHUICL/wuhuicl-net/Wuhuicl.App/Themes/Icons.xaml"
 
 NS_D = "http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -43,58 +43,70 @@ NS_X = "http://schemas.microsoft.com/winfx/2006/xaml"
 # --------------------------------------------------------------------------------------
 ICONS = [
     # --- sidebar main navigation (App.vue navItems) -------------------------------------
-    ("Icon.Home",           "App.vue",                    109, "M3 10.5 12 3l9 7.5"),
-    ("Icon.Game",           "App.vue",                    114, '<rect x="2" y="7"'),
-    ("Icon.Friends",        "App.vue",                    119, "M2 21v-3a6 6 0 0 1 12 0v3"),
-    ("Icon.Keys",           "App.vue",                    124, "M6 10h.01M10 10h.01"),
-    ("Icon.Skin",           "App.vue",                    129, "m9 4-6 3 2 5"),
-    ("Icon.Community",      "App.vue",                    134, '<circle cx="12" cy="12" r="9"'),
-    ("Icon.Settings",       "App.vue",                    139, "M19.4 15a1.65 1.65"),
+    ("Icon.Home",           "App.vue",                       125, "M3 10.5 12 3l9 7.5"),
+    ("Icon.Game",           "App.vue",                       130, '<rect x="2" y="7"'),
+    ("Icon.Friends",        "App.vue",                       135, "M2 21v-3a6 6 0 0 1 12 0v3"),
+    ("Icon.Keys",           "App.vue",                       140, "M6 10h.01M10 10h.01"),
+    ("Icon.Skin",           "App.vue",                       145, "m9 4-6 3 2 5"),
+    ("Icon.Community",      "App.vue",                       150, '<circle cx="12" cy="12" r="9"'),
+    ("Icon.Settings",       "App.vue",                       155, "M19.4 15a1.65 1.65"),
     # --- sidebar resource group ---------------------------------------------------------
-    ("Icon.Resources",      "App.vue",                   1273, "M3 11h18"),
-    ("Icon.CaretRight",     "App.vue",                   1276, "m9 6 6 6-6 6"),
-    ("Icon.Mods",           "App.vue",                    162, "M21 8 12 3 3 8v8l9 5 9-5Z"),
-    ("Icon.ResourcePacks",  "App.vue",                    167, "M3 7a2 2 0 0 1 2-2"),
-    ("Icon.Shaders",        "App.vue",                    172, '<circle cx="12" cy="12" r="4"'),
+    ("Icon.Resources",      "App.vue",                      1283, "M3 11h18"),
+    ("Icon.CaretRight",     "App.vue",                      1286, "m9 6 6 6-6 6"),
+    ("Icon.Mods",           "App.vue",                       178, "M21 8 12 3 3 8v8l9 5 9-5Z"),
+    ("Icon.ResourcePacks",  "App.vue",                       183, "M3 7a2 2 0 0 1 2-2"),
+    ("Icon.Shaders",        "App.vue",                       188, '<circle cx="12" cy="12" r="4"'),
     # --- topbar / window buttons --------------------------------------------------------
-    ("Icon.Download",       "App.vue",                   1334, "M12 3v11"),
-    ("Icon.Changelog",      "App.vue",                   1360, "M12 7v5l3.5 2"),
-    ("Icon.Bell",           "App.vue",                   1367, "M18 8a6 6 0 1 0-12 0"),
-    ("Icon.Back",           "App.vue",                   1328, "m15 18-6-6 6-6"),
-    ("Icon.Minimize",       "App.vue",                   1378, "M5 12h14"),
-    ("Icon.Maximize",       "App.vue",                   1383, '<rect x="6" y="6"'),
+    ("Icon.Download",       "App.vue",                      1344, "M12 3v11"),
+    ("Icon.Changelog",      "App.vue",                      1370, "M12 7v5l3.5 2"),
+    ("Icon.Bell",           "App.vue",                      1377, "M18 8a6 6 0 1 0-12 0"),
+    ("Icon.Back",           "App.vue",                      1338, "m15 18-6-6 6-6"),
+    ("Icon.Minimize",       "App.vue",                      1388, "M5 12h14"),
+    ("Icon.Maximize",       "App.vue",                      1393, '<rect x="6" y="6"'),
     # source has ONE button for both states (title "最大化/还原"), hence identical geometry
-    ("Icon.Restore",        "App.vue",                   1383, '<rect x="6" y="6"'),
-    ("Icon.Close",          "App.vue",                   1388, "M6 6l12 12M18 6 6 18"),
+    ("Icon.Restore",        "App.vue",                      1393, '<rect x="6" y="6"'),
+    ("Icon.Close",          "App.vue",                      1398, "M6 6l12 12M18 6 6 18"),
     # --- hero / launch area (HomeView.vue) ----------------------------------------------
-    ("Icon.Gear",           "views/HomeView.vue",          511, "M19.4 15a1.7 1.7"),
-    ("Icon.Ellipsis",       "views/HomeView.vue",          520, '<circle cx="5" cy="12" r="1.8"'),
-    ("Icon.Play",           "views/HomeView.vue",          533, "M8 5.5v13l11-6.5Z"),
-    ("Icon.ChevronDown",    "views/HomeView.vue",          538, "m6 9 6 6 6-6"),
+    ("Icon.Gear",           "views/HomeView.vue",            509, "M19.4 15a1.7 1.7"),
+    ("Icon.Ellipsis",       "views/HomeView.vue",            518, '<circle cx="5" cy="12" r="1.8"'),
+    ("Icon.Play",           "views/HomeView.vue",            531, "M8 5.5v13l11-6.5Z"),
+    ("Icon.ChevronDown",    "views/HomeView.vue",            536, "m6 9 6 6 6-6"),
     # --- runtime strip (HomeView.vue) ---------------------------------------------------
-    ("Icon.Java",           "views/HomeView.vue",          548, "M8 2v4M16 2v4"),
-    ("Icon.Memory",         "views/HomeView.vue",          553, '<rect x="5" y="5"'),
-    ("Icon.Pulse",          "views/HomeView.vue",          558, "M3 12h4l2-7 4 14 2-7h6"),
-    ("Icon.ChevronRight",   "views/HomeView.vue",          550, "m9 6 6 6-6 6"),
+    ("Icon.Java",           "views/HomeView.vue",            546, "M8 2v4M16 2v4"),
+    ("Icon.Memory",         "views/HomeView.vue",            551, '<rect x="5" y="5"'),
+    ("Icon.Pulse",          "views/HomeView.vue",            556, "M3 12h4l2-7 4 14 2-7h6"),
+    ("Icon.ChevronRight",   "views/HomeView.vue",            548, "m9 6 6 6-6 6"),
     # --- instances ----------------------------------------------------------------------
-    ("Icon.Apps",           "views/HomeView.vue",          568, '<rect x="3" y="3" width="7"'),
-    ("Icon.Star",           "views/GameView.vue",         1150, "m12 2 3.09 6.26"),
-    ("Icon.StarOutline",    "views/GameView.vue",         1150, "m12 2 3.09 6.26"),
+    ("Icon.Apps",           "views/HomeView.vue",            566, '<rect x="3" y="3" width="7"'),
+    ("Icon.Star",           "views/GameView.vue",           1157, "m12 2 3.09 6.26"),
+    ("Icon.StarOutline",    "views/GameView.vue",           1157, "m12 2 3.09 6.26"),
     # --- common actions -----------------------------------------------------------------
-    ("Icon.Search",         "views/GameView.vue",         1006, '<circle cx="11" cy="11" r="7"'),
-    ("Icon.Folder",         "views/GameView.vue",         1196, "M3 7a2 2 0 0 1 2-2"),
-    ("Icon.Edit",           "views/GameView.vue",         1204, "M17 3a2.85 2.83"),
-    ("Icon.Refresh",        "views/GameView.vue",         1027, "M21 12a9 9 0 1 1-2.64-6.36"),
-    ("Icon.Check",          "components/SelectMenu.vue",   100, "M20 6 9 17l-5-5"),
-    ("Icon.Close2",         "components/UpdateModal.vue",   67, "M18 6 6 18M6 6l12 12"),
-    ("Icon.ChevronLeft",    "App.vue",                   1313, "m9 18 6-6-6-6"),
-    ("Icon.Upload",         "App.vue",                   1551, "M21 15v4a2 2 0 0 1-2 2"),
+    ("Icon.Search",         "views/GameView.vue",           1013, '<circle cx="11" cy="11" r="7"'),
+    ("Icon.Folder",         "views/GameView.vue",           1203, "M3 7a2 2 0 0 1 2-2"),
+    ("Icon.Edit",           "views/GameView.vue",           1211, "M17 3a2.85 2.83"),
+    ("Icon.Refresh",        "views/GameView.vue",           1034, "M21 12a9 9 0 1 1-2.64-6.36"),
+    ("Icon.Check",          "components/SelectMenu.vue",     100, "M20 6 9 17l-5-5"),
+    ("Icon.Close2",         "components/UpdateModal.vue",     67, "M18 6 6 18M6 6l12 12"),
+    ("Icon.ChevronLeft",    "App.vue",                      1323, "m9 18 6-6-6-6"),
+    ("Icon.Upload",         "App.vue",                      1561, "M21 15v4a2 2 0 0 1-2 2"),
     # --- account / skin -----------------------------------------------------------------
-    ("Icon.User",           "views/SkinsView.vue",         416, '<circle cx="12" cy="8" r="4"'),
-    ("Icon.Sliders",        "views/SettingsView.vue",      679, "M4 21v-7M4 10V3"),
+    ("Icon.User",           "views/SkinsView.vue",           420, '<circle cx="12" cy="8" r="4"'),
+    ("Icon.Sliders",        "views/SettingsView.vue",        682, "M4 21v-7M4 10V3"),
     # --- non-themed multi colour marks --------------------------------------------------
-    ("Icon.GrassBlock",     "views/HomeView.vue",          584, '<polygon points="24,5'),
-    ("Icon.Microsoft",      "views/HomeView.vue",          623, "M0 0h10v10H0z"),
+    ("Icon.GrassBlock",     "views/HomeView.vue",            582, '<polygon points="24,5'),
+    ("Icon.Microsoft",      "views/HomeView.vue",            621, "M0 0h10v10H0z"),
+    # --- sidebar resource group, 1.1.10 additions ----------------------------------------
+    ("Icon.Recordings",     "App.vue",                       191, '<rect x="3" y="5" width="14"'),
+    ("Icon.Projections",    "App.vue",                       192, "m12 3 9 5v8l-9 5-9-5V8z"),
+    # --- MOD 面板 / 服务器 nav icons (were transcribed by hand until 1.1.10) ------------
+    ("Icon.Bridge",         "App.vue",                       196, '<circle cx="12" cy="12" r="3.5"'),
+    ("Icon.Servers",        "App.vue",                       201, '<rect x="3" y="13" width="18"'),
+    # --- 联机方式三卡（stroke-width 1.7, FriendConnectView methodCards） -----------------
+    ("Icon.Bars",           "views/FriendConnectView.vue",    22, "M4 20V9m5 11V5m5 15v-8m5 8V8"),
+    ("Icon.Gamepad",        "views/FriendConnectView.vue",    30, '<rect x="2.5" y="7"'),
+    ("Icon.Cube",           "views/FriendConnectView.vue",    38, "M12 3 4 7v10l8 4 8-4V7l-8-4Z"),
+    # --- skin viewer --------------------------------------------------------------------
+    ("Icon.ResetView",      "views/SkinsView.vue",           399, '<circle cx="12" cy="12" r="7.5"'),
 ]
 
 # requested by the port but with no SVG anywhere in the source tree (92 blocks / 85 unique d)
@@ -133,6 +145,42 @@ NOTES = {
     "Icon.Gear": "HomeView simplified 8-tooth gear, distinct from Icon.Settings "
                  "(Feather gear, App.vue:139)",
 }
+
+# --------------------------------------------------------------------------------------
+# UiGlyph.vue: 1.1.10 keeps its 22 utility glyphs in a JS object literal instead of
+# inline SVG. The component template is fixed — one <path>, viewBox 24, fill none,
+# stroke currentColor, stroke-width 1.7, round caps and joins — so the table alone is
+# parsed here and re-emitted as Icon.G.<name>.
+# --------------------------------------------------------------------------------------
+UI_GLYPH = "components/UiGlyph.vue"
+GLYPH_SW = "1.7"
+GLYPH_RE = re.compile(r"^\s{2}([a-z][a-z0-9]*):\s*'([^']*)',\s*$", re.M)
+
+
+def load_glyphs():
+    path = os.path.join(SRC, UI_GLYPH.replace("/", os.sep))
+    if not os.path.isfile(path):
+        raise IconError(f"UiGlyph source missing: {path}")
+    text = open(path, encoding="utf-8").read()
+    table = text[text.index("const paths"):text.index("</script>")]
+    out = []
+    for m in GLYPH_RE.finditer(table):
+        line = text[:m.start()].count("\n") + 1
+        out.append((f"Icon.G.{m.group(1)}", m.group(2).strip(), line))
+    if len(out) < 20:
+        raise IconError(f"only {len(out)} glyph entries parsed from {UI_GLYPH}")
+    return out
+
+
+def glyph_info(d, line):
+    """A parsed-svg record for one UiGlyph entry, using the component's fixed attrs."""
+    return {"viewbox": (24.0, 24.0),
+            "root": {"viewBox": "0 0 24 24", "fill": "none", "stroke": "currentColor",
+                     "stroke-width": GLYPH_SW, "stroke-linecap": "round",
+                     "stroke-linejoin": "round"},
+            "els": [("path", {"d": d})],
+            "where": f"{UI_GLYPH}:{line}"}
+
 
 SELF_TAGS = {"path", "circle", "ellipse", "rect", "line", "polyline", "polygon"}
 SUPPORTED_TAGS = SELF_TAGS
@@ -409,11 +457,19 @@ def find_block(rel, line, sig):
     for bline, svg in blocks:
         if bline == line and norm(sig) in norm(svg):
             return svg, f"{rel}:{line}"
-    # anchor drifted -> fall back to a unique signature hit, but say so loudly
+    # 锚点漂移：换基线（1.1.5 → 1.1.10）之后几乎所有行号都挪了位。
+    # 先按签名找；命中多条时取「离原锚点最近」的那条并大声报出所有候选，
+    # 因为同一个图标在源码里常被复制成两三份（顶栏、菜单、模态里各一颗），
+    # 距离最近的那份才是原来那一个。候选全部打印，方便人工复核。
     hits = [(bline, svg) for bline, svg in blocks if norm(sig) in norm(svg)]
     if len(hits) == 1:
         print(f"  note: {rel} anchor {line} moved, matched block at line {hits[0][0]}")
         return hits[0][1], f"{rel}:{hits[0][0]}"
+    if len(hits) > 1:
+        near = min(hits, key=lambda h: abs(h[0] - line))
+        others = ", ".join(str(h[0]) for h in hits if h is not near)
+        print(f"  note: {rel} anchor {line} moved; {len(hits)} 命中（{others}），取最近的 line {near[0]}")
+        return near[1], f"{rel}:{near[0]}"
     raise IconError(f"cannot locate svg in {rel} near line {line} ({len(hits)} signature hits)")
 
 
@@ -569,9 +625,14 @@ def generate():
     chunks = []
     stats = {"keys": 0, "svg_children": 0, "paths": 0, "viewboxes": {}}
     report = []
+    records = []
     for key, rel, line, sig in ICONS:
         svg, provenance = find_block(rel, line, sig)
-        info = parse_svg(svg, provenance)
+        records.append((key, parse_svg(svg, provenance)))
+    for key, d, line in load_glyphs():
+        records.append((key, glyph_info(d, line)))
+    for key, info in records:
+        provenance = info["where"]
         paths, notes = build_paths(info, key)
         if not paths:
             raise IconError(f"{key}: no geometry produced")
@@ -589,8 +650,9 @@ def generate():
         f'<ResourceDictionary xmlns="{NS_D}"\n'
         f'                    xmlns:x="{NS_X}">\n\n'
         "    <!-- GENERATED FILE - DO NOT EDIT BY HAND.\n"
-        "         Produced by tools/gen_icons.py from the inline SVGs of\n"
-        "         KAMUCL-1.1.5/src/renderer/src (read-only source of truth).\n"
+        f"         Rewritten by tools/gen_icons.py from {SRC} (read-only source of truth):\n"
+        "         the inline SVGs listed in the ICONS catalogue, plus every entry of\n"
+        "         components/UiGlyph.vue's JS path table as Icon.G.<name> (stroke-width 1.7).\n"
         "         Each Style is a ContentControl template: Viewbox > Canvas(viewBox size) > Path.\n"
         "         Path colour comes from Themes/Controls.xaml IconStroke / IconFill styles;\n"
         "         StrokeThickness is set only where the source stroke-width differs from 2. -->\n"
@@ -658,7 +720,7 @@ def validate(text, stats):
     if len(set(keys)) != len(keys):
         dup = [k for k in set(keys) if keys.count(k) > 1]
         raise IconError(f"duplicate x:Key: {dup}")
-    if set(keys) != {k for k, *_ in ICONS}:
+    if set(keys) != {k for k, *_ in ICONS} | {k for k, _, _ in load_glyphs()}:
         raise IconError("generated keys differ from catalogue")
 
     paths = root.iter(f"{{{NS_D}}}Path")

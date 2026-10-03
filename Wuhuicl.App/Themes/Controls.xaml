@@ -9,7 +9,11 @@
          这里不设 FontFamily：隐式样式会压过属性继承，图标字符会被换成中文字体渲染成豆腐块。 -->
 
     <FontFamily x:Key="UiFont">Microsoft YaHei UI, Segoe UI</FontFamily>
-    <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas</FontFamily>
+    <!-- 原版等宽栈是 'Cascadia Code', Consolas, monospace（styles.css:680-682，各处再补 Courier New）。
+         末尾必须显式挂一个中文字体：CSS 的 monospace 只影响拉丁字，汉字由 Chromium 按系统字体逐字回退，
+         拿到的是正常的雅黑；WPF 走的是另一套全局 mesh 回退，同一个 FontFamily 里不同码位会命中不同字体，
+         实测日志窗里「启动」两字被回退成倾斜的仿宋一类，而下一行「游戏退出代码」又是正的。 -->
+    <FontFamily x:Key="MonoFont">Cascadia Code, Cascadia Mono, Consolas, Microsoft YaHei UI</FontFamily>
 
     <local:BoolVis x:Key="BoolVis"/>
     <local:InvertBool x:Key="InvBool"/>
@@ -251,20 +255,29 @@
         <Setter Property="Width" Value="32"/>
         <Setter Property="Height" Value="32"/>
         <Setter Property="Background" Value="Transparent"/>
+        <!-- 模板会画 BorderBrush/BorderThickness，这里显式钉 0：Control.BorderThickness 的元数据默认是 1，
+             不钉的话全工程 16 处图标钮会凭空描一圈主题默认色的边。要边的派生样式自己覆盖（.inst-icon）。 -->
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
         <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <!-- 圆角走 CssRadius.Round，默认 6 = .icon-btn（styles.css:281）；顶栏图标钮要 10 -->
         <Setter Property="ctl:CssRadius.Round" Value="6"/>
+        <!-- hover 底色走 CssRadius.Hover，默认取 card-2（styles.css:282）；.log-close 要换成 hover 色 -->
+        <Setter Property="ctl:CssRadius.Hover" Value="{DynamicResource CardSoft}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="b" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
                             CornerRadius="{Binding Path=(ctl:CssRadius.Round), RelativeSource={RelativeSource TemplatedParent}}"
                             RenderTransformOrigin="0.5,0.5">
                         <Border.RenderTransform><ScaleTransform/></Border.RenderTransform>
                         <Grid>
                             <!-- hover 底色用独立覆盖层做透明度渐变：直接动画 Background 会改到共享的主题画刷 -->
-                            <Border x:Name="hv" Background="{DynamicResource CardSoft}" Opacity="0"
+                            <Border x:Name="hv" Background="{Binding Path=(ctl:CssRadius.Hover), RelativeSource={RelativeSource TemplatedParent}}"
+                                    Opacity="0"
                                     CornerRadius="{Binding Path=(ctl:CssRadius.Round), RelativeSource={RelativeSource TemplatedParent}}"/>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Grid>
@@ -325,6 +338,34 @@
                 <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
             </Trigger>
         </Style.Triggers>
+    </Style>
+
+    <!-- .log-close：日志窗右上角的关闭钮（HomeView.vue:974-975）
+         32×32、border 0、radius 8、透明底、字色 text-dim；
+         hover 底是 hover 色（不是 .icon-btn 的 card-2），字色转 text。
+         原版内容是文本「×」20px，不是 svg 图标，所以宿主里放 TextBlock 而不是 ContentControl。 -->
+    <Style x:Key="LogClose" TargetType="Button" BasedOn="{StaticResource IconBtn}">
+        <Setter Property="ctl:CssRadius.Round" Value="8"/>
+        <Setter Property="ctl:CssRadius.Hover" Value="{DynamicResource Hover}"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- .log-failure button：失败条里的「导出错误日志」（HomeView.vue:977）
+         padding 6 10、border 1 danger-border、radius 7、透明底、字色 danger。
+         它不是 .btn 家族（原版是裸 button）：没有 min-height 36、没有 hover 底色、没有 SemiBold，
+         字号也没被 .btn 的 font-family:inherit 接管，走浏览器 UA 的 13.33px。 -->
+    <Style x:Key="LogFailureBtn" TargetType="Button" BasedOn="{StaticResource Btn}">
+        <Setter Property="MinHeight" Value="0"/>
+        <Setter Property="Padding" Value="10,6"/>
+        <Setter Property="FontSize" Value="13.3"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{DynamicResource Danger}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource DangerBorder}"/>
+        <Setter Property="ctl:CssRadius.Round" Value="7"/>
     </Style>
 
     <!-- .dl-badge：下载数角标，min-width 16 / 高 16 / padding 0 4 / radius 999（=8）/
@@ -743,18 +784,27 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <ContentPresenter VerticalAlignment="Center"/>
-                            <Path Grid.Column="1" x:Name="arrow" Width="8" Height="8" Stretch="Uniform"
-                                  Data="M2,6 L8,12 L14,6" Stroke="{DynamicResource Fg2}" StrokeThickness="2"
-                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                            <!-- .collapse-arrow（模板 7 处，样式 :1377-1389）：7×7 的盒子只画
+                                 border-right 与 border-bottom 各 2px text-dim，即右下角那个「⌟」，
+                                 再靠 transform 转：折叠态 rotate(-45deg) → 尖朝右（＞），
+                                 展开态 rotate(45deg) → 尖朝下（ˇ）。
+                                 原版源码注释把这两态写成「朝上／朝下」，按 CSS 的顺时针符号算其实
+                                 是「朝右／朝下」（标准的 disclosure 三角惯例），这里以几何为准。
+                                 路径取两条边的中线（6 与 6），因为 WPF 的描边是沿路径居中的，
+                                 2px 粗正好铺满 CSS 那 2px 边框的位置；端点用平头、拐角用斜接，
+                                 与 border 的切口一致（之前用 8×8 圆头 V 是凭感觉画的）。 -->
+                            <Path Grid.Column="1" x:Name="arrow" Width="7" Height="7" Stretch="None"
+                                  Data="M6,0 L6,6 L0,6" Stroke="{DynamicResource Fg2}" StrokeThickness="2"
+                                  StrokeLineJoin="Miter" StrokeStartLineCap="Flat" StrokeEndLineCap="Flat"
                                   VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
-                                <Path.RenderTransform><RotateTransform Angle="0"/></Path.RenderTransform>
+                                <Path.RenderTransform><RotateTransform Angle="-45"/></Path.RenderTransform>
                             </Path>
                         </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="arrow" Property="RenderTransform">
-                                <Setter.Value><RotateTransform Angle="180"/></Setter.Value>
+                                <Setter.Value><RotateTransform Angle="45"/></Setter.Value>
                             </Setter>
                         </Trigger>
                     </ControlTemplate.Triggers>
@@ -1141,10 +1191,18 @@
     </Style>
 
     <!-- ============ 输入 ============ -->
+    <!-- .input / .select：min-height ctl-h 36 / padding space-2 space-3 ＝ 8 12 / 1px border /
+         radius radius-md 10 / 底 card-2 / 字色 text（styles.css:303-317），
+         字号是 text-md 14（styles.css:314，进 .content 后由 ui-system.css:15 再钉一遍 14）。
+         原来这里给的是 13，全工程 28 处没写 FontSize 的输入框因此都比正版小一号。
+         确实带更小的 scoped 字号的那几处必须自己写死，别回来改这个默认值：
+         .ms-uri-row .input 与 .dir-row .input 是 text-sm 13（AccountsView:822 系 / SettingsView:1466 系）、
+         .tool-search input 13（GameView:2181）、.history-name-input 12（SkinsView:1046）、
+         .room-input 22（VoxLinkPanel）、.server-search input 是 font:inherit → 跟着 14。 -->
     <Style TargetType="TextBox">
         <Setter Property="MinHeight" Value="36"/>
         <Setter Property="Padding" Value="12,8"/>
-        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontSize" Value="14"/>
         <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
         <Setter Property="CaretBrush" Value="{DynamicResource Fg}"/>
         <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
@@ -1156,7 +1214,8 @@
                 <ControlTemplate TargetType="TextBox">
                     <Border x:Name="bd" Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10">
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{Binding Path=(ctl:CssRadius.Round), RelativeSource={RelativeSource TemplatedParent}}">
                         <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
                                       VerticalAlignment="Center"/>
                     </Border>
@@ -1171,15 +1230,148 @@
     </Style>
     <Style x:Key="Input" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}"/>
 
+    <!-- ============ 复选框（1.1.10 起是全局自定义外观，之前是浏览器原生的那颗） ============
+         input[type='checkbox']（styles.css:119-152）：appearance none，
+         宽高取 CSS 变量 check-size（源里前缀是双横线，默认 20，.check-option input 覆盖成 26）、min-width 同值、flex 0 0 auto，
+         描边 1.5px color-mix(text-dim 65%, border)＝CheckBorder、radius 6、底 card-2；
+         hover（非 disabled）描边转 accent（:139）；
+         checked 底与描边转 accent ＋ 一张白色对勾 svg（:140-145，viewBox 24 的 m5 12 4.5 4.5L19 7、
+         stroke 3 圆头圆角，background-size 76% → 20 的框里画 15.2）；
+         indeterminate 是同一位置画一条横线（:146-150）；
+         focus-visible 才有 2px accent 光环、offset 3（:151）→ 用 KeyboardFocusVisible 表达；
+         disabled opacity .45（:152）。
+         .switch 与 .connection-toggle 里的 input 被 :not(:where(...)) 排除，走下面的 Switch。
+         盒子单独做成 ContentControl 模板：.menu-item／.server-check／.mp-keysync-opt 这几处
+         除了盒子还要画自己的行或卡片外壳，但盒子本身是全局同一份，抄四遍迟早对不上。
+         尺寸按默认 20 写死；唯一改尺寸的是 .check-option input（26，见下面的 CheckOption）。 -->
+    <ControlTemplate x:Key="CheckBoxMark" TargetType="ContentControl">
+        <Border x:Name="box" Width="20" Height="20" CornerRadius="6"
+                Background="{DynamicResource CardSoft}"
+                BorderBrush="{DynamicResource CheckBorder}" BorderThickness="1.5"
+                VerticalAlignment="Center">
+            <Grid>
+                <Viewbox x:Name="mark" Width="15.2" Height="15.2" Visibility="Collapsed">
+                    <Canvas Width="24" Height="24">
+                        <Path Data="M5,12 L9.5,16.5 L19,7" Stroke="#FFFFFFFF" StrokeThickness="3"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                    </Canvas>
+                </Viewbox>
+                <Viewbox x:Name="dash" Width="15.2" Height="15.2" Visibility="Collapsed">
+                    <Canvas Width="24" Height="24">
+                        <Path Data="M6,12 L18,12" Stroke="#FFFFFFFF" StrokeThickness="3"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                    </Canvas>
+                </Viewbox>
+            </Grid>
+        </Border>
+        <ControlTemplate.Triggers>
+            <!-- 顺序即优先级：hover 在前、选中在后，两者同时命中时留 accent 底 -->
+            <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=CheckBox}}" Value="True">
+                <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+            </DataTrigger>
+            <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=CheckBox}}" Value="{x:Null}">
+                <Setter TargetName="box" Property="Background" Value="{DynamicResource Accent}"/>
+                <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                <Setter TargetName="dash" Property="Visibility" Value="Visible"/>
+            </DataTrigger>
+            <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=CheckBox}}" Value="True">
+                <Setter TargetName="box" Property="Background" Value="{DynamicResource Accent}"/>
+                <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                <Setter TargetName="mark" Property="Visibility" Value="Visible"/>
+                <Setter TargetName="dash" Property="Visibility" Value="Collapsed"/>
+            </DataTrigger>
+            <DataTrigger Binding="{Binding IsEnabled, RelativeSource={RelativeSource AncestorType=CheckBox}}" Value="False">
+                <Setter Property="Opacity" Value="0.45"/>
+            </DataTrigger>
+        </ControlTemplate.Triggers>
+    </ControlTemplate>
+
     <Style TargetType="CheckBox">
         <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
         <Setter Property="FontSize" Value="13"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <StackPanel Orientation="Horizontal" Background="Transparent">
+                        <ContentControl Template="{StaticResource CheckBoxMark}"/>
+                        <ContentPresenter x:Name="lbl" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                        <Trigger Property="Content" Value="{x:Null}">
+                            <Setter TargetName="lbl" Property="Margin" Value="0"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
     <Style x:Key="Check" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}"/>
 
-    <!-- .switch：40×22，滑块 14，左边距 3，选中位移 18 → 21（原版 translate(18px,-50%) 从 3 起） -->
+    <!-- .check-option（styles.css:152-157，1.1.10 新增）：整块就是一个可点的卡片，
+         flex / gap 14 / align flex-start / padding 16 / border 1 border / radius 14 / 底 card-2 / cursor pointer；
+         :has(input:checked) → 描边 color-mix(accent 50%, border)＝CheckBorderOn、
+                              底 color-mix(accent-soft 40%, card-2)＝CheckBgOn（半透明 accent 叠 card-2 等价）；
+         里面的 input 是 check-size 变量 26、margin-top 2（:154）；
+         strong（:155）块级 / text-md 14 / 600；small（:156）块级 / margin-top 4 / text-dim / 12 / line-height 1.6；
+         :has(input:disabled) 只把 cursor 变回 default，不降透明度。
+         WPF 的 CheckBox 本身就是这块卡，所以模板另写一份（对齐方式与基线那套不同）。 -->
+    <Style x:Key="CheckOption" TargetType="CheckBox">
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <Border x:Name="card" Background="{DynamicResource CardSoft}"
+                            BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="14"
+                            Padding="16">
+                        <StackPanel Orientation="Horizontal">
+                            <Border x:Name="box" Width="26" Height="26" CornerRadius="6" Margin="0,2,0,0"
+                                    Background="{DynamicResource CardSoft}"
+                                    BorderBrush="{DynamicResource CheckBorder}" BorderThickness="1.5"
+                                    VerticalAlignment="Top">
+                                <Viewbox Width="19.8" Height="19.8" Visibility="Collapsed" x:Name="mark">
+                                    <Canvas Width="24" Height="24">
+                                        <Path Data="M5,12 L9.5,16.5 L19,7" Stroke="#FFFFFFFF" StrokeThickness="3"
+                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                                    </Canvas>
+                                </Viewbox>
+                            </Border>
+                            <ContentPresenter Margin="14,0,0,0" VerticalAlignment="Top"/>
+                        </StackPanel>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="card" Property="Background" Value="{DynamicResource CheckBgOn}"/>
+                            <Setter TargetName="card" Property="BorderBrush" Value="{DynamicResource CheckBorderOn}"/>
+                            <Setter TargetName="box" Property="Background" Value="{DynamicResource Accent}"/>
+                            <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            <Setter TargetName="mark" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <!-- CSS 只在 input 上 disabled 时给 cursor:default（:157），不降透明度 -->
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- .switch（styles.css:356-363）40×22 ＋ 里面那个真正画出来的 .switch-ui（:374-381）：
+         inset 0 / radius 999（＝11）/ 底 card-2 / 描边 1 border；
+         .switch-ui::before（:383-393）是 14×14 圆滑块，left 3、top 50% 居中，底色 text-dim；
+         选中（:395-402）底与描边转 accent、滑块 translate(18px) → 左边距 3＋18＝21、滑块底 on-accent；
+         禁用（:406-408）整块 opacity .65。
+         .switch input（:364-373）是 opacity 0 的裸 checkbox，只有 :focus-visible 光环（:403-405）
+         在 WPF 里没有对应物（focus-visible 是「键盘聚焦才亮」，用 IsKeyboardFocused 会变成点一下也亮），
+         连同 background/transform 的两条 transition 一起记进动效待办。 -->
     <Style x:Key="Switch" TargetType="CheckBox">
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
@@ -1199,6 +1391,9 @@
                             <Setter TargetName="knob" Property="Fill" Value="{DynamicResource AccentFg}"/>
                             <Setter TargetName="knob" Property="Margin" Value="21,0,0,0"/>
                         </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.65"/>
+                        </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -1211,7 +1406,8 @@
                 <ControlTemplate TargetType="ToggleButton">
                     <Border x:Name="b" Background="{DynamicResource CardSoft}"
                             BorderBrush="{DynamicResource Line}" BorderThickness="1"
-                            CornerRadius="10" Padding="12,0">
+                            CornerRadius="{Binding Path=(ctl:CssRadius.Round), RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                            Padding="12,0">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
@@ -1237,7 +1433,8 @@
     <Style TargetType="ComboBox">
         <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
         <Setter Property="MinHeight" Value="36"/>
-        <Setter Property="FontSize" Value="13"/>
+        <!-- .select / .select-menu-btn 的字号同 .input ＝ text-md 14（styles.css:314 ＋ ui-system.css:15） -->
+        <Setter Property="FontSize" Value="14"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBox">

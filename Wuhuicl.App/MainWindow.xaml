@@ -136,6 +136,39 @@
             <Setter Property="HorizontalAlignment" Value="Right"/>
         </Style>
 
+        <!-- ============ 三·B、侧栏头像按钮（1.1.10 新增，App.vue:1246-1247 ＋ :1735） ============
+             .brand-slot：48×72 / position relative / z-index 5 / grid place-items center / flex-shrink 0。
+             .brand-avatar：display block / 透明 / border 0 / padding 0 / radius 12 /
+             transition opacity .38s ＋ transform .38s；:focus-visible 是 2px accent 光环、offset 4。
+             两个状态类要等「卡慕互动彩蛋」（MascotStage）接入才有数据来源：
+             .avatar-preparing＝opacity .75＋scale(.94)，.avatar-open＝opacity 0＋translateY(-14)＋scale(.65)＋不吃点击。
+             另有 .shell.mascots-active（:1734）在彩蛋打开时把全局 backdrop-filter 全关，属玻璃层待办。 -->
+        <Style x:Key="Sh.BrandAvatar" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="12"
+                                Padding="{TemplateBinding Padding}" RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <!-- :focus-visible 在 WPF 只能落到 KeyboardFocusVisible（点选不亮环） -->
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="b" Property="BorderThickness" Value="2"/>
+                                <Setter TargetName="b" Property="Margin" Value="-4"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- ============ 三、启动失败弹窗（App.vue:1573-1586 ＋ :2313-2325） ============ -->
         <!-- .launchfail-modal（:2314）：width 480px 定值；.modal 的 max-width/max-height 仍由
              ui-system.css:38 兜着（代码里写回）。 -->
@@ -322,7 +355,10 @@
                 </Setter.Value>
             </Setter>
         </Style>
-        <!-- .mp-replace-confirm（同 :2564-2577）：label 包 checkbox，整行可点；字色继承 .mp-conflict 的 text-dim -->
+        <!-- .mp-replace-confirm（App.vue:2585-2597，与 .mp-conflict-actions label 同一条规则）：
+             label 包 checkbox，整行可点；min-height 48 / padding 12 / border 1 / radius 10；
+             hover 底 card-2、:has(input:checked) 描边 accent ＋ 底 accent-soft；字色继承 .mp-conflict 的 text-dim。
+             盒子没有本地规则 → 走全局那颗 20（styles.css:119-152）。 -->
         <Style x:Key="Sh.MpReplaceConfirm" TargetType="CheckBox">
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
@@ -340,19 +376,9 @@
                                     <ColumnDefinition Width="8"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <!-- 18×18 的 accent-color checkbox：Chromium 是圆角方块，
-                                     勾选＝accent 实心＋on-accent 对勾，未勾＝透明底＋中性描边 -->
-                                <Border Grid.Column="0" Width="18" Height="18" CornerRadius="3" VerticalAlignment="Center">
-                                    <Border x:Name="box" CornerRadius="3" BorderThickness="2"
-                                            BorderBrush="{DynamicResource BorderStrong}" Background="Transparent">
-                                        <!-- 对勾：模板里没有 ContentControl 祖先，不能用 IconStroke 那套继承取色，
-                                             颜色在下面 IsChecked 触发器里直接给 on-accent -->
-                                        <Path x:Name="tick" Stroke="{DynamicResource BorderStrong}" StrokeThickness="2.6"
-                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                                              Data="M4,9 L7.5,12.5 L13,5" Stretch="Uniform" Opacity="0"
-                                              Fill="{x:Null}"/>
-                                    </Border>
-                                </Border>
+                                <!-- 盒子走全局那颗（styles.css:119-152，1.1.10 起 20 的圆角盒）；
+                                     .mp-replace-confirm 自己没给 input 写尺寸（App.vue:2564-2577） -->
+                                <ContentControl Grid.Column="0" Template="{StaticResource CheckBoxMark}"/>
                                 <ContentPresenter Grid.Column="2" VerticalAlignment="Center">
                                     <ContentPresenter.Resources>
                                         <!-- .mp-replace-confirm{line-height:1.4}（App.vue:2591）：
@@ -372,20 +398,17 @@
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
                                 <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
-                                <Setter TargetName="box" Property="Background" Value="{DynamicResource Accent}"/>
-                                <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Accent}"/>
-                                <Setter TargetName="tick" Property="Opacity" Value="1"/>
-                                <Setter TargetName="tick" Property="Stroke" Value="{DynamicResource AccentFg}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
-        <!-- .mp-keysync-opt（:2578-2593）：flex align-start gap 8 / margin-top 12 / padding 12 /
+        <!-- .mp-keysync-opt（App.vue:2597-2611）：flex align-start gap 8 / margin-top 12 / padding 12 /
              border 1 / radius 10 / line-height 1.5 / 12px text-dim；hover 底 card-2；
-             :has(:checked) → 描边 accent ＋ 底 accent-soft ＋ 字色转 text；
-             它的 input（:2593）accent-color accent、margin-top 2、flex-shrink 0（没给尺寸＝UA 13×13）。 -->
+             :has(input:checked) → 描边 accent ＋ 底 accent-soft ＋ 字色转 text；
+             它的 input（:2612）只剩 margin-top 2 ＋ flex-shrink 0，盒子尺寸走全局 20
+             （1.1.10 前是 UA 的 13×13，那句 accent-color 在 appearance none 之后已经不起作用）。 -->
         <Style x:Key="Sh.MpKeysyncOpt" TargetType="CheckBox">
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
@@ -403,16 +426,11 @@
                                     <ColumnDefinition Width="8"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <Border Grid.Column="0" Width="13" Height="13" CornerRadius="2"
-                                        VerticalAlignment="Top" Margin="0,2,0,0">
-                                    <Border x:Name="box" CornerRadius="2" BorderThickness="1.5"
-                                            BorderBrush="{DynamicResource BorderStrong}" Background="Transparent">
-                                        <Path x:Name="tick" Stroke="{DynamicResource BorderStrong}" StrokeThickness="2.2"
-                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
-                                              Data="M3,7 L5.6,9.8 L10,4" Stretch="Uniform" Opacity="0"
-                                              Fill="{x:Null}"/>
-                                    </Border>
-                                </Border>
+                                <!-- 盒子换成全局那颗；:has(:checked) 的卡片配色仍由下面的触发器管。
+                                     .mp-keysync-opt input（App.vue:2612）只有 margin-top 2 ＋ flex-shrink 0，
+                                     尺寸走全局 20（1.1.10 前是 UA 的 13×13）。 -->
+                                <ContentControl Grid.Column="0" VerticalAlignment="Top" Margin="0,2,0,0"
+                                                Template="{StaticResource CheckBoxMark}"/>
                                 <ContentPresenter Grid.Column="2" VerticalAlignment="Top"/>
                             </Grid>
                         </Border>
@@ -424,10 +442,6 @@
                                 <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
                                 <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
                                 <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
-                                <Setter TargetName="box" Property="Background" Value="{DynamicResource Accent}"/>
-                                <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Accent}"/>
-                                <Setter TargetName="tick" Property="Opacity" Value="1"/>
-                                <Setter TargetName="tick" Property="Stroke" Value="{DynamicResource AccentFg}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -736,7 +750,11 @@
                  它排在 .shell 之下、靠 shell 自身的半透明底（:1733 的 color-mix(bg 78%, transparent) ＋
                  backdrop-filter）才透得出来；这里的窗口本体是不透明实底（WindowGrad），
                  所以这层现在即使画上背景也看不见 → 保留几何正确的空壳并 Collapsed，
-                 等背景设置（皮肤/图片选择）接入时，要连同 ShellRoot 的底色一起换成带 alpha 的画刷。 -->
+                 等背景设置（皮肤/图片选择）接入时，要连同 ShellRoot 的底色一起换成带 alpha 的画刷。
+                 同一个 :1232 还挂了两枚状态类，都不产生像素，别去复刻：
+                 .has-bg（规则在 :1745-1747）设的 shell-surface 就是 .shell 基态 :1729 已经设过的同一个值，纯空操作；
+                 .edit-mode（规则在 :2029-2031）只把 topbar 的 app-region 改成 no-drag，
+                 那是 Electron 的拖窗热区开关，WPF 这边顶栏拖动写在 Topbar_MouseDown 里，与类名无关。 -->
             <Border x:Name="AppBgLayer" Grid.Column="0" Grid.ColumnSpan="2"
                     Visibility="Collapsed" IsHitTestVisible="False"/>
 
@@ -754,12 +772,21 @@
                          .brand-head（App.vue:1772-1780）是玩家皮肤的脸，不是应用图标：
                          42×42 / radius 10 / 1px rgba(255,255,255,.26) / 0 3px 12px rgba(0,0,0,.18) / pixelated -->
                     <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0">
-                        <Border x:Name="BrandHead" Width="42" Height="42" CornerRadius="10"
-                                BorderBrush="#43FFFFFF" BorderThickness="1">
-                            <Border.Effect>
-                                <DropShadowEffect BlurRadius="12" ShadowDepth="3" Direction="270"
-                                                  Opacity="0.18" Color="#000000"/>
-                            </Border.Effect>
+                        <!-- .brand-slot（1.1.10）：48×72 的格子，头像在里面居中；
+                             头像本身从裸图片变成 .brand-avatar 按钮（样式见上面 Sh.BrandAvatar）。
+                             1.1.5 没有这一层，头像是 .brand-head 直接当 flex 子项，所以侧栏宽度差 6px 就是这么来的。 -->
+                        <Border Width="48" Height="72" VerticalAlignment="Center">
+                            <Button x:Name="BrandAvatar" Style="{StaticResource Sh.BrandAvatar}"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    Click="OpenMascots_Click" ToolTip="打开卡慕互动彩蛋">
+                                <Border x:Name="BrandHead" Width="42" Height="42" CornerRadius="10"
+                                        BorderBrush="#43FFFFFF" BorderThickness="1">
+                                    <Border.Effect>
+                                        <DropShadowEffect BlurRadius="12" ShadowDepth="3" Direction="270"
+                                                          Opacity="0.18" Color="#000000"/>
+                                    </Border.Effect>
+                                </Border>
+                            </Button>
                         </Border>
                         <!-- .logo-text（:1781-1785）：column / gap space-1 4 -->
                         <Grid Margin="12,0,0,0" VerticalAlignment="Center">
@@ -1057,7 +1084,12 @@
                 </Grid>
             </Grid>
 
-            <!-- ==================== 启动日志弹窗（原版是 z:9100 的模态窗） ==================== -->
+            <!-- ==================== 启动日志弹窗（.log-mask ＋ .log-dialog，HomeView.vue:968-969）
+                     .log-mask：fixed inset 0 / z 9100 / flex 居中 / padding 24 /
+                     底 var(mask) ＋ backdrop-filter blur(5px)（模糊由 MaskBlur 快照做）。
+                     .log-dialog：flex column / 宽 min(760, 100vw 减 64) / 最高 min(620, 100vh 减 80) /
+                     radius 16 / 底 card 94% / shadow-lg / overflow hidden，
+                     宽高两条减项在 ApplyViewportCaps 里按窗口实际尺寸写回。 ==================== -->
             <Border x:Name="LogOverlay" Grid.Column="0" Grid.ColumnSpan="2" Visibility="Collapsed"
                     Background="{DynamicResource Overlay}" MouseLeftButtonDown="CloseLog_Click">
                 <Border.Style>
@@ -1080,7 +1112,8 @@
                         </Style.Triggers>
                     </Style>
                 </Border.Style>
-                <Border Width="760" MaxHeight="620" CornerRadius="16" VerticalAlignment="Center"
+                <Border x:Name="LogCard" Width="760" MaxHeight="620" CornerRadius="16"
+                        VerticalAlignment="Center"
                         HorizontalAlignment="Center" Background="{DynamicResource Card}"
                         BorderBrush="{DynamicResource Line}" BorderThickness="1"
                         RenderTransformOrigin="0.5,0.5"
@@ -1113,40 +1146,76 @@
                         </Style>
                     </Border.Style>
                     <DockPanel>
-                        <Grid DockPanel.Dock="Top" Margin="18,16">
-                            <StackPanel HorizontalAlignment="Left">
-                                <TextBlock Text="启动日志" FontSize="16" FontWeight="Bold"/>
-                                <TextBlock FontSize="11" Foreground="{DynamicResource Fg2}" Margin="0,3,0,0"
-                                           Text="{Binding LogLines.Count, StringFormat={}{0} 行}"/>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                                <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="10,4"
-                                        Content="复制命令" Click="CopyCmd_Click"/>
-                                <Button Style="{StaticResource BtnGhost}" MinHeight="32" Padding="10,4"
-                                        Content="清空" Margin="8,0,0,0" Click="ClearLog_Click"/>
-                                <Button Style="{StaticResource IconBtn}" Width="32" Height="32" Margin="10,0,0,0"
+                        <!-- .log-dialog header（HomeView.vue:970-975）：flex / align center / space-between /
+                             padding 16 18 / border-bottom 1 border；header div 是 column flex、gap 3；
+                             h3 16px（:972）＋ span 11px text-dim（:973）。
+                             原版头部只有标题和一个 .log-close，复制命令／清空都不在头部（清空在 footer）。 -->
+                        <Border DockPanel.Dock="Top" BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
+                            <Grid Margin="18,16">
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="启动日志" FontSize="16" FontWeight="Bold"/>
+                                    <TextBlock FontSize="11" Foreground="{DynamicResource Fg2}" Margin="0,3,0,0"
+                                               Text="{Binding LogHeadText}"/>
+                                </StackPanel>
+                                <!-- .log-close 32×32 radius 8、hover 底是 hover 色而非 card-2（:974-975）；
+                                     内容是文本「×」20px，字色靠 Button 的 Foreground 继承下来，
+                                     写死在 TextBlock 上就跟着不了 hover 转 text（currentColor 那条老坑） -->
+                                <Button Style="{StaticResource LogClose}"
+                                        HorizontalAlignment="Right" VerticalAlignment="Center"
                                         Click="CloseLog_Click">
-                                    <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.Close}"/>
+                                    <TextBlock Text="×" FontSize="20"/>
                                 </Button>
-                            </StackPanel>
-                        </Grid>
+                            </Grid>
+                        </Border>
+                        <!-- .log-failure（模板 :717-720 ＋ 样式 :976-977）：flex / align center / space-between /
+                             gap 12 / padding 10 18 / 底 danger-soft / 字 danger / 12px；v-if 是 launchFailed。
+                             右侧按钮 padding 6 10、border 1 danger-border、radius 7、透明底（:977）。 -->
+                        <Border DockPanel.Dock="Top" Background="{DynamicResource DangerSoft}"
+                                TextElement.Foreground="{DynamicResource Danger}"
+                                Visibility="{Binding LaunchFailed, Converter={StaticResource BoolVis}}">
+                            <DockPanel Margin="18,10">
+                                <Button DockPanel.Dock="Right" Margin="12,0,0,0" VerticalAlignment="Center"
+                                        Style="{StaticResource LogFailureBtn}" Click="ExportFailureLogs_Click">
+                                    <TextBlock x:Name="ExportFailureText" Text="导出错误日志"/>
+                                </Button>
+                                <TextBlock Text="检测到启动失败或异常退出" FontSize="12" VerticalAlignment="Center"/>
+                            </DockPanel>
+                        </Border>
+                        <!-- .log-dialog footer（:981）：flex / justify-end / padding 11 16 / border-top 1 border。
+                             里面只有一个 .btn.btn-ghost.btn-sm「清空日志」，disabled 判据是 logs 为空（:725）。 -->
                         <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0"
                                 Padding="16,11">
-                            <TextBlock FontSize="11" Foreground="{DynamicResource Fg2}"
-                                       Text="日志只保留本次会话，关窗即清；复制命令可把完整启动指令贴给别人排查。"/>
+                            <Button Style="{StaticResource BtnSmGhost}" Content="清空日志"
+                                    HorizontalAlignment="Right"
+                                    IsEnabled="{Binding CanClearLogs}" Click="ClearLog_Click"/>
                         </Border>
+                        <!-- .log-body（:978-980）：min-height 220 / flex 1 / overflow auto / padding 14 18 /
+                             底是 bg 色 42% 混合（LogBody 画刷）／ user-select text。
+                             头部和底部各占一条，正文落在中间，所以原版 overflow:hidden 的圆角裁切在这里不会露馅。
+                             pre 是 11.5px/1.65 等宽、pre-wrap ＋ break-all（:979）→ 换 ItemsControl ＋ 折行，
+                             不用 ListBox：原版这块没有选中态、没有 hover 高亮，且 ItemsControl 更省。 -->
                         <Border MinHeight="220" Background="{DynamicResource LogBody}" Padding="18,14">
-                            <ListBox x:Name="LogList" Background="Transparent" BorderThickness="0"
-                                     Style="{StaticResource CardList}"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                                     ItemsSource="{Binding LogLines}">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding}" FontFamily="{StaticResource MonoFont}"
-                                                   FontSize="11.5" Foreground="{DynamicResource Fg2}"/>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
+                            <Grid>
+                                <!-- .log-empty（模板 :722 ＋ 样式 :980）：padding 70 0 / 字色 text-dim / 居中，
+                                     字号没写 → 跟 body 的 text-md 14；v-if 是 logs 为空 -->
+                                <TextBlock Text="暂无启动日志" FontSize="14" Foreground="{DynamicResource Fg2}"
+                                           TextAlignment="Center" VerticalAlignment="Top" Margin="0,70"
+                                           Visibility="{Binding NoLogs, Converter={StaticResource BoolVis}}"/>
+                                <ScrollViewer x:Name="LogScroll" VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              Visibility="{Binding NoLogs, Converter={StaticResource BoolVis}, ConverterParameter=invert}">
+                                    <ItemsControl x:Name="LogList" ItemsSource="{Binding LogLines}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding}" FontFamily="{StaticResource MonoFont}"
+                                                           FontSize="11.5" LineHeight="18.975"
+                                                           LineStackingStrategy="BlockLineHeight"
+                                                           TextWrapping="Wrap" Foreground="{DynamicResource Fg2}"/>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Grid>
                         </Border>
                     </DockPanel>
                 </Border>

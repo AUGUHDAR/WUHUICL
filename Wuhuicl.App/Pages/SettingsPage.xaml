@@ -863,7 +863,39 @@
                                         <!-- .plugin-list：column gap 8（:1294）；v-if plugins.length，
                                              listPlugins() 未接入 → 默认走 else 分支的那句提示 -->
                                         <StackPanel Visibility="Collapsed" Margin="0,14,0,0">
-                                            <Border Style="{StaticResource StPluginRow}"/>
+                                            <!-- .plugin-row（模板 :1134-1150，样式 :1295）：
+                                                 flex center / gap 12 / min-height row-h 42 / padding 8 12 /
+                                                 border 1 / radius radius-md 10 —— 就是 StPluginRow。
+                                                 里面三块：.plugin-info（:1296 flex 1 / min-width 0 / column / gap 2）
+                                                 ＋ 删除钮（.btn.btn-sm，确认态换 btn-danger）
+                                                 ＋ .switch（40×22 那一套，:1147-1150） -->
+                                            <Border Style="{StaticResource StPluginRow}">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="12"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                        <ColumnDefinition Width="12"/>
+                                                        <ColumnDefinition Width="Auto"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel Grid.Column="0">
+                                                        <!-- .plugin-name（:1297）：font-weight 600，字号继承 body 的 14；
+                                                             里面 v-if p.version 的 span.muted（:1137）只改字色，
+                                                             字重仍跟着 600 → 用两个 Run，不要给第二段降字重 -->
+                                                        <TextBlock FontSize="14" FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis"><Run Text="示例插件"/><Run Text=" v1.2.0" Foreground="{DynamicResource Fg2}"/></TextBlock>
+                                                        <!-- .plugin-meta（:1298 ＋ .muted）：12px / 单行截断 -->
+                                                        <TextBlock Style="{StaticResource Micro}" Margin="0,2,0,0"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   Text="作者 · 一句话说明"/>
+                                                    </StackPanel>
+                                                    <Button Grid.Column="2" Style="{StaticResource BtnSmGhost}"
+                                                            Content="删除" VerticalAlignment="Center"/>
+                                                    <CheckBox Grid.Column="4" Style="{StaticResource Switch}"
+                                                            Width="40" Height="22" VerticalAlignment="Center"
+                                                            IsChecked="True"/>
+                                                </Grid>
+                                            </Border>
                                         </StackPanel>
                                         <TextBlock Style="{StaticResource StGroupHint}" Margin="0,14,0,6"
                                                    Text="还没有安装插件"/>
@@ -1078,8 +1110,9 @@
                                         <StackPanel>
                                             <!-- .memory-auto-row：基线 flex start space-between gap 16 + 下边线（:1702-1710），
                                                  runtime-grid 里压成 margin 0 0 8 / padding 0 0 10 / gap 12（:1878）；
-                                                 文字用 .java-auto-text 列 gap 4（:1516）+ 标题 13/600（:1879）
-                                                 + 描述 12px / line-height 1.55 / margin-top 4（:1879） -->
+                                                 文字用 .java-auto-text 列 gap 4（:1516）＋
+                                                 .java-auto-title（:1521 的 13px/600，runtime-grid 里 :1879 定成 13px）
+                                                 ＋ .java-auto-desc（:1879：12px / line-height 1.55 → 18.6 / margin-top 4） -->
                                             <Grid Margin="0,0,0,8">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*"/>
@@ -1089,7 +1122,7 @@
                                                 <StackPanel Grid.Column="0">
                                                     <TextBlock Text="自动分配（推荐）" FontSize="13" FontWeight="SemiBold"/>
                                                     <!-- autoMemoryText 在拿到本机内存前就是「…」（:413）// 占位：等系统信息接入 -->
-                                                    <TextBlock Margin="0,4,0,0" FontSize="12" LineHeight="19"
+                                                    <TextBlock Margin="0,4,0,0" FontSize="12" LineHeight="18.6"
                                                                LineStackingStrategy="BlockLineHeight"
                                                                Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
                                                                Text="按物理内存 1/4 自动分配（本机当前 …，2-8GB 区间），启动时实时生效；开启后禁用手动调节。"/>
@@ -1112,9 +1145,14 @@
                                                         <ColumnDefinition Width="172"/>
                                                     </Grid.ColumnDefinitions>
                                                     <!-- .mem-slider：flex 1 / height 24 / relative（:1712）；
-                                                         track 绝对居中 6px radius 999 底 card-2（:1713-1716）；
-                                                         fill 同高、90° accent-2→accent（:1717-1722，即 BarFill）；
-                                                         thumb 16×16 圆形，accent 底 + 2px on-accent 描边（:1724-1731） -->
+                                                         .mem-slider-track 绝对居中、高 6、radius 999（＝3）、底 card-2（:1713-1716）；
+                                                         .mem-slider-fill 同高、90° accent-2→accent（:1717-1722，即 BarFill）；
+                                                         .mem-slider-thumb 16×16 圆，accent 底 ＋ 2px on-accent 描边（:1724-1731）。
+                                                         两处已知差值：
+                                                         ① thumb 的 box-shadow 0 1px 6px color-mix(accent 45%, transparent) 要按主题取色，
+                                                            WPF 的 DropShadowEffect.Color 不能在样式里吃 DynamicResource，先不画；
+                                                         ② .mem-slider-thumb:hover 是 scale(1.12)、.dragging 是 scale(1.18) ＋ cursor grabbing
+                                                            （:1730-1731），滑块本身还没有拖拽接线，等交互轮一起做。 -->
                                                     <Grid Grid.Column="0" VerticalAlignment="Center">
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="45*"/>
@@ -1155,9 +1193,9 @@
                                                            Text="拖动滑块以 0.5 GB 步进（上限随当前可用内存浮动，预留 1G 给系统）；需要精细调节（如 0.25 GB）时点右侧数值直接输入"/>
                                                 <!-- .memory-warn：margin-top 8（:1732-1736）+ collapse-body gap 8 = 16，
                                                      上一项 hint 已带 margin-bottom 6 → 这里再补 10；
-                                                     只在手动值超过可用内存时出现（v-if memoryOverFree） -->
-                                                <TextBlock Margin="0,10,0,0" FontSize="12" LineHeight="19"
-                                                           LineStackingStrategy="BlockLineHeight"
+                                                     只在手动值超过可用内存时出现（v-if memoryOverFree）。
+                                                     :1732 只给 font-size 12 与 danger 色，没给 line-height → 用字体默认行高 -->
+                                                <TextBlock Margin="0,10,0,0" FontSize="12"
                                                            Foreground="{DynamicResource Danger}" TextWrapping="Wrap"
                                                            Visibility="Collapsed"
                                                            Text="当前分配超过可用内存，游戏可能启动失败或卡死系统；请调低或改回「自动分配」"/>
@@ -1205,10 +1243,12 @@
                                                         <ColumnDefinition Width="12"/>
                                                         <ColumnDefinition Width="Auto"/>
                                                     </Grid.ColumnDefinitions>
+                                                    <!-- .java-auto-title（:1521，runtime-grid 里 :1879 定 13px/600）
+                                                         ＋ .java-auto-desc（:1879：12px / line-height 1.55 → 18.6 / margin-top 4） -->
                                                     <StackPanel Grid.Column="0">
                                                         <TextBlock Text="自动检测并下载所需 Java（推荐）" FontSize="13"
                                                                    FontWeight="SemiBold"/>
-                                                        <TextBlock Margin="0,4,0,0" FontSize="12" LineHeight="19"
+                                                        <TextBlock Margin="0,4,0,0" FontSize="12" LineHeight="18.6"
                                                                    LineStackingStrategy="BlockLineHeight"
                                                                    Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
                                                                    Text="启动时按游戏版本自动选择匹配的 Java；本机没有时自动下载安装。关闭后使用下方手动选择的 Java。"/>
@@ -1270,13 +1310,16 @@
                                                                        Foreground="{DynamicResource Fg2}"
                                                                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                                                                        Text="扫描注册表、PATH、启动器 Runtime 与全部本地固定磁盘"/>
-                                                            <!-- v-if javaRefreshing 的进度行与 3px 轨道（:905-910 + :1445-1457） -->
+                                                            <!-- v-if javaRefreshing 的进度行（模板 :905-910，样式 :1439-1457）：
+                                                                 .java-scan-text 是 muted 的 12px 单行截断（:1439 ＋ .muted），
+                                                                 .java-scan-track 高 3 / radius 999（＝2）/ 底 border，
+                                                                 里面那个 span 是 accent 满高、宽度按进度（:1450-1457） -->
                                                             <StackPanel Grid.Column="0" Visibility="Collapsed">
                                                                 <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}"
                                                                            TextTrimming="CharacterEllipsis"/>
-                                                                <Border Height="3" CornerRadius="2" Margin="0,4,0,0"
+                                                                <Border Height="3" CornerRadius="1.5" Margin="0,4,0,0"
                                                                         Background="{DynamicResource Line}">
-                                                                    <Border Width="40" CornerRadius="2"
+                                                                    <Border Width="40" CornerRadius="1.5"
                                                                             HorizontalAlignment="Left"
                                                                             Background="{DynamicResource Accent}"/>
                                                                 </Border>
@@ -1298,9 +1341,10 @@
                                                                 <TextBlock Style="{StaticResource Micro}"
                                                                            Text="已识别 0 个 Java"/>
                                                             </Border>
-                                                            <!-- .java-item：tag + 版本 600 shrink 0 + 路径 mono 12 截断 +
-                                                                 隐藏按钮（:1466-1500）// 占位：等 Java 列表接入，
-                                                                 这里只留一条空行表达几何 -->
+                                                            <!-- .java-item：.tag ＋ .java-item-ver（:1474 font-weight 600 / flex-shrink 0）
+                                                                 ＋ .java-item-path（:1478 flex 1 / min-width 0 / 溢出省略 / 等宽 / 12px）
+                                                                 ＋ .java-item-hide（:1483-1500）（:1466-1500）
+                                                                 // 占位：等 Java 列表接入，这里只留一条空行表达几何 -->
                                                             <Border Style="{StaticResource StJavaItem}">
                                                                 <Grid>
                                                                     <Grid.ColumnDefinitions>
@@ -1509,9 +1553,15 @@
                                         <ColumnDefinition Width="12"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
+                                    <!-- TextBox.Text 的默认绑定模式是 TwoWay，而 GamePaths.Root 是只读属性：
+                                         首次排版时 WPF 会抛 InvalidOperationException（被 App 的
+                                         DispatcherUnhandledException 接住弹「出错了」），
+                                         并把那一轮布局整个打断（侧栏「资源管理」整行渲染不出来就是这个副作用）。
+                                         只读展示必须显式 OneWay。 -->
                                     <TextBox Grid.Column="0" Style="{StaticResource Input}" Opacity="0.7"
                                              IsReadOnly="True" FontFamily="{StaticResource MonoFont}"
-                                             Text="{Binding Paths.Root}"/>
+                                             FontSize="13"
+                                             Text="{Binding Paths.Root, Mode=OneWay}"/>
                                     <Button Grid.Column="2" Style="{StaticResource BtnGhost}" Content="前往管理"/>
                                 </Grid>
                             </StackPanel>
@@ -1630,8 +1680,11 @@
                                 </Border>
                                 <!-- .upd-release-item：flex gap 14 / align-start / padding 16 / border 1 / radius 10，
                                      选中 = accent 边 + accent-soft 底；radio margin-top 5（:1277-1284）；
-                                     .upd-release-main：wrap baseline gap 8（:1284）+ 版本 650 / 日期 12 / 摘要 12 占整行
-                                     （:1285-1287）// 占位：等 Release 列表接入，这行只表达几何 -->
+                                     .upd-release-main（:1283）：flex wrap / align baseline / gap 8 / min-width 0，
+                                     里面是 .upd-release-ver（:1284 font-weight 650 → WPF SemiBold，字号继承 14）
+                                     与 .upd-release-date（:1285 ＋ .muted：12px text-dim）；
+                                     .upd-release-summary（:1286 ＋ .muted）：12px ＋ flex-basis 100% → 独占一行，
+                                     与上一行的间距就是 main 的 gap 8。// 占位：等 Release 列表接入 -->
                                 <StackPanel Visibility="Collapsed">
                                     <Border Padding="16" CornerRadius="10" BorderBrush="{DynamicResource Accent}"
                                             BorderThickness="1" Background="{DynamicResource AccentSoft}">
@@ -1642,11 +1695,16 @@
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
                                             <RadioButton Grid.Column="0" Margin="0,5,0,0" VerticalAlignment="Top"/>
-                                            <WrapPanel Grid.Column="2">
-                                                <TextBlock Text="v1.1.4" FontWeight="SemiBold"/>
-                                                <TextBlock Text="2026-01-01 12:00" FontSize="12"
-                                                           Foreground="{DynamicResource Fg2}" Margin="8,0,0,0"/>
-                                            </WrapPanel>
+                                            <StackPanel Grid.Column="2">
+                                                <WrapPanel>
+                                                    <TextBlock Text="v1.1.4" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="2026-01-01 12:00" FontSize="12"
+                                                               Foreground="{DynamicResource Fg2}" Margin="8,0,0,0"/>
+                                                </WrapPanel>
+                                                <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                           Margin="0,8,0,0" TextWrapping="Wrap"
+                                                           Text="本次更新的摘要（release body 的首段）"/>
+                                            </StackPanel>
                                         </Grid>
                                     </Border>
                                 </StackPanel>

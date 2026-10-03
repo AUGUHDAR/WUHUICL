@@ -215,34 +215,11 @@
             <Setter Property="Foreground" Value="{DynamicResource Danger}"/>
         </Style>
 
-        <!-- ============ input[type=checkbox] 18×18 + accent-color 主色（ServersView.vue:504）；
-                    §2 的 Check 是 13px 原生勾，尺寸与配色都对不上，按原版度量重写 ============ -->
-        <Style x:Key="SrvCheck" TargetType="CheckBox">
-            <Setter Property="Width" Value="18"/>
-            <Setter Property="Height" Value="18"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="CheckBox">
-                        <Border x:Name="bx" CornerRadius="4" BorderThickness="1"
-                                BorderBrush="{DynamicResource BorderStrong}"
-                                Background="{DynamicResource CardSoft}">
-                            <ContentControl x:Name="tick" Width="12" Height="12" Visibility="Collapsed"
-                                            Foreground="{DynamicResource AccentFg}"
-                                            Style="{DynamicResource Icon.Check}"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="bx" Property="Background" Value="{DynamicResource Accent}"/>
-                                <Setter TargetName="bx" Property="BorderBrush" Value="{DynamicResource Accent}"/>
-                                <Setter TargetName="tick" Property="Visibility" Value="Visible"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
+        <!-- ============ 列表里的 input[type=checkbox]。1.1.10 起走全局自定义外观
+                    （styles.css:119-152：20 的圆角盒、描边 1.5、勾选是白色对勾），
+                    ServersView 自己只剩 .server-check 的 padding-left 16（:502），
+                    旧版这颗 18×18 ＋ accent-color 已被全局的 !important 宽高顶掉 → 套默认模板。 ============ -->
+        <Style x:Key="SrvCheck" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}"/>
 
         <!-- .server-address：无边透明底 / 13px text-dim 等宽 / cursor copy（ServerDetails.vue:30） -->
         <Style x:Key="SrvAddress" TargetType="Button">
@@ -301,8 +278,10 @@
          所以本页根节点自带内层滚动容器，不再套外层 ScrollViewer。
          .connect-page：max-width 1120 / margin 0 auto / flex column gap sec-gap 28（connection.css:3）
          → .servers-page 把 gap 压成 16（ServersView.vue:509）；@min-1121 又把 max-width 压成 1480 并 height 100%（:510 + :529）。
-         两档由代码里的 ApplyMetrics() 按视口宽切换（WPF 无 media query）。 -->
-    <Grid x:Name="PageRoot" MaxWidth="1120" HorizontalAlignment="Center" VerticalAlignment="Stretch">
+         两档由代码里的 ApplyMetrics() 按视口宽切换（WPF 无 media query）。
+         这里保持默认 Stretch 只给 MaxWidth：Stretch 的元素被 MaxWidth 夹住时 WPF 自己居中，等价 margin 0 auto；
+         写 HorizontalAlignment=Center 反而会按内容测量排版，星号列不摊开（首页就因此塌成 766 宽）。 -->
+    <Grid x:Name="PageRoot" MaxWidth="1120" VerticalAlignment="Stretch">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -1049,10 +1028,12 @@
                     <TextBlock Text="服务器地址" FontSize="13" Foreground="{DynamicResource Fg2}" Margin="0,16,0,8"/>
                     <TextBox x:Name="ServerEditAddr" Style="{StaticResource Input}" FontSize="13"
                              FontFamily="{StaticResource MonoFont}" MaxLength="256"/>
+                    <!-- .modal-actions（styles.css:555-560）：flex / align center / justify flex-end /
+                         gap space-3 16 / margin-top space-5 24。WPF 没有 gap → 第二个按钮左留 16。 -->
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,24,0,0">
                         <Button Style="{StaticResource BtnGhost}" MinWidth="42" Content="取消"
                                 Click="SrvCancel_Click"/>
-                        <Button Style="{StaticResource BtnGold}" MinWidth="42" Margin="12,0,0,0" Content="保存"
+                        <Button Style="{StaticResource BtnGold}" MinWidth="42" Margin="16,0,0,0" Content="保存"
                                 Click="SrvSave_Click"/>
                     </StackPanel>
                 </StackPanel>
@@ -1069,10 +1050,11 @@
                     <TextBlock x:Name="ServerDeleteText" FontSize="14" LineHeight="24" TextWrapping="Wrap"
                                Margin="0,12,0,0"
                                Text="确定要从启动器删除该服务器吗？这只会删除启动器记录，不会修改 Minecraft 的 servers.dat；下次同步时，游戏内仍存在的条目可能再次出现。"/>
+                    <!-- .modal-actions（styles.css:555-560）：gap 16 / margin-top 24 / 右对齐 -->
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,24,0,0">
                         <Button Style="{StaticResource BtnGhost}" MinWidth="42" Content="取消"
                                 Click="SrvCancel_Click"/>
-                        <Button Style="{StaticResource BtnDanger}" MinWidth="42" Margin="12,0,0,0" Content="确认删除"
+                        <Button Style="{StaticResource BtnDanger}" MinWidth="42" Margin="16,0,0,0" Content="确认删除"
                                 Click="SrvDelete_Click"/>
                     </StackPanel>
                 </StackPanel>
@@ -1090,10 +1072,11 @@
                     <ComboBox x:Name="ServerJoinInstance" MinHeight="36" FontSize="13"/>
                     <TextBlock x:Name="ServerJoinHint" Style="{StaticResource Micro}" Margin="0,8,0,0"
                                TextWrapping="Wrap"/>
+                    <!-- .modal-actions（styles.css:555-560）：gap 16 / margin-top 24 / 右对齐 -->
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,24,0,0">
                         <Button Style="{StaticResource BtnGhost}" MinWidth="42" Content="取消"
                                 Click="SrvCancel_Click"/>
-                        <Button Style="{StaticResource BtnGold}" MinWidth="42" Margin="12,0,0,0" Content="启动"
+                        <Button Style="{StaticResource BtnGold}" MinWidth="42" Margin="16,0,0,0" Content="启动"
                                 Click="SrvJoin_Click"/>
                     </StackPanel>
                 </StackPanel>

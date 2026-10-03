@@ -72,7 +72,7 @@ public sealed class LaunchSession : INotifyPropertyChanged
     public AccountRow? SelectedAccount { get => _account; set { if (Set(ref _account, value)) { if (value is not null) Accounts.Select(value.Model.Id); SaveSettings(); } } }
 
     VersionRow? _installed;
-    public VersionRow? SelectedInstalled { get => _installed; set { if (Set(ref _installed, value)) { Settings.Value.LastVersion = value?.Id; SaveSettings(); } } }
+    public VersionRow? SelectedInstalled { get => _installed; set { if (Set(ref _installed, value)) { Settings.Value.LastVersion = value?.Id; SaveSettings(); RaiseRunState(); } } }
 
     VersionRow? _online;
     public VersionRow? SelectedOnline { get => _online; set => Set(ref _online, value); }
@@ -84,10 +84,16 @@ public sealed class LaunchSession : INotifyPropertyChanged
     public double Progress { get => _progress; set => Set(ref _progress, value); }
 
     bool _busy;
-    public bool Busy { get => _busy; set { if (Set(ref _busy, value)) { Raise(nameof(RunStateText)); Raise(nameof(RunStateColor)); } } }
+    public bool Busy { get => _busy; set { if (Set(ref _busy, value)) RaiseRunState(); } }
 
     bool _gameRunning;
-    public bool GameRunning { get => _gameRunning; set { if (Set(ref _gameRunning, value)) { Raise(nameof(CanPlay)); Raise(nameof(CanStop)); Raise(nameof(RunStateText)); Raise(nameof(RunStateColor)); } } }
+    public bool GameRunning { get => _gameRunning; set { if (Set(ref _gameRunning, value)) { Raise(nameof(CanPlay)); Raise(nameof(CanStop)); RaiseRunState(); } } }
+
+    /// <summary>原版 launchFailed（HomeView.vue:161-164）：launchState 为 error，或退出码非 0。
+    /// 它同时驱动首页启动按钮文案（:171）、.runtime-state.error 这一档色调（:883-884）
+    /// 和日志窗顶部的 .log-failure 条（:717）。</summary>
+    bool _launchFailed;
+    public bool LaunchFailed { get => _launchFailed; set { if (Set(ref _launchFailed, value)) RaiseRunState(); } }
 
     public bool CanPlay => !Busy && !GameRunning && SelectedAccount is not null && SelectedInstalled is not null;
     public bool CanStop => GameRunning;
@@ -99,22 +105,72 @@ public sealed class LaunchSession : INotifyPropertyChanged
     public string MemorySummary => Settings.Value.MaxHeapMb >= 1024
         ? $"{Settings.Value.MaxHeapMb / 1024.0:0.#} GB"
         : $"{Settings.Value.MaxHeapMb} MB";
-    // 原版 heroStatus 四态（HomeView.vue:192-200）：等待选择 / 正在准备 / 游戏运行中 / 需要检查 / 就绪
-    public string RunStateText => GameRunning ? "游戏运行中" : Busy ? "正在准备"
-        : InstalledList.Count == 0 ? "等待选择" : "就绪";
+    // 原版 heroStatus 五态（HomeView.vue:192-200），判据顺序也照抄：
+    // 没有当前实例 → 等待选择；运行中 → 游戏运行中；正在准备 → 正在准备；
+    // launchFailed／实例损坏 → 需要检查；否则就绪。
+    // 「没有当前实例」原版查的是 currentVersion（= selectedInstance，:61），不是「一个版本都没装」，
+    // 所以这里用 SelectedInstalled 为 null，和 InstalledList.Count==0 只在空列表时等价。
+    // 缺的两档（version.failed / version.incomplete，:197）要等实例体检接入才能补，暂时只有 launchFailed。
+    public string RunStateText => SelectedInstalled is null ? "等待选择" : GameRunning ? "游戏运行中"
+        : Busy ? "正在准备" : LaunchFailed ? "需要检查" : "就绪";
 
-    /// <summary>.runtime-state i 的点色：idle 灰、ready/running 绿（HomeView.vue:881-882），
-    /// 不是 accent —— 之前空状态点成蓝色就是这里错了。</summary>
-    public string RunStateColor => !GameRunning && !Busy && InstalledList.Count == 0 ? "Idle" : "Ok";
+    /// <summary>.runtime-state i 的点色：idle 灰、ready/running 绿、error 红（HomeView.vue:881-884），
+    /// 不是 accent —— 之前空状态点成蓝色就是这里错了。error 优先级最低：启动过程中不算需要检查。</summary>
+    public string RunStateColor => SelectedInstalled is null ? "Idle"
+        : !GameRunning && !Busy && LaunchFailed ? "Danger" : "Ok";
 
-    /// <summary>ready/running 才有 3px 光环 box-shadow 0 0 0 3px --ok-soft（:882）。</summary>
-    public string RunStateRing => RunStateColor == "Ok" ? "OkSoft" : "Transparent";
+    /// <summary>ready/running 才有 3px 光环 box-shadow 0 0 0 3px ok-soft（:882），
+    /// error 换成 danger-soft（:884），idle 没有光环。</summary>
+    public string RunStateRing => RunStateColor switch
+    {
+        "Ok" => "OkSoft",
+        "Danger" => "DangerSoft",
+        _ => "Transparent",
+    };
+
+    /// <summary>.runtime-state strong 的字色：默认 accent-2，error 档转 danger（:880 与 :883）。
+    /// 前面的 svg 图标两档都是 accent-2，所以只有文字这一处要跟着 tone 走。</summary>
+    public string RunStateFg => RunStateColor == "Danger" ? "Danger" : "AccentHi";
+
+    void RaiseRunState()
+    {
+        Raise(nameof(RunStateText));
+        Raise(nameof(RunStateColor));
+        Raise(nameof(RunStateRing));
+        Raise(nameof(RunStateFg));
+        Raise(nameof(LogHeadText));
+    }
+
+    /// <summary>原版 launchText（HomeView.vue:169-172）四档：launching 用进度文案，这里落回它的
+    /// 兜底句「正在启动…」；running 是「再次启动」；launchFailed 才是「重新启动」；都没问题就「开始游戏」。
+    /// 之前只有两档，还把 running 写成了「重新启动」。</summary>
+    public string LaunchText => Busy ? "正在启动…" : GameRunning ? "再次启动"
+        : LaunchFailed ? "重新启动" : "开始游戏";
+
+    /// <summary>日志窗 header 的「N 行 · 运行状态」（HomeView.vue:714）。
+    /// WPF 绑不到 ObservableCollection.Count 的变更，所以按原版 computed 的写法做成属性，改日志时手动 Raise。</summary>
+    public string LogHeadText => $"{LogLines.Count} 行 · {RunStateText}";
+
+    /// <summary>.log-empty 的 v-if 是 !store.logs.length（:722），footer 清空的 disabled 是同一个条件（:725）。</summary>
+    public bool NoLogs => LogLines.Count == 0;
+    public bool CanClearLogs => LogLines.Count > 0;
+
+    void RaiseLogs()
+    {
+        Raise(nameof(NoLogs));
+        Raise(nameof(CanClearLogs));
+        Raise(nameof(LogHeadText));
+    }
+
+    /// <summary>对应原版「清空日志」（HomeView.vue:725 store.logs = []）。</summary>
+    public void ClearLogs()
+    {
+        LogLines.Clear();
+        RaiseLogs();
+    }
 
     /// <summary>版本页第二个页签：原版是「已安装」，有实例时才带数量（GameView.vue:937）。</summary>
     public string InstalledTabText => InstalledList.Count == 0 ? "已安装" : $"已安装（{InstalledList.Count}）";
-
-    string _lastCommand = "";
-    public string LastCommand { get => _lastCommand; set => Set(ref _lastCommand, value); }
 
     GameLauncher? _launcher;
     CancellationTokenSource? _cts;
@@ -189,6 +245,7 @@ public sealed class LaunchSession : INotifyPropertyChanged
         {
             LogLines.Add(line);
             while (LogLines.Count > 2000) LogLines.RemoveAt(0);
+            RaiseLogs();
         });
     }
 
@@ -256,9 +313,7 @@ public sealed class LaunchSession : INotifyPropertyChanged
         foreach (var v in sorted) InstalledList.Add(v);
         SelectedInstalled ??= InstalledList.FirstOrDefault();
         Raise(nameof(CanPlay));
-        Raise(nameof(RunStateText));
-        Raise(nameof(RunStateColor));
-        Raise(nameof(RunStateRing));
+        RaiseRunState();
         Raise(nameof(InstalledTabText));
     }
 
@@ -368,6 +423,9 @@ public sealed class LaunchSession : INotifyPropertyChanged
         var id = SelectedInstalled!.Id;
         var acc = SelectedAccount!.Model;
         Busy = true; Status = "正在准备启动…";
+        // 原版 launchState 一旦转成 launching，error 态自然就没了（HomeView.vue:161-165 是按当前 status 算的），
+        // 所以重新启动要把「需要检查」清掉，否则失败条会一直挂着。
+        LaunchFailed = false;
         try
         {
             VersionInfo Load(string vid)
@@ -411,7 +469,6 @@ public sealed class LaunchSession : INotifyPropertyChanged
 
             var plan = LaunchPlanBuilder.Build(Paths, rv, opts);
             plan.Java = java!;
-            LastCommand = plan.DisplayCommand(opts.Token);
             foreach (var w in plan.Warnings) Log("提醒：" + w);
 
             _launcher?.Dispose();
@@ -421,6 +478,8 @@ public sealed class LaunchSession : INotifyPropertyChanged
             _launcher.Exited += code => Dispatcher(() =>
             {
                 GameRunning = false;
+                // 原版 launchState.status='exited' ＋ code，launchFailed 就是 code 非 0（HomeView.vue:161-164）
+                LaunchFailed = code != 0;
                 Status = code == 0 ? $"游戏已退出（正常）" : $"游戏退出，代码 {code}";
                 Log(code == 0 ? "游戏正常退出" : $"游戏退出代码 {code}");
             });
@@ -435,6 +494,9 @@ public sealed class LaunchSession : INotifyPropertyChanged
         }
         catch (Exception ex)
         {
+            // 原版这里把 launchState 置成 error（HomeView.vue:161-165 的第一个分支），
+            // 首页按钮文案转「重新启动」、日志窗出 .log-failure 条
+            LaunchFailed = true;
             Status = "启动失败：" + ex.Message;
             Log("启动失败：" + ex.Message);
         }

@@ -56,6 +56,12 @@
   <SolidColorBrush x:Key="AccentPick" Color="#0DEC4899"/>
   <SolidColorBrush x:Key="Accent16" Color="#29EC4899"/>
   <SolidColorBrush x:Key="Accent8" Color="#14EC4899"/>
+  <SolidColorBrush x:Key="DragTint" Color="#2EEC4899"/>
+  <Color x:Key="C.CheckBorder">#C08FAB</Color>
+  <SolidColorBrush x:Key="CheckBorder" Color="{StaticResource C.CheckBorder}"/>
+  <Color x:Key="C.CheckBorderOn">#F48CC1</Color>
+  <SolidColorBrush x:Key="CheckBorderOn" Color="{StaticResource C.CheckBorderOn}"/>
+  <SolidColorBrush x:Key="CheckBgOn" Color="#0AEC4899"/>
   <SolidColorBrush x:Key="LoaderBg" Color="#9F7C3256"/>
   <SolidColorBrush x:Key="LogBody" Color="#6BFDF2F8"/>
   <SolidColorBrush x:Key="Idle" Color="#FF9CA3AF"/>
@@ -80,4 +86,9 @@
                     Opacity="0.05" Color="#1f3255"/>
   <DropShadowEffect x:Key="PopShadow" BlurRadius="55" ShadowDepth="20" Direction="270"
                     Opacity="0.18" Color="#1f3255"/>
+  <!-- .loader-option.active 的 box-shadow 0 0 14px accent 12%（GameView.vue:1501，1.1.10 新增）：
+       本工程 CSS blur 与 WPF BlurRadius 按 1:1 换算，与 PopShadow 同一口径；
+       ShadowDepth 0 ＝ CSS 的 offsets 全 0，透明度取 12% 而不是写角色彩。 -->
+  <DropShadowEffect x:Key="LoaderGlow" BlurRadius="14" ShadowDepth="0" Opacity="0.12"
+                    Color="{StaticResource C.Accent}"/>
 </ResourceDictionary>

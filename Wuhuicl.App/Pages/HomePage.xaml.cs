@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 
 namespace Wuhuicl.App.Pages;
 
@@ -9,18 +10,25 @@ public partial class HomePage : UserControl
 {
     MainWindow Shell => (MainWindow)System.Windows.Application.Current.MainWindow!;
 
-    /// <summary>参与测试及创作者名单，逐字取自 CreatorCard.vue:11 的 names 数组。</summary>
-    static readonly string[] Creators =
-    {
-        "BAI_ZHU", "AeZz", "物晖", "牛肉", "好好", "hun_Bk", "J39", "略略略", "鸦猫", "sheri",
-        "书九叶", "yansan", "(x_x;)", "小坎坷", "MuxYang", "八千代", "Henry", "月を見ていた", "Hiro", "摇滚高手"
-    };
+    /// <summary>原版 CreatorCard.vue:4 那 20 个名字是官方 1.1.10 的测试名单；本作只有作者一个人，
+    /// 按作者要求只留自己（就是名单里那个「物晖」，启动器名 WUHUICL/武慧 是另一回事）。
+    /// 要加人只改这个数组，气泡的错峰与漂移会自己跟上。</summary>
+    static readonly string[] Creators = { "物晖" };
+
+    /// <summary>右上角 ↗ 与整张卡都指向作者的 B 站空间（原版链的是官方的 9596327）。</summary>
+    const string CreatorUrl = "https://space.bilibili.com/526277131";
+
+    /// <summary>一个气泡的动画参数：reveal 用外层 Border 的平移＋透明度，drift 用内层文字的平移。
+    /// 原版是 CSS 自定义属性 --delay / --drift-x / --drift-y / --duration（CreatorCard.vue:6 ＋ :14）。</summary>
+    readonly List<(Border Bubble, TranslateTransform Reveal, TranslateTransform Drift,
+        double DelayMs, Point DriftXY, double DriftSec)> _bubbles = new();
+    readonly Random _drift = new();
 
     public HomePage()
     {
         InitializeComponent();
         BuildCreatorBubbles();
-        // .creator-reveal 由 pointerenter / pointerleave / focusin / focusout 开合（CreatorCard.vue:12）
+        // .creator-reveal 由 pointerenter / pointerleave / focusin / focusout 开合（CreatorCard.vue:11）
         CreatorCard.MouseEnter += (_, _) => SetCreatorOpen(true);
         CreatorCard.MouseLeave += (_, _) => SetCreatorOpen(false);
         CreatorCard.LostFocus += (_, _) => SetCreatorOpen(false);
@@ -29,35 +37,118 @@ public partial class HomePage : UserControl
         RuntimeStrip.MouseLeave += (_, _) => HideRuntimeBlob();
     }
 
-    /// <summary>.creator-bubble：12px / radius 999 / 底 card-2 / padding 5 9，层内 gap 8（CreatorCard.vue:21-22）。</summary>
+    /// <summary>.creator-bubble：12px / radius 999 / 底 card-2 / padding 5 9，层内 gap 8（CreatorCard.vue:24）。
+    /// 每个气泡按索引拿一份随机漂移量（:6 的 drift 数组：x ±6px、y ±4px、周期 3.8~6.8s）。</summary>
     void BuildCreatorBubbles()
     {
-        foreach (var name in Creators)
+        for (int i = 0; i < Creators.Length; i++)
         {
-            var bubble = new System.Windows.Controls.Border
+            var reveal = new TranslateTransform(0, 4);
+            var drift = new TranslateTransform();
+            var bubble = new Border
             {
-                Background = (System.Windows.Media.Brush)System.Windows.Application.Current.Resources["CardSoft"],
-                Padding = new System.Windows.Thickness(9, 5, 9, 5),
-                Margin = new System.Windows.Thickness(0, 0, 8, 8),
-                Child = new System.Windows.Controls.TextBlock
+                Padding = new Thickness(9, 5, 9, 5),
+                Margin = new Thickness(0, 0, 8, 8),
+                Opacity = 0,
+                RenderTransform = reveal,
+                Child = new TextBlock
                 {
-                    Text = name,
+                    Text = Creators[i],
                     FontSize = 12,
-                    Foreground = (System.Windows.Media.Brush)System.Windows.Application.Current.Resources["Fg"],
+                    RenderTransform = drift,
                 },
             };
+            // 画刷必须走动态资源引用（等价 XAML 里的 DynamicResource）：
+            // 直接 Application.Current.Resources["CardSoft"] 拿到的是查表当下那一份，
+            // 实测在浅色主题下取到的是深色主题的 card-2，气泡会变成一块黑底；
+            // 而且换主题时静态取的也不会跟着变。
+            bubble.SetResourceReference(Border.BackgroundProperty, "CardSoft");
+            ((TextBlock)bubble.Child).SetResourceReference(TextBlock.ForegroundProperty, "Fg");
             // 999 的胶囊半径一律走 CssRadius.Pill：WPF 的 CornerRadius 不会按盒子尺寸收缩
             Controls.CssRadius.SetPill(bubble, true);
             CreatorNames.Children.Add(bubble);
+            _bubbles.Add((bubble, reveal, drift, i * 40.0,
+                new Point(_drift.NextDouble() * 12 - 6, _drift.NextDouble() * 8 - 4),
+                3.8 + _drift.NextDouble() * 3));
         }
     }
 
-    /// <summary>展开态：grid-template-rows 0fr→1fr ＋ opacity 1（240ms / 200ms）。
-    /// 这里先用 MaxHeight 表达开合，缓动动效归在 UI_MOTION 的待办里。</summary>
+    /// <summary>展开态。原版两层同时动（CreatorCard.vue:25-30）：
+    /// ① .creator-reveal：grid-template-rows 0fr→1fr 用 240ms var(ease-out)，opacity 用 200ms ease；
+    ///    WPF 没有 0fr→1fr，用 MaxHeight 0↔240 走同样的时长与曲线。
+    /// ② .moving .creator-bubble：reveal 220ms both ＋ 每颗延迟 i×40ms（透明度 0→1、translateY 4→0）；
+    ///    内层 span：drift 随机周期 ease-in-out infinite alternate ＋ 同样的延迟。
+    /// 收起时把两组动画整个摘掉（BeginAnimation(…, null)），否则 HoldEnd 会把气泡钉在半路。</summary>
     void SetCreatorOpen(bool open)
     {
-        CreatorReveal.MaxHeight = open ? 240 : 0;
-        CreatorReveal.Opacity = open ? 1 : 0;
+        CreatorReveal.BeginAnimation(MaxHeightProperty,
+            Ramp(CreatorReveal.MaxHeight, open ? 240 : 0, 240, Services.Motion.EaseOut));
+        CreatorReveal.BeginAnimation(OpacityProperty,
+            Ramp(CreatorReveal.Opacity, open ? 1 : 0, 200, Services.Motion.Ease));
+
+        foreach (var (bubble, reveal, drift, delay, xy, sec) in _bubbles)
+        {
+            if (!open)
+            {
+                // 摘掉动画（不是写 0）：HoldEnd 会把气泡钉在半透明/半位移的状态
+                bubble.BeginAnimation(OpacityProperty, null);
+                reveal.BeginAnimation(TranslateTransform.YProperty, null);
+                drift.BeginAnimation(TranslateTransform.XProperty, null);
+                drift.BeginAnimation(TranslateTransform.YProperty, null);
+                bubble.Opacity = 0;
+                reveal.Y = 4;
+                drift.X = drift.Y = 0;
+                continue;
+            }
+            bubble.Opacity = 0;
+            reveal.Y = 4;
+            bubble.BeginAnimation(OpacityProperty, Ramp(0, 1, 220, Services.Motion.Ease, delay));
+            reveal.BeginAnimation(TranslateTransform.YProperty, Ramp(4, 0, 220, Services.Motion.Ease, delay));
+            // drift：from 是 -xy、to 是 +xy，AutoReverse ＋ Forever，周期就是随机出来的 --duration
+            drift.BeginAnimation(TranslateTransform.XProperty, Swing(-xy.X, xy.X, sec, delay));
+            drift.BeginAnimation(TranslateTransform.YProperty, Swing(-xy.Y, xy.Y, sec, delay));
+        }
+    }
+
+    /// <summary>一段带缓动的两帧动画（可选延迟，对应 CSS 的 animation-delay）。
+    /// KeySpline 只挂在 SplineDoubleKeyFrame 上（EasingDoubleKeyFrame 没有这个属性），
+    /// 这点与 Services/Motion.cs:34-44 同一个写法。</summary>
+    static DoubleAnimationUsingKeyFrames Ramp(double from, double to, double ms, KeySpline spline, double delayMs = 0)
+    {
+        var a = new DoubleAnimationUsingKeyFrames();
+        a.KeyFrames.Add(new SplineDoubleKeyFrame(from, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+        a.KeyFrames.Add(new SplineDoubleKeyFrame(to, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(ms)), spline));
+        if (delayMs > 0) a.BeginTime = TimeSpan.FromMilliseconds(delayMs);
+        return a;
+    }
+
+    /// <summary>CSS 的 `animation: drift Xs ease-in-out infinite alternate`：
+    /// WPF 用 AutoReverse ＋ RepeatBehavior.Forever 表达 alternate。</summary>
+    static DoubleAnimationUsingKeyFrames Swing(double from, double to, double sec, double delayMs)
+    {
+        var a = new DoubleAnimationUsingKeyFrames { RepeatBehavior = RepeatBehavior.Forever, AutoReverse = true };
+        a.KeyFrames.Add(new SplineDoubleKeyFrame(from, KeyTime.FromTimeSpan(TimeSpan.Zero), Services.Motion.EaseInOut));
+        a.KeyFrames.Add(new SplineDoubleKeyFrame(to, KeyTime.FromTimeSpan(TimeSpan.FromSeconds(sec)), Services.Motion.EaseInOut));
+        if (delayMs > 0) a.BeginTime = TimeSpan.FromMilliseconds(delayMs);
+        return a;
+    }
+
+    /// <summary>自测入口：--open=creator 直接展开创作者卡，
+    /// 不然 PrintWindow 抓不到 hover 态（截图脚本没有指针）。</summary>
+    internal void DebugOpenCreator() => SetCreatorOpen(true);
+
+    /// <summary>整张卡与右上角 ↗ 都开作者的 B 站空间。Button 会吃掉自己的 MouseLeftButtonUp，
+    /// 所以点 ↗ 不会冒泡到卡片上开两次。</summary>
+    void CreatorCard_Click(object sender, MouseButtonEventArgs e) => OpenCreatorSpace();
+    void CreatorLink_Click(object sender, RoutedEventArgs e) => OpenCreatorSpace();
+
+    static void OpenCreatorSpace()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(CreatorUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex) { MainWindow.Diag("打开 B 站空间失败：" + ex.Message); }
     }
 
     // ---------------- .runtime-blob：跟随悬停格滑动（HomeView.vue:546 ＋ :862-870 ＋ 脚本 :177-190） ----------------

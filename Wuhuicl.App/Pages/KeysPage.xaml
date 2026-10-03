@@ -895,8 +895,18 @@
 
                 <!-- ==================== 分区三：.default-packs（模板 :156-172） ====================
                      margin-bottom sec-gap 28 — :231；padding 20 — :273（与 §2 Panel 的 20 同值，不重复设）
-                     // 占位：等默认配置功能接入（getDefaultResourcePacks / importDefaultResourcePacks 在 api 层） -->
-                <Border x:Name="PanelPacks" Style="{StaticResource Panel}" Margin="0,0,0,28" Visibility="Collapsed">
+                     // 占位：等默认配置功能接入（getDefaultResourcePacks / importDefaultResourcePacks 在 api 层）
+                     外层 Grid 只为承载 .drag-active（模板 :156 的 :class，样式 :231）：
+                     outline 2px solid accent ＋ background accent-soft。WPF 没有 outline 这个「不占布局的外描边」，
+                     等价写法是在被描元素外面套一圈 Margin=-2 的 Border：线画在盒子外侧，内容不会被挤动 2px；
+                     外沿圆角＝卡片 radius-lg 14 ＋ 线宽 2 ＝ 16（浏览器算 outline 圆角就是这个和）。
+                     dragover／dragleave 本身属功能，所以这层先 Collapsed。 -->
+                <Grid>
+                    <Border x:Name="PacksDragActive" Margin="-2" CornerRadius="16"
+                            BorderBrush="{DynamicResource Accent}" BorderThickness="2"
+                            Background="{DynamicResource AccentSoft}"
+                            IsHitTestVisible="False" Visibility="Collapsed"/>
+                    <Border x:Name="PanelPacks" Style="{StaticResource Panel}" Margin="0,0,0,28" Visibility="Collapsed">
                     <StackPanel>
                         <!-- .default-packs .cfg-col-head：gap 12 / wrap；首个 div flex 1 / min-width 160 — :273 -->
                         <Grid Style="{StaticResource CfgColHead}">
@@ -1014,6 +1024,7 @@
                                    Text="添加后自动开启同步。每个材质包可独立启停，下次启动游戏时生效；未启用的包不会复制，并取消其默认启用。关闭总同步不改动实例。原文件和已复制文件保留。"/>
                     </StackPanel>
                 </Border>
+                </Grid>
 
                 <!-- 读取中：模板 :173 的 .card.empty + .spin。
                      .content .empty = min-height 120 / padding 32 16（ui-system.css:44）
@@ -1027,8 +1038,10 @@
             </StackPanel>
         </ScrollViewer>
 
-        <!-- .cfg-capture-mask 是 position fixed / inset 0 / z-index 9000 的全屏遮罩（模板 :221 + 样式 :269），
-             点它调 stopCapture()。它要盖住整个窗口，而本页在 ScrollViewer 内，
+        <!-- .menu-overlay.cfg-capture-mask（模板 :221）：.menu-overlay 是全局的
+             position fixed / inset 0 / z-index 90（styles.css:577-581，纯点击捕获层，不画任何东西），
+             本页又在它上面叠了 .cfg-capture-mask 的 z-index 9000（:269）。
+             它要盖住整个窗口，而本页在 ScrollViewer 内，
              所以这里只留一个 0 尺寸的命名锚点，真遮罩层需由主控放进窗口浮层（KeysPage.xaml.cs 尾注有接线说明） -->
         <Border x:Name="CaptureMask" Width="0" Height="0" Panel.ZIndex="9000" Visibility="Collapsed"/>
     </Grid>

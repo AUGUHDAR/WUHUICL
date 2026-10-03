@@ -9,6 +9,7 @@
   ChipBg        .tag 的底                     = color-mix(text-dim 14%, transparent) styles.css:469
   LoaderBg      .loader-badge 的底            = color-mix(accent 30%, rgba(20,30,24,.46)) HomeView.vue:831
   LogBody       .log-body 的底                = color-mix(bg 42%, transparent)      HomeView.vue:978
+  DragTint      .drag-hint 拖拽提示底          = color-mix(accent 18%, transparent)   SkinsView.vue:747
   CyanSoft / DangerSoft / DangerBorder        = App.vue:985-990（深浅两套 alpha）
 
 其中 accent-2 就是既有的 AccentHi（accent 72% + white），accent-deep 就是 AccentLo。
@@ -44,6 +45,14 @@ CHIP_MIX = .14      # .tag 底 = color-mix(text-dim 14%, transparent)  styles.cs
 LOADER_MIX = .30    # .loader-badge 底 = color-mix(accent 30%, rgba(20,30,24,.46))  HomeView.vue:831
 LOADER_BASE = (20, 30, 24, .46)
 LOG_MIX = .42       # .log-body 底 = color-mix(bg 42%, transparent)  HomeView.vue:978
+DRAG_MIX = .18      # .drag-hint 底 = color-mix(accent 18%, transparent)  SkinsView.vue:747
+# 1.1.10 styles.css:119-157 的复选框三件套：
+#   静止描边 = color-mix(text-dim 65%, border)、选中描边 = color-mix(accent 50%, border)、
+#   选中底色 = color-mix(accent-soft 40%, card-2)（accent-soft 本身带 alpha，
+#   所以选中态用「accent 按 40%×soft-alpha 的半透明叠在 card-2 上」等价表达）。
+CHECK_BORDER_MIX = .65
+CHECK_ON_MIX = .50
+CHECK_BG_KEEP = .40
 
 
 def parse(s):
@@ -98,6 +107,8 @@ def build_block(text):
     ok = parse(read(text, r'<Color x:Key="C\.Ok">#(\w{6,8})</Color>', "C.Ok"))
     danger = parse(read(text, r'<Color x:Key="C\.Danger">#(\w{6,8})</Color>', "C.Danger"))
     cyan = parse(read(text, r'<Color x:Key="C\.Cyan">#(\w{6,8})</Color>', "C.Cyan"))
+    line = parse(read(text, r'<Color x:Key="C\.Line">#(\w{6,8})</Color>', "C.Line"))
+    card_soft = parse(read(text, r'<Color x:Key="C\.CardSoft">#(\w{6,8})</Color>', "C.CardSoft"))
 
     # App.vue:970 的深色判据就是 bg 的相对亮度 < .46，soft 层的双套 alpha 全靠它
     dark = luminance(bg) < .46
@@ -108,6 +119,12 @@ def build_block(text):
     nav_fg = "#{0:02X}{1:02X}{2:02X}".format(*[round(v) for v in mix(fg, accent, FG_MIX)])
     pill_top = hexa(soft[:3] + (soft[3] * SOFT_KEEP,))
     border = hexa(accent_hi[:3] + (255 * BORDER_MIX,))
+    # 复选框（1.1.10 styles.css:119-157）：静止描边是 text-dim 65% ＋ border 35%，
+    # 选中描边是 accent 50% ＋ border 50%，选中底是 accent-soft 40% 叠 card-2 ——
+    # accent-soft 自带 alpha，所以"叠一次"等价于把它的 alpha 再乘 40%，用半透明画刷表达。
+    ck_border = "#{0:02X}{1:02X}{2:02X}".format(*[round(v) for v in mix(fg2[:3], line[:3], CHECK_BORDER_MIX)])
+    ck_on = "#{0:02X}{1:02X}{2:02X}".format(*[round(v) for v in mix(accent[:3], line[:3], CHECK_ON_MIX)])
+    ck_bg = rgba(accent[:3], CHECK_BG_KEEP * (soft_a if dark else SOFT_LIGHT))
 
     return (
         f"{BEGIN}\n"
@@ -126,6 +143,12 @@ def build_block(text):
         f"  <SolidColorBrush x:Key=\"AccentPick\" Color=\"{rgba(accent[:3], PICK_MIX)}\"/>\n"
         f"  <SolidColorBrush x:Key=\"Accent16\" Color=\"{rgba(accent[:3], PANEL_16)}\"/>\n"
         f"  <SolidColorBrush x:Key=\"Accent8\" Color=\"{rgba(accent[:3], PANEL_8)}\"/>\n"
+        f"  <SolidColorBrush x:Key=\"DragTint\" Color=\"{rgba(accent[:3], DRAG_MIX)}\"/>\n"
+        f"  <Color x:Key=\"C.CheckBorder\">{ck_border}</Color>\n"
+        f"  <SolidColorBrush x:Key=\"CheckBorder\" Color=\"{{StaticResource C.CheckBorder}}\"/>\n"
+        f"  <Color x:Key=\"C.CheckBorderOn\">{ck_on}</Color>\n"
+        f"  <SolidColorBrush x:Key=\"CheckBorderOn\" Color=\"{{StaticResource C.CheckBorderOn}}\"/>\n"
+        f"  <SolidColorBrush x:Key=\"CheckBgOn\" Color=\"{ck_bg}\"/>\n"
         f"  <SolidColorBrush x:Key=\"LoaderBg\" Color=\"{loader_bg(accent[:3])}\"/>\n"
         f"  <SolidColorBrush x:Key=\"LogBody\" Color=\"{rgba(bg[:3], LOG_MIX)}\"/>\n"
         f"  <SolidColorBrush x:Key=\"Idle\" Color=\"#FF9CA3AF\"/>\n"
