@@ -51,10 +51,22 @@
                                         </Border>
 
                                         <StackPanel Grid.Row="2" VerticalAlignment="Top" Margin="0,18,0,0">
-                                            <TextBlock x:Name="HeroTitle" Text="还没有安装版本" FontSize="30"
+                                            <!-- .hero-content h1：字号 clamp(24,2.6vw,32)（:1030 覆盖 :819），
+                                                 窗口 1360 时 2.6vw=35 → 取上限 32；line-height 1.25 → 40；
+                                                 两行截断（-webkit-line-clamp:2 → MaxHeight 80）；
+                                                 阴影 text-shadow 0 4px 24px rgba(0,0,0,.32)（:819 未被后文覆盖）；
+                                                 字重 850 WPF 无对应档，取最近的 ExtraBold(800)。
+                                                 letter-spacing -1px WPF 的 TextBlock 没有该属性，差值记进 UI_SPEC。 -->
+                                            <TextBlock x:Name="HeroTitle" Text="还没有安装版本" FontSize="32"
                                                        FontWeight="ExtraBold" Foreground="#FFFFFFFF"
-                                                       LineHeight="38" MaxWidth="620" TextWrapping="Wrap"
-                                                       MaxHeight="76" TextTrimming="CharacterEllipsis"/>
+                                                       LineHeight="40" LineStackingStrategy="BlockLineHeight"
+                                                       MaxWidth="620" TextWrapping="Wrap"
+                                                       MaxHeight="80" TextTrimming="CharacterEllipsis">
+                                                <TextBlock.Effect>
+                                                    <DropShadowEffect BlurRadius="24" ShadowDepth="4" Direction="270"
+                                                                      Opacity="0.32" Color="#000000"/>
+                                                </TextBlock.Effect>
+                                            </TextBlock>
                                             <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                                 <TextBlock x:Name="HeroGameVersion" Text="" FontSize="15"
                                                            FontWeight="SemiBold" Foreground="#FFFFFFFF"
