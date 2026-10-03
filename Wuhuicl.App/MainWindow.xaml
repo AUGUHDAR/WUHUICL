@@ -17,6 +17,712 @@
         <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" CornerRadius="0" GlassFrameThickness="0"/>
     </shell:WindowChrome.WindowChrome>
 
+    <!-- ==================== 窗内私有资源，前缀 Sh（shell）====================
+         Themes/Controls.xaml 是跨页共享层（归人工维护，本轮不可改）；这一批只服务主窗自己的
+         三个 App.vue 弹窗（整合包导入 / 启动失败 / 配置不兼容）与顶栏浮层的行族，
+         按同一原则留在窗内资源作用域。行号全部指 KAMUCL-1.1.5/src/renderer/src/App.vue
+         的 style 段（注意它的最终生效值：同特异性后写的那条赢）。 -->
+    <Window.Resources>
+
+        <!-- ============ 一、通用弹窗壳：styles.css:527-563 ＋ ui-system.css:37-40 ============ -->
+        <!-- .modal-mask：fixed inset 0 / z 10000 / flex 居中 / 底 var(mask)＝Overlay / backdrop blur(10)。
+             原版的 100vw/100vh 减项在 WPF 没有视口单位，由代码 ApplyViewportCaps() 按窗口实际尺寸
+             写回各卡片的 MaxWidth/MaxHeight（styles.css:546-547 ＋ ui-system.css:38）。 -->
+        <Style x:Key="Sh.ModalMask" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource Overlay}"/>
+        </Style>
+        <!-- mask-in：opacity 0→1 / 0.2s ease（styles.css:537 ＋ :564-568）。
+             与本页日志窗那条动画同一参数，做成一档给两个模态共用。 -->
+        <Style x:Key="Sh.ModalMaskIn" TargetType="Border" BasedOn="{StaticResource Sh.ModalMask}">
+            <Style.Triggers>
+                <Trigger Property="Visibility" Value="Visible">
+                    <Trigger.EnterActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="Opacity">
+                                    <SplineDoubleKeyFrame KeyTime="0:0:0" Value="0"/>
+                                    <SplineDoubleKeyFrame KeyTime="0:0:0.2" Value="1"
+                                                          KeySpline="0.25,0.1 0.25,1"/>
+                                </DoubleAnimationUsingKeyFrames>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </Trigger.EnterActions>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <!-- modal-in：220ms ease-out（令牌 motion-enter ＋ cubic-bezier(.2,.7,.3,1)），
+             opacity 0→1 ＋ translateY 6→0（styles.css:554 ＋ :569-572；scale(.99) 不足半个像素，
+             与本页日志窗一样只做位移）。放在卡片自己的 Style 里，因为两张卡的 BasedOn 不同。 -->
+        <!-- .modal：width min(460px,100vw 减 48) / max-height calc(100vh 减 96)，ui-system.css:38 后写
+             把上界收成 calc(100vh 减 32) 并加 max-width calc(100vw 减 32)、overflow auto /
+             底 surface-raised（＝Card）/ border 1 border / radius radius-lg 14 / padding space-5 24 / shadow-lg -->
+        <Style x:Key="Sh.Modal" TargetType="Border">
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Width" Value="460"/>
+            <Setter Property="Background" Value="{DynamicResource Card}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Padding" Value="24"/>
+            <Setter Property="ClipToBounds" Value="True"/>
+            <Setter Property="Effect" Value="{DynamicResource PopShadow}"/>
+        </Style>
+        <!-- .modal-title（App.vue:1575 的 h3）：App.vue 的 style 段没有这条规则，styles.css /
+             ui-system.css 也没有 → 落到 UA 的 h3 ＝ 1.17em(14×1.17≈16.4)/bold，
+             全局 * 复位把 margin 归零。与 ModsPage.xaml:210 的 MpModalTitle 同一结论：16/Bold。 -->
+        <Style x:Key="Sh.ModalTitle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+        <!-- .modal-actions：flex / align center / justify flex-end / gap space-3 12 / margin-top space-5 24
+             （styles.css:557-563，ui-system.css:40 追加 flex-wrap wrap） -->
+        <Style x:Key="Sh.ModalActions" TargetType="StackPanel">
+            <Setter Property="Orientation" Value="Horizontal"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="Margin" Value="0,24,0,0"/>
+        </Style>
+        <!-- 顶栏浮层里的 .btn.btn-sm.btn-ghost：面板是 Teleport 到 body 的，不在 .content 里，
+             所以 ui-system.css:17 的 min-height 32 不生效，走 styles.css:258-263 ＝
+             min-height calc(ctl-h 36 减 8)＝28 / padding 4 12 / 13px / radius-sm 6。 -->
+        <Style x:Key="Sh.BtnSmFloat" TargetType="Button" BasedOn="{StaticResource BtnSmGhost}">
+            <Setter Property="MinHeight" Value="28"/>
+        </Style>
+        <!-- 同上但只有 .btn.btn-sm（不带 btn-ghost）：透明底 ＋ 透明描边，字 text（styles.css:158-177） -->
+        <Style x:Key="Sh.BtnSmPlain" TargetType="Button" BasedOn="{StaticResource BtnSm}">
+            <Setter Property="MinHeight" Value="28"/>
+        </Style>
+        <!-- .input::placeholder（styles.css:318-321）：text-dim ＋ opacity .7。
+             WPF 的 TextBox 没有 placeholder，按 SettingsPage:241-252 的既有手法用覆盖层。
+             这里的 input 在 Teleport 层里，字号是 styles.css:313 的 text-md 14（不是 ui-system.css:15 的 .content 分支）。 -->
+        <Style x:Key="Sh.Placeholder" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="Opacity" Value="0.7"/>
+            <Setter Property="IsHitTestVisible" Value="False"/>
+            <Setter Property="Margin" Value="13,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Visibility" Value="Collapsed"/>
+        </Style>
+
+        <!-- ============ 二、配置不兼容弹窗（App.vue:1532-1541 ＋ :1720-1724） ============ -->
+        <!-- .menu-overlay（styles.css:577-581）只给 fixed inset 0 / z 90，没有底色也没有模糊；
+             .cfg-mismatch-mask（App.vue:1721）后写并压成 z 9600 ＋ display grid / place-items center，
+             同样不写 background → 这一层是全透明的挡点击层，不是遮罩。
+             两条同特异性（menu-overlay 是全局单类，cfg-mismatch-mask 是 scoped 双特异性）→ 
+             mask 的 z-index 与居中生效，overlay 的 fixed inset 0 保留。 -->
+        <Style x:Key="Sh.CfgMask" TargetType="Border">
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+        <!-- .card（styles.css:450-457）＋ .cfg-mismatch-modal（:1722）：
+             card 基线给 radius 14 / border 1 / 底 card / box-shadow var(shadow)（＝CardShadow），
+             这条把宽收成 min(460px,90vw)、padding 收成 20 22，并排成 column flex / gap 12。
+             ui-system.css:13 只在 .content 里取消 card 阴影，这层挂在 body 上 → 阴影保留。 -->
+        <Style x:Key="Sh.CfgModal" TargetType="Border" BasedOn="{StaticResource Panel}">
+            <Setter Property="Width" Value="460"/>
+            <Setter Property="Padding" Value="22,20"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Effect" Value="{DynamicResource CardShadow}"/>
+        </Style>
+        <!-- .upd-modal-title（:1723）：margin 0 / font-size 17px（h3 的 UA 粗体保留） -->
+        <Style x:Key="Sh.UpdModalTitle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="17"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+        <!-- .upd-modal-actions（:1724）：flex / justify flex-end / gap 10（不是 modal-actions 的 12） -->
+        <Style x:Key="Sh.UpdModalActions" TargetType="StackPanel">
+            <Setter Property="Orientation" Value="Horizontal"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+        </Style>
+
+        <!-- ============ 三、启动失败弹窗（App.vue:1573-1586 ＋ :2313-2325） ============ -->
+        <!-- .launchfail-modal（:2314）：width 480px 定值；.modal 的 max-width/max-height 仍由
+             ui-system.css:38 兜着（代码里写回）。 -->
+        <Style x:Key="Sh.LaunchFailModal" TargetType="Border" BasedOn="{StaticResource Sh.Modal}">
+            <Setter Property="Width" Value="480"/>
+        </Style>
+        <!-- .launchfail-text（:2317-2325）：13px / line-height 1.7 / text-dim / word-break break-all /
+             max-height 220 / overflow-y auto / white-space pre-wrap -->
+        <Style x:Key="Sh.LaunchFailText" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="LineHeight" Value="22"/>
+            <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="MaxHeight" Value="220"/>
+        </Style>
+
+        <!-- ============ 四、整合包导入弹窗 mp-族（App.vue:1591-1712 ＋ :2452-2624） ============ -->
+        <!-- .mp-modal（:2452-2456）：width min(620px, 100vw 减 40) / max-height 88vh / overflow-y auto。
+             scoped（特异性 0,2,0）压过全局 .modal 的 460 宽与 calc(100vh 减 32) 高；
+             620 与 88vh 的实际上界由 ApplyViewportCaps() 写回 MaxWidth/MaxHeight。 -->
+        <Style x:Key="Sh.MpModal" TargetType="Border" BasedOn="{StaticResource Sh.Modal}">
+            <Setter Property="Width" Value="620"/>
+        </Style>
+        <!-- .mp-title（:2457-2460）：font-size text-lg 16 / margin-bottom space-4 16。
+             是 h3：UA 粗体 1.17em 被这条的 16px 压住，字重仍来自 UA ＝ bold。 -->
+        <Style x:Key="Sh.MpTitle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Margin" Value="0,0,0,16"/>
+        </Style>
+        <!-- .mp-loading（:2461-2466）：flex 居中 / gap space-2 8 / padding space-3 0 上下 12 -->
+        <Style x:Key="Sh.MpLoading" TargetType="StackPanel">
+            <Setter Property="Orientation" Value="Horizontal"/>
+            <Setter Property="Margin" Value="0,12"/>
+        </Style>
+        <!-- .mp-tags（:2467-2471）：flex wrap / gap 8。WrapPanel 没有 Gap 属性，项间距靠每项右距 8
+             （原版 gap 同样不在行尾占位），容器本身在实例上写。 -->
+        <!-- .mp-summary（:2472-2476）：margin space-2 0 0 / text-dim / 12px -->
+        <Style x:Key="Sh.MpSummary" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,8,0,0"/>
+        </Style>
+        <!-- .mp-label（:2477-2481）：13px / text-dim / margin space-4 0 space-2 0 ＝ 16 0 8 -->
+        <Style x:Key="Sh.MpLabel" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="Margin" Value="0,16,0,8"/>
+        </Style>
+        <!-- .mp-name-label（:2528-2530）：flex-shrink 0 → 不参与截断 -->
+        <Style x:Key="Sh.MpNameLabel" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="LineHeight" Value="16"/>
+            <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+        </Style>
+        <!-- .mp-name-value（:2531-2539）：text-dim / 溢出省略；.mp-name-opt.active 时转 accent-2。
+             原版的父子选择器在 WPF 里用「祖先 RadioButton 的 IsChecked」DataTrigger 等价表达。 -->
+        <Style x:Key="Sh.MpNameValue" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="LineHeight" Value="16"/>
+            <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsChecked, RelativeSource={RelativeSource AncestorType=RadioButton}}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- .mp-name-opt（:2487-2509）：flex 居中 gap 8 / width 100% / padding 8 12 /
+             radius 999（≈32 高的行收成 16，走 CssRadius.Pill 动态收缩，绝不写 999）/
+             border 1 border / 底 card-2 / 字 text 13 / 左对齐；
+             hover（:2503）只把描边转 text-dim；.active（:2506-2509）描边 accent ＋ 底 accent-soft。
+             整行是 RadioButton（原版是 button ＋ 假 radio，语义就是单选）。 -->
+        <Style x:Key="Sh.MpNameOpt" TargetType="RadioButton">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="b" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                                Padding="12,8" ctl:CssRadius.Pill="True">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- .mp-radio（:2510-2521）：14×14、border 2 text-dim；
+                                     active 时 border 转 accent ＋ box-shadow inset 0 0 0 3px card,
+                                     inset 0 0 0 8px accent ＝ 从内边算 3px card 环＋到心的 8px accent
+                                     （10 见方的 padding box 上 8px 已铺满），净结果：3px card 环 ＋ 4px accent 心。
+                                     几何用三层圆表达：12 见方＋2 描边＝外沿 14（WPF 描边跨在几何线上）。 -->
+                                <Grid Grid.Column="0" Width="14" Height="14" VerticalAlignment="Center">
+                                    <Ellipse x:Name="ring" Width="12" Height="12" StrokeThickness="2"
+                                             Stroke="{DynamicResource Fg2}" Fill="Transparent"/>
+                                    <Ellipse x:Name="disc" Width="10" Height="10" Opacity="0"
+                                             Fill="{DynamicResource Card}"/>
+                                    <Ellipse x:Name="dot" Width="4" Height="4" Opacity="0"
+                                             Fill="{DynamicResource Accent}"/>
+                                </Grid>
+                                <ContentPresenter Grid.Column="2" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Fg2}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
+                                <Setter TargetName="ring" Property="Stroke" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="disc" Property="Opacity" Value="1"/>
+                                <Setter TargetName="dot" Property="Opacity" Value="1"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- .mp-conflict-actions label / .mp-replace-confirm 共用一条规则（:2564-2577）：
+             flex 居中 gap 8 / min-height 48 / padding 12 / border 1 border / radius 10 / line-height 1.4；
+             hover 底 card-2；:has(input:checked) → 描边 accent ＋ 底 accent-soft。
+             两个变体分别做成 RadioButton（重新命名/新实例/更新/覆盖）与 CheckBox（确认替换）。
+             字色：label 不是 button，没有 .mp-name-opt 那条 color:text 的覆盖，
+             继承的是 .mp-conflict 的 text-dim（:2553）→ 这里 Foreground 用 Fg2。 -->
+        <Style x:Key="Sh.MpConflictOpt" TargetType="RadioButton">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="b" MinHeight="48" Padding="12" CornerRadius="10"
+                                Background="Transparent" BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                            <Grid VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- .mp-conflict input（:2594-2600）：accent-color accent / 18×18 / margin 0 /
+                                     flex-shrink 0。type=radio 在 Chromium 是正圆，勾选态为 accent 实心＋内白点。 -->
+                                <Grid Grid.Column="0" Width="18" Height="18" VerticalAlignment="Center">
+                                    <Ellipse x:Name="ring" Width="16" Height="16" StrokeThickness="2"
+                                             Stroke="{DynamicResource BorderStrong}" Fill="Transparent"/>
+                                    <Ellipse x:Name="dot" Width="8" Height="8" Opacity="0"
+                                             Fill="{DynamicResource Accent}"/>
+                                </Grid>
+                                <ContentPresenter Grid.Column="2" VerticalAlignment="Center">
+                                    <ContentPresenter.Resources>
+                                        <!-- .mp-replace-confirm{line-height:1.4}（App.vue:2591）：
+                                             RadioButton 上没有 LineHeight，只能挂在内容器的隐式 TextBlock 上 -->
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="LineHeight" Value="17"/>
+                                            <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+                                        </Style>
+                                    </ContentPresenter.Resources>
+                                </ContentPresenter>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource CardSoft}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
+                                <Setter TargetName="ring" Property="Stroke" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="dot" Property="Opacity" Value="1"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- .mp-replace-confirm（同 :2564-2577）：label 包 checkbox，整行可点；字色继承 .mp-conflict 的 text-dim -->
+        <Style x:Key="Sh.MpReplaceConfirm" TargetType="CheckBox">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border x:Name="b" MinHeight="48" Padding="12" CornerRadius="10"
+                                Background="Transparent" BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                            <Grid VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <!-- 18×18 的 accent-color checkbox：Chromium 是圆角方块，
+                                     勾选＝accent 实心＋on-accent 对勾，未勾＝透明底＋中性描边 -->
+                                <Border Grid.Column="0" Width="18" Height="18" CornerRadius="3" VerticalAlignment="Center">
+                                    <Border x:Name="box" CornerRadius="3" BorderThickness="2"
+                                            BorderBrush="{DynamicResource BorderStrong}" Background="Transparent">
+                                        <!-- 对勾：模板里没有 ContentControl 祖先，不能用 IconStroke 那套继承取色，
+                                             颜色在下面 IsChecked 触发器里直接给 on-accent -->
+                                        <Path x:Name="tick" Stroke="{DynamicResource BorderStrong}" StrokeThickness="2.6"
+                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                              Data="M4,9 L7.5,12.5 L13,5" Stretch="Uniform" Opacity="0"
+                                              Fill="{x:Null}"/>
+                                    </Border>
+                                </Border>
+                                <ContentPresenter Grid.Column="2" VerticalAlignment="Center">
+                                    <ContentPresenter.Resources>
+                                        <!-- .mp-replace-confirm{line-height:1.4}（App.vue:2591）：
+                                             CheckBox 上没有 LineHeight，只能挂到内容器的隐式 TextBlock -->
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="LineHeight" Value="17"/>
+                                            <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+                                        </Style>
+                                    </ContentPresenter.Resources>
+                                </ContentPresenter>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource CardSoft}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
+                                <Setter TargetName="box" Property="Background" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="tick" Property="Opacity" Value="1"/>
+                                <Setter TargetName="tick" Property="Stroke" Value="{DynamicResource AccentFg}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- .mp-keysync-opt（:2578-2593）：flex align-start gap 8 / margin-top 12 / padding 12 /
+             border 1 / radius 10 / line-height 1.5 / 12px text-dim；hover 底 card-2；
+             :has(:checked) → 描边 accent ＋ 底 accent-soft ＋ 字色转 text；
+             它的 input（:2593）accent-color accent、margin-top 2、flex-shrink 0（没给尺寸＝UA 13×13）。 -->
+        <Style x:Key="Sh.MpKeysyncOpt" TargetType="CheckBox">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border x:Name="b" Padding="12" CornerRadius="10" Margin="0,12,0,0"
+                                Background="Transparent" BorderBrush="{DynamicResource Line}" BorderThickness="1">
+                            <Grid VerticalAlignment="Top">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Width="13" Height="13" CornerRadius="2"
+                                        VerticalAlignment="Top" Margin="0,2,0,0">
+                                    <Border x:Name="box" CornerRadius="2" BorderThickness="1.5"
+                                            BorderBrush="{DynamicResource BorderStrong}" Background="Transparent">
+                                        <Path x:Name="tick" Stroke="{DynamicResource BorderStrong}" StrokeThickness="2.2"
+                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                              Data="M3,7 L5.6,9.8 L10,4" Stretch="Uniform" Opacity="0"
+                                              Fill="{x:Null}"/>
+                                    </Border>
+                                </Border>
+                                <ContentPresenter Grid.Column="2" VerticalAlignment="Top"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource CardSoft}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                                <Setter TargetName="box" Property="Background" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="tick" Property="Opacity" Value="1"/>
+                                <Setter TargetName="tick" Property="Stroke" Value="{DynamicResource AccentFg}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- .mp-impact（:2604-2612）：padding 8 / radius radius-sm 6 / 底 card-2 / line-height 1.55；
+             .danger（:2610）字色转 danger。字色基线继承 .mp-conflict 的 text-dim、12px。 -->
+        <Style x:Key="Sh.MpImpact" TargetType="Border">
+            <Setter Property="Padding" Value="8"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+        </Style>
+        <!-- .mp-error（:2613-2618）：13px / danger / line-height 1.7 / word-break break-all -->
+        <Style x:Key="Sh.MpError" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="LineHeight" Value="22"/>
+            <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+            <Setter Property="Foreground" Value="{DynamicResource Danger}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+        <!-- .mp-actions（:2619-2624）：flex 右对齐 / gap space-3 12 / margin-top space-5 24 -->
+        <Style x:Key="Sh.MpActions" TargetType="StackPanel">
+            <Setter Property="Orientation" Value="Horizontal"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="Margin" Value="0,24,0,0"/>
+        </Style>
+
+        <!-- ============ 五、下载中心行族（App.vue:1451-1493 ＋ :2240-2312） ============ -->
+        <!-- .dl-item：padding space-3 space-4 ＝ 12 16 / border-bottom 1 border（:2240-2243）。
+             最后一行的下边线由 .notice-item:last-child 那条同类规则去掉，原版 .dl-item 没有 last-child
+             豁免 → 尾行仍带线，这里照原样保留。 -->
+        <Style x:Key="Sh.DlItem" TargetType="Border">
+            <Setter Property="Padding" Value="16,12"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        </Style>
+        <!-- .dl-title（:2255-2261）：13px / 600 / 溢出省略。
+             .dl-error .dl-title（:2268）转 danger，由代码在失败行上直接改 Foreground。 -->
+        <Style x:Key="Sh.DlTitle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        </Style>
+        <!-- .dl-sub（:2262-2267）：margin-top space-1 4 / 12px / line-height 1.5 / break-all / muted -->
+        <Style x:Key="Sh.DlSub" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="LineHeight" Value="18"/>
+            <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Margin" Value="0,4,0,0"/>
+        </Style>
+        <!-- .dl-bar（:2271-2277）：margin-top space-2 8 / 高 5 / radius 999（＝2.5，半高）/ 底 card-2 / overflow hidden -->
+        <Style x:Key="Sh.DlBar" TargetType="Border">
+            <Setter Property="Height" Value="5"/>
+            <Setter Property="CornerRadius" Value="2.5"/>
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+            <Setter Property="Margin" Value="0,8,0,0"/>
+            <Setter Property="ClipToBounds" Value="True"/>
+        </Style>
+        <!-- .dl-bar-fill（:2278-2283）：高 100% / radius 999（2.5）/ 底 90° accent-2→accent（＝BarFill） -->
+        <Style x:Key="Sh.DlBarFill" TargetType="Border">
+            <Setter Property="CornerRadius" Value="2.5"/>
+            <Setter Property="Background" Value="{DynamicResource BarFill}"/>
+            <Setter Property="HorizontalAlignment" Value="Left"/>
+        </Style>
+        <!-- .dl-stage .dl-bar（:2288）：后写且更特异（0,2,0 压 :2271 的 0,1,0）→ 高 3、margin-top 6，
+             圆角半高＝1.5 -->
+        <Style x:Key="Sh.DlStageBar" TargetType="Border" BasedOn="{StaticResource Sh.DlBar}">
+            <Setter Property="Height" Value="3"/>
+            <Setter Property="CornerRadius" Value="1.5"/>
+            <Setter Property="Margin" Value="0,6,0,0"/>
+        </Style>
+        <!-- .dl-dismiss（:2301-2312）：透明底无边 / text-dim / font-size text-md 14 / padding 0 4 /
+             line-height 1，内容是「×」；hover 字色转 text。
+             原版没给宽高：盒尺寸＝字形宽 ＋ 左右各 4，line-height 1 把高收到 14 → 
+             宽高都不写，由内容里的 TextBlock（LineHeight 14）撑出来。 -->
+        <Style x:Key="Sh.DlDismiss" TargetType="Button">
+            <Setter Property="Padding" Value="4,0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- .dl-stage（:2285）：min-width 0 / padding 9 10 / border 1 border / radius 9 / 底 card-2 -->
+        <Style x:Key="Sh.DlStage" TargetType="Border">
+            <Setter Property="Padding" Value="10,9"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="9"/>
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+        </Style>
+        <!-- .dl-stage-heading（:2286）：flex space-between gap 8 / 12px / 600；
+             .dl-stage.is-done 时整条转 accent（:2289）——is-done 在父级，代码改这层 Foreground -->
+        <Style x:Key="Sh.DlStageHeading" TargetType="Grid">
+            <Setter Property="TextElement.FontSize" Value="12"/>
+            <Setter Property="TextElement.FontWeight" Value="SemiBold"/>
+        </Style>
+        <!-- .dl-stage-detail（:2287）：溢出省略 / 12px / margin-top 3 / muted -->
+        <Style x:Key="Sh.DlStageDetail" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+            <Setter Property="Margin" Value="0,3,0,0"/>
+        </Style>
+
+        <!-- ============ 六、通知行族（App.vue:1405-1412 ＋ :2326-2361） ============ -->
+        <!-- .notice-item：flex gap 12 / min-height row-h 42 / padding 12 16 / border-bottom 1 /
+             最后一行无线（:2334）/ 13px。字号走 TextElement（Border 不是 Control，没有 FontSize 属性）。 -->
+        <Style x:Key="Sh.NoticeItem" TargetType="Border">
+            <Setter Property="Padding" Value="16,12"/>
+            <Setter Property="MinHeight" Value="42"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="TextElement.FontSize" Value="13"/>
+        </Style>
+        <!-- .notice-text（:2354-2357）：line-height 1.5 / break-all -->
+        <Style x:Key="Sh.NoticeText" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="LineHeight" Value="20"/>
+            <Setter Property="LineStackingStrategy" Value="BlockLineHeight"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+        <!-- .notice-time（:2358-2361）：12px / text-dim -->
+        <Style x:Key="Sh.NoticeTime" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+        </Style>
+        <!-- .notice-empty（:2207-2216）：flex 居中 / min-height 96 / padding 16 / 居中 / text-dim / 13px -->
+        <Style x:Key="Sh.NoticeEmpty" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="TextAlignment" Value="Center"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="16"/>
+        </Style>
+
+        <!-- ============ 七、更新日志行族（App.vue:1426-1433 ＋ :2154-2175） ============ -->
+        <!-- .note-version ＋ .note-version（:2154-2158）：margin-top 12 / border-top 1 dashed / padding-top 12。
+             虚线要贴在盒顶（CSS 的 border 在 padding 之外），所以 Padding 留 0，
+             12 的 padding-top 由内容自己的 Margin 承担；WPF 的 Border 画不出 dashed，
+             虚线用同位 Rectangle 叠（与 DropMask 的 dashed 同一手法）。 -->
+        <Style x:Key="Sh.NoteVersion" TargetType="Border">
+            <Setter Property="Margin" Value="0,12,0,0"/>
+        </Style>
+        <!-- .note-head（:2159-2164）：flex baseline gap 12 / margin 0 0 8 -->
+        <Style x:Key="Sh.NoteHead" TargetType="StackPanel">
+            <Setter Property="Orientation" Value="Horizontal"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+        </Style>
+        <!-- .note-ver（:2165-2168）：700 / 13px（text-sm） -->
+        <Style x:Key="Sh.NoteVer" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+        <!-- .note-changes（:2169-2175）：margin 0 / padding-left 16 / line-height 1.7 / 12px / 字色 text。
+             li 的圆点是 UA list-style disc（全局 * 复位只清 margin/padding，不清 list-style）→ 逐条一个点。
+             行本身用 Grid 两列（点 Auto ＋ 文字 *）表达，12px 由这条 Style 的 TextElement 继承下去。 -->
+        <Style x:Key="Sh.NoteChangeRow" TargetType="Grid">
+            <Setter Property="TextElement.FontSize" Value="12"/>
+        </Style>
+
+        <!-- ============ 八、侧栏残项：sidebar-health 与导航子项几何（App.vue:1950-2005） ============ -->
+        <!-- .nav-label（:1875-1877）：font-weight 500 ＝ WPF Medium；
+             .nav-item.active .nav-label（:1878-1880）才是 600，那条由 Nav 模板的 IsChecked 触发器给
+             （模板触发器优先级高于样式 Setter，所以这里用 Setter 不会顶掉选中态的 SemiBold）。 -->
+        <Style x:Key="Sh.Nav" TargetType="RadioButton" BasedOn="{StaticResource Nav}">
+            <Setter Property="FontWeight" Value="Medium"/>
+        </Style>
+        <Style x:Key="Sh.NavParent" TargetType="ToggleButton" BasedOn="{StaticResource NavParent}">
+            <Setter Property="FontWeight" Value="Medium"/>
+        </Style>
+        <!-- .nav-sub-item（:1929-1957）：40 高 / padding-left 32 / 13px，且
+             .nav-sub-item .nav-icon 是 17 盒 ＋ 内层 svg 16（:1950-1957），
+             主导航才是 20 盒 / 19 svg（:1862-1874）。共享字典的 NavSub 复用 Nav 的 20/19 模板，
+             Controls.xaml 不可改，所以这里在窗内重写模板的图标列，只把 20/19 换成 17/16。
+             .nav-sub-item::before 那颗 5px 圆点是 content:none（:1935-1946）→ 原版根本不渲染，跳过。 -->
+        <Style x:Key="Sh.NavSub" TargetType="RadioButton" BasedOn="{StaticResource NavSub}">
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid>
+                            <Border Background="Transparent" CornerRadius="10"/>
+                            <Grid Margin="16,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="17"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <ContentControl Grid.Column="0" Width="16" Height="16" VerticalAlignment="Center"
+                                                Style="{Binding Tag, RelativeSource={RelativeSource TemplatedParent},
+                                                        Converter={StaticResource StyleByKey}}"/>
+                                <ContentPresenter Grid.Column="2" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource NavActiveFg}"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- .sidebar-health（:1959-2005）：grid 8px / minmax(0,1fr) / 14px，gap 8 /
+             min-height row-h 42 / margin 12 / padding 0 12 / border 1 / radius 10 /
+             底 color-mix(card 48%, transparent)（用 48% 不透明度的 Card 叠加等价表达）/
+             字 text-dim 12 / 500 / 左对齐；hover 底 card-2、字 text（:1978-1981）。 -->
+        <Style x:Key="Sh.SidebarHealth" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border MinHeight="42" CornerRadius="10" BorderThickness="1"
+                                BorderBrush="{DynamicResource Line}">
+                            <Grid>
+                                <!-- 48% card 底：hover 时换成实色 card-2（:1979） -->
+                                <Border x:Name="tint" CornerRadius="9" Background="{DynamicResource Card}"
+                                        Opacity="0.48"/>
+                                <ContentPresenter VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+                                <Setter TargetName="tint" Property="Background" Value="{DynamicResource CardSoft}"/>
+                                <Setter TargetName="tint" Property="Opacity" Value="1"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ============ 九、拖拽遮罩（App.vue:2419-2449） ============ -->
+        <!-- .drop-box：column 居中 gap 16 / padding 48 / border 2 dashed accent / radius 14 /
+             底 color-mix(accent 8%, card)（＝Card 垫底再叠 8% 的 accent，用 Accent8 画刷）/ 字 accent。
+             Border 画不出 dashed，虚线用同位 Rectangle 叠；描边跨在几何线上，所以内缩 1px 后
+             外沿正好落在盒边（半径 13＋1＝14，与 CSS 的 border-box 对齐）。 -->
+        <Style x:Key="Sh.DropBox" TargetType="Border">
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Background" Value="{DynamicResource Card}"/>
+        </Style>
+        <Style x:Key="Sh.DropBoxTint" TargetType="Border">
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Background" Value="{DynamicResource Accent8}"/>
+        </Style>
+        <Style x:Key="Sh.DropBoxDash" TargetType="Rectangle">
+            <Setter Property="RadiusX" Value="13"/>
+            <Setter Property="RadiusY" Value="13"/>
+            <Setter Property="Margin" Value="1"/>
+            <Setter Property="Stroke" Value="{DynamicResource Accent}"/>
+            <Setter Property="StrokeThickness" Value="2"/>
+            <Setter Property="StrokeDashArray" Value="4 3"/>
+        </Style>
+        <!-- .drop-title（:2446-2449 ＋ :1556 文案）：text-lg 16 / 600 / accent，与图标之间是 .drop-box 的 gap 16 -->
+        <Style x:Key="Sh.DropTitle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,16,0,0"/>
+        </Style>
+
+    </Window.Resources>
+
     <Border x:Name="ShellRoot" Background="{DynamicResource WindowGrad}" BorderBrush="{DynamicResource Line}"
             BorderThickness="1" ClipToBounds="True">
         <Grid x:Name="ShellHost">
@@ -24,6 +730,15 @@
                 <ColumnDefinition Width="208"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
+
+            <!-- .app-bg（App.vue:1229 ＋ 样式 :1738-1743）：fixed inset 0 / z 0 / pointer-events none
+                 的自定义背景层（纯色或图片 ＋ 透明度 ＋ 模糊，来自 bgStyle）。
+                 它排在 .shell 之下、靠 shell 自身的半透明底（:1733 的 color-mix(bg 78%, transparent) ＋
+                 backdrop-filter）才透得出来；这里的窗口本体是不透明实底（WindowGrad），
+                 所以这层现在即使画上背景也看不见 → 保留几何正确的空壳并 Collapsed，
+                 等背景设置（皮肤/图片选择）接入时，要连同 ShellRoot 的底色一起换成带 alpha 的画刷。 -->
+            <Border x:Name="AppBgLayer" Grid.Column="0" Grid.ColumnSpan="2"
+                    Visibility="Collapsed" IsHitTestVisible="False"/>
 
             <!-- ==================== 侧栏 208 ==================== -->
             <Border Grid.Column="0" Background="{DynamicResource NavBg}"
@@ -35,8 +750,8 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <!-- .logo-area：88 高，padding 0 16，gap 12。
-                         .brand-head（App.vue:1772）是玩家皮肤的脸，不是应用图标：
+                    <!-- .logo-area：88 高，padding 0 16，gap 12（App.vue:1764-1771）。
+                         .brand-head（App.vue:1772-1780）是玩家皮肤的脸，不是应用图标：
                          42×42 / radius 10 / 1px rgba(255,255,255,.26) / 0 3px 12px rgba(0,0,0,.18) / pixelated -->
                     <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0">
                         <Border x:Name="BrandHead" Width="42" Height="42" CornerRadius="10"
@@ -46,21 +761,28 @@
                                                   Opacity="0.18" Color="#000000"/>
                             </Border.Effect>
                         </Border>
+                        <!-- .logo-text（:1781-1785）：column / gap space-1 4 -->
                         <Grid Margin="12,0,0,0" VerticalAlignment="Center">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="4"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
+                            <!-- .logo-name（:1786-1793）：20px / 700 / line-height 1.2 / letter-spacing 2px。
+                                 WPF 的 TextBlock 没有字距属性（同 HomePage:614、AccountsPage:183 的既有处理），
+                                 这 2px×7 字≈14px 的加宽表达不了，留给渲染层。 -->
                             <TextBlock Grid.Row="0" Text="WUHUICL" FontSize="20" FontWeight="Bold"
-                                       LineHeight="24"/>
+                                       LineHeight="24" LineStackingStrategy="BlockLineHeight"/>
+                            <!-- .logo-version（:1794-1800）：align-self flex-end / padding-right 2 /
+                                 12px / accent-2 / opacity .85 -->
                             <TextBlock Grid.Row="2" Text="v0.1.0" FontSize="12" HorizontalAlignment="Right"
                                        Margin="0,0,2,0" Foreground="{DynamicResource AccentHi}" Opacity="0.85"/>
                         </Grid>
                     </StackPanel>
 
-                    <!-- .nav：gap 4，padding 4 12 12。
-                         水滴层与选条层是独立绝对定位层（原版 .nav-bubble / .nav-selection），
+                    <!-- .nav（App.vue:1802-1810）：flex column / gap 4 / padding 4 12 12 / overflow-y auto。
+                         .nav-label（:1875-1877）500、选中 600（:1878）；.nav-icon 20 盒 / 19 svg（:1862-1874）。
+                         水滴层与选条层是独立绝对定位层（原版 .nav-bubble :1837 / .nav-selection :1849），
                          几何由代码测量后做 300ms cubic-bezier(.22,1,.36,1) 位移。 -->
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0">
                         <Grid Margin="12,4,12,12">
@@ -79,70 +801,72 @@
                                 </Border>
                             </Canvas>
                             <StackPanel x:Name="NavList">
-                                <RadioButton x:Name="NavHome" Style="{StaticResource Nav}"
+                                <RadioButton x:Name="NavHome" Style="{StaticResource Sh.Nav}"
                                              GroupName="nav" Tag="Icon.Home"
                                              Content="首页" IsChecked="True" Checked="Nav_Checked"
                                              MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
-                                <RadioButton x:Name="NavVersions" Style="{StaticResource Nav}"
+                                <RadioButton x:Name="NavVersions" Style="{StaticResource Sh.Nav}"
                                              GroupName="nav" Tag="Icon.Game"
                                              Content="游戏版本" Checked="Nav_Checked"
                                              MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
-                                <ToggleButton x:Name="NavResources" Style="{StaticResource NavParent}"
+                                <ToggleButton x:Name="NavResources" Style="{StaticResource Sh.NavParent}"
                                               Tag="Icon.Resources" Content="资源管理"
                                               Checked="NavExpand_Changed" Unchecked="NavExpand_Changed"
                                               MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
-                                <!-- .nav-sub：原版是 grid-template-rows 0fr→1fr，190ms ease-out；
-                                     WPF 没有等价物，用高度测量后做同参数的 DoubleAnimation -->
+                                <!-- .nav-sub（:1896-1907）：grid-template-rows 0fr→1fr，190ms ease-out ＋ margin 4 0；
+                                     WPF 没有等价物，用高度测量后做同参数的 DoubleAnimation（代码 NavExpand_Changed）。
+                                     子项的淡入/位移（:1915-1925）同样留在代码，本轮没接。 -->
                                 <StackPanel x:Name="NavSubList" Height="0" ClipToBounds="True"
                                             Visibility="Collapsed">
-                                    <!-- .nav-sub-item 的 padding-left 32 = 导航内缩 16 + 再缩 16 -->
+                                    <!-- .nav-sub-inner（:1908-1914）：overflow hidden / column / gap 4 / min-width 0。
+                                         .nav-sub-item 的 padding-left 32 = 导航内缩 16 + 再缩 16 -->
                                     <StackPanel Margin="16,0,0,0">
-                                        <RadioButton x:Name="NavMods" Style="{StaticResource NavSub}"
+                                        <RadioButton x:Name="NavMods" Style="{StaticResource Sh.NavSub}"
                                              GroupName="nav" Tag="Icon.Mods"
                                                      Content="模组" Checked="Nav_Checked"
                                                      MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
-                                        <RadioButton x:Name="NavPacks" Style="{StaticResource NavSub}"
+                                        <RadioButton x:Name="NavPacks" Style="{StaticResource Sh.NavSub}"
                                              GroupName="nav"
                                                      Tag="Icon.ResourcePacks" Content="资源包" Checked="Nav_Checked"
                                                      MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
-                                        <RadioButton x:Name="NavShaders" Style="{StaticResource NavSub}"
+                                        <RadioButton x:Name="NavShaders" Style="{StaticResource Sh.NavSub}"
                                              GroupName="nav"
                                                      Tag="Icon.Shaders" Content="光影包" Checked="Nav_Checked"
                                                      MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
-                                        <RadioButton x:Name="NavRecordings" Style="{StaticResource NavSub}"
+                                        <RadioButton x:Name="NavRecordings" Style="{StaticResource Sh.NavSub}"
                                              GroupName="nav"
                                                      Tag="Icon.Changelog" Content="录像" Checked="Nav_Checked"
                                                      MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
                                         <!-- 子项顺序照 App.vue:158-186：mods/packs/shaders/recordings/bridge/servers。
                                              MOD 面板是桥接参数编辑器（BridgeView），服务器是服务器条目管理（ServersView），
                                              两者与主导航的「联机」互不相干，不能并成一块。 -->
-                                        <RadioButton x:Name="NavBridge" Style="{StaticResource NavSub}"
+                                        <RadioButton x:Name="NavBridge" Style="{StaticResource Sh.NavSub}"
                                              GroupName="nav" Tag="Icon.Bridge"
                                                      Content="MOD 面板" Checked="Nav_Checked"
                                                      MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
-                                        <RadioButton x:Name="NavServers" Style="{StaticResource NavSub}"
+                                        <RadioButton x:Name="NavServers" Style="{StaticResource Sh.NavSub}"
                                              GroupName="nav" Tag="Icon.Servers"
                                                      Content="服务器" Checked="Nav_Checked"
                                                      MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
                                     </StackPanel>
                                 </StackPanel>
-                                <RadioButton x:Name="NavOnline" Style="{StaticResource Nav}"
+                                <RadioButton x:Name="NavOnline" Style="{StaticResource Sh.Nav}"
                                              GroupName="nav" Tag="Icon.Friends"
                                              Content="联机" Checked="Nav_Checked"
                                              MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
-                                <RadioButton x:Name="NavDefaults" Style="{StaticResource Nav}"
+                                <RadioButton x:Name="NavDefaults" Style="{StaticResource Sh.Nav}"
                                              GroupName="nav" Tag="Icon.Keys"
                                              Content="默认配置" Checked="Nav_Checked"
                                              MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
-                                <RadioButton x:Name="NavSkin" Style="{StaticResource Nav}"
+                                <RadioButton x:Name="NavSkin" Style="{StaticResource Sh.Nav}"
                                              GroupName="nav" Tag="Icon.Skin"
                                              Content="皮肤" Checked="Nav_Checked"
                                              MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
-                                <RadioButton x:Name="NavCommunity" Style="{StaticResource Nav}"
+                                <RadioButton x:Name="NavCommunity" Style="{StaticResource Sh.Nav}"
                                              GroupName="nav" Tag="Icon.Community"
                                              Content="社区资源" Checked="Nav_Checked"
                                              MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
-                                <RadioButton x:Name="NavSettings" Style="{StaticResource Nav}"
+                                <RadioButton x:Name="NavSettings" Style="{StaticResource Sh.Nav}"
                                              GroupName="nav" Tag="Icon.Settings"
                                              Content="设置" Checked="Nav_Checked"
                                              MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
@@ -150,8 +874,12 @@
                         </Grid>
                     </ScrollViewer>
 
-                    <!-- .sidebar-health：min-height 42，grid 8px / 1fr / 14px，gap 8，margin 12 -->
-                    <Button Grid.Row="2" Style="{StaticResource BtnGhost}" Height="42" Margin="12" Padding="12,0"
+                    <!-- .sidebar-health（App.vue:1305-1314 ＋ 样式 :1959-2005）：几何见 Sh.SidebarHealth。
+                         .sidebar-health i（:1982-1996）＝ 7×7 圆点 ＋ box-shadow 0 0 0 3px 的光环，
+                         光环按 tone 换色：ok→ok/ok-soft（默认）、is-busy→accent/accent-soft、
+                         is-error→danger/danger-soft。数据源是 launcherHealth（:743-750），
+                         由代码 SetLauncherHealth(tone,text) 写回；box-shadow 不占位，所以 13 的光环溢出 8 的列。 -->
+                    <Button Grid.Row="2" Style="{StaticResource Sh.SidebarHealth}" Margin="12" Padding="12,0"
                             HorizontalContentAlignment="Stretch" Click="Notice_Click">
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -159,10 +887,12 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="14"/>
                             </Grid.ColumnDefinitions>
-                            <Ellipse Grid.Column="0" Width="7" Height="7" Fill="{DynamicResource Ok}"
-                                     VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="1" Text="全部系统运行正常" FontSize="12" Margin="8,0"
-                                       VerticalAlignment="Center" Foreground="{DynamicResource Fg2}"
+                            <Grid Grid.Column="0" Width="8" VerticalAlignment="Center">
+                                <Ellipse x:Name="HealthRing" Width="13" Height="13" Fill="{DynamicResource OkSoft}"/>
+                                <Ellipse x:Name="HealthDot" Width="7" Height="7" Fill="{DynamicResource Ok}"/>
+                            </Grid>
+                            <TextBlock x:Name="HealthText" Grid.Column="1" Text="全部系统运行正常"
+                                       Margin="8,0" VerticalAlignment="Center"
                                        TextTrimming="CharacterEllipsis"/>
                             <ContentControl Grid.Column="2" Width="14" Height="14" VerticalAlignment="Center"
                                             Style="{DynamicResource Icon.ChevronRight}"/>
@@ -171,26 +901,29 @@
                 </Grid>
             </Border>
 
-            <!-- ==================== 右区：顶栏 72 + 内容 ==================== -->
+            <!-- .main-area（App.vue:1318 ＋ 样式 :2008-2013）：flex 1 / min-width 0 / column ＝ 顶栏＋内容 -->
             <Grid Grid.Column="1">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="72"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
-                <!-- .topbar：72 高，padding 0 24，唯一拖拽区 -->
+                <!-- .topbar（:1320 ＋ :2016-2027）：72 高 / padding 0 24（space-5）/ gap 16 /
+                     space-between / 底 color-mix(bg-2 78%, transparent)＝NavBg / 下边线 1 /
+                     唯一可拖区（-webkit-app-region:drag → 代码 Topbar_MouseDown）。
+                     max-width 1080 时收成 68 高（:2410-2412），窄窗分支本轮未接。 -->
                 <Border Grid.Row="0" Background="{DynamicResource NavBg}" BorderBrush="{DynamicResource Line}"
                         BorderThickness="0,0,0,1" Padding="24,0" MouseLeftButtonDown="Topbar_MouseDown">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <!-- .topbar 是 flex：[top-back?] spacer(flex:1) + gap 16 + top-actions，
+                            <!-- .topbar 是 flex：[top-back?] .topbar-spacer(flex:1，:2060) + gap 16 + .top-actions(:2068)，
                                  所以格言只在动作区左边的带子里居中，不是整条顶栏居中 -->
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <!-- .top-back：36×36（ctl-h）/ radius 6 / card-2 底 / 1px color-mix(border 70%) /
-                             字色 text-dim，hover 才变 accent-2（App.vue:2033-2045）。
+                             字色 text-dim，hover 才变 text ＋ 描边 border-strong（App.vue:2033-2058）。
                              v-if="canGoBack && currentView !== 'home'"（:1321）→ 由代码控制显隐 -->
                         <Button x:Name="BtnTopBack" Grid.Column="0" Style="{StaticResource TopBack}"
                                 Visibility="Collapsed" Margin="0,0,16,0"
@@ -198,15 +931,20 @@
                             <!-- 左指箭头是 App.vue:1328 的 Icon.Back；Icon.ChevronLeft 复刻的是 :1313 那条，方向朝右，别混用 -->
                             <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.Back}"/>
                         </Button>
+                        <!-- .topbar-spacer（:1330 ＋ :2060）：flex 1 / min-width 0 / align-self stretch，
+                             里面只放 CreatorMotto -->
                         <ctl:CreatorMotto x:Name="Motto" Grid.Column="1" Margin="0,0,16,0"/>
+                        <!-- .top-actions（:1332 ＋ :2068-2073）：flex 居中 / gap space-1 4 / 不拖拽 -->
                         <StackPanel Grid.Column="2" Orientation="Horizontal"
                                     HorizontalAlignment="Right" VerticalAlignment="Center">
-                            <!-- App.vue:1333 下载按钮 v-if currentView !== home；首页只有有下载任务时才出图标钮 -->
+                            <!-- .top-btn.dl-toggle（:1333）：v-if currentView !== home；
+                                 .dl-toggle（:2221）只是 position:relative，给 .dl-badge 当定位父 -->
                             <Button x:Name="BtnTopDownload" Style="{StaticResource TopBtn}" Margin="0" Click="OpenDl_Click">
                                 <StackPanel Orientation="Horizontal">
                                     <ContentControl Width="15" Height="15" VerticalAlignment="Center"
                                                     Style="{DynamicResource Icon.Download}"/>
-                                    <TextBlock Text="下载" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                    <!-- .dl-badge（:1340 ＋ :2224-2236）：min-width 16 / 高 16 / padding 0 4 /
+                                         radius 999（半高 8）/ 底 accent / 字 on-accent 12·700 居中（＝DlBadge 档） -->
                                     <Border x:Name="DlBadge" Style="{StaticResource DlBadge}"
                                             Margin="8,0,0,0" Visibility="Collapsed">
                                         <TextBlock x:Name="DlBadgeText" Text="0" FontSize="12" FontWeight="Bold"
@@ -215,7 +953,7 @@
                                     </Border>
                                 </StackPanel>
                             </Button>
-                            <!-- App.vue:1342 导入按钮：与下载同为 .top-btn，同样只在非首页出现 -->
+                            <!-- .top-btn（:1342 onImportClick）：与下载同为 .top-btn，同样只在非首页出现 -->
                             <Button x:Name="BtnTopImport" Style="{StaticResource TopBtn}" Margin="4,0,0,0"
                                     Click="Import_Click">
                                 <StackPanel Orientation="Horizontal">
@@ -224,13 +962,30 @@
                                     <TextBlock Text="导入" Margin="8,0,0,0" VerticalAlignment="Center"/>
                                 </StackPanel>
                             </Button>
-                            <!-- App.vue:1359 首页那个图标钮是「更新日志」而不是历史列表（Icon.Changelog 本来就对）；
-                                 App.vue:1351 另有一个「下载中心」图标钮，只在首页且有活动任务时出现，等下载队列接入再补 -->
+                            <!-- .top-icon-btn.dl-toggle（:1350-1358）：只在首页「且有活动任务」时出现，
+                                 里面是 .dl-badge.compact（:2131-2138）：absolute top 2 / right 0 /
+                                 min-width 14 / 高 14 / 12px（半高圆角＝7）。任务计数未接入 → 整颗按钮 Collapsed。 -->
+                            <Button x:Name="BtnTopHomeDl" Style="{StaticResource TopIconBtn}" Margin="4,0,0,0"
+                                    Visibility="Collapsed" ToolTip="下载中心" Click="OpenDl_Click">
+                                <Grid>
+                                    <ContentControl Width="17" Height="17" Style="{DynamicResource Icon.Download}"/>
+                                    <Border x:Name="DlBadgeCompact" Style="{StaticResource DlBadge}"
+                                            MinWidth="14" Height="14" CornerRadius="7"
+                                            HorizontalAlignment="Right" VerticalAlignment="Top"
+                                            Margin="0,2,0,0" Visibility="Collapsed">
+                                        <TextBlock x:Name="DlBadgeCompactText" Text="0" FontSize="12" FontWeight="Bold"
+                                                   Foreground="{DynamicResource AccentFg}"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                </Grid>
+                            </Button>
+                            <!-- .top-icon-btn.dl-toggle（:1359）：首页第二颗图标钮是「更新日志」-->
                             <Button x:Name="BtnTopHistory" Style="{StaticResource TopIconBtn}" Margin="4,0,0,0"
                                     ToolTip="更新日志" Click="History_Click">
                                 <ContentControl Width="17" Height="17" Style="{DynamicResource Icon.Changelog}"/>
                             </Button>
-                            <Button Style="{StaticResource TopIconBtn}" Margin="4,0,0,0"
+                            <!-- .top-icon-btn（:1366 ＋ :2099-2120）：36×36 / radius 10 / svg 17 -->
+                            <Button x:Name="BtnTopNotice" Style="{StaticResource TopIconBtn}" Margin="4,0,0,0"
                                     ToolTip="通知" Click="Notice_Click">
                                 <Grid>
                                     <ContentControl Width="17" Height="17" Style="{DynamicResource Icon.Bell}"/>
@@ -242,7 +997,10 @@
                                              Margin="0,7,8,0" Visibility="Collapsed"/>
                                 </Grid>
                             </Button>
+                            <!-- .top-divider（:1375 ＋ :2363-2369）：1×20 / 底 border / margin 0 8 -->
                             <Border Width="1" Height="20" Background="{DynamicResource Line}" Margin="8,0"/>
+                            <!-- .win-btn（:1377-1391 ＋ :2371-2395）：38×36 / radius 10 / svg 15；
+                                 .win-close:hover 底 danger ＋ 白字（:2392） -->
                             <Button x:Name="BtnMin" Style="{StaticResource WinBtn}" Click="Min_Click">
                                 <ContentControl Width="15" Height="15" Style="{DynamicResource Icon.Minimize}"/>
                             </Button>
@@ -256,7 +1014,10 @@
                     </Grid>
                 </Border>
 
-                <!-- .content：padding 24，滚动条槽常驻 -->
+                <!-- .content（:1501 ＋ :2398-2404）：flex 1 / min-height 0 / overflow-y auto /
+                     padding space-5 24 / scrollbar-gutter stable（:2406 的 1080 分支收成 16，未接）。
+                     里面的每一页就是 .route-view（:1503 ＋ ui-system.css:9 min-width 0），
+                     路由切换的 fade 进出场（:1502 ＋ styles.css:648-651）留在代码/页面侧。 -->
                 <Grid Grid.Row="1" Margin="24">
 
                     <!-- ============ 首页 ============ -->
@@ -391,15 +1152,20 @@
                 </Border>
             </Border>
 
-            <!-- ============ 浮层族：Toast / 通知 / 更新日志 / 下载中心 / 拖拽遮罩 ============
-                 原版这些都是 Teleport 到 body 的 fixed 层，这里统一挂在 ShellHost 顶层。
-                 .notice-mask：fixed inset 0 / z 9000，透明，点空白处关闭（App.vue:2141-2145）。 -->
-            <Border x:Name="FloatMask" Background="Transparent" Visibility="Collapsed"
+            <!-- ============ 浮层族（原版 Teleport 到 body 的 fixed 层）============
+                 通知 / 更新日志 / 下载中心 / 配置不兼容 / 拖拽遮罩 / 启动失败 / 整合包导入。
+                 全部横跨 ShellHost 两列（Grid.ColumnSpan＝2），否则会被算进 208 宽的侧栏列里，
+                 这版壳层最初就栽在这儿；层的先后次序按原版 z-index 排：
+                 notice-mask 9000 ＜ notice-panel 9001 ＜ cfg-mismatch 9600 ＜ drop-mask 9999 ＜ modal-mask 10000。
+                 .notice-mask（App.vue:2141-2145）：fixed inset 0 / z 9000 / 无底色，点空白处关闭。 -->
+            <Border x:Name="FloatMask" Grid.Column="0" Grid.ColumnSpan="2"
+                    Background="Transparent" Visibility="Collapsed"
                     MouseLeftButtonUp="FloatMask_Click"/>
 
             <!-- .toasts：fixed top 76 / right 24 / column gap 8 / z 200 / pointer-events none
                  （Toasts.vue:38-43） -->
-            <ItemsControl x:Name="ToastHost" IsHitTestVisible="False" Visibility="Collapsed"
+            <ItemsControl x:Name="ToastHost" Grid.Column="0" Grid.ColumnSpan="2"
+                          IsHitTestVisible="False" Visibility="Collapsed"
                           HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,76,24,0">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate><StackPanel/></ItemsPanelTemplate>
@@ -428,87 +1194,601 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
-            <!-- .notice-panel：fixed top 82 / right 92 / w 320 / max-h 420 / column /
-                 radius 14 / border 1 / shadow-lg（App.vue:2176-2195） -->
-            <Border x:Name="NoticePanel" Style="{StaticResource FloatPanel}"
+            <!-- .notice-panel（App.vue:1398 ＋ :2176-2195）：fixed top 82 / right 92 / w 320 /
+                 max-h 420 / column / radius 14 / border 1 / shadow-lg / 底 card-solid 94% / overflow hidden。
+                 这里踩到一个 CSS 陷阱：.notes-panel（:2146）写在 .notice-panel（:2176）之前，同特异性，
+                 后写的 .notice-panel 赢 → 更新日志面板的有效宽度是 320／最大高 420，不是 380／480；
+                 .dl-panel（:2237）写在 .notice-panel 之后，所以只有宽度收成 380，max-h 仍是 420。
+                 blur(24) saturate(130%) 是 backdrop-filter，WPF 没有，用不透明 Card 底近似（同 FloatPanel）。 -->
+            <Border x:Name="NoticePanel" Grid.Column="0" Grid.ColumnSpan="2" Style="{StaticResource FloatPanel}"
+                    Width="320" MaxHeight="420" HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Margin="0,82,92,0">
+                <DockPanel>
+                    <!-- .notice-head（:1399 ＋ :2196-2202）：flex space-between / padding 12 16 / 下边线 1 -->
+                    <Border DockPanel.Dock="Top" Style="{StaticResource FloatPanelHead}">
+                        <Grid>
+                            <!-- .notice-title（:2203-2206）：14px / 700 -->
+                            <TextBlock FontSize="14" FontWeight="Bold" Text="通知"/>
+                            <!-- .btn.btn-ghost.btn-sm（:1401）：列表为空时 disabled（opacity .45） -->
+                            <Button x:Name="NoticeClearBtn" Style="{StaticResource Sh.BtnSmFloat}"
+                                    Content="清空" HorizontalAlignment="Right" IsEnabled="False"
+                                    Click="Notice_ClearAll_Click"/>
+                        </Grid>
+                    </Border>
+                    <Grid>
+                        <!-- .notice-empty（:1403 ＋ :2207-2216）：flex 居中 / min-height 96 / padding 16 /
+                             text-dim 13，文案是「暂无通知」 -->
+                        <Grid x:Name="NoticeEmpty" MinHeight="96">
+                            <TextBlock Text="暂无通知" Style="{StaticResource Sh.NoticeEmpty}"/>
+                        </Grid>
+                        <!-- .notice-list（:1404 ＋ :2217-2219）：overflow-y auto -->
+                        <ScrollViewer x:Name="NoticeListScroll" VerticalScrollBarVisibility="Auto"
+                                      Visibility="Collapsed">
+                            <StackPanel>
+                                <!-- 列表数据源 store.notices 未接入 → 不放 ItemsSource，
+                                     绑一个不存在的属性只会静默失效；行几何见下面的 NoticeRowShell -->
+                                <ItemsControl x:Name="NoticeList"/>
+                                <!-- .notice-item（:1405-1412 ＋ :2326-2336）：flex gap 12 / min-height 42 /
+                                     padding 12 16 / 下边线 1（末行无线）/ 13px。
+                                     .notice-dot（:2337-2350）：7×7 圆，margin-top 4，
+                                     默认 accent；notice-success→ok、notice-error→danger（代码按 type 换 Fill）。
+                                     .notice-body（:2351-2353）：min-width 0。
+                                     .notice-text（:2354-2357）：line-height 1.5 / break-all。
+                                     .notice-time（:2358-2361）：12px text-dim。
+                                     查看原因（:1409）是 .btn.btn-sm（不带 ghost），只在 n.exitTarget 存在时出现，
+                                     它和 .notice-time 是同一行的两个 inline 盒（HTML 里被空白夹着）→ 这里并排。 -->
+                                <Border x:Name="NoticeRowShell" Style="{StaticResource Sh.NoticeItem}"
+                                        Visibility="Collapsed">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse x:Name="NoticeRowDot" Grid.Column="0" Width="7" Height="7"
+                                                 VerticalAlignment="Top" Margin="0,4,0,0"
+                                                 Fill="{DynamicResource Accent}"/>
+                                        <StackPanel Grid.Column="2">
+                                            <TextBlock x:Name="NoticeRowText" Style="{StaticResource Sh.NoticeText}"/>
+                                            <!-- 查看原因与时间是同一个行盒里的两个 inline 盒（:1409／:1410），
+                                                 原版没有 margin，只被 HTML 空白隔出一个词距 → 这里挨着排 -->
+                                            <StackPanel Orientation="Horizontal">
+                                                <Button x:Name="NoticeRowDetail" Style="{StaticResource Sh.BtnSmPlain}"
+                                                        Content="查看原因" Visibility="Collapsed"
+                                                        Click="Notice_RowDetail_Click"/>
+                                                <TextBlock x:Name="NoticeRowTime" Style="{StaticResource Sh.NoticeTime}"
+                                                           Margin="4,0,0,0" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </DockPanel>
+            </Border>
+
+            <!-- .notice-panel.notes-panel（App.vue:1420 ＋ :2146-2175）：见上条的「后写赢」陷阱，
+                 有效尺寸 320×420。.notes-list（:2150-2153）：overflow-y auto / padding 2 16 16。 -->
+            <Border x:Name="NotesPanel" Grid.Column="0" Grid.ColumnSpan="2" Style="{StaticResource FloatPanel}"
                     Width="320" MaxHeight="420" HorizontalAlignment="Right" VerticalAlignment="Top"
                     Margin="0,82,92,0">
                 <DockPanel>
                     <Border DockPanel.Dock="Top" Style="{StaticResource FloatPanelHead}">
                         <Grid>
-                            <TextBlock FontSize="14" FontWeight="Bold" Text="通知"/>
-                            <Button Style="{StaticResource IconBtn}" Width="28" Height="28"
-                                    HorizontalAlignment="Right" Content="&#xE711;" Click="Notice_Click"/>
-                        </Grid>
-                    </Border>
-                    <!-- .notice-empty：min-height 96 / padding 16 / 居中 / text-dim 13（App.vue:2208-2216） -->
-                    <StackPanel x:Name="NoticeEmpty" MinHeight="96">
-                        <TextBlock Text="暂时没有通知" FontSize="13" Foreground="{DynamicResource Fg2}"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center"
-                                   Margin="16" TextAlignment="Center"/>
-                    </StackPanel>
-                    <!-- .notice-list：overflow-y auto（App.vue:2217）。列表数据未接入 → 这里不放 ItemsSource：
-                         绑一个不存在的属性只会静默失效，接线等通知源就绪后由主控完成 -->
-                    <ItemsControl x:Name="NoticeList" MaxHeight="330"/>
-                </DockPanel>
-            </Border>
-
-            <!-- .notice-panel.notes-panel：w 380 / max-h 480；.notes-list padding 2 16 16（App.vue:2146-2175） -->
-            <Border x:Name="NotesPanel" Style="{StaticResource FloatPanel}"
-                    Width="380" MaxHeight="480" HorizontalAlignment="Right" VerticalAlignment="Top"
-                    Margin="0,82,92,0">
-                <DockPanel>
-                    <Border DockPanel.Dock="Top" Style="{StaticResource FloatPanelHead}">
-                        <Grid>
                             <TextBlock FontSize="14" FontWeight="Bold" Text="更新日志"/>
-                            <Button Style="{StaticResource IconBtn}" Width="28" Height="28"
-                                    HorizontalAlignment="Right" Content="&#xE711;" Click="History_Click"/>
+                            <!-- 头部右侧是 .muted 的「版本 · 日期」（:1423），没有按钮 -->
+                            <TextBlock x:Name="NotesHeadMeta" Style="{StaticResource Sh.NoticeTime}"
+                                       FontSize="14" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                         </Grid>
                     </Border>
                     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16,2,16,16">
-                        <ItemsControl x:Name="NotesList"/>
+                        <StackPanel>
+                            <ItemsControl x:Name="NotesList"/>
+                            <!-- .note-version（:1426 ＋ :2154-2158）：兄弟之间 margin-top 12 /
+                                 border-top 1 dashed border / padding-top 12。
+                                 .note-head（:2159-2164）：flex baseline gap 12 / margin 0 0 8，
+                                 .note-ver 13px/700（:2165），右侧 .muted 是继承的 14px text-dim。
+                                 .note-changes（:2169-2175）：padding-left 16 / line-height 1.7 / 12px / 字色 text，
+                                 li 的实心圆点是 UA 的 list-style disc（全局 * 只复位 margin/padding）。
+                                 数据源 updateNotes 未接入 → 整行壳 Collapsed。 -->
+                            <Border x:Name="NoteRowShell" Style="{StaticResource Sh.NoteVersion}"
+                                    Visibility="Collapsed">
+                                <Grid TextElement.FontSize="12">
+                                    <Rectangle Height="1" Stroke="{DynamicResource Line}" StrokeThickness="1"
+                                               StrokeDashArray="3 2" VerticalAlignment="Top"
+                                               SnapsToDevicePixels="True"/>
+                                    <StackPanel Margin="0,12,0,0">
+                                        <StackPanel Style="{StaticResource Sh.NoteHead}">
+                                            <TextBlock x:Name="NoteRowVer" Style="{StaticResource Sh.NoteVer}"/>
+                                            <TextBlock x:Name="NoteRowDate" FontSize="14" Margin="12,0,0,0"
+                                                       Foreground="{DynamicResource Fg2}"/>
+                                        </StackPanel>
+                                        <StackPanel x:Name="NoteRowChanges" Margin="16,0,0,0">
+                                            <!-- 一条 li：圆点是 UA 的 disc（宽约 6，含间距），文字 12px、
+                                                 line-height 1.7、字色 text（.note-changes 上写的 color:var(text)） -->
+                                            <Grid Style="{StaticResource Sh.NoteChangeRow}">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                    <ColumnDefinition Width="6"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="&#x2022;" VerticalAlignment="Top"
+                                                           Foreground="{DynamicResource Fg}"/>
+                                                <TextBlock x:Name="NoteRowChange" Grid.Column="2"
+                                                           Foreground="{DynamicResource Fg}" LineHeight="20"
+                                                           LineStackingStrategy="BlockLineHeight" TextWrapping="Wrap"/>
+                                            </Grid>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
                     </ScrollViewer>
                 </DockPanel>
             </Border>
 
-            <!-- .notice-panel.dl-panel：w 380；.dl-item padding 12 16 + 下边线（App.vue:2236-2312） -->
-            <Border x:Name="DlPanel" Style="{StaticResource FloatPanel}"
-                    Width="380" MaxHeight="480" HorizontalAlignment="Right" VerticalAlignment="Top"
+            <!-- .notice-panel.dl-panel（App.vue:1442 ＋ :2237-2239）：w 380 / max-h 420（见 NoticePanel 那条陷阱注释） -->
+            <Border x:Name="DlPanel" Grid.Column="0" Grid.ColumnSpan="2" Style="{StaticResource FloatPanel}"
+                    Width="380" MaxHeight="420" HorizontalAlignment="Right" VerticalAlignment="Top"
                     Margin="0,82,92,0">
                 <DockPanel>
                     <Border DockPanel.Dock="Top" Style="{StaticResource FloatPanelHead}">
                         <Grid>
                             <TextBlock FontSize="14" FontWeight="Bold" Text="下载中心"/>
-                            <Button Style="{StaticResource IconBtn}" Width="28" Height="28"
-                                    HorizontalAlignment="Right" Content="&#xE711;" Click="OpenDl_Click"/>
+                            <!-- .btn.btn-ghost.btn-sm（:1445）：收起面板并跳去「游戏版本」 -->
+                            <Button Style="{StaticResource Sh.BtnSmFloat}" Content="去版本下载"
+                                    HorizontalAlignment="Right" Click="Dl_GoVersions_Click"/>
                         </Grid>
                     </Border>
-                    <StackPanel x:Name="DlEmpty" MinHeight="96">
-                        <TextBlock Text="当前没有下载任务" FontSize="13" Foreground="{DynamicResource Fg2}"
-                                   HorizontalAlignment="Center" VerticalAlignment="Center" Margin="16"/>
-                    </StackPanel>
-                    <ItemsControl x:Name="DlList" MaxHeight="380"/>
+                    <Grid>
+                        <!-- .notice-empty（:1449）文案是「没有进行中的任务」 -->
+                        <Grid x:Name="DlEmpty" MinHeight="96">
+                            <TextBlock Text="没有进行中的任务" Style="{StaticResource Sh.NoticeEmpty}"/>
+                        </Grid>
+                        <ScrollViewer x:Name="DlListScroll" VerticalScrollBarVisibility="Auto"
+                                      Visibility="Collapsed">
+                            <StackPanel>
+                                <ItemsControl x:Name="DlList"/>
+                                <!-- .dl-item（:1451 ＋ :2240-2312）一行的完整几何：
+                                     .dl-item-head（:2244）flex space-between gap 8；
+                                     .dl-title（:2255）13/600 省略号，.dl-error 时转 danger（:2268，代码换色）；
+                                     .dl-actions（:2250）inline-flex gap 4 flex-none；
+                                     .dl-dismiss（:2301）透明 × 按钮 14px padding 0 4 line-height 1；
+                                     .dl-sub（:2262）margin-top 4 / 12px / line-height 1.5 / break-all / muted；
+                                     .dl-bar（:2271）margin-top 8 / 高 5 / 半高圆角 / card-2 底，
+                                     .dl-bar-fill（:2278）宽＝进度百分比（用星型列表达百分比），
+                                     .is-indeterminate 时宽度强制 35%（:1482 内联 ＋ :2290 的位移动画：
+                                     translateX(-120%)→(320%) 1.25s ease-in-out infinite，
+                                     WPF 的动画写不出自身宽度的百分比，这条补间留给接线时按 ActualWidth 计算）；
+                                     .dl-stages（:2284）grid gap 10 / margin-top 14，
+                                     .dl-stage（:2285）padding 9 10 / border 1 / radius 9 / card-2 底，
+                                     .dl-stage-heading（:2286）space-between / 12px / 600，is-done 整条转 accent（:2289），
+                                     .dl-stage-detail（:2287）省略号 / 12px / margin-top 3，
+                                     .dl-stage .dl-bar（:2288）高 3 / margin-top 6。
+                                     任务模型（store.tasks）未接入 → 整行壳 Collapsed，
+                                     逐条行需要接线时按这份几何在代码里生成。 -->
+                                <Border x:Name="DlRowShell" Style="{StaticResource Sh.DlItem}"
+                                        Visibility="Collapsed">
+                                    <StackPanel>
+                                        <Grid>
+                                            <!-- .dl-item-head（:2244-2249）：flex space-between gap 8 →
+                                                 标题列 *（可收缩到省略号），动作列 Auto，中间 8 -->
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="8"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock x:Name="DlRowTitle" Grid.Column="0"
+                                                       Style="{StaticResource Sh.DlTitle}"
+                                                       VerticalAlignment="Center"/>
+                                            <StackPanel Grid.Column="2" Orientation="Horizontal"
+                                                        VerticalAlignment="Center">
+                                                <!-- running：暂停＋取消（:1455-1456） -->
+                                                <Button x:Name="DlRowPause" Style="{StaticResource Sh.BtnSmFloat}"
+                                                        Content="暂停" Visibility="Collapsed" Click="Dl_Pause_Click"/>
+                                                <!-- paused：继续＋取消（:1459-1460） -->
+                                                <Button x:Name="DlRowResume" Style="{StaticResource Sh.BtnSmFloat}"
+                                                        Content="继续" Visibility="Collapsed" Click="Dl_Resume_Click"/>
+                                                <Button x:Name="DlRowCancel" Style="{StaticResource Sh.BtnSmFloat}"
+                                                        Content="取消" Margin="4,0,0,0" Visibility="Collapsed"
+                                                        Click="Dl_Cancel_Click"/>
+                                                <!-- cancelling：单颗禁用钮（:1462） -->
+                                                <Button x:Name="DlRowCancelling" Style="{StaticResource Sh.BtnSmFloat}"
+                                                        Content="正在取消&#x2026;" IsEnabled="False"
+                                                        Visibility="Collapsed"/>
+                                                <!-- done / cancelled / error：.dl-dismiss（:1465），内容是「×」，
+                                                     line-height 1 → 字形高就是行高 -->
+                                                <Button x:Name="DlRowDismiss" Style="{StaticResource Sh.DlDismiss}"
+                                                        Margin="4,0,0,0" Visibility="Collapsed"
+                                                        Click="Dl_Dismiss_Click">
+                                                    <TextBlock Text="&#xD7;" FontSize="14" LineHeight="14"
+                                                               LineStackingStrategy="BlockLineHeight"/>
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock x:Name="DlRowSub" Style="{StaticResource Sh.DlSub}"/>
+                                        <Border Style="{StaticResource Sh.DlBar}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition x:Name="DlBarFillCol" Width="35*"/>
+                                                    <ColumnDefinition x:Name="DlBarRestCol" Width="65*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Border x:Name="DlRowBarFill" Grid.Column="0"
+                                                        Style="{StaticResource Sh.DlBarFill}"/>
+                                            </Grid>
+                                        </Border>
+                                        <StackPanel x:Name="DlStagesHost" Margin="0,14,0,0">
+                                            <Border x:Name="DlStageShell" Style="{StaticResource Sh.DlStage}"
+                                                    Visibility="Collapsed">
+                                                <StackPanel>
+                                                    <Grid Style="{StaticResource Sh.DlStageHeading}">
+                                                        <!-- space-between gap 8：标签列 *，状态列 Auto，中间 8 -->
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="8"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock x:Name="DlStageLabel" Grid.Column="0"
+                                                                   VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource Fg}"/>
+                                                        <TextBlock x:Name="DlStageState" Grid.Column="2"
+                                                                   VerticalAlignment="Center"
+                                                                   Foreground="{DynamicResource Fg2}"/>
+                                                    </Grid>
+                                                    <TextBlock x:Name="DlStageDetail"
+                                                               Style="{StaticResource Sh.DlStageDetail}"/>
+                                                    <Border Style="{StaticResource Sh.DlStageBar}">
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition x:Name="DlStageBarFillCol" Width="0*"/>
+                                                                <ColumnDefinition x:Name="DlStageBarRestCol" Width="100*"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <Border Grid.Column="0" CornerRadius="1.5"
+                                                                    Background="{DynamicResource BarFill}"
+                                                                    HorizontalAlignment="Stretch"/>
+                                                        </Grid>
+                                                    </Border>
+                                                </StackPanel>
+                                            </Border>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
                 </DockPanel>
             </Border>
 
-            <!-- .drop-mask：fixed inset 0 / z 9999 / 居中 / 底 accent 16%（App.vue:2419-2426）
-                 .drop-box：column 居中 gap 16 / padding 48 / border 2 dashed accent / radius 14 /
-                 底 accent 8% / 字 accent；svg 48×48；.drop-title 16/600（App.vue:2428-2449）。
-                 WPF 的 Border 画不出 dashed，虚线用同位置 Rectangle 叠出来。 -->
-            <Border x:Name="DropMask" Background="{DynamicResource Accent16}" Visibility="Collapsed">
-                <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Width="320" Height="180">
-                    <Border Background="{DynamicResource Accent8}" CornerRadius="14"/>
-                    <Rectangle RadiusX="14" RadiusY="14" Stroke="{DynamicResource Accent}" StrokeThickness="2"
-                               StrokeDashArray="4 3"/>
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+            <!-- .menu-overlay.cfg-mismatch-mask（App.vue:1532 ＋ styles.css:577-581 ＋ App.vue:1721）：
+                 铺满整窗、全透明、只挡点击并把卡片居中（原版这层没有底色也没有 backdrop-filter），
+                 z 9600 在拖拽遮罩（9999）之下、模态（10000）之上。
+                 .card.cfg-mismatch-modal（:1533 ＋ :1722）：min(460,90vw) / padding 20 22 / column / gap 12。
+                 文案照 :1534-1538 三条原文。配置版本兼容检查（configMismatch）未接入 → 整层 Collapsed。 -->
+            <Border x:Name="CfgMismatchMask" Grid.Column="0" Grid.ColumnSpan="2"
+                    Style="{StaticResource Sh.CfgMask}" Visibility="Collapsed">
+                <Border x:Name="CfgMismatchCard" Style="{StaticResource Sh.CfgModal}">
+                    <StackPanel>
+                        <TextBlock Text="配置文件版本不兼容" Style="{StaticResource Sh.UpdModalTitle}"/>
+                        <!-- p.muted：字号继承 body 的 text-md 14，字色 text-dim；与上下兄弟之间是 gap 12 -->
+                        <TextBlock FontSize="14" TextWrapping="Wrap" Margin="0,12,0,0"
+                                   Foreground="{DynamicResource Fg2}"
+                                   Text="当前配置文件由更新版本的启动器创建，可能包含本版本不认识的格式。可以继续尝试使用（可能异常），或重置为默认设置（原配置会自动备份）。"/>
+                        <!-- .upd-modal-actions（:1724）：flex 右对齐 / gap 10（不是 modal-actions 的 12） -->
+                        <StackPanel Style="{StaticResource Sh.UpdModalActions}" Margin="0,12,0,0">
+                            <Button Content="继续尝试" Style="{StaticResource BtnGhost}" Click="Cfg_Keep_Click"/>
+                            <Button Content="重置设置" Style="{StaticResource BtnDanger}" Margin="10,0,0,0"
+                                    Click="Cfg_Reset_Click"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </Border>
+
+            <!-- .drop-mask（App.vue:1549 ＋ :2419-2430）：fixed inset 0 / z 9999 / flex 居中 /
+                 底 color-mix(accent 16%, transparent)＝Accent16 / blur(24) saturate(130%) / pointer-events none。
+                 .drop-box（:2431-2448）：column 居中 gap 16 / padding 48 / border 2 dashed accent /
+                 radius 14 / 底 color-mix(accent 8%, card) ＝ Card 垫底再叠 8% accent / 字 accent；
+                 svg 48×48；.drop-title 16/600。原版没有给盒宽，宽度由那句长文案撑出来，
+                 所以这里让内容自排（Padding 48），不再写死 320×180。
+                 Border 画不出 dashed → 2px 虚线用同位 Rectangle 叠；blur(24) 还欠 MaskBlur。 -->
+            <Border x:Name="DropMask" Grid.Column="0" Grid.ColumnSpan="2"
+                    Background="{DynamicResource Accent16}" Visibility="Collapsed" IsHitTestVisible="False">
+                <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <Border Style="{StaticResource Sh.DropBox}"/>
+                    <Border Style="{StaticResource Sh.DropBoxTint}"/>
+                    <Rectangle Style="{StaticResource Sh.DropBoxDash}"/>
+                    <!-- padding 48 ＋ 2px 边框 ＝ 内容距盒边 50；gap 16 落在图标与标题之间 -->
+                    <StackPanel Margin="50" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <ContentControl Width="48" Height="48" HorizontalAlignment="Center"
                                         Foreground="{DynamicResource Accent}"
                                         Style="{DynamicResource Icon.Upload}"/>
-                        <TextBlock Text="松开即导入" FontSize="16" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource Accent}"
-                                   HorizontalAlignment="Center" Margin="0,16,0,0"/>
+                        <!-- .drop-title（:1556 原文） -->
+                        <TextBlock Text="松开导入：存档 / 整合包 / MOD / 外置登录提供商"
+                                   Style="{StaticResource Sh.DropTitle}"/>
                     </StackPanel>
                 </Grid>
+            </Border>
+
+            <!-- .modal-mask（App.vue:1573 ＋ styles.css:527-538）＋ .modal.launchfail-modal（:2314-2316）：
+                 480 宽，标题走 h3 的 UA 粗体，.launchfail-text（:2317）13px / line-height 1.7 /
+                 text-dim / break-all / max-height 220 / 纵向滚动 / white-space pre-wrap，
+                 动作行是通用 .modal-actions（styles.css:557）：右对齐 gap 12 / margin-top 24，
+                 三颗钮＝查看原因(btn-ghost) ＋ 关闭(btn-ghost) ＋ 导出错误日志(btn-gold ＋ 14×14 下载图标)。
+                 启动失败捕获（launchFail）未接入 → 整层 Collapsed。 -->
+            <Border x:Name="LaunchFailMask" Grid.Column="0" Grid.ColumnSpan="2"
+                    Style="{StaticResource Sh.ModalMaskIn}" Visibility="Collapsed"
+                    MouseLeftButtonDown="LaunchFail_Mask_Down">
+                <Border x:Name="LaunchFailCard" MouseLeftButtonDown="ModalCard_Down">
+                    <!-- modal-in：220ms ease-out 的 opacity 0→1 ＋ translateY 6→0
+                         （styles.css:554 ＋ :569-574；原版还有 scale(.99)，与本页日志窗同一取舍） -->
+                    <Border.Style>
+                        <Style TargetType="Border" BasedOn="{StaticResource Sh.LaunchFailModal}">
+                            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+                            <Setter Property="RenderTransform">
+                                <Setter.Value><TranslateTransform/></Setter.Value>
+                            </Setter>
+                            <Style.Triggers>
+                                <Trigger Property="IsVisible" Value="True">
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="Opacity">
+                                                    <SplineDoubleKeyFrame KeyTime="0:0:0" Value="0"/>
+                                                    <SplineDoubleKeyFrame KeyTime="0:0:0.22" Value="1"
+                                                                          KeySpline="0.2,0.7 0.3,1"/>
+                                                </DoubleAnimationUsingKeyFrames>
+                                                <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)">
+                                                    <SplineDoubleKeyFrame KeyTime="0:0:0" Value="6"/>
+                                                    <SplineDoubleKeyFrame KeyTime="0:0:0.22" Value="0"
+                                                                          KeySpline="0.2,0.7 0.3,1"/>
+                                                </DoubleAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <StackPanel>
+                        <TextBlock x:Name="LaunchFailTitle" Style="{StaticResource Sh.ModalTitle}"/>
+                        <!-- 标题与正文之间原版没有间距（* 把 p/h3 的 margin 清 0，两条规则都不补 margin） -->
+                        <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto">
+                            <TextBlock x:Name="LaunchFailText" Style="{StaticResource Sh.LaunchFailText}"/>
+                        </ScrollViewer>
+                        <StackPanel Style="{StaticResource Sh.ModalActions}">
+                            <Button Content="查看原因" Style="{StaticResource BtnGhost}"
+                                    Click="LaunchFail_Reason_Click"/>
+                            <Button Content="关闭" Style="{StaticResource BtnGhost}" Margin="12,0,0,0"
+                                    Click="LaunchFail_Close_Click"/>
+                            <Button x:Name="LaunchFailExportBtn" Style="{StaticResource BtnGold}" Margin="12,0,0,0"
+                                    Click="LaunchFail_Export_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <ContentControl Width="14" Height="14" VerticalAlignment="Center"
+                                                    Style="{DynamicResource Icon.Download}"/>
+                                    <TextBlock x:Name="LaunchFailExportText" Text="导出错误日志"
+                                               Margin="8,0,0,0" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </Border>
+
+            <!-- ==================== 整合包导入确认弹窗（App.vue:1591-1712 ＋ :2452-2624）====================
+                 .modal-mask ＋ .modal.mp-modal：宽 min(620px, 100vw 减 40) / 最高 88vh / 纵向滚动，
+                 上限由代码 ApplyViewportCaps() 按窗口尺寸写回。
+                 三态互斥：.mp-loading（probing）／info 主体／解析失败，
+                 整合包解析（probeModpack）与实例冲突表（existingInstances）都没有接 → 
+                 只有标题与三态壳可见性由代码 SetModpackState 管，内容一律 Collapsed。 -->
+            <Border x:Name="MpMask" Grid.Column="0" Grid.ColumnSpan="2"
+                    Style="{StaticResource Sh.ModalMaskIn}" Visibility="Collapsed"
+                    MouseLeftButtonDown="Mp_Mask_Down">
+                <Border x:Name="MpModalCard" Padding="0" MouseLeftButtonDown="ModalCard_Down">
+                    <!-- 同 .modal 的 modal-in（styles.css:554 ＋ :569-574），220ms ease-out -->
+                    <Border.Style>
+                        <Style TargetType="Border" BasedOn="{StaticResource Sh.MpModal}">
+                            <Setter Property="Padding" Value="0"/>
+                            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
+                            <Setter Property="RenderTransform">
+                                <Setter.Value><TranslateTransform/></Setter.Value>
+                            </Setter>
+                            <Style.Triggers>
+                                <Trigger Property="IsVisible" Value="True">
+                                    <Trigger.EnterActions>
+                                        <BeginStoryboard>
+                                            <Storyboard>
+                                                <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="Opacity">
+                                                    <SplineDoubleKeyFrame KeyTime="0:0:0" Value="0"/>
+                                                    <SplineDoubleKeyFrame KeyTime="0:0:0.22" Value="1"
+                                                                          KeySpline="0.2,0.7 0.3,1"/>
+                                                </DoubleAnimationUsingKeyFrames>
+                                                <DoubleAnimationUsingKeyFrames Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)">
+                                                    <SplineDoubleKeyFrame KeyTime="0:0:0" Value="6"/>
+                                                    <SplineDoubleKeyFrame KeyTime="0:0:0.22" Value="0"
+                                                                          KeySpline="0.2,0.7 0.3,1"/>
+                                                </DoubleAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </BeginStoryboard>
+                                    </Trigger.EnterActions>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="24">
+                        <StackPanel>
+                            <!-- .mp-title（:1593 ＋ :2457）：16px / margin-bottom 16 -->
+                            <TextBlock Text="导入整合包" Style="{StaticResource Sh.MpTitle}"/>
+
+                            <!-- .mp-loading（:1596 ＋ :2461-2466）：flex 居中 gap 8 / padding 12 0，
+                                 里面是全局 .spin（styles.css:683-691，14×14 的 accent 环）＋ .muted「解析中…」 -->
+                            <StackPanel x:Name="MpLoading" Style="{StaticResource Sh.MpLoading}"
+                                        Visibility="Collapsed">
+                                <ContentControl Style="{StaticResource Spin}"/>
+                                <TextBlock Text="解析中&#x2026;" Foreground="{DynamicResource Fg2}" FontSize="14"
+                                           Margin="8,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+
+                            <StackPanel x:Name="MpInfoBody" Visibility="Collapsed">
+                                <!-- .mp-tags（:1603 ＋ :2467-2471）：flex wrap / gap 8。
+                                     FORMAT_TAG_CLASS（:518-522）：mrpack→tag-success（ok-soft/ok）、
+                                     curseforge→tag-gold（accent-soft/accent-2）、fullpack→tag-cyan（cyan-soft/cyan）。
+                                     .tag 基线见 Controls.xaml:92（padding 2 8 ＋ 1px 透明边 ＋ line-height 1.6）。 -->
+                                <WrapPanel>
+                                    <Border x:Name="MpTagFormat" Style="{StaticResource Tag}" Margin="0,0,8,0"
+                                            Visibility="Collapsed">
+                                        <TextBlock x:Name="MpTagFormatText" Style="{StaticResource TagText}"/>
+                                    </Border>
+                                    <Border x:Name="MpTagMc" Style="{StaticResource Tag}" Margin="0,0,8,0"
+                                            Visibility="Collapsed">
+                                        <TextBlock x:Name="MpTagMcText" Style="{StaticResource TagText}"/>
+                                    </Border>
+                                    <Border x:Name="MpTagLoader" Style="{StaticResource Tag}" Margin="0,0,8,0"
+                                            Background="{DynamicResource AccentSoft}" Visibility="Collapsed">
+                                        <TextBlock x:Name="MpTagLoaderText" Style="{StaticResource TagText}"
+                                                   Foreground="{DynamicResource AccentHi}"/>
+                                    </Border>
+                                    <Border x:Name="MpTagVersion" Style="{StaticResource Tag}" Margin="0,0,8,0"
+                                            Visibility="Collapsed">
+                                        <TextBlock x:Name="MpTagVersionText" Style="{StaticResource TagText}"/>
+                                    </Border>
+                                </WrapPanel>
+
+                                <!-- .mp-summary（:1616 ＋ :2472-2476）：margin-top 8 / 12px / text-dim -->
+                                <TextBlock x:Name="MpSummary" Style="{StaticResource Sh.MpSummary}"/>
+
+                                <!-- .mp-label（:1622 ＋ :2477-2481）：13px text-dim / margin 16 0 8 -->
+                                <TextBlock Text="目标游戏文件夹" Style="{StaticResource Sh.MpLabel}"/>
+                                <!-- select.select（:1623 ＋ styles.css:304-341）：宽 100% / 最低 36 /
+                                     padding 8 12（右侧再留 32 给箭头）/ radius 10 / card-2 底 / 14px。
+                                     选项来自 store.settings.folders（名称＋默认标记＋路径），未接入。 -->
+                                <ComboBox x:Name="MpFolderSelect" FontSize="14"/>
+
+                                <TextBlock Text="实例命名" Style="{StaticResource Sh.MpLabel}"/>
+                                <!-- .mp-name-opts（:1630 ＋ :2482-2486）：column / gap 8 -->
+                                <StackPanel>
+                                    <RadioButton x:Name="MpNameFromFile" Style="{StaticResource Sh.MpNameOpt}"
+                                                 GroupName="mpname" IsChecked="True" Margin="0,0,0,8">
+                                        <!-- .mp-name-text（:2522-2527）：flex baseline gap 8 / min-width 0 -->
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="使用压缩包文件名" Style="{StaticResource Sh.MpNameLabel}"/>
+                                            <TextBlock x:Name="MpNameFromFileValue" Style="{StaticResource Sh.MpNameValue}"
+                                                       Margin="8,0,0,0"/>
+                                        </StackPanel>
+                                    </RadioButton>
+                                    <RadioButton x:Name="MpNameFromInner" Style="{StaticResource Sh.MpNameOpt}"
+                                                 GroupName="mpname">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="使用整合包名称" Style="{StaticResource Sh.MpNameLabel}"/>
+                                            <TextBlock x:Name="MpNameFromInnerValue" Style="{StaticResource Sh.MpNameValue}"
+                                                       Margin="8,0,0,0"/>
+                                        </StackPanel>
+                                    </RadioButton>
+                                </StackPanel>
+                                <!-- input.input.mp-custom-name（:1654 ＋ :2540-2543）：宽 100% / margin-top 8 /
+                                     maxlength 120 / placeholder「自定义实例名称」 -->
+                                <Grid Margin="0,8,0,0">
+                                    <TextBox x:Name="MpCustomName" Style="{StaticResource Input}" FontSize="14"
+                                             MaxLength="120"/>
+                                    <TextBlock x:Name="MpCustomNameHint" Text="自定义实例名称"
+                                               Style="{StaticResource Sh.Placeholder}"/>
+                                </Grid>
+
+                                <!-- .mp-conflict（:1656 ＋ :2544-2600）：grid gap 8 / margin-top 12 / padding 12 /
+                                     border 1 且颜色是 color-mix(accent-deep 48%, border) /
+                                     底 color-mix(accent-deep 8%, card) / radius 10 / 12px text-dim，
+                                     里面 strong（:2555）字色转 text。
+                                     WPF 画不出 color-mix，两层各画一遍再按 48%／8% 不透明度叠：
+                                     底＝Card，叠 8% AccentLo；描边＝Line，再叠一层 48% 的 AccentLo 描边。
+                                     内容需要 existingInstances（同包同版本／同名冲突）才能填 → 整块 Collapsed。 -->
+                                <Grid x:Name="MpConflict" Margin="0,12,0,0" Visibility="Collapsed"
+                                      TextElement.FontSize="12">
+                                    <Border CornerRadius="10" Background="{DynamicResource Card}"/>
+                                    <Border CornerRadius="10" Background="{DynamicResource AccentLo}" Opacity="0.08"/>
+                                    <Border CornerRadius="10" BorderBrush="{DynamicResource Line}" BorderThickness="1"/>
+                                    <Border CornerRadius="10" BorderBrush="{DynamicResource AccentLo}"
+                                            BorderThickness="1" Opacity="0.48" IsHitTestVisible="False"/>
+                                    <!-- padding 12 ＋ 1px 边框内缩 -->
+                                    <StackPanel Margin="13" TextElement.Foreground="{DynamicResource Fg2}">
+                                        <TextBlock x:Name="MpConflictTitle" FontWeight="Bold"
+                                                   Foreground="{DynamicResource Fg}" TextWrapping="Wrap"
+                                                   Text="检测到实例冲突或相同整合包版本"/>
+                                        <TextBlock x:Name="MpConflictList" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                        <!-- .mp-conflict-actions（:1661 ＋ :2558-2563）：grid 两列 /
+                                             column-gap space-3 12 / row-gap space-2 8 / margin-top space-1 4。
+                                             它是 grid 项，父级 gap 8 ＋ 自身 margin-top 4 ＝ 距上 12。 -->
+                                        <UniformGrid Columns="2" Margin="0,12,0,0">
+                                            <!-- 初值 conflictAction='rename'（App.vue:548）→ 重新命名默认选中 -->
+                                            <RadioButton x:Name="MpActRename" Style="{StaticResource Sh.MpConflictOpt}"
+                                                         GroupName="mpconflict" Content="重新命名" IsChecked="True"
+                                                         Margin="0,0,0,8" Checked="MpConflictAction_Changed"/>
+                                            <RadioButton x:Name="MpActNew" Style="{StaticResource Sh.MpConflictOpt}"
+                                                         GroupName="mpconflict" Content="作为新实例安装（自动加序号）"
+                                                         Margin="12,0,0,8" Checked="MpConflictAction_Changed"/>
+                                            <RadioButton x:Name="MpActUpdate" Style="{StaticResource Sh.MpConflictOpt}"
+                                                         GroupName="mpconflict" Content="更新现有实例"
+                                                         Checked="MpConflictAction_Changed"/>
+                                            <RadioButton x:Name="MpActOverwrite" Style="{StaticResource Sh.MpConflictOpt}"
+                                                         GroupName="mpconflict" Content="覆盖安装" Margin="12,0,0,0"
+                                                         Checked="MpConflictAction_Changed"/>
+                                        </UniformGrid>
+                                        <!-- .select.mp-existing-select（:1669 ＋ :2601）：margin-top space-1 4，
+                                             同样叠父级 gap 8 ＝ 12；选项＝同目录下冲突实例（＋「同一整合包版本」后缀） -->
+                                        <ComboBox x:Name="MpExistingSelect" FontSize="14" Margin="0,12,0,0"
+                                                  Visibility="Collapsed"/>
+                                        <!-- .mp-impact（:1674 ＋ :2604-2612）：padding 8 / radius 6 / card-2 底 /
+                                             line-height 1.55；.danger（覆盖安装时，:2610）字色转 danger。
+                                             两段文案照 :1676 与 :1679 原文，由代码按 conflictAction 二选一。 -->
+                                        <Border x:Name="MpImpact" Style="{StaticResource Sh.MpImpact}"
+                                                Margin="0,8,0,0" Visibility="Collapsed">
+                                            <TextBlock x:Name="MpImpactText" TextWrapping="Wrap" LineHeight="19"
+                                                       LineStackingStrategy="BlockLineHeight"
+                                                       Foreground="{DynamicResource Fg2}"/>
+                                        </Border>
+                                        <!-- .mp-replace-confirm（:1682 ＋ :2564-2577）：与 conflict-actions 的 label 同一条规则，
+                                             文案照 :1684（「更新」／「覆盖」随 conflictAction 变） -->
+                                        <CheckBox x:Name="MpReplaceConfirm" Style="{StaticResource Sh.MpReplaceConfirm}"
+                                                  Margin="0,8,0,0" Visibility="Collapsed">
+                                            <TextBlock x:Name="MpReplaceConfirmText" TextWrapping="Wrap"
+                                                       LineHeight="17" LineStackingStrategy="BlockLineHeight"/>
+                                        </CheckBox>
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- .mp-keysync-opt（:1690 ＋ :2578-2593）：出现条件＝包内有作者预设键位
+                                     且设置里开了默认按键同步；文案照 :1692 原文 -->
+                                <CheckBox x:Name="MpKeysyncOpt" Style="{StaticResource Sh.MpKeysyncOpt}"
+                                          Visibility="Collapsed">
+                                    <TextBlock Text="该整合包含作者预设键位（options.txt）。用启动器默认按键替换预设键位；其余设置保留。不勾选则保留作者预设。"
+                                               TextWrapping="Wrap" LineHeight="18"
+                                               LineStackingStrategy="BlockLineHeight"/>
+                                </CheckBox>
+
+                                <!-- .mp-error（:1695／:1698 ＋ :2613-2618）：13px danger / line-height 1.7 / break-all。
+                                     原版这条没有 margin（* 复位把 p 的边距清成 0），所以紧贴上一块，
+                                     这里不额外补间距。两条各占一个：名称冲突提示 ＋ 通用错误 -->
+                                <TextBlock x:Name="MpNameError" Style="{StaticResource Sh.MpError}"
+                                           Visibility="Collapsed"/>
+                                <TextBlock x:Name="MpErrorText" Style="{StaticResource Sh.MpError}"
+                                           Visibility="Collapsed"/>
+
+                                <!-- .mp-actions（:1700 ＋ :2619-2624）：flex 右对齐 / gap 12 / margin-top 24 -->
+                                <StackPanel Style="{StaticResource Sh.MpActions}">
+                                    <Button Content="取消" Style="{StaticResource BtnGhost}" Click="Mp_Cancel_Click"/>
+                                    <Button Content="确认导入" Style="{StaticResource BtnGold}" Margin="12,0,0,0"
+                                            Click="Mp_Confirm_Click"/>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- 解析失败分支（:1707-1712）：.mp-error ＋ .mp-actions（只有一颗关闭钮） -->
+                            <StackPanel x:Name="MpErrorBody" Visibility="Collapsed">
+                                <TextBlock x:Name="MpFatalError" Style="{StaticResource Sh.MpError}"/>
+                                <StackPanel Style="{StaticResource Sh.MpActions}">
+                                    <Button Content="关闭" Style="{StaticResource BtnGhost}" Click="Mp_Cancel_Click"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
             </Border>
         </Grid>
     </Border>

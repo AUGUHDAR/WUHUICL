@@ -36,6 +36,8 @@ public partial class MainWindow : Window
         };
         Loaded += OnLoaded;
         StateChanged += (_, _) => UpdateMaxGlyph();
+        // 弹窗宽度里的 100vw/vh 减项要跟窗口尺寸走（ApplyViewportCaps）
+        SizeChanged += (_, _) => ApplyViewportCaps();
     }
 
     async void OnLoaded(object sender, RoutedEventArgs e)
@@ -45,6 +47,11 @@ public partial class MainWindow : Window
         Show("home", sender as RadioButton);
         BindSettings();
         UpdateMaxGlyph();
+        ApplyViewportCaps();
+        // .input::placeholder 的覆盖层：TextBox 没有 placeholder，初值空就要露出提示字
+        MpCustomName.TextChanged += (_, _) => MpCustomNameHint.Visibility =
+            MpCustomName.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        MpCustomNameHint.Visibility = Visibility.Visible;
         ApplyThemeFromSettings();
         LoadBanners();
         ApplyBrandArt();
@@ -335,11 +342,14 @@ public partial class MainWindow : Window
             "friends" => PageFriends,
             _ => PageStub,
         }).Visibility = Visibility.Visible;
-        // App.vue:1333/1342 下载与导入都只在非首页出现；:1359 更新日志图标钮只在首页出现
+        // App.vue:1333/1342 下载与导入都只在非首页出现；:1359 更新日志图标钮只在首页出现；
+        // :1351 首页那颗下载图标钮要「首页 且 有活动任务」，跟着 ApplyTaskBadge 一起算
         bool home = which == "home";
         BtnTopDownload.Visibility = home ? Visibility.Collapsed : Visibility.Visible;
         BtnTopImport.Visibility = home ? Visibility.Collapsed : Visibility.Visible;
         BtnTopHistory.Visibility = home ? Visibility.Visible : Visibility.Collapsed;
+        ApplyTaskBadge();
+        ApplyResourceGroup();
         if (home) RefreshHero();
     }
 
@@ -351,6 +361,23 @@ public partial class MainWindow : Window
         StubTitle.Text = "该模块尚未接入";
         StubText.Text = "本轮只交付基础链路。";
         StubIcon.Style = (Style)FindResource("Icon.Settings");
+    }
+
+    /// <summary>
+    /// 资源组联动（App.vue:192-193 的 inResourceGroup ＋ :1267-1285 的绑定）：
+    /// 当前视图落在 mods/packs/shaders/bridge/servers/recordings 里时，父项「资源管理」
+    /// 既要保持展开（子菜单与尖角的 open 都是 resourceExpanded || inResourceGroup），
+    /// 字色还要转 text（.nav-parent.group-active，App.vue:1881）。
+    /// Foreground 给 null 就是清掉本地值，回到样式/模板触发器自己的取色（hover 也是 text，视觉不损失）。
+    /// </summary>
+    static readonly string[] ResourceGroupViews = { "mods", "packs", "shaders", "bridge", "servers", "recordings" };
+
+    void ApplyResourceGroup()
+    {
+        if (NavResources is null) return;
+        bool inGroup = ResourceGroupViews.Contains(_view);
+        NavResources.Foreground = inGroup ? (Brush)FindResource("Fg") : null;
+        if (inGroup && NavResources.IsChecked != true) NavResources.IsChecked = true;
     }
 
     internal void NavVersionsFromButton(object sender, RoutedEventArgs e)
@@ -381,6 +408,13 @@ public partial class MainWindow : Window
     void NavExpand_Changed(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded) return;
+        // 原版子菜单的 open 条件是 resourceExpanded || inResourceGroup（App.vue:1285／:1278）：
+        // 人已经停在资源子页里时收不起来，这里把父项按回去（会重入一次本函数，走展开分支）
+        if (NavResources.IsChecked != true && ResourceGroupViews.Contains(_view))
+        {
+            NavResources.IsChecked = true;
+            return;
+        }
         bool open = NavResources.IsChecked == true;
         if (open)
         {
@@ -552,7 +586,254 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>收起三个顶栏浮层和它们的遮罩：开弹窗（z 10000／9600）前先退到浮层（z 9001）之下，
+    /// 否则 ShowFloat 给面板加的 Panel.ZIndex 会把浮面板压在模态之上。</summary>
+    void CloseFloats()
+    {
+        NoticePanel.Visibility = Visibility.Collapsed;
+        NotesPanel.Visibility = Visibility.Collapsed;
+        DlPanel.Visibility = Visibility.Collapsed;
+        FloatMask.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// CSS 的 vw/vh 减项在 WPF 没有对应单位，按窗口实际尺寸写回各弹窗的 MaxWidth/MaxHeight：
+    /// .mp-modal 宽 min(620, 100vw 减 40)／最高 88vh（App.vue:2452-2455）；
+    /// .modal 宽 min(460, 100vw 减 48)、被 ui-system.css:38 收成 max-width/max-height 减 32，
+    /// .launchfail-modal 把宽收成 480（:2314）；
+    /// .cfg-mismatch-modal 宽 min(460, 90vw)（:1722），card 基线没有最大高，所以这里也不给它设。
+    /// </summary>
+    void ApplyViewportCaps()
+    {
+        double w = ActualWidth, h = ActualHeight;
+        if (w < 60 || h < 60) return;
+        MpModalCard.MaxWidth = Math.Min(620, w - 40);
+        MpModalCard.MaxHeight = h * 0.88;
+        LaunchFailCard.MaxWidth = Math.Min(480, w - 32);
+        LaunchFailCard.MaxHeight = h - 32;
+        CfgMismatchCard.MaxWidth = Math.Min(460, w * 0.9);
+    }
+
     void FloatMask_Click(object sender, MouseButtonEventArgs e) => ShowFloat(FloatMask);
+
+    // ---------------- 顶栏浮层里的行内动作（原版都是面板内按钮，不是页面） ----------------
+    /// <summary>通知头部的「清空」（App.vue:1401 clearNotices）。</summary>
+    void Notice_ClearAll_Click(object sender, RoutedEventArgs e) => _s.Log("通知中心未接入：清空要等 store.notices 有数据源。");
+    /// <summary>通知行里的「查看原因」（App.vue:1409）：原版打开实例中心的诊断页签，需要 n.exitTarget。</summary>
+    void Notice_RowDetail_Click(object sender, RoutedEventArgs e) => _s.Log("实例中心（InstanceCenter）下一轮接入，诊断页签从这里进。");
+    /// <summary>下载中心头部的「去版本下载」（App.vue:1445）：收面板 ＋ 切到 game/versions 视图。</summary>
+    void Dl_GoVersions_Click(object sender, RoutedEventArgs e) { ShowFloat(DlPanel); NavVersions.IsChecked = true; Show("versions", NavVersions); }
+    /// <summary>任务行四态动作（App.vue:1455-1465）：暂停／继续／取消／移除记录。</summary>
+    void Dl_Pause_Click(object sender, RoutedEventArgs e) => _s.Log("下载任务队列未接入：暂停要等 store.tasks。");
+    void Dl_Resume_Click(object sender, RoutedEventArgs e) => _s.Log("下载任务队列未接入：继续要等 store.tasks。");
+    void Dl_Cancel_Click(object sender, RoutedEventArgs e) => _s.CancelWork();
+    void Dl_Dismiss_Click(object sender, RoutedEventArgs e) => _s.Log("下载任务队列未接入：移除记录要等 store.tasks。");
+
+    /// <summary>
+    /// .dl-bar-fill 的宽度是进度百分比（App.vue:1482 内联 style），WPF 没有 % 宽度，
+    /// 用两根星型列按比例分配。is-indeterminate 时原版强制 35%（:1482 的三元 ＋ :2290 的位移动画），
+    /// 那条 translateX(-120%)→(320%) 是相对自身宽度的，只能接线时按 DlRowBarFill.ActualWidth 算。
+    /// </summary>
+    internal void SetDlRowProgress(double percent, bool indeterminate)
+    {
+        double p = indeterminate ? 35 : Math.Clamp(percent, 0, 100);
+        DlBarFillCol.Width = new GridLength(p, GridUnitType.Star);
+        DlBarRestCol.Width = new GridLength(Math.Max(0, 100 - p), GridUnitType.Star);
+    }
+
+    /// <summary>.dl-stage .dl-bar 的同款百分比条（App.vue:1491）。</summary>
+    internal void SetDlStageProgress(double percent)
+    {
+        double p = Math.Clamp(percent, 0, 100);
+        DlStageBarFillCol.Width = new GridLength(p, GridUnitType.Star);
+        DlStageBarRestCol.Width = new GridLength(Math.Max(0, 100 - p), GridUnitType.Star);
+    }
+
+    /// <summary>store.noticesUnread → .bell-dot（App.vue:1371 ＋ :2121-2130）。</summary>
+    internal void SetNoticesUnread(bool unread) => BellDot.Visibility = unread ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>拖拽遮罩（App.vue:1549 dragActive）。原版还要 blur(24) saturate(130%)，
+    /// 这层是 pointer-events:none 的纯视觉层，MaskBlur 得在显示前拍快照才含得住底下的内容。</summary>
+    internal void SetDropMask(bool on) => DropMask.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>
+    /// launcherHealth（App.vue:743-750）：最近启动异常→error，有后台任务→busy，否则 ok。
+    /// .sidebar-health i 的底色与 3px 光环按 tone 换（:1982-1996）。
+    /// 「最近启动异常」这条判定还没接（要看退出码历史），先按 busy/ok 两态走。
+    /// </summary>
+    internal void SetLauncherHealth(string tone, string text)
+    {
+        var (dot, ring) = tone switch
+        {
+            "busy" => ("Accent", "AccentSoft"),
+            "error" => ("Danger", "DangerSoft"),
+            _ => ("Ok", "OkSoft"),
+        };
+        HealthDot.Fill = (Brush)FindResource(dot);
+        HealthRing.Fill = (Brush)FindResource(ring);
+        HealthText.Text = text;
+    }
+
+    /// <summary>活动任务数（activeTaskCount）：驱动 .dl-badge、首页那颗图标钮（App.vue:1350-1358）
+    /// 与侧栏健康的 busy 态。任务队列没接之前恒为 0，按钮和角标都保持 Collapsed。</summary>
+    int _activeTasks;
+    internal int ActiveTaskCount
+    {
+        get => _activeTasks;
+        set { _activeTasks = value; ApplyTaskBadge(); }
+    }
+
+    void ApplyTaskBadge()
+    {
+        bool has = _activeTasks > 0;
+        var vis = has ? Visibility.Visible : Visibility.Collapsed;
+        DlBadge.Visibility = vis;
+        DlBadgeText.Text = _activeTasks.ToString();
+        DlBadgeCompact.Visibility = vis;
+        DlBadgeCompactText.Text = _activeTasks.ToString();
+        // 首页的图标钮只在「首页 且 有活动任务」时出现（App.vue:1351）
+        BtnTopHomeDl.Visibility = has && _view == "home" ? vis : Visibility.Collapsed;
+        SetLauncherHealth(has ? "busy" : "ok",
+            has ? $"{_activeTasks} 项后台任务进行中" : "全部系统运行正常");
+    }
+
+    // ---------------- 启动失败弹窗（App.vue:1573-1586 ＋ :2313-2325） ----------------
+    System.Windows.Controls.Image? _failBlur;
+    /// <summary>拉起失败／崩溃时调用：标题＋正文（正文是 pre-wrap，换行照原样保留）。</summary>
+    internal void ShowLaunchFailure(string title, string text)
+    {
+        CloseFloats();
+        LaunchFailTitle.Text = title;
+        LaunchFailText.Text = text;
+        // .modal-mask 的 blur(10)（styles.css:535）：先快照再显示
+        _failBlur ??= MaskBlur.Attach(ShellHost, LaunchFailMask, ShellRoot, 10);
+        LaunchFailMask.Visibility = Visibility.Visible;
+    }
+
+    void CloseLaunchFail()
+    {
+        LaunchFailMask.Visibility = Visibility.Collapsed;
+        MaskBlur.Detach(ShellHost, _failBlur);
+        _failBlur = null;
+    }
+
+    /// <summary>@pointerdown.self：点遮罩本体才关，点卡片不关（ModalCard_Down 把事件吃掉）。</summary>
+    void LaunchFail_Mask_Down(object sender, MouseButtonEventArgs e) => CloseLaunchFail();
+    void Mp_Mask_Down(object sender, MouseButtonEventArgs e) => CloseModpackImport();
+    void ModalCard_Down(object sender, MouseButtonEventArgs e) => e.Handled = true;
+
+    void LaunchFail_Reason_Click(object sender, RoutedEventArgs e)
+    {
+        // 原版：openInstanceCenter({id: launchingVersionId, folder: launchingFolder}, 'diagnostics')
+        _s.Log("实例中心（InstanceCenter）下一轮接入：这里要带出错实例的 id 与目录。");
+        CloseLaunchFail();
+    }
+    void LaunchFail_Close_Click(object sender, RoutedEventArgs e) => CloseLaunchFail();
+    void LaunchFail_Export_Click(object sender, RoutedEventArgs e)
+    {
+        // launchFail.exporting 期间按钮 disabled（App.vue:1580），文案转「导出中…」
+        LaunchFailExportBtn.IsEnabled = false;
+        LaunchFailExportText.Text = "导出中…";
+        _s.Log("日志导出未接入：要把本次会话日志与崩溃栈打成文件。");
+        LaunchFailExportText.Text = "导出错误日志";
+        LaunchFailExportBtn.IsEnabled = true;
+    }
+
+    // ---------------- 配置不兼容弹窗（App.vue:1532-1541 ＋ :1720-1724） ----------------
+    /// <summary>配置版本回退检测（configMismatch）未接入，先给出可见性开关。
+    /// 这一层原版是全透明的挡点击层（.menu-overlay 没有底色，.cfg-mismatch-mask 也不写背景），
+    /// 所以不挂 Overlay 也不接 MaskBlur，只有居中的 card 自身有底。</summary>
+    internal void SetConfigMismatch(bool open)
+    {
+        CloseFloats();
+        CfgMismatchMask.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+    }
+    /// <summary>「继续尝试」（App.vue:1537）：只收弹窗，不碰配置文件。</summary>
+    void Cfg_Keep_Click(object sender, RoutedEventArgs e) => SetConfigMismatch(false);
+    /// <summary>「重置设置」（App.vue:1538 onConfigReset）：备份原配置后写回默认值。</summary>
+    void Cfg_Reset_Click(object sender, RoutedEventArgs e)
+    {
+        _s.Log("配置重置未接入：要先把 settings.json 备份成带时间戳的副本，再落默认值。");
+        SetConfigMismatch(false);
+    }
+
+    // ---------------- 整合包导入弹窗（App.vue:1591-1712 ＋ :2452-2624） ----------------
+    System.Windows.Controls.Image? _mpBlur;
+    /// <summary>三态互斥：probing（.mp-loading）／info（主体）／失败（.mp-error ＋ 关闭）。</summary>
+    internal enum MpState { Probing, Info, Failed }
+
+    /// <summary>
+    /// 拖入或点选整合包后的入口（原版 openModpackImport，App.vue:609）：先开遮罩进「解析中」。
+    /// probeModpack 还没移植，所以 info 主体里的字段全部留空壳（各自 Collapsed），
+    /// 等解析结果（format / mcVersion / loader / fileName / innerName / existingInstances / hasPresetKeys）就绪再填。
+    /// </summary>
+    internal void OpenModpackImport(string filePath)
+    {
+        CloseFloats();
+        MpModalCard.MaxWidth = Math.Min(620, Math.Max(240, ActualWidth - 40));
+        MpModalCard.MaxHeight = Math.Max(240, ActualHeight * 0.88);
+        MpCustomName.Text = "";
+        MpFatalError.Text = "";
+        SetModpackState(MpState.Probing);
+        _mpBlur ??= MaskBlur.Attach(ShellHost, MpMask, ShellRoot, 10);
+        MpMask.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>切三态可见性。Info 态里各数据块（tags／冲突框／按键同步／错误行）由填数据的代码各自打开。</summary>
+    internal void SetModpackState(MpState state)
+    {
+        MpLoading.Visibility = state == MpState.Probing ? Visibility.Visible : Visibility.Collapsed;
+        MpInfoBody.Visibility = state == MpState.Info ? Visibility.Visible : Visibility.Collapsed;
+        MpErrorBody.Visibility = state == MpState.Failed ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    void CloseModpackImport()
+    {
+        MpMask.Visibility = Visibility.Collapsed;
+        MaskBlur.Detach(ShellHost, _mpBlur);
+        _mpBlur = null;
+    }
+
+    /// <summary>取消／关闭（App.vue:1701／:1710）。</summary>
+    void Mp_Cancel_Click(object sender, RoutedEventArgs e) => CloseModpackImport();
+
+    /// <summary>确认导入（App.vue:1702 confirmModpackImport）：整合包安装链路未移植，先记录缺什么。</summary>
+    void Mp_Confirm_Click(object sender, RoutedEventArgs e)
+    {
+        _s.Log("整合包导入未接入：要 mrpack/curseforge 解析、资产下载与实例冲突处理（"
+            + (MpActUpdate.IsChecked == true ? "更新" : MpActOverwrite.IsChecked == true ? "覆盖"
+               : MpActNew.IsChecked == true ? "新实例" : "重新命名") + "）。");
+        CloseModpackImport();
+    }
+
+    /// <summary>
+    /// conflictAction 变化（App.vue:599 onMpConflictActionChange）：
+    /// update／overwrite 才需要选实例＋看影响＋勾确认（mpNeedsReplaceConfirm，:574）；
+    /// 重新命名／新实例则收起这三块。确认勾选在换动作时要清掉。
+    /// </summary>
+    void MpConflictAction_Changed(object sender, RoutedEventArgs e)
+    {
+        // XAML 解析期 MpActRename 的 IsChecked="True" 就会抛一次 Checked，
+        // 那时下面这些元素还没建出来，必须等加载完再动它们
+        if (!IsLoaded || MpExistingSelect is null) return;
+        bool needConfirm = MpActUpdate.IsChecked == true || MpActOverwrite.IsChecked == true;
+        MpExistingSelect.Visibility = needConfirm ? Visibility.Visible : Visibility.Collapsed;
+        MpImpact.Visibility = needConfirm ? Visibility.Visible : Visibility.Collapsed;
+        MpReplaceConfirm.Visibility = needConfirm ? Visibility.Visible : Visibility.Collapsed;
+        if (needConfirm)
+        {
+            MpReplaceConfirm.IsChecked = false;
+            bool update = MpActUpdate.IsChecked == true;
+            // 两段影响说明照 App.vue:1676／:1679 原文；.mp-impact.danger 只改字色（:2610-2612），不画边框
+            MpImpactText.Text = update
+                ? "将重建包管理文件并恢复用户存档、配置及非包管理文件；同名的新包 MOD 优先。操作失败会恢复完整备份。"
+                : "将重建实例包文件；存档、配置、截图、资源包及可识别的用户 MOD 会保留，其他未知顶层内容可能被移除。操作失败会恢复完整备份。";
+            MpImpactText.Foreground = (Brush)FindResource(update ? "Fg2" : "Danger");
+            MpReplaceConfirmText.Text = update
+                ? "我已确认上述影响范围，并同意更新所选实例。"
+                : "我已确认上述影响范围，并同意覆盖所选实例。";
+        }
+    }
     internal void AccountMenu_Click(object sender, RoutedEventArgs e)
     {
         // 原版账号卡上的 ⋯ 是切到 accounts 视图，不是跳设置
