@@ -1,4 +1,4 @@
-<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:local="clr-namespace:Wuhuicl.App"
                     xmlns:ctl="clr-namespace:Wuhuicl.App.Controls">
@@ -16,6 +16,8 @@
     <FontFamily x:Key="MonoFont">Cascadia Code, Cascadia Mono, Consolas, Microsoft YaHei UI</FontFamily>
 
     <local:BoolVis x:Key="BoolVis"/>
+    <local:BoolShift x:Key="BoolShift"/>
+    <local:BoolOne x:Key="BoolOne"/>
     <local:InvertBool x:Key="InvBool"/>
     <local:CountVis x:Key="CountVis"/>
     <local:BrushByKey x:Key="BrushByKey"/>
@@ -251,6 +253,60 @@
     </Style>
 
     <!-- .icon-btn：32×32，radius 6，内层 svg 16×16 -->
+    <!-- 实例中心卡片（.ic-card — InstanceCenter.vue:109）：border 1 / radius 16 / bg card；
+         .ic-grid .ic-card:hover = accent-soft 底（无位移，契约 §6.4） -->
+    <Style x:Key="IcCard" TargetType="Button">
+        <Setter Property="Background" Value="{DynamicResource Card}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="20"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="16"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
+                            <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 实例管理中心页签（.ic-tabs button — InstanceCenter.vue:109）：padding 10 24 / radius 12 /
+         透明底 text-dim；.active = accent-soft 底 + accent 字 + 700 -->
+    <Style x:Key="IcTab" TargetType="Button">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+        <Setter Property="Padding" Value="24,10"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="12"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="IcTabOn" TargetType="Button" BasedOn="{StaticResource IcTab}">
+        <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+        <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+        <Setter Property="FontWeight" Value="Bold"/>
+    </Style>
+
     <Style x:Key="IconBtn" TargetType="Button">
         <Setter Property="Width" Value="32"/>
         <Setter Property="Height" Value="32"/>
@@ -308,13 +364,41 @@
                             </Trigger.ExitActions>
                             <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
                         </Trigger>
-                        <!-- .icon-btn:active = scale(0.93)，140ms（styles.css:290-292） -->
+                        <!-- .icon-btn:active = scale(0.93)，140ms ease（styles.css:290-292，对齐 .btn 家族）；
+                             模板 b 已带 ScaleTransform，这里动画它的 ScaleX/ScaleY，不能用 Setter 整体换对象 -->
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="b" Property="RenderTransform">
-                                <Setter.Value>
-                                    <ScaleTransform ScaleX="0.93" ScaleY="0.93"/>
-                                </Setter.Value>
-                            </Setter>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="b"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.14" Value="0.93"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="b"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.14" Value="0.93"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="b"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.14" Value="1"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="b"
+                                                                       Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.14" Value="1"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.45"/>
@@ -426,13 +510,33 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ContentControl">
-                    <Grid>
+                    <!-- .spin：rotate 360deg / 0.8s linear infinite（styles.css:734-736） -->
+                    <Grid x:Name="wheel" RenderTransformOrigin="0.5,0.5">
+                        <Grid.RenderTransform>
+                            <RotateTransform Angle="0"/>
+                        </Grid.RenderTransform>
                         <Border CornerRadius="7" BorderThickness="2"
                                 BorderBrush="{DynamicResource AccentSoft}"/>
                         <Path Data="M1,7 A6,6 0 0,1 13,7" Stroke="{DynamicResource Accent}"
                               StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                               Fill="{x:Null}"/>
                     </Grid>
+                    <ControlTemplate.Triggers>
+                        <!-- EventTrigger Loaded 的 Storyboard 会跑错名字域（找不到 wheel），属性触发器没有这个问题；
+                             隐藏时不显式停：.spin 只在读取中态短暂可见，常驻成本可忽略 -->
+                        <Trigger Property="IsVisible" Value="True">
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="wheel"
+                                                         Storyboard.TargetProperty="RenderTransform.Angle"
+                                                         From="0" To="360" Duration="0:0:0.8"
+                                                         RepeatBehavior="Forever"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -445,6 +549,10 @@
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
         <Setter Property="Cursor" Value="Hand"/>
+        <!-- hover 底色 card-2 淡入 0.15s（原版 .win-btn 的 background transition 0.15s）；字色仍走瞬时 Trigger -->
+        <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
+        <Setter Property="ctl:HoverFade.BrushKey" Value="CardSoft"/>
+        <Setter Property="ctl:HoverFade.DurationMs" Value="150"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -453,7 +561,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource CardSoft}"/>
+                            <!-- 底色淡入走 HoverFade（本地值优先级高于 Trigger，背景 Setter 必须删） -->
                             <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
@@ -463,6 +571,8 @@
     </Style>
     <!-- .win-close:hover = danger 底 + 白字 -->
     <Style x:Key="WinClose" TargetType="Button" BasedOn="{StaticResource WinBtn}">
+        <!-- Enabled 与 0.15s 时长继承 WinBtn，只把淡入色换成 danger；白字仍走瞬时 Trigger -->
+        <Setter Property="ctl:HoverFade.BrushKey" Value="Danger"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -471,7 +581,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource Danger}"/>
+                            <!-- 底色淡入走 HoverFade 继承链（danger），Foreground 白字仍瞬时 -->
                             <Setter Property="Foreground" Value="#FFFFFFFF"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
@@ -487,9 +597,13 @@
         <Setter Property="FontSize" Value="13"/>
         <Setter Property="FontWeight" Value="Normal"/>
         <Setter Property="Foreground" Value="{DynamicResource Fg2}"/>
+        <!-- hover 底色 card-2 淡入 0.15s（App.vue:2108-2113 的 .top-btn transition 0.15s）；
+             HoverFade 挂本地 Background，样式里的 IsMouseOver 背景 Setter 必须删（不生效还误导） -->
+        <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
+        <Setter Property="ctl:HoverFade.BrushKey" Value="CardSoft"/>
+        <Setter Property="ctl:HoverFade.DurationMs" Value="150"/>
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
                 <!-- .top-btn:hover 的字色是 accent-2 而不是 accent（App.vue:2092） -->
                 <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
             </Trigger>
@@ -607,7 +721,8 @@
                                     <Path x:Name="caret" Style="{StaticResource IconStroke}"
                                           Data="M9,6 L15,12 L9,18" StrokeThickness="2"
                                           RenderTransformOrigin="0.5,0.5">
-                                        <Path.RenderTransform><RotateTransform Angle="0"/></Path.RenderTransform>
+                                        <!-- 带名字：展开动画直接驱动它的 Angle，Trigger 不再整体换 transform -->
+                                        <Path.RenderTransform><RotateTransform x:Name="caretRot" Angle="0"/></Path.RenderTransform>
                                     </Path>
                                 </Canvas>
                             </Viewbox>
@@ -617,10 +732,30 @@
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
                         </Trigger>
+                        <!-- .nav-caret：展开 rotate 90deg / 0.18s ease（App.vue:1910-1913） -->
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="caret" Property="RenderTransform">
-                                <Setter.Value><RotateTransform Angle="90"/></Setter.Value>
-                            </Setter>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="caretRot"
+                                                                       Storyboard.TargetProperty="Angle">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.18" Value="90"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimationUsingKeyFrames Storyboard.TargetName="caretRot"
+                                                                       Storyboard.TargetProperty="Angle">
+                                            <SplineDoubleKeyFrame KeyTime="0:0:0.18" Value="0"
+                                                                  KeySpline="0.25,0.1 0.25,1"/>
+                                        </DoubleAnimationUsingKeyFrames>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -1107,6 +1242,11 @@
         <!-- .instance-play 的图标色是 accent-2（HomeView.vue:909） -->
         <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
         <Setter Property="Cursor" Value="Hand"/>
+        <!-- hover 变 accent 实色淡入 0.16s（原版 .icon-btn 家族 background 0.16s）：HoverFade 以
+             「透明副本淡入到 accent」表达，离开时淡回透明再恢复 AccentSoft 底；字色仍走瞬时 Trigger -->
+        <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
+        <Setter Property="ctl:HoverFade.BrushKey" Value="Accent"/>
+        <Setter Property="ctl:HoverFade.DurationMs" Value="160"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -1115,7 +1255,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource Accent}"/>
+                            <!-- 底色淡入走 HoverFade（Accent），字色仍瞬时 -->
                             <Setter Property="Foreground" Value="{DynamicResource AccentFg}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
@@ -1147,17 +1287,17 @@
     <Style x:Key="RowItem" TargetType="ListBoxItem">
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <!-- hover 底色淡入 130ms（默认键 Hover、默认时长）；淡入色画在 ListBoxItem.Background 上，
+             模板内层 b 改走 TemplateBinding 才能透出来；选中底色仍由模板 Trigger 瞬时切换 -->
+        <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ListBoxItem">
-                    <Border x:Name="b" Background="Transparent"
+                    <Border x:Name="b" Background="{TemplateBinding Background}"
                             BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
                         <ContentPresenter Margin="12" MinHeight="48" VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource Hover}"/>
-                        </Trigger>
                         <Trigger Property="IsSelected" Value="True">
                             <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
                         </Trigger>
@@ -1171,16 +1311,16 @@
     <Style x:Key="RowCard" TargetType="ListBoxItem">
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <!-- hover 底色淡入 card-2（同 RowItem 的做法，130ms 默认）；选中底色仍由模板 Trigger 瞬时切换 -->
+        <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
+        <Setter Property="ctl:HoverFade.BrushKey" Value="CardSoft"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ListBoxItem">
-                    <Border x:Name="b" Background="Transparent" Margin="0,2" CornerRadius="10" Padding="12,8">
+                    <Border x:Name="b" Background="{TemplateBinding Background}" Margin="0,2" CornerRadius="10" Padding="12,8">
                         <ContentPresenter VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="b" Property="Background" Value="{DynamicResource CardSoft}"/>
-                        </Trigger>
                         <Trigger Property="IsSelected" Value="True">
                             <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
                         </Trigger>
@@ -1380,16 +1520,57 @@
                     <Border x:Name="track" Width="40" Height="22" CornerRadius="11"
                             Background="{DynamicResource CardSoft}"
                             BorderBrush="{DynamicResource Line}" BorderThickness="1">
-                        <Ellipse x:Name="knob" Width="14" Height="14" Fill="{DynamicResource Fg2}"
-                                 HorizontalAlignment="Left" VerticalAlignment="Center" Margin="3,0,0,0"/>
+                        <Grid>
+                            <!-- 选中底：accent 覆盖层。Opacity 基值绑 IsChecked（初始态正确），
+                                 动画只在切换过渡期覆盖（FillBehavior.Stop 回基值=同值无跳变）（styles.css:425） -->
+                            <Border x:Name="on" CornerRadius="11" Background="{DynamicResource Accent}"
+                                    Margin="-1"
+                                    Opacity="{Binding IsChecked, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource BoolOne}}"/>
+                            <!-- 滑块：transform 位移 3 到 21，190ms ease-out（styles.css:437-447）；
+                                 Margin 3 保留为占位基准，动画走 TranslateTransform.X = 21-3 = 18 -->
+                            <Ellipse x:Name="knob" Width="14" Height="14" Fill="{DynamicResource Fg2}"
+                                     HorizontalAlignment="Left" VerticalAlignment="Center" Margin="3,0,0,0">
+                                <Ellipse.RenderTransform>
+                                    <TranslateTransform X="{Binding IsChecked, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource BoolShift}}"/>
+                                </Ellipse.RenderTransform>
+                            </Ellipse>
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <!-- 原版选中态是纯色 accent（styles.css:396-399），不是 accent-grad -->
-                            <Setter TargetName="track" Property="Background" Value="{DynamicResource Accent}"/>
-                            <Setter TargetName="track" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            <!-- 颜色（knob 变白）保留瞬时 Setter：共享画刷不能逐实例动画，
+                                 且 190ms 内的纯色变化感知很弱；位移与底色出现走动画 -->
                             <Setter TargetName="knob" Property="Fill" Value="{DynamicResource AccentFg}"/>
-                            <Setter TargetName="knob" Property="Margin" Value="21,0,0,0"/>
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="on" Storyboard.TargetProperty="Opacity"
+                                                         To="1" Duration="0:0:0.19" FillBehavior="Stop"/>
+                                        <DoubleAnimation Storyboard.TargetName="knob"
+                                                         Storyboard.TargetProperty="RenderTransform.X"
+                                                         To="18" Duration="0:0:0.19" FillBehavior="Stop">
+                                            <DoubleAnimation.EasingFunction>
+                                                <QuadraticEase EasingMode="EaseOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="on" Storyboard.TargetProperty="Opacity"
+                                                         To="0" Duration="0:0:0.19" FillBehavior="Stop"/>
+                                        <DoubleAnimation Storyboard.TargetName="knob"
+                                                         Storyboard.TargetProperty="RenderTransform.X"
+                                                         To="0" Duration="0:0:0.19" FillBehavior="Stop">
+                                            <DoubleAnimation.EasingFunction>
+                                                <QuadraticEase EasingMode="EaseOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.65"/>
@@ -1413,10 +1594,12 @@
                                 <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <ContentPresenter VerticalAlignment="Center"/>
-                            <!-- 箭头内联画，不依赖图标字典的合并顺序 -->
+                            <!-- 箭头内联画，不依赖图标字典的合并顺序；
+                                 原版 .select 的 chevron 是 14px 盒、描边随 14/24 viewBox 缩到很细（≈1.2 视觉），
+                                 这里 12px 盒 + 1.4 等价 -->
                             <Path Grid.Column="1" Style="{StaticResource IconStroke}"
-                                  Data="M6,9 L12,15 L18,9" StrokeThickness="2"
-                                  Width="14" Height="14" Stretch="Uniform" Margin="8,0,0,0"
+                                  Data="M6,9 L12,15 L18,9" StrokeThickness="1.4"
+                                  Width="12" Height="12" Stretch="Uniform" Margin="8,0,0,0"
                                   VerticalAlignment="Center"/>
                         </Grid>
                     </Border>
@@ -1488,9 +1671,12 @@
         <Setter Property="FontSize" Value="12"/>
         <Setter Property="FontWeight" Value="Normal"/>
         <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        <!-- hover 底色 accent-soft 淡入 0.14s（原版 .menu-item 的 background 0.14s ease，styles.css:612） -->
+        <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
+        <Setter Property="ctl:HoverFade.BrushKey" Value="AccentSoft"/>
+        <Setter Property="ctl:HoverFade.DurationMs" Value="140"/>
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
                 <!-- .menu-item:hover / .active：底 accent-soft、字 accent-2（styles.css:618-624） -->
                 <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
             </Trigger>

@@ -1,4 +1,4 @@
-using System.Windows.Controls;
+﻿using System.Windows.Controls;
 
 namespace Wuhuicl.App.Pages;
 
@@ -23,10 +23,9 @@ public partial class VersionsPage : UserControl
         var tab = TabDownload.IsChecked == true ? TabDownload : TabInstalled;
         var b = tab.TransformToVisual(TabsHost).TransformBounds(
             new System.Windows.Rect(0, 0, tab.ActualWidth, tab.ActualHeight));
-        System.Windows.Controls.Canvas.SetLeft(TabsBlob, b.X);
-        System.Windows.Controls.Canvas.SetTop(TabsBlob, b.Y);
-        TabsBlob.Width = b.Width;
-        TabsBlob.Height = b.Height;
+        // .game-tabs-blob：left/width 190ms var(--ease-out) + opacity 0.15s（GameView.vue:1891）
+        Services.Motion.SlideBlob(TabsBlob, b.X, b.Y, b.Width, b.Height,
+            instant: TabsBlob.Opacity == 0 || TabsBlob.Width <= 0);
         TabsBlob.Opacity = 1;
     }
 
@@ -53,9 +52,12 @@ public partial class VersionsPage : UserControl
     void DeleteVersion_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.DeleteVersion_Click(sender, e);
     void Install_Click(object sender, System.Windows.Input.MouseButtonEventArgs e) => Shell.Install_Click(sender, new System.Windows.RoutedEventArgs());
     void Install_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.Install_Click(sender, e);
-    void ShowSnap_Changed(object sender, System.Windows.RoutedEventArgs e) => Shell.ShowSnap_Changed(sender, e);
     void LaunchRow_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.RowPlay_Click(sender, e);
-    void RowMore_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.RowMore_Click(sender, e);
+    void RowMore_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if ((sender as System.Windows.FrameworkElement)?.Tag is Services.VersionRow v)
+            Shell.OpenInstanceCenter(v.Id);
+    }
 
     /// <summary>页签切换只切本页可见体，不动全局状态。</summary>
     void Tab_Changed(object sender, System.Windows.RoutedEventArgs e)
@@ -71,4 +73,23 @@ public partial class VersionsPage : UserControl
     void FolderMore_Click(object sender, System.Windows.RoutedEventArgs e)
         => FolderActions.Visibility = FolderActions.Visibility == System.Windows.Visibility.Visible
             ? System.Windows.Visibility.Collapsed : System.Windows.Visibility.Visible;
+
+    // ---------------- 收藏 / 改名（GameView.vue:1144-1161） ----------------
+
+    /// <summary>fav-btn @click=toggleFavorite（:1150）。</summary>
+    void FavRow_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if ((sender as System.Windows.FrameworkElement)?.Tag is not Services.VersionRow v) return;
+        bool now = Shell._s.ToggleFavorite(v.Id);
+        Shell._s.Status = now ? $"已收藏 {v.Label}" : $"已取消收藏 {v.Label}";
+    }
+
+    /// <summary>instance-name @click=openRenameFor（:1161）：就地弹输入框改名（Directory.Move 语义）。</summary>
+    void RenameRow_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if ((sender as System.Windows.FrameworkElement)?.Tag is not Services.VersionRow v) return;
+        string? newName = Shell.PromptText("重命名实例", "新的实例名称", v.Label);
+        if (string.IsNullOrWhiteSpace(newName) || newName == v.Label) return;
+        Shell.RenameVersion(v.Id, newName.Trim());
+    }
 }

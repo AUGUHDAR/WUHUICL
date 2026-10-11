@@ -1,7 +1,8 @@
-<UserControl x:Class="Wuhuicl.App.Pages.SettingsPage"
+﻿<UserControl x:Class="Wuhuicl.App.Pages.SettingsPage"
                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-               xmlns:ctl="clr-namespace:Wuhuicl.App.Controls">
+               xmlns:ctl="clr-namespace:Wuhuicl.App.Controls"
+               Loaded="SettingsPage_Loaded">
 
     <!-- 版式来源：SettingsView.vue（模板 :592-1230，样式 :1232-1892）+ docs/UI_GEOMETRY_PAGES.md §2。
          取最终生效值：@media 之后那串压缩单行规则（:1833-1885）优先级同级但源码在后，压过前面的基线。
@@ -19,6 +20,27 @@
            两个 scope 各用独立 GroupName，等于原版 lastCategories 的按范围记忆选择（:47-49）。 -->
 
     <UserControl.Resources>
+        <!-- .capsule（HomeLayoutEditor 的模式/方式选择胶囊）：30 高 / padding 0 14 / 胶囊圆 /
+             底 card-2 描边 13px；选中底 accent-soft + 字 accent（SettingsView:1242 的选中态同款）。
+             键名 St 前缀，避免与画刷键同名（契约 §4）。 -->
+        <Style x:Key="StCapsule" TargetType="Button" BasedOn="{StaticResource Btn}">
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="MinHeight" Value="30"/>
+            <Setter Property="Padding" Value="14,0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="ctl:CssRadius.Pill" Value="True"/>
+        </Style>
+
+        <!-- 胶囊选中态：由代码按 Tag 比对设置值切换 -->
+        <Style x:Key="StCapsuleOn" TargetType="Button" BasedOn="{StaticResource StCapsule}">
+            <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+            <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+        </Style>
+
 
         <!-- .content .page-title = var(text-title) 24px / line-height 1.35（ui-system.css:6 + :12），
              它压过 styles.css:503-508 的 20px；700 字重来自 styles.css:506，契约 §2 也写 24px/Bold。
@@ -511,10 +533,120 @@
                                                        Text="桌面玻璃、颜色与图片"/>
                                         </StackPanel>
                                     </ToggleButton>
-                                    <!-- .layout-setting-body：padding 0 18 14（:499）// 占位：组件体未移植 -->
+                                    <!-- .layout-setting-body：padding 0 18 14（:499）。
+                                         组件体复刻 1.1.10 HomeLayoutEditor.vue:221-359（背景段）：
+                                         模式三胶囊（系统桌面/纯色/图片 :233-243）＋ color 的色板行（:245-256）＋
+                                         image 的 预览/导入/显示方式/透明度/模糊（:258-357）。
+                                         .bg-row：flex align-center gap 12；标签 .muted.bg-label 12px。 -->
                                     <Border Padding="18,0,18,14"
                                             Visibility="{Binding IsChecked, ElementName=BackgroundHead,
-                                                          Converter={StaticResource BoolVis}}"/>
+                                                          Converter={StaticResource BoolVis}}">
+                                        <StackPanel>
+
+                                            <!-- .layout-head：列流，右侧「恢复默认」btn-sm ghost（:227） -->
+                                            <Grid Margin="0,0,0,12">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Style="{StaticResource StGroupTitle}" Text="窗口背景"/>
+                                                    <TextBlock Style="{StaticResource StGroupHint}" Text="桌面玻璃的透出程度跟随当前主题；也可选择纯色或自定义图片。"/>
+                                                </StackPanel>
+                                                <Button x:Name="BgResetBtn" Grid.Column="1" Style="{StaticResource BtnSmGhost}"
+                                                        Content="恢复默认" VerticalAlignment="Center" Click="BgReset_Click"/>
+                                            </Grid>
+
+                                            <!-- .bg-modes（:233-243）：三胶囊 系统桌面 / 纯色 / 图片 -->
+                                            <StackPanel x:Name="BgModeRow" Orientation="Horizontal" Margin="0,0,0,12">
+                                                <Button x:Name="BgModeSystem" Style="{StaticResource StCapsule}" Tag="none"
+                                                        Content="系统桌面" Click="BgMode_Click"/>
+                                                <Button x:Name="BgModeColor" Style="{StaticResource StCapsule}" Tag="color"
+                                                        Content="纯色" Margin="8,0,0,0" Click="BgMode_Click"/>
+                                                <Button x:Name="BgModeImage" Style="{StaticResource StCapsule}" Tag="image"
+                                                        Content="图片" Margin="8,0,0,0" Click="BgMode_Click"/>
+                                            </StackPanel>
+
+                                            <!-- mode=color 的色板行（:245-256）：K 是原生取色器，WPF 没有对应控件，
+                                                 落成预设色板 + 当前 hex 文本，语义等价（选一个纯色） -->
+                                            <StackPanel x:Name="BgColorRow" Orientation="Horizontal" Margin="0,0,0,12"
+                                                        Visibility="Collapsed">
+                                                <TextBlock Text="背景色" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                           VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                                <StackPanel x:Name="BgColorSwatches" Orientation="Horizontal"/>
+                                                <TextBlock x:Name="BgColorHex" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                           VerticalAlignment="Center" Margin="12,0,0,0"
+                                                           FontFamily="{StaticResource MonoFont}"/>
+                                            </StackPanel>
+
+                                            <!-- mode=image 段（:258-357） -->
+                                            <StackPanel x:Name="BgImageSection" Visibility="Collapsed">
+
+                                                <!-- .image-preview：图片预览或空态文案（:259-269） -->
+                                                <Border x:Name="BgPreviewHost" Height="150" CornerRadius="10"
+                                                        BorderBrush="{DynamicResource Line}" BorderThickness="1"
+                                                        Background="{DynamicResource CardSoft}" Margin="0,0,0,12"
+                                                        ClipToBounds="True">
+                                                    <Grid>
+                                                        <Image x:Name="BgPreviewImage" Stretch="UniformToFill" Visibility="Collapsed"/>
+                                                        <TextBlock x:Name="BgPreviewEmpty" Text="尚未导入背景图片"
+                                                                   FontSize="13" Foreground="{DynamicResource Fg2}"
+                                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                    </Grid>
+                                                </Border>
+
+                                                <!-- .bg-row 背景图片：导入单张…（:270-281）；K 的「添加多张/自动切换」是轮播列表管理，
+                                                     预渲染版先落单张主链路 -->
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                                    <TextBlock Text="背景图片" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                                    <Button x:Name="BgPickBtn" Style="{StaticResource BtnSmGhost}" Content="导入单张…"
+                                                            Click="BgPick_Click"/>
+                                                    <TextBlock x:Name="BgPathText" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                               VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="CharacterEllipsis"
+                                                               Text="未选择"/>
+                                                </StackPanel>
+
+                                                <!-- .bg-row 显示方式（:317-330）：填充 / 适应 / 裁切 -->
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                                    <TextBlock Text="显示方式" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                                    <Button x:Name="BgFitFill" Style="{StaticResource StCapsule}" Tag="fill"
+                                                            Content="填充" Click="BgFit_Click"/>
+                                                    <Button x:Name="BgFitFit" Style="{StaticResource StCapsule}" Tag="fit"
+                                                            Content="适应" Margin="8,0,0,0" Click="BgFit_Click"/>
+                                                    <Button x:Name="BgFitCrop" Style="{StaticResource StCapsule}" Tag="crop"
+                                                            Content="裁切" Margin="8,0,0,0" Click="BgFit_Click"/>
+                                                </StackPanel>
+
+                                                <!-- .bg-row 图片透明度（:331-343）：滑条值＝1 减 不透明度，显示的百分比越大越透 -->
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                                    <TextBlock Text="图片透明度" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                                    <Slider x:Name="BgOpacitySlider" Width="200" Minimum="0" Maximum="1" SmallChange="0.05"
+                                                            LargeChange="0.1" TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                                            VerticalAlignment="Center" ValueChanged="BgOpacity_Changed"/>
+                                                    <TextBlock x:Name="BgOpacityVal" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                               VerticalAlignment="Center" Margin="12,0,0,0" Text="50%"/>
+                                                </StackPanel>
+
+                                                <!-- .bg-row 图片模糊（:344-356）：0-40px 步进 2 -->
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                                    <TextBlock Text="图片模糊" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                                    <Slider x:Name="BgBlurSlider" Width="200" Minimum="0" Maximum="40" SmallChange="2"
+                                                            LargeChange="4" TickFrequency="2" IsSnapToTickEnabled="True"
+                                                            VerticalAlignment="Center" ValueChanged="BgBlur_Changed"/>
+                                                    <TextBlock x:Name="BgBlurVal" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                               VerticalAlignment="Center" Margin="12,0,0,0" Text="0px"/>
+                                                </StackPanel>
+
+                                                <!-- :357 的说明行 -->
+                                                <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
+                                                           Text="透明度越高图片越透；图片模糊单独控制清晰度。系统桌面毛玻璃由操作系统管理，不受这两个图片选项影响。"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Border>
                                 </StackPanel>
                             </Border>
                             <Border Style="{StaticResource Panel}" Padding="0">
@@ -550,10 +682,11 @@
                                 <StackPanel Grid.Column="0">
                                     <TextBlock Style="{StaticResource StGroupTitle}" Text="启动后关闭启动器"/>
                                     <TextBlock Style="{StaticResource StGroupHint}" Margin="0"
-                                               Text="游戏成功启动后自动退出 KAMUCL"/>
+                                               Text="游戏成功启动后自动退出 WUHUICL"/>
                                 </StackPanel>
-                                <!-- store.settings.closeAfterLaunch 默认 false（settings.ts:63） -->
-                                <CheckBox Grid.Column="2" Style="{StaticResource Switch}" VerticalAlignment="Center"/>
+                                <CheckBox x:Name="ChkCloseAfter" Grid.Column="2" Style="{StaticResource Switch}"
+                                          VerticalAlignment="Center"
+                                          Checked="Setting_Changed" Unchecked="Setting_Changed"/>
                             </Grid>
                         </Border>
                         <Border Style="{StaticResource Panel}" Padding="18,14" Margin="0,0,0,12">
@@ -568,8 +701,9 @@
                                     <TextBlock Style="{StaticResource StGroupHint}" Margin="0"
                                                Text="微软登录失败而浏览器正常时可开启。默认直连；开启后仍保留 TLS 证书校验。"/>
                                 </StackPanel>
-                                <!-- store.settings.msUseProxy 默认未定义 → false（:1043） -->
-                                <CheckBox Grid.Column="2" Style="{StaticResource Switch}" VerticalAlignment="Center"/>
+                                <CheckBox x:Name="ChkMsProxy" Grid.Column="2" Style="{StaticResource Switch}"
+                                          VerticalAlignment="Center"
+                                          Checked="Setting_Changed" Unchecked="Setting_Changed"/>
                             </Grid>
                         </Border>
 
@@ -1122,7 +1256,7 @@
                                                 <StackPanel Grid.Column="0">
                                                     <TextBlock Text="自动分配（推荐）" FontSize="13" FontWeight="SemiBold"/>
                                                     <!-- autoMemoryText 在拿到本机内存前就是「…」（:413）// 占位：等系统信息接入 -->
-                                                    <TextBlock Margin="0,4,0,0" FontSize="12" LineHeight="18.6"
+                                                    <TextBlock x:Name="AutoMemDesc" Margin="0,4,0,0" FontSize="12" LineHeight="18.6"
                                                                LineStackingStrategy="BlockLineHeight"
                                                                Foreground="{DynamicResource Fg2}" TextWrapping="Wrap"
                                                                Text="按物理内存 1/4 自动分配（本机当前 …，2-8GB 区间），启动时实时生效；开启后禁用手动调节。"/>
@@ -1210,11 +1344,24 @@
                                                     <ColumnDefinition Width="8"/>
                                                     <ColumnDefinition Width="Auto"/>
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Grid.Column="0" Text="正在读取本机内存信息…" FontSize="12"
+                                                <TextBlock x:Name="MemInfoText" Grid.Column="0" Text="正在读取本机内存信息…" FontSize="12"
                                                            Foreground="{DynamicResource Fg2}" VerticalAlignment="Center"
                                                            TextWrapping="Wrap"/>
-                                                <Button Grid.Column="2" Style="{StaticResource StLinkBtn}" Content="刷新"/>
+                                                <Button Grid.Column="2" Style="{StaticResource StLinkBtn}" Content="刷新"
+                                                        Click="MemInfoRefresh_Click"/>
                                             </Grid>
+
+                                            <!-- 整理系统内存 + 启动前整理（SettingsView.vue :858-884 的等价区） -->
+                                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                                <Button x:Name="BtnOrganizeMem" Style="{StaticResource BtnGhost}"
+                                                        MinHeight="36" Padding="14,6" FontSize="13"
+                                                        Content="整理系统内存" Click="OrganizeMem_Click"/>
+                                                <CheckBox x:Name="ChkOrganizeBefore" Content="启动前整理" FontSize="13"
+                                                          VerticalAlignment="Center" Margin="16,0,0,0"
+                                                          Checked="OrganizeBefore_Changed" Unchecked="OrganizeBefore_Changed"/>
+                                            </StackPanel>
+                                            <TextBlock Style="{StaticResource StGroupHint}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                                       Text="整理可回收工作集；运行中的游戏和受保护进程会跳过。内存可能随进程活动回涨。"/>
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
@@ -1579,9 +1726,9 @@
                                     <TextBlock Style="{StaticResource StGroupHint}" Margin="0"
                                                Text="仅影响新安装的版本。开启后独立保存存档、模组与配置；已有实例在游戏版本页调整。"/>
                                 </StackPanel>
-                                <!-- settings.defaultIsolation 默认 true（settings.ts:53） -->
-                                <CheckBox Grid.Column="2" Style="{StaticResource Switch}" IsChecked="True"
-                                          VerticalAlignment="Center"/>
+                                <CheckBox x:Name="ChkDefaultIso" Grid.Column="2" Style="{StaticResource Switch}"
+                                          IsChecked="True" VerticalAlignment="Center"
+                                          Checked="Setting_Changed" Unchecked="Setting_Changed"/>
                             </Grid>
                         </Border>
                     </StackPanel>

@@ -10,15 +10,23 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- 回收站删除用（Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile + RecycleOption）；
+         框架自带程序集，不是 NuGet 包。 -->
+    <UseVisualBasic>true</UseVisualBasic>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- 素材按文件读取（SkinRenderer.LoadAsset 走 AppContext.BaseDirectory），
-       所以必须 CopyToOutputDirectory；用 Resource 内嵌进 exe 的话磁盘上没有文件，
-       界面就会静默降级成无图——之前 hero.png 就是这么"加载不出来"的。 -->
+       所以必须 CopyToOutputDirectory；单文件发布时磁盘上没有这些文件，
+       LoadAsset 会回退到下面的 EmbeddedResource（皮肤 UV 裁剪与窗口图标都依赖它）。 -->
   <ItemGroup>
     <None Include="Assets\skin.png" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Assets\hero\*.png" CopyToOutputDirectory="PreserveNewest" LinkBase="Assets\hero" />
+    <EmbeddedResource Include="Assets\skin.png" LogicalName="Wuhuicl.App.Assets.skin.png" />
+    <EmbeddedResource Include="Assets\kamucl-bridge.jar" LogicalName="Wuhuicl.App.Assets.kamucl-bridge.jar" />
+    <EmbeddedResource Include="Assets\app.ico" LogicalName="Wuhuicl.App.Assets.app.ico" />
+    <EmbeddedResource Include="Assets\hero\*.png" LogicalName="Wuhuicl.App.Assets.hero.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,10 +1,10 @@
+﻿using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
-using System.Windows.Threading;
 
 namespace Wuhuicl.App.Controls;
 
@@ -20,6 +20,7 @@ namespace Wuhuicl.App.Controls;
 ///   看 (0,16,0)，初始 yaw=-0.35（SkinViewer3D.vue:18,95,99）。
 /// · 光：环境白 + 平行白自 (-15,30,50)（:103-105）。
 /// · 交互：拖拽 yaw+=dx·0.01 / pitch 夹 ±75°，滚轮 zoom 夹 0.5..3，双击回位（:76-98）。
+/// 帧驱动 = CompositionTarget.Rendering（vsync 对齐 = 原版 rAF；走路/拖拽期间订阅，收敛后退订）。
 /// 贴图最近邻预放大 16×：WPF 3D 采样固定双线性，放大后采样点落在纹素内部，视觉≈pixelated。
 /// </summary>
 public sealed class SkinDoll3D : Viewport3D
@@ -30,7 +31,12 @@ public sealed class SkinDoll3D : Viewport3D
 
     double _yaw = DefaultYaw, _pitch, _zoom = 1, _targetYaw = DefaultYaw, _targetPitch, _targetZoom = 1;
     double _seconds, _walk, _targetWalk = 1;          // blend 从 0 渐入
-    readonly DispatcherTimer _clock = new(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(16) };
+    // 帧驱动 = CompositionTarget.Rendering（与合成器对齐，等价原版 requestAnimationFrame；
+    // DispatcherTimer 16ms 在负载下漂移，拖拽会一顿一顿）。真实 elapsed 喂 dt，
+    // 掉帧时动画速率不变（原版 dt=clamp((now-previous)/1000,0,.05) 语义）。
+    readonly Stopwatch _frameClock = Stopwatch.StartNew();
+    double _lastFrameMs;
+    bool _rendering;
     Point _dragLast;
     bool _dragging;
 
@@ -71,6 +77,7 @@ public sealed class SkinDoll3D : Viewport3D
 
     public SkinDoll3D()
     {
+
         Children.Add(new ModelVisual3D
         {
             Content = new Model3DGroup
@@ -79,36 +86,50 @@ public sealed class SkinDoll3D : Viewport3D
             }
         });
 
-        _clock.Tick += ClockTick;
+        Children.Add(new ModelVisual3D
+        {
+            Content = new Model3DGroup
+            {
+                Children = { new AmbientLight(Colors.White), new DirectionalLight(Colors.White, new Vector3D(-15, 30, 50)) }
+            }
+        });
+
         Loaded += (_, _) => { Fit(); Rebuild(); };
         SizeChanged += (_, _) => Fit();
 
-        // SkinViewer3D.vue:76-98 的指针交互
+        // SkinViewer3D.vue:76-98 的指针交互。Handled：宿主 SkinDollHost 还会给「空白区」
+        // 转发同一事件，不拦住会双跑（转速×2）。
         MouseLeftButtonDown += (_, e) =>
         {
             _dragging = true; _dragLast = e.GetPosition(this);
             CaptureMouse();
             StartClock();
+            e.Handled = true;
         };
         MouseMove += (_, e) =>
         {
             if (!_dragging) return;
             var p = e.GetPosition(this);
             _targetYaw += (p.X - _dragLast.X) * 0.01;
+            // 俯仰与常规 3D 查看器一致：向下拖 = 相机下沉（看脚底），向上拖 = 相机升起（看头顶）
             _targetPitch = Math.Clamp(_targetPitch + (p.Y - _dragLast.Y) * 0.01, -Math.PI * 5 / 12, Math.PI * 5 / 12);
             _dragLast = p;
             StartClock();
+            e.Handled = true;
         };
-        MouseLeftButtonUp += (_, _) => { _dragging = false; ReleaseMouseCapture(); };
+        MouseLeftButtonUp += (_, e) => { EndDrag(); e.Handled = true; };
+        // 捕获被系统抢走（Alt+Tab、弹窗吃掉 MouseUp）时必须松手，否则整个鼠标被 3D 视图"抢走"
+        LostMouseCapture += (_, _) => _dragging = false;
         MouseWheel += (_, e) =>
         {
-            _targetZoom = Math.Clamp(_targetZoom * Math.Exp(-e.Delta * 0.0012), 0.5, 3);
+            _targetZoom = Math.Clamp(_targetZoom * Math.Exp(e.Delta * 0.0012), 0.5, 3);
             StartClock();
+            e.Handled = true;
         };
         // UIElement 没有 MouseDoubleClick（那是 Control 的）→ 用 ClickCount==2 表达双击回位
         MouseDown += (_, e) =>
         {
-            if (e.ClickCount == 2) { _targetYaw = DefaultYaw; _targetPitch = 0; _targetZoom = 1; StartClock(); }
+            if (e.ClickCount == 2) { ResetView(); e.Handled = true; }
         };
     }
 
@@ -130,7 +151,31 @@ public sealed class SkinDoll3D : Viewport3D
         return sb.ToString();
     }
 
-    void StartClock() => _clock.Start();
+    void StartClock()
+    {
+        // 树外（宿主的离屏快照路径）不需要时钟：姿态由 SetPose 直接摆好，
+        // 重挂树后由 Loaded→Rebuild→StartClock 重新启动
+        if (!IsLoaded || _rendering) return;
+        _rendering = true;
+        _lastFrameMs = _frameClock.Elapsed.TotalMilliseconds;
+        CompositionTarget.Rendering += OnRendering;
+        ApplyFrame(0);                  // 改一次 DP 让合成器有下一帧，Rendering 才会被触发
+    }
+
+    void StopClock()
+    {
+        if (!_rendering) return;
+        _rendering = false;
+        CompositionTarget.Rendering -= OnRendering;
+    }
+
+    void OnRendering(object? sender, EventArgs e)
+    {
+        double now = _frameClock.Elapsed.TotalMilliseconds;
+        double dt = Math.Clamp((now - _lastFrameMs) / 1000, 0, 0.05);
+        _lastFrameMs = now;
+        ApplyFrame(dt);
+    }
 
     // ---------------- 相机（SkinViewer3D.vue fit/render） ----------------
     void Fit()
@@ -139,12 +184,82 @@ public sealed class SkinDoll3D : Viewport3D
         _baseDistance = Math.Max(20, 10 / aspect) / Math.Tan(45 * Math.PI / 360);
     }
 
-    void ClockTick(object? sender, EventArgs e) => ApplyFrame();
+    void EndDrag()
+    {
+        _dragging = false;
+        if (IsMouseCaptured) ReleaseMouseCapture();
+    }
 
     /// <summary>按当前状态推进一帧（也供离线渲染台同步调用）。</summary>
-    public void ApplyFrame()
+    public void ApplyFrame() => ApplyFrame(1.0 / 60);
+
+    /// <summary>离线渲染：外部给目标姿态后一次到位，不做补间。</summary>
+    public void SetPose(double yaw, double pitch, double zoom)
     {
-        double dt = 1.0 / 60, k = 1 - Math.Exp(-14 * dt);
+        _targetYaw = yaw; _targetPitch = pitch; _targetZoom = zoom;
+        _yaw = yaw; _pitch = pitch; _zoom = zoom;
+        ApplyFrame(0.0001);
+    }
+
+    /// <summary>离线渲染：走路开关与相位（SkinDollHost 逐帧轮播用）。</summary>
+    public void SetWalkPose(bool walking, double phase)
+    {
+        _targetWalk = walking ? 1 : 0;
+        _walk = _targetWalk;
+        _seconds = phase;
+    }
+
+    /// <summary>宿主转发：按下开始拖拽。</summary>
+    public void BeginPointerDrag(Point p)
+    {
+        _dragging = true; _dragLast = p;
+        StartClock();
+    }
+
+    /// <summary>宿主转发：拖拽移动（俯仰方向与自身处理器一致：向下拖看脚底）。</summary>
+    public void UpdatePointerDrag(Point p)
+    {
+        if (!_dragging) return;
+        _targetYaw += (p.X - _dragLast.X) * 0.01;
+        _targetPitch = Math.Clamp(_targetPitch + (p.Y - _dragLast.Y) * 0.01, -Math.PI * 5 / 12, Math.PI * 5 / 12);
+        _dragLast = p;
+        StartClock();
+    }
+
+    /// <summary>宿主转发：松手。</summary>
+    public void EndPointerDrag() => EndDrag();
+
+    /// <summary>宿主转发：滚轮缩放。</summary>
+    public void ZoomBy(double delta)
+    {
+        _targetZoom = Math.Clamp(_targetZoom * Math.Exp(delta * 0.0012), 0.5, 3);
+        StartClock();
+    }
+
+    /// <summary>双击回位（原版 resetView：yaw=-0.35 / pitch=0 / zoom=1）。</summary>
+    public void ResetView()
+    {
+        _targetYaw = DefaultYaw; _targetPitch = 0; _targetZoom = 1;
+        StartClock();
+    }
+
+    /// <summary>宿主可见性驱动：不可见（切页/藏页）停帧省电省 GPU，
+    /// 回来续跑（真实 dt 有 0.05s 上限，暂停后恢复不跳变）。</summary>
+    public void SetRunning(bool running)
+    {
+        if (!running) StopClock();
+        else if (Walk || _targetWalk != 0) StartClock();
+    }
+
+    /// <summary>宿主 Walk 属性变化：开走立即续帧，停走由 settled 自停。</summary>
+    public void SetWalkRunning(bool walking)
+    {
+        if (walking) StartClock();
+    }
+
+    void ApplyFrame(double dt)
+    {
+        double k = 1 - Math.Exp(-14 * dt);
         _seconds += dt;
         _walk += (_targetWalk - _walk) * Math.Min(1, dt * 6);
         _yaw += (_targetYaw - _yaw) * k;
@@ -161,11 +276,11 @@ public sealed class SkinDoll3D : Viewport3D
         _cam.LookDirection = new Point3D(0, 16, 0) - _cam.Position;
         Camera = _cam;
 
-        // 原版静止时停帧（:69 的 rAF 续帧条件）：非走路 + 交互收敛后停表
+        // 原版静止时停帧（:116 的 rAF 续帧条件）：非走路 + 交互收敛后退订 Rendering
         bool settled = !_dragging && _targetWalk == 0
                        && Math.Abs(_targetYaw - _yaw) + Math.Abs(_targetPitch - _pitch) + Math.Abs(_targetZoom - _zoom) < 0.0001
                        && Math.Abs(_walk) < 0.001;
-        if (settled) _clock.Stop();
+        if (settled) StopClock();
     }
 
     static void SetAngle(RotateTransform3D t, double rad) => ((AxisAngleRotation3D)t.Rotation).Angle = rad * 180 / Math.PI;
@@ -266,8 +381,10 @@ public sealed class SkinDoll3D : Viewport3D
         {
             Geometry = mesh,
             Material = mat,
-            // layer1 是 FrontSide、layer2 是 DoubleSide+透明（model.ts:104-110）
-            BackMaterial = twoSided ? mat : null,
+            // 原版 layer1 FrontSide / layer2 DoubleSide（model.ts:104-110），但 WPF 的三角 winding
+            // 与 three.js 不保证逐面一致，从下往上看会出现整面消失/黑块 —— 统一给 BackMaterial
+            // 关掉剔除保正确性（模型只有几十个三角形，开销可忽略）。
+            BackMaterial = mat,
             Transform = new TranslateTransform3D(x, y, z),
         });
     }
@@ -327,13 +444,21 @@ public sealed class SkinDoll3D : Viewport3D
             idx.Add(vi); idx.Add(vi + 2); idx.Add(vi + 3);
         }
 
-        // 六面区块（setUVs:38-45）
+        // 六面区块（setUVs:38-45）。每面的四角顺序必须与 three 的顶点顺序一致，
+        // 否则同一块贴图会前后/左右镜像：three 0.185.1 BoxGeometry.js:76-81 给出六面的
+        // (u,v,w,udir,vdir) 参数，:110-131 是顶点循环（iy 外层、ix 内层，v0=(ix0,iy0)…v3=(ix1,iy1)），
+        // 而 setUVs 的数组是按 v0,v1,v2,v3 顺序覆写的。逐面推出来：
+        //   front +Z：v0=左上 → 区块左上      back −Z：v0=右上 → 区块左上
+        //   right +X：v0=前上 → 区块左上      left −X：v0=后上 → 区块左上
+        //   top   +Y：v0=后左 → 区块左上（前缘拿区块下缘）
+        //   bottom −Y：v0=**前**左 → 区块左上（后缘拿区块下缘）——与 top 正好相反，
+        //   这里若按 top 的直觉把 bl/br 放在后缘，头底面前后镜像，下巴就画成后颈的颜色。
         Face(new(-hw, -hh, hd), new(hw, -hh, hd), new(hw, hh, hd), new(-hw, hh, hd), u + ud, v + ud, uw, uh);            // front +Z
         Face(new(hw, -hh, -hd), new(-hw, -hh, -hd), new(-hw, hh, -hd), new(hw, hh, -hd), u + uw + 2 * ud, v + ud, uw, uh); // back -Z
         Face(new(hw, -hh, hd), new(hw, -hh, -hd), new(hw, hh, -hd), new(hw, hh, hd), u + uw + ud, v + ud, ud, uh);        // right +X
         Face(new(-hw, -hh, -hd), new(-hw, -hh, hd), new(-hw, hh, hd), new(-hw, hh, -hd), u, v + ud, ud, uh);              // left -X
         Face(new(-hw, hh, hd), new(hw, hh, hd), new(hw, hh, -hd), new(-hw, hh, -hd), u + ud, v, uw, ud);                  // top +Y
-        Face(new(-hw, -hh, -hd), new(hw, -hh, -hd), new(hw, -hh, hd), new(-hw, -hh, hd), u + uw + ud, v, uw, ud);         // bottom -Y
+        Face(new(-hw, -hh, hd), new(hw, -hh, hd), new(hw, -hh, -hd), new(-hw, -hh, -hd), u + uw + ud, v, uw, ud);         // bottom -Y
 
         return new MeshGeometry3D { Positions = pos, TextureCoordinates = uv, TriangleIndices = idx };
     }

@@ -1,4 +1,4 @@
-<UserControl x:Class="Wuhuicl.App.Pages.BridgePage"
+﻿<UserControl x:Class="Wuhuicl.App.Pages.BridgePage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
@@ -17,10 +17,8 @@
            .content .page-title 24px 行高 1.35（ui-system.css:12，覆盖 styles.css:503 的 text-xl）；
            .page-sub 13px text-dim（styles.css:509-512）。
 
-         数据：契约 §5 的 LaunchSession 白名单里没有桥接状态、参数清单、modId、实例关联字段，
-         所以整页不写一条 Binding，全部按原版文案写死占位（每块注释 // 占位：等桥接 MOD 功能接入）。
-         status?.connected（:208）为假时参数区不渲染，因此参数区整体 Collapsed；
-         状态文案按任务口径取「先选择游戏实例」那一组，其余五组在注释里逐条列出。
+         数据：已接真实后端 BridgeService —— 状态（/ping）、清单（/manifest）、修改（/set）、恢复（/reset）
+         走 .kamucl-bridge.json 发现文件 + X-Kamucl-Token 本地 HTTP；参数行由代码侧动态生成。
 
          注：下面 XML 注释里的 CSS 令牌一律去掉前导双横线书写（写 accent-soft 而不写 var 形式），
          XML 注释内不允许出现连续两个减号，否则 XAML 编译直接崩。 -->
@@ -151,7 +149,7 @@
                      :332 整块重排为 grid：max-width 960、grid-template-columns 24px minmax(0,1fr)、gap 16、padding 24、min-height 0。
                      .card 底走 Panel（radius 14 / border 1 / padding 20 → 这里被压成 24，box-shadow none 见 ui-system.css:13）。
                      .bridge-status.connected 才把描边换成 color-mix(accent 45%, border)（:291），未连接时留 border。 -->
-                <Border Style="{StaticResource Panel}" Padding="24" MaxWidth="960">
+                <Border x:Name="StatusCard" Style="{StaticResource Panel}" Padding="24" MaxWidth="960">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <!-- grid-template-columns 的第一列 24px：只放那颗 10px 状态点（:332） -->
@@ -175,12 +173,12 @@
                                     <ColumnDefinition Width="12"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <!-- 左：实例名或「尚未选择游戏实例」（:193 的三元式，此处取未选分支）
-                                     // 占位：等桥接 MOD 功能接入（原版是 versionLabel(currentVersion)） -->
-                                <TextBlock Grid.Column="0" FontSize="13" VerticalAlignment="Center"
+                                <!-- 左：实例名（versionLabel(currentVersion)）或「尚未选择游戏实例」（:193 三元式） -->
+                                <TextBlock x:Name="CtxText" Grid.Column="0" FontSize="13" VerticalAlignment="Center"
                                            TextTrimming="CharacterEllipsis" Foreground="{DynamicResource Fg2}"
                                            Text="尚未选择游戏实例"/>
-                                <Button Grid.Column="2" Style="{StaticResource BridgeBtnGhostSm}" Content="刷新状态"/>
+                                <Button x:Name="BtnRefresh" Grid.Column="2" Style="{StaticResource BridgeBtnGhostSm}"
+                                        Content="刷新状态" Click="Refresh_Click"/>
                             </Grid>
                         </Border>
 
@@ -195,237 +193,84 @@
                         <!-- .bridge-status-text：flex 1 / min-width 200 / column gap space-1 4（:300 + :301）
                              + span 行高 1.7（:332）；strong 21px（:332 覆盖 :301 的 text-sm 13）+ .muted 12px（:302） -->
                         <StackPanel Grid.Row="1" Grid.Column="1" Margin="16,16,0,0" MinWidth="200">
-                            <!-- // 占位：等桥接 MOD 功能接入
-                                 :196 的六态文案（依 v-if 短路顺序）：
-                                   connected → 已连接桥接 MOD（v…）
-                                   !currentVersion → 先选择游戏实例   ← 本页显示的这条
-                                   bridgePresent === false → 尚未安装桥接 MOD
-                                   bridgePresent === null → 尚未确认安装状态
-                                   gameRunning → 等待游戏接入
-                                   其余 → 启动游戏后自动接入 -->
-                            <TextBlock FontSize="21" FontWeight="Bold" TextTrimming="CharacterEllipsis"
+                            <!-- :196 的六态文案（依 v-if 短路顺序）由代码侧 Render() 按真实状态挑选 -->
+                            <TextBlock x:Name="TxtStatusTitle" FontSize="21" FontWeight="Bold" TextTrimming="CharacterEllipsis"
                                        Text="先选择游戏实例"/>
-                            <!-- :197 与上条一一对应的 muted 行，这里取 !currentVersion 分支 -->
-                            <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}" LineHeight="20"
+                            <!-- :197 与上条一一对应的 muted 行 -->
+                            <TextBlock x:Name="TxtStatusDetail" Margin="0,4,0,0" Style="{StaticResource Micro}" LineHeight="20"
                                        TextWrapping="Wrap" Text="选择已安装加载器的实例后，可安装桥接 MOD。"/>
-                            <!-- :198 的 presenceError 段落走 .connection-error（border 1 danger / padding 12 16 / radius 10 /
-                                 12px 行高 1.7，connection.css:67），只有报错才出现 // 占位：等桥接 MOD 功能接入 -->
+                            <!-- :198 的 presenceError 段落走 .connection-error（border 1 danger / padding 12 16 / radius 10，
+                                 connection.css:67），只有报错才出现 -->
+                            <Border x:Name="PresenceError" BorderBrush="{DynamicResource Danger}"
+                                    BorderThickness="1" CornerRadius="10" Padding="12,16"
+                                    Margin="0,12,0,0" Visibility="Collapsed">
+                                <TextBlock x:Name="PresenceErrorText" FontSize="12" LineHeight="20"
+                                           TextWrapping="Wrap" Foreground="{DynamicResource Danger}"/>
+                            </Border>
                         </StackPanel>
 
                         <!-- .bridge-guide-actions：grid-column 2 / flex wrap align-center gap 12（:332），子项 :201-204。
-                             gap 12 用子项右下 Margin 表达。四个子项各自的 v-if 都标在行内注释里；
-                             按「先选择游戏实例」这一态，源码只会渲染出 :203 那一条，
-                             本轮为把这块的动作语法铺全，四条都留在界面上（// 占位：等桥接 MOD 功能接入）。 -->
+                             gap 12 用子项右下 Margin 表达。四个子项各自的 v-if 都由代码侧按真实状态控制显隐。 -->
                         <WrapPanel Grid.Row="2" Grid.Column="1" Margin="16,16,0,0">
                             <!-- :201 v-if="!connected && bridgePresent === false" 的 .btn.btn-gold，
-                                 busy 时文案换成「安装中…」 -->
-                            <Button Style="{StaticResource BtnGold}" Margin="0,0,12,12" Content="安装桥接 MOD"/>
+                                 busy 时文案换成「安装中…」；:disabled="installingBridge || !currentVersion?.loader" -->
+                            <Button x:Name="BtnInstall" Style="{StaticResource BtnGold}" Margin="0,0,12,12"
+                                    Content="安装桥接 MOD" Click="Install_Click"/>
                             <!-- :202 v-if="currentVersion && !currentVersion.loader && bridgePresent === false" -->
-                            <TextBlock Margin="0,0,12,12" VerticalAlignment="Center" Style="{StaticResource Micro}"
-                                       LineHeight="20" TextWrapping="Wrap" MaxWidth="240"
+                            <TextBlock x:Name="TxtPureHint" Margin="0,0,12,12" VerticalAlignment="Center" Style="{StaticResource Micro}"
+                                       LineHeight="20" TextWrapping="Wrap" MaxWidth="240" Visibility="Collapsed"
                                        Text="纯净版不加载 MOD，请选择带加载器的实例。"/>
-                            <!-- :203 v-if="!connected"；文案是 currentVersion ? 前往首页 : 选择游戏实例（此处未选实例），
-                                 tone 是 bridgePresent === false ? btn-ghost : btn-gold（此处 bridgePresent 未知 → gold） -->
-                            <Button Style="{StaticResource BtnGold}" Margin="0,0,12,12" Content="选择游戏实例"/>
+                            <!-- :203 v-if="!connected"；文案是 currentVersion ? 前往首页 : 选择游戏实例，
+                                 tone 是 bridgePresent === false ? btn-ghost : btn-gold -->
+                            <Button x:Name="BtnNav" Style="{StaticResource BtnGold}" Margin="0,0,12,12"
+                                    Content="选择游戏实例" Click="Nav_Click"/>
                             <!-- :204 v-if="connected && params.length" 的 .btn.btn-ghost -->
                             <Button x:Name="BtnResetAll" Style="{StaticResource BtnGhost}" Margin="0,0,12,12"
-                                    Content="全部恢复默认"/>
+                                    Content="全部恢复默认" Visibility="Collapsed" Click="ResetAll_Click"/>
                         </WrapPanel>
                     </Grid>
                 </Border>
 
-                <!-- ============ 参数区（:208-284）：v-if="status?.connected" → 整块 Collapsed ============
-                     // 占位：等桥接 MOD 功能接入（原版参数来自 bridgeManifest(v.id).params，:75-76） -->
+                <!-- ============ 参数区（:208-284）：v-if="status?.connected" → 整块默认 Collapsed ============
+                     参数行由代码侧按 manifest 动态生成进 ParamList（modId → group 两级聚合，各一张 .bridge-card）。
+                     加载态/两种空态的显隐也全在代码侧。 -->
                 <StackPanel x:Name="ParamsSection" Visibility="Collapsed" Margin="0,16,0,0">
 
                     <!-- .bridge-toolbar：display flex（:303）；.bridge-search：flex 1（:304）+ .input 基线
                              min-height ctl-h 36 / padding 8 12 / radius 10 / 14px（styles.css:307-313 + ui-system.css:15）；
-                             placeholder 文案见 :210。WPF 没有 placeholder，按 ServersPage 的覆盖层写法。 -->
-                    <Grid>
+                             placeholder 文案见 :210。WPF 没有 placeholder，按覆盖层写法。
+                             工具条只在 params.length 时出现（:209 v-if）。 -->
+                    <Grid x:Name="ToolbarRow" Visibility="Collapsed">
                         <TextBox x:Name="TxtSearch" Style="{StaticResource Input}" TextChanged="Search_TextChanged"/>
                         <TextBlock x:Name="SearchPh" Text="搜索参数名称、说明、分组…" FontSize="14"
                                    IsHitTestVisible="False" VerticalAlignment="Center" Margin="13,0,0,0"
                                    Foreground="{DynamicResource Fg2}"/>
                     </Grid>
 
-                    <!-- 加载态 :212 的 .card.empty：正在读取参数清单…（前置 .spin 转圈，本轮不做动画）// 占位
-                         空态一 :281：没有匹配「搜索词」的参数（.card.empty，min-height 120 / padding 32 16，
-                                       styles.css:515-522 + ui-system.css:57）// 占位
-                         空态二 :282：桥接 MOD 没有注册任何参数 // 占位 -->
+                    <!-- 动态参数行容器 -->
+                    <StackPanel x:Name="ParamList" Margin="0,12,0,0"/>
 
-                    <!-- .bridge-mod：flex column gap card-gap 16（:305），一个 modId 一段 -->
-                    <StackPanel Margin="0,16,0,0">
-                        <!-- .bridge-card：.card 基线 + padding space-4 card-pad = 16 20（:306）。
-                             :307 的 hover 位移与阴影按 ui-system.css:13 的 box-shadow none 与「卡片一律平面」（契约 §6.4）不出。 -->
-                        <Border Style="{StaticResource Panel}" Padding="20,16">
-                            <StackPanel>
-                                <!-- .bridge-card-head：row align baseline gap 12 / padding-bottom 12 /
-                                         border-bottom 1 / margin-bottom 8（:308）；strong 13px/700（:309）+ muted 12px（:310）。
-                                         CSS 的 baseline 对齐 WPF 没有，这里用 Bottom 近似（同一字号下等价）。
-                                         // 占位：等桥接 MOD 功能接入（group 与 modId 都来自参数清单） -->
-                                <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1"
-                                        Padding="0,0,0,12">
-                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom">
-                                        <TextBlock FontSize="13" FontWeight="Bold" Text="客户端表现"/>
-                                        <TextBlock Margin="12,0,0,0" Style="{StaticResource Micro}"
-                                                   FontFamily="{StaticResource MonoFont}" Text="kamucl_bridge"/>
-                                    </StackPanel>
-                                </Border>
+                    <!-- 加载态 :212 的 .card.empty：正在读取参数清单…（前置 .spin 转圈） -->
+                    <Border x:Name="LoadingCard" Style="{StaticResource Panel}" Padding="32,16"
+                            Margin="0,12,0,0" Visibility="Collapsed">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <ContentControl Style="{StaticResource Spin}" Width="14" Height="14"
+                                            VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBlock FontSize="14" VerticalAlignment="Center" Text="正在读取参数清单…"/>
+                        </StackPanel>
+                    </Border>
 
-                                <StackPanel Margin="0,8,0,0">
-                                    <!-- 行 1：label.switch（:231-239）+ apply tag 需重载资源（:134 / :224） -->
-                                    <Border Style="{StaticResource BridgeRow}" BorderThickness="0">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="16"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <!-- .bridge-row-info：flex 1 / min-width 0 / column gap space-1 4（:314） -->
-                                            <StackPanel Grid.Column="0">
-                                                <!-- .bridge-label：13px/600 / row align-center gap 8 / wrap（:315） -->
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock FontSize="13" FontWeight="SemiBold"
-                                                               VerticalAlignment="Center" Text="显示帧率与坐标"/>
-                                                    <!-- .tag.bridge-apply-tag（模板 :224，样式 :318）：
-                                                         .tag 基态是 radius 999 / padding 2 8 / 12px（styles.css:460-467），
-                                                         这里被 :318 压成 padding 1 8；APPLY_HINT 四值见 :132-137 -->
-                                                    <Border Style="{StaticResource Tag}" Padding="8,1" Margin="8,0,0,0">
-                                                        <TextBlock Style="{StaticResource TagText}"
-                                                                   Foreground="{DynamicResource Fg2}"
-                                                                   Text="需重载资源"/>
-                                                    </Border>
-                                                </StackPanel>
-                                                <!-- .bridge-desc：12px（:316 + :227）// 占位：等桥接 MOD 功能接入 -->
-                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
-                                                           LineHeight="20" TextWrapping="Wrap"
-                                                           Text="在画面左上角显示 FPS、坐标与朝向，只对本地客户端生效。"/>
-                                            </StackPanel>
-                                            <!-- .bridge-control：row align-center gap space-3 12 / flex-shrink 0（:320）；
-                                                 label.switch 的开关是全局 40×22 那一套（§2 的 Switch，滑块 14、位移 21） -->
-                                            <StackPanel Grid.Column="2" Orientation="Horizontal"
-                                                        VerticalAlignment="Center">
-                                                <CheckBox Style="{StaticResource Switch}" Width="40" Height="22"
-                                                          IsChecked="True" VerticalAlignment="Center"/>
-                                            </StackPanel>
-                                        </Grid>
-                                    </Border>
+                    <!-- 空态一 :281：没有匹配「搜索词」的参数 -->
+                    <Border x:Name="EmptyNoMatch" Style="{StaticResource Panel}" Padding="32,16"
+                            Margin="0,12,0,0" Visibility="Collapsed">
+                        <TextBlock x:Name="EmptyNoMatchText" FontSize="14" HorizontalAlignment="Center"/>
+                    </Border>
 
-                                    <!-- 行 2：滑块 + 数值（:240-251），并演示 :268-276 修改后才出现的 bridge-reset -->
-                                    <Border Style="{StaticResource BridgeRow}" Margin="0,0,0,0">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="16"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Grid.Column="0">
-                                                <TextBlock FontSize="13" FontWeight="SemiBold" Text="第一人称手臂视野"/>
-                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
-                                                           LineHeight="20" TextWrapping="Wrap"
-                                                           Text="调整手持物品的视野偏移量，0 到 100 之间的整数，改动即时下发给游戏并以游戏返回值为准。"/>
-                                            </StackPanel>
-                                            <StackPanel Grid.Column="2" Orientation="Horizontal"
-                                                        VerticalAlignment="Center">
-                                                <Slider Style="{StaticResource BridgeSlider}" Value="62"/>
-                                                <!-- .bridge-slider-value：min-width 44 / 右对齐 / 12px text-dim /
-                                                         tabular-nums（:322）// 占位：等桥接 MOD 功能接入 -->
-                                                <TextBlock Margin="12,0,0,0" MinWidth="44" TextAlignment="Right"
-                                                           FontSize="12" VerticalAlignment="Center"
-                                                           Foreground="{DynamicResource Fg2}"
-                                                           Typography.NumeralAlignment="Tabular" Text="62"/>
-                                                <!-- :268-276 v-if="isModified(p)"，title 是恢复默认（不是文字而是 13px 的逆时针图标）；
-                                                     scope 为 SERVER 时按钮 disabled（:272） -->
-                                                <Button Style="{StaticResource BridgeReset}" Margin="12,0,0,0">
-                                                    <ContentControl Width="13" Height="13"
-                                                                    Style="{DynamicResource Icon.Refresh}"/>
-                                                </Button>
-                                            </StackPanel>
-                                        </Grid>
-                                    </Border>
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-
-                    <!-- 第二个 modId 段：.bridge-mod 之间也是 gap card-gap 16（:305） -->
-                    <StackPanel Margin="0,16,0,0">
-                        <Border Style="{StaticResource Panel}" Padding="20,16">
-                            <StackPanel>
-                                <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1"
-                                        Padding="0,0,0,12">
-                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom">
-                                        <TextBlock FontSize="13" FontWeight="Bold" Text="服务端规则"/>
-                                        <TextBlock Margin="12,0,0,0" Style="{StaticResource Micro}"
-                                                   FontFamily="{StaticResource MonoFont}" Text="kamucl_bridge"/>
-                                    </StackPanel>
-                                </Border>
-
-                                <StackPanel Margin="0,8,0,0">
-                                    <!-- 行 3：文本输入 .input.bridge-text（:253-259，width 200 见 :323） -->
-                                    <Border Style="{StaticResource BridgeRow}" BorderThickness="0">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="16"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Grid.Column="0">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock FontSize="13" FontWeight="SemiBold"
-                                                               VerticalAlignment="Center" Text="系统消息前缀"/>
-                                                    <!-- APPLY_HINT 的另两态注释：需重进世界（:135）/ 需重启游戏（:136）
-                                                         这条是 INSTANT，:133 的空串 → 不出标签 -->
-                                                </StackPanel>
-                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
-                                                           LineHeight="20" TextWrapping="Wrap"
-                                                           Text="桥接 MOD 发出的系统消息都会在行首带上这段前缀，留空表示不加。"/>
-                                            </StackPanel>
-                                            <TextBox Grid.Column="2" Style="{StaticResource Input}" Width="200"
-                                                     VerticalAlignment="Center" Text="[KAMUCL]"/>
-                                        </Grid>
-                                    </Border>
-
-                                    <!-- 行 4：下拉 .bridge-select（模板 :260-267，样式 :324 → width 160），
-                                         并演示 scope === 'SERVER' 的只读态：.bridge-row.disabled 把 info 压到 opacity .55（:313），
-                                         控件本身 disabled（:265），tooltip 见 :225 的 title 文案 -->
-                                    <Border Style="{StaticResource BridgeRow}">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="16"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Grid.Column="0" Opacity="0.55">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock FontSize="13" FontWeight="SemiBold"
-                                                               VerticalAlignment="Center" Text="难度联动模式"/>
-                                                    <!-- .tag.bridge-scope-tag：文案「服务器」（:225），度量同 :319 -->
-                                                    <Border Style="{StaticResource Tag}" Padding="8,1" Margin="8,0,0,0"
-                                                            ToolTip="服务器参数：必须由服务端校验权限，本地接口只读">
-                                                        <TextBlock Style="{StaticResource TagText}"
-                                                                   Foreground="{DynamicResource Fg2}" Text="服务器"/>
-                                                    </Border>
-                                                </StackPanel>
-                                                <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}"
-                                                           LineHeight="20" TextWrapping="Wrap"
-                                                           Text="服务端下发的难度档位，本地只读；改它需要服务端权限。"/>
-                                                <!-- :228 的 itemError 行 .bridge-error：12px danger（:317）// 占位：等桥接 MOD 功能接入 -->
-                                            </StackPanel>
-                                            <StackPanel Grid.Column="2" Orientation="Horizontal"
-                                                        VerticalAlignment="Center" IsEnabled="False">
-                                                <ComboBox Width="160" SelectedIndex="1">
-                                                    <ComboBoxItem Content="和平"/>
-                                                    <ComboBoxItem Content="普通"/>
-                                                    <ComboBoxItem Content="困难"/>
-                                                </ComboBox>
-                                            </StackPanel>
-                                        </Grid>
-                                    </Border>
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
+                    <!-- 空态二 :282：桥接 MOD 没有注册任何参数 -->
+                    <Border x:Name="EmptyNoParams" Style="{StaticResource Panel}" Padding="32,16"
+                            Margin="0,12,0,0" Visibility="Collapsed">
+                        <TextBlock FontSize="14" HorizontalAlignment="Center" Text="桥接 MOD 没有注册任何参数"/>
+                    </Border>
                 </StackPanel>
             </StackPanel>
         </Grid>

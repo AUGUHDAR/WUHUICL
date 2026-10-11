@@ -1,4 +1,4 @@
-<UserControl x:Class="Wuhuicl.App.Pages.HomePage"
+﻿<UserControl x:Class="Wuhuicl.App.Pages.HomePage"
                xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                xmlns:ctl="clr-namespace:Wuhuicl.App.Controls">
@@ -306,6 +306,11 @@
             <Setter Property="HorizontalAlignment" Value="Stretch"/>
             <Setter Property="HorizontalContentAlignment" Value="Left"/>
             <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <!-- .menu-item hover 底 accent-soft（HomeView.vue:963）：HoverFade 150ms 淡入；
+                 字色转 accent-2 是瞬时通道，保留 Setter -->
+            <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
+            <Setter Property="ctl:HoverFade.BrushKey" Value="AccentSoft"/>
+            <Setter Property="ctl:HoverFade.DurationMs" Value="150"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
@@ -316,7 +321,6 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="b" Property="Background" Value="{DynamicResource AccentSoft}"/>
                                 <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
@@ -331,6 +335,8 @@
         <Style x:Key="HpMenuItemActive" TargetType="Button" BasedOn="{StaticResource HpMenuItem}">
             <Setter Property="Background" Value="{DynamicResource AccentSoft}"/>
             <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+            <!-- .active 静止态即 hover 配色，AccentSoft 是持久底：关掉继承的 HoverFade，避免划过时闪回透明 -->
+            <Setter Property="ctl:HoverFade.Enabled" Value="False"/>
         </Style>
         <!-- .menu-item.danger：静止字色 danger（:964）；hover 走全局 styles.css:636-639
              （特异度 0,4,0 压过 scoped 的 0,3,0）：底 danger-soft、字仍是 danger。
@@ -345,17 +351,20 @@
             <Setter Property="HorizontalAlignment" Value="Stretch"/>
             <Setter Property="HorizontalContentAlignment" Value="Left"/>
             <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <!-- .menu-item.danger hover 底 danger-soft（styles.css:636-639）：HoverFade 150ms 淡入；
+                 模板 b 从写死 Transparent 改绑 TemplateBinding，静止态底由 Background=Transparent 提供 -->
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
+            <Setter Property="ctl:HoverFade.BrushKey" Value="DangerSoft"/>
+            <Setter Property="ctl:HoverFade.DurationMs" Value="150"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="b" Background="Transparent" CornerRadius="7"
+                        <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="7"
                                 Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="b" Property="Background" Value="{DynamicResource DangerSoft}"/>
-                            </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.45"/>
                             </Trigger>
@@ -623,12 +632,15 @@
                                     <!-- .hero-content h1（模板 :499，样式 :819 ＋ 尾部 :1030）：
                                          clamp(24px, 2.6vw, 32px)（1360 窗口下 2.6vw=35 → 取上限 32）、
                                          line-height 1.25 → 40、两行截断（-webkit-line-clamp:2 → MaxHeight 80）、
-                                         字重 850（WPF 无该档，取最近的 ExtraBold 800）、
+                                         字重 850 → 只能落 700（Bold）：本机中文走 UiFont 的
+                                         Microsoft YaHei UI，该族只有 300/400/700 三档，
+                                         要 800 会让 WPF 逐字换族，同一行汉字基线一高一低就是"字在飘"；
+                                         Chrome 拿 850 时实际也是渲染 700，所以 Bold 才是原版的像素。
                                          text-shadow 0 4px 24px rgba(0,0,0,.32)（:819 未被后文覆盖）、
                                          margin-top 18。letter-spacing -1px WPF 的 TextBlock 没有对应属性，
                                          差值记进 UI_SPEC 的已知偏差。 -->
-                                    <TextBlock x:Name="HeroTitle" Text="还没有安装版本" FontSize="32"
-                                               FontWeight="ExtraBold" Foreground="#FFFFFFFF"
+                                    <TextBlock x:Name="HeroTitle" Text="选择游戏实例" FontSize="32"
+                                               FontWeight="Bold" Foreground="#FFFFFFFF"
                                                LineHeight="40" LineStackingStrategy="BlockLineHeight"
                                                MaxWidth="620" TextWrapping="Wrap"
                                                MaxHeight="80" TextTrimming="CharacterEllipsis">
@@ -643,14 +655,16 @@
                                     <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                                         <TextBlock x:Name="HeroGameVersion" Text="" FontSize="15"
                                                    FontWeight="SemiBold" Foreground="#FFFFFFFF"
-                                                   VerticalAlignment="Center"/>
-                                        <Border x:Name="HeroLoader" Style="{StaticResource LoaderBadge}">
-                                            <TextBlock x:Name="HeroLoaderText" Text="原版" FontSize="11"
+                                                   Visibility="Collapsed" VerticalAlignment="Center"/>
+                                        <Border x:Name="HeroLoader" Style="{StaticResource LoaderBadge}"
+                                                Visibility="Collapsed">
+                                            <TextBlock x:Name="HeroLoaderText" Text="" FontSize="11"
                                                        FontWeight="SemiBold" Foreground="#FFF6FFF8"/>
                                         </Border>
                                     </StackPanel>
-                                    <TextBlock x:Name="HeroSub" FontSize="12.5" Foreground="#CCE8EDF5"
-                                               Margin="0,10,0,0" MaxWidth="480" TextWrapping="Wrap"/>
+                                    <!-- 这里原来有一行 HeroSub（"先在「游戏版本」里安装…"／"账号 … 内存 … Java …"），
+                                         原版 .hero-content 只有 kicker／hero-metadata／hero-actions 三个孩子
+                                         （HomeView.vue:529-543），没有这一行，属于自造，已删。 -->
                                 </StackPanel>
 
                                 <!-- .hero-actions（模板 :508，样式 :832 ＋ 尾部 :1030）：flex / width 100% /
@@ -931,12 +945,13 @@
                                            Text="尚未安装游戏实例，点击前往版本管理"/>
                             </Grid>
 
-                            <!-- .instance-grid（模板 :573，样式 :894 与尾部 :1030）：尾部把基础的 4 列网格
-                                 改成 display flex / 列方向 / gap 0 → 一个列表，每行一张 .instance-card。
+                            <!-- .instance-grid（模板 :573）: v-for="version in recent" — recent 是
+                                 sortWithFavorite(...).slice(0, wideRecent ? 8 : 4)（:380），绑 RecentList（排序+截取在
+                                 LaunchSession.RebuildRecent，SizeChanged 时按 1500px 断点换 8/4）；
                                  v-if store.installed.length（:573）→ 有实例才渲染，空态由上面的 EmptyHint 顶位 -->
                             <ListBox x:Name="HomeInstalled" Style="{StaticResource CardList}"
                                      ItemContainerStyle="{StaticResource RowItem}"
-                                     ItemsSource="{Binding InstalledList}"
+                                     ItemsSource="{Binding RecentList}"
                                      SelectedItem="{Binding SelectedInstalled}">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
@@ -1246,9 +1261,11 @@
                                         </Border.OpacityMask>
                                     </Border>
 
-                                    <!-- .viewer3d（模板 :648，样式 :947）：height 100%、透明底、占满整块舞台；
-                                         拖拽转向 / 滚轮缩放 / 行走动画都在 Controls/SkinDoll3D.cs 里 -->
-                                    <ctl:SkinDoll3D x:Name="SkinDoll"/>
+                                    <!-- .viewer3d（模板 :648，样式 :947）：height 100%、透明底、占满整块舞台。
+                                         常驻 3D 娃娃（SkinDoll3D，走动动画）
+                                         （连续拖拽转向 / 滚轮缩放 / 双击回正 / 行走，SkinViewer3D.vue 语义；
+                                         原版首页 animation 默认 walk → Walk=True） -->
+                                    <ctl:SkinDoll3D x:Name="SkinDoll" Walk="True"/>
 
                                     <!-- A.9 .skin-overlay 三个分支（模板 :649-651）：z-index 2、贴舞台底 12。
                                          全部默认收起——原版这三条也只在 loading / 未登录 / 出错时出现。 -->
@@ -1406,17 +1423,16 @@
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <!-- .menu-item（:674-685）：星标或占位条 ＋ versionLabel -->
-                                        <Button Style="{StaticResource HpMenuItem}" Tag="{Binding}">
+                                        <Button Style="{StaticResource HpMenuItem}" Tag="{Binding}" Click="VersionPick_Click">
                                             <StackPanel Orientation="Horizontal">
-                                                <!-- v-if isFavorite（:682）：svg 12×12，fill currentColor。
-                                                     // 占位：端口没有收藏数据 → 收起，接入后与下面的 spacer 互换 -->
+                                                <!-- v-if isFavorite（:682）：svg 12×12，fill currentColor -->
                                                 <ContentControl Width="12" Height="12" VerticalAlignment="Center"
-                                                                Visibility="Collapsed"
+                                                                Visibility="{Binding Favorite, Converter={StaticResource BoolVis}}"
                                                                 Style="{DynamicResource Icon.Star}"/>
                                                 <!-- v-else .menu-spacer（:683，样式 :965）：宽 12、flex none，
                                                      没有内容所以高度 0 -->
-                                                <Border Width="12" Background="Transparent"
-                                                        VerticalAlignment="Center"/>
+                                                <Border Width="12" Background="Transparent" VerticalAlignment="Center"
+                                                        Visibility="{Binding Favorite, Converter={StaticResource BoolVis}, ConverterParameter=invert}"/>
                                                 <TextBlock Margin="8,0,0,0" VerticalAlignment="Center"
                                                            Text="{Binding Label}"
                                                            TextTrimming="CharacterEllipsis"/>
@@ -1451,24 +1467,24 @@
                     Style="{StaticResource HpFloatMenu}">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel>
-                        <Button x:Name="CardMenuManage" Style="{StaticResource HpCardMenuItem}" Content="管理实例"/>
-                        <Button x:Name="CardMenuLaunch" Style="{StaticResource HpCardMenuItem}" Content="启动实例"/>
+                        <Button x:Name="CardMenuManage" Style="{StaticResource HpCardMenuItem}" Content="管理实例" Click="CardMenuManage_Click"/>
+                        <Button x:Name="CardMenuLaunch" Style="{StaticResource HpCardMenuItem}" Content="启动实例" Click="CardMenuLaunch_Click"/>
                         <!-- :700 :disabled＝running || launching || restartBusy。
                              端口只有 GameRunning 与 Busy（Services/LaunchSession.cs:86-90），restartBusy 无数据源，
                              所以这里只表达「游戏在跑就禁用」，启动中的拦截由接线时补 Busy -->
                         <Button x:Name="CardMenuLaunchCommand" Style="{StaticResource HpCardMenuItem}"
                                 IsEnabled="{Binding GameRunning, Converter={StaticResource InvBool}}"
                                 ToolTip="新建允许命令的创造模式测试世界并自动进入（Minecraft 1.20+）"
-                                Content="启动并创建命令世界"/>
+                                Content="启动并创建命令世界" Click="CardMenuLaunchCommand_Click"/>
                         <!-- :701 :disabled＝!running || restartBusy → 静止态（没有游戏在跑）本来就是禁用的 -->
                         <Button x:Name="CardMenuQuickRestart" Style="{StaticResource HpCardMenuItem}"
-                                IsEnabled="{Binding GameRunning}" Content="快速重启游戏"/>
+                                IsEnabled="{Binding GameRunning}" Content="快速重启游戏" Click="CardMenuQuickRestart_Click"/>
                         <!-- :702-704 文案在「收藏实例 / 取消收藏」之间切，端口没有收藏数据 → 取未收藏那支 -->
-                        <Button x:Name="CardMenuFavorite" Style="{StaticResource HpCardMenuItem}" Content="收藏实例"/>
-                        <Button x:Name="CardMenuOpenFolder" Style="{StaticResource HpCardMenuItem}" Content="打开文件夹"/>
+                        <Button x:Name="CardMenuFavorite" Style="{StaticResource HpCardMenuItem}" Content="收藏实例" Click="CardMenuFavorite_Click"/>
+                        <Button x:Name="CardMenuOpenFolder" Style="{StaticResource HpCardMenuItem}" Content="打开文件夹" Click="CardMenuOpenFolder_Click"/>
                         <!-- :706 .menu-item.danger -->
                         <Button x:Name="CardMenuDelete" Style="{StaticResource HpCardMenuItemDanger}"
-                                Content="删除实例"/>
+                                Content="删除实例" Click="CardMenuDelete_Click"/>
                     </StackPanel>
                 </ScrollViewer>
             </Border>

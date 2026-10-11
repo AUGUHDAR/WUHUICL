@@ -107,6 +107,9 @@ ICONS = [
     ("Icon.Cube",           "views/FriendConnectView.vue",    38, "M12 3 4 7v10l8 4 8-4V7l-8-4Z"),
     # --- skin viewer --------------------------------------------------------------------
     ("Icon.ResetView",      "views/SkinsView.vue",           399, '<circle cx="12" cy="12" r="7.5"'),
+    # --- 资源管理行图标（FileManager.vue:433-438，stroke-width 1.8，不是导航那颗 2） ------
+    ("Icon.FmFolder",       "components/FileManager.vue",    433, "M3 7a2 2 0 0 1 2-2"),
+    ("Icon.FmFile",         "components/FileManager.vue",    435, "M14 2H6a2 2 0 0 0-2 2"),
 ]
 
 # requested by the port but with no SVG anywhere in the source tree (92 blocks / 85 unique d)

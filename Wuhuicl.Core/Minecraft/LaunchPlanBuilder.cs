@@ -4,6 +4,16 @@ using System.Text.Json;
 
 namespace Wuhuicl.Core.Minecraft;
 
+/// <summary>autoMemoryMB（shared/memory.ts）：物理内存 25% 取 0.5GB 整，夹 2~8GB。</summary>
+public static class MemoryPolicy
+{
+    public static int AutoMemoryMB(long totalMemMb)
+    {
+        var quarter = (long)Math.Floor(totalMemMb * 0.25 / 512) * 512;
+        return (int)Math.Min(8192, Math.Max(2048, quarter));
+    }
+}
+
 public sealed class LaunchOptions
 {
     public string VersionId { get; set; } = "";
@@ -23,6 +33,7 @@ public sealed class LaunchOptions
     public bool Demo;
     public string? JavaAgent { get; set; }                  // authlib-injector
     public string? PrefetchedMetadata { get; set; }         // authlib-injector base64
+    public string? SingleplayerWorld { get; set; }          // 启动并创建命令世界：--quickPlaySingleplayer（1.20+）
 }
 
 public sealed class LaunchPlan
@@ -99,8 +110,13 @@ public static class LaunchPlanBuilder
         // 2) 用户附加 JVM 参数
         foreach (var extra in o.ExtraJvmArgs) if (!string.IsNullOrWhiteSpace(extra)) args.Add(extra.Trim());
         // 3) 内存
-        args.Add($"-Xms{Math.Max(128, o.MinHeapMb)}m");
+        // 原版 JVM 基线（launch.ts:646-653）：-Xms 取 min(mem,1024)
+        args.Add($"-Xms{Math.Min(o.MaxHeapMb, 1024)}m");
         args.Add($"-Xmx{Math.Max(512, o.MaxHeapMb)}m");
+        args.Add("-XX:+UseG1GC");
+        args.Add("-XX:+ParallelRefProcEnabled");
+        args.Add("-XX:MaxGCPauseMillis=200");
+        args.Add("-Dfile.encoding=UTF-8");
         // 4) authlib-injector（外置登录）
         if (!string.IsNullOrEmpty(o.JavaAgent))
             args.Add($"-javaagent:{o.JavaAgent}={vars.GetValueOrDefault("yggdrasil_session_server_base_url", "")}");
@@ -123,6 +139,15 @@ public static class LaunchPlanBuilder
                 args.Add(o.ServerAddress);
             }
             else plan.Warnings.Add("该版本不支持自动进服，已忽略服务器地址");
+        }
+        if (!string.IsNullOrEmpty(o.SingleplayerWorld))
+        {
+            if (VersionCompare.Compare(rv.Id, "1.20") >= 0)
+            {
+                args.Add("--quickPlaySingleplayer");
+                args.Add(o.SingleplayerWorld);
+            }
+            else plan.Warnings.Add("该版本不支持 Quick Play 单人直进（需要 1.20+），已忽略世界参数");
         }
         foreach (var extra in o.ExtraGameArgs) if (!string.IsNullOrWhiteSpace(extra)) args.Add(extra.Trim());
 

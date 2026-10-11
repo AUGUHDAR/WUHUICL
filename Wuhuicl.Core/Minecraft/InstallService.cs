@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 
@@ -86,6 +86,9 @@ public sealed class InstallService
     readonly Core.Storage.GamePaths Paths;
     public Downloader DL { get; } = new();
     public IProgress<string>? Progress { get; set; }
+    /// <summary>新版本默认开启版本隔离：安装完成时创建版本专属资源目录（mods 等）。</summary>
+    public bool DefaultIsolation { get; set; } = true;
+
     /// <summary>国内网络默认先试镜像。</summary>
     public bool UseMirror { get; set; } = true;
     public string MirrorRoot { get; set; } = "https://bmclapi2.bangbang93.com";
@@ -166,6 +169,13 @@ public sealed class InstallService
             report.Skipped = results.Count(r => r.Skipped);
         }
         report.Ok = report.Failed.Count == 0;
+        // 版本隔离（settings.defaultIsolation）：装完顺手建版本专属资源目录，
+        // 资源页与游戏都能直接用；已存在则跳过
+        if (report.Ok && DefaultIsolation)
+        {
+            foreach (var kind in new[] { "mods", "resourcepacks", "shaderpacks" })
+                Directory.CreateDirectory(Path.Combine(Paths.VersionDir(id), kind));
+        }
         return report;
 
         VersionInfo? LoadLocal(string vid)

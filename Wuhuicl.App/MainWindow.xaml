@@ -1,10 +1,10 @@
-<Window x:Class="Wuhuicl.App.MainWindow"
+﻿<Window x:Class="Wuhuicl.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:pages="clr-namespace:Wuhuicl.App.Pages"
         xmlns:ctl="clr-namespace:Wuhuicl.App.Controls"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="WUHUICL 武慧启动器" Width="1360" Height="860" MinWidth="960" MinHeight="620"
+        Title="WUHUICL 启动器" Width="1360" Height="860" MinWidth="960" MinHeight="620"
         WindowStartupLocation="CenterScreen" Background="{DynamicResource WindowGrad}"
         Foreground="{DynamicResource Fg}" FontFamily="{StaticResource UiFont}" FontSize="14"
         TextOptions.TextFormattingMode="Ideal" UseLayoutRounding="True">
@@ -759,7 +759,7 @@
                     Visibility="Collapsed" IsHitTestVisible="False"/>
 
             <!-- ==================== 侧栏 208 ==================== -->
-            <Border Grid.Column="0" Background="{DynamicResource NavBg}"
+            <Border x:Name="SidebarShell" Grid.Column="0" Background="{DynamicResource NavBg}"
                     BorderBrush="{DynamicResource Line}" BorderThickness="0,0,1,0">
                 <Grid>
                     <Grid.RowDefinitions>
@@ -811,7 +811,9 @@
                          .nav-label（:1875-1877）500、选中 600（:1878）；.nav-icon 20 盒 / 19 svg（:1862-1874）。
                          水滴层与选条层是独立绝对定位层（原版 .nav-bubble :1837 / .nav-selection :1849），
                          几何由代码测量后做 300ms cubic-bezier(.22,1,.36,1) 位移。 -->
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0">
+                    <!-- .nav 的滚动条是 overlay 且原生隐藏（App.vue:1806 附近 overflow-y:auto 无 scrollbar 样式），
+                         子菜单展开超高时也不显示可见滚动条 -->
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Hidden" Padding="0">
                         <Grid Margin="12,4,12,12">
                             <Canvas x:Name="NavHost" IsHitTestVisible="False">
                                 <!-- .nav-bubble：App.vue:1842 底色是 135° 渐变（accent-soft 80% → hover）
@@ -864,7 +866,11 @@
                                              GroupName="nav"
                                                      Tag="Icon.Changelog" Content="录像" Checked="Nav_Checked"
                                                      MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
-                                        <!-- 子项顺序照 App.vue:158-186：mods/packs/shaders/recordings/bridge/servers。
+                                        <RadioButton x:Name="NavProjections" Style="{StaticResource Sh.NavSub}"
+                                             GroupName="nav"
+                                                     Tag="Icon.Projections" Content="投影" Checked="Nav_Checked"
+                                                     MouseEnter="NavItem_Enter" MouseLeave="NavItem_Leave"/>
+                                        <!-- 子项顺序照 1.1.10 App.vue:158-192：mods/packs/shaders/recordings/projections/bridge/servers。
                                              MOD 面板是桥接参数编辑器（BridgeView），服务器是服务器条目管理（ServersView），
                                              两者与主导航的「联机」互不相干，不能并成一块。 -->
                                         <RadioButton x:Name="NavBridge" Style="{StaticResource Sh.NavSub}"
@@ -970,6 +976,8 @@
                                 <StackPanel Orientation="Horizontal">
                                     <ContentControl Width="15" Height="15" VerticalAlignment="Center"
                                                     Style="{DynamicResource Icon.Download}"/>
+                                    <!-- 原版 .top-btn 是「图标＋文字」（App.vue:1334-1339 下载），与右侧「导入」同构 -->
+                                    <TextBlock Text="下载" Margin="8,0,0,0" VerticalAlignment="Center"/>
                                     <!-- .dl-badge（:1340 ＋ :2224-2236）：min-width 16 / 高 16 / padding 0 4 /
                                          radius 999（半高 8）/ 底 accent / 字 on-accent 12·700 居中（＝DlBadge 档） -->
                                     <Border x:Name="DlBadge" Style="{StaticResource DlBadge}"
@@ -1059,6 +1067,7 @@
                     <pages:SkinsPage x:Name="PageSkins" Visibility="Collapsed"/>
                     <pages:CommunityPage x:Name="PageCommunity" Visibility="Collapsed"/>
                     <pages:ModsPage x:Name="PageMods" Visibility="Collapsed"/>
+                    <pages:ProjectionsPage x:Name="PageProjections" Visibility="Collapsed"/>
                     <pages:KeysPage x:Name="PageKeys" Visibility="Collapsed"/>
                     <pages:RecordingsPage x:Name="PageRecordings" Visibility="Collapsed"/>
                     <pages:ServersPage x:Name="PageServers" Visibility="Collapsed"/>
@@ -1859,6 +1868,8 @@
                     </ScrollViewer>
                 </Border>
             </Border>
+            <!-- 实例管理中心（InstanceCenter.cs 代码构建，z 9500 盖全窗） -->
+            <ContentControl x:Name="InstanceCenterHost" Grid.Column="0" Grid.ColumnSpan="2" Panel.ZIndex="9500"/>
         </Grid>
     </Border>
 </Window>

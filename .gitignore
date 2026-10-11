@@ -3,3 +3,20 @@ obj/
 *.user
 __pycache__/
 *.pyc
+
+# 本地构建产物与截图
+publish/
+shots/
+shots$p.png
+
+# 已退役的娃娃烘焙帧（仅本地留参考）
+Wuhuicl.App/Assets/doll/
+
+# 本地一次性修补脚本
+_fix*.py
+
+# tools 只保留三个生成工具，其余为本地一次性修补脚本
+tools/*
+!tools/check_resource_keys.py
+!tools/gen_icons.py
+!tools/gen_theme_mixins.py

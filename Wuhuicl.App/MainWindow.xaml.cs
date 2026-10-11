@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
@@ -15,15 +15,28 @@ namespace Wuhuicl.App;
 
 public partial class MainWindow : Window
 {
-    readonly LaunchSession _s = new();
-    readonly List<BitmapSource> _banners = new();
+    internal readonly LaunchSession _s = new();
     DispatcherTimer? _bannerTimer;
     int _bannerIndex;
+    readonly List<string> _bannerFiles = new();
+    static readonly Dictionary<string, BitmapSource> _bannerCache = new();   // 只留 2 张，见 DecodeBanner
+
+    /// <summary>hero 按需解码：缓存超 2 张就清空重来（交叉淡入同时最多引用 2 张）。</summary>
+    static BitmapSource DecodeBanner(string path)
+    {
+        if (_bannerCache.TryGetValue(path, out var hit)) return hit;
+        if (_bannerCache.Count >= 2) _bannerCache.Clear();
+        var bmp = SkinRenderer.LoadAsset(path);
+        _bannerCache[path] = bmp!;   // 资产缺失时 LoadAsset 返回 null，字典按非空约定缓存（界面侧已降级处理）
+        return bmp!;
+    }
     bool _frontA = true;
 
     public MainWindow()
     {
         InitializeComponent();
+        InstanceCenterW = new InstanceCenter(this, _s);
+        InstanceCenterHost.Content = InstanceCenterW.BuildHost();
         DataContext = _s;
         Diag($"ctor W={Width} H={Height} Min={MinWidth}");
         SourceInitialized += (_, _) =>
@@ -45,6 +58,86 @@ public partial class MainWindow : Window
             if (LogOverlay.Visibility != Visibility.Visible) return;
             Dispatcher.BeginInvoke(() => LogScroll.ScrollToEnd(), System.Windows.Threading.DispatcherPriority.Background);
         };
+        // 窗口背景（壁纸）：设置页补丁与主题切换都要重涂（壳层半透明比按主题的暗/亮取值）
+        _s.BackgroundChanged += ApplyBackgroundFromSettings;
+        ThemeManager.Applied += ApplyBackgroundFromSettings;
+    }
+
+    // ==================== 窗口背景（壁纸）层 ====================
+    // 复刻 App.vue:886-911 的 bgStyle + :1236 的 .app-bg + :1762 的 .shell.has-bg：
+    // 背景层垫底（根 Grid 第一个子元素，不拦截交互），壳层底色改半透明让它透出；
+    // 透出比例取 --shell-surface / --bg-2 的 color-mix（App.vue:971-973、:1010-1012）：
+    // 壳 42%（浅主题）/30%（深主题），侧栏 38% / 26%。
+    void ApplyBackgroundFromSettings()
+    {
+        var bg = _s.Settings.Value.Background;
+        if (bg.Mode is not ("color" or "image"))
+        {
+            AppBgLayer.Visibility = Visibility.Collapsed;
+            SetResourceReference(BackgroundProperty, "WindowGrad");
+            SidebarShell.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty, "NavBg");
+            return;
+        }
+        bool dark = ThemeManager.IsDark(_s.Settings.Value.Theme);
+        Background = ShellBrush(ResourceColor("Bg"), dark ? 0.30 : 0.42);
+        SidebarShell.Background = ShellBrush(ResourceColor("NavBg"), dark ? 0.26 : 0.38);
+
+        if (bg.Mode == "color")
+        {
+            AppBgLayer.Background = new SolidColorBrush(ParseColor(bg.Color, System.Windows.Media.Color.FromRgb(0x1b, 0x24, 0x37)));
+            AppBgLayer.Effect = null;
+            AppBgLayer.Margin = new Thickness(0);
+        }
+        else
+        {
+            if (!System.IO.File.Exists(bg.Image))
+            {
+                // 图片缺失：K 的 probe.onerror 会回退默认背景（App.vue:864-875），这里同样整层收起
+                AppBgLayer.Visibility = Visibility.Collapsed;
+                return;
+            }
+            var brush = new System.Windows.Media.ImageBrush(new System.Windows.Media.Imaging.BitmapImage(new Uri(bg.Image)))
+            {
+                // fit：fill→填满、fit→等适应（contain）、crop→裁切（cover）— App.vue:896 的三态映射
+                Stretch = bg.Fit switch
+                {
+                    "fill" => Stretch.Fill,
+                    "fit" => Stretch.Uniform,
+                    _ => Stretch.UniformToFill,
+                },
+            };
+            AppBgLayer.Background = brush;
+            // CSS blur 向四周溢出，K 用 inset = 负 1.5×blur 补边（App.vue:898-900）；
+            // WPF 的 BlurEffect 边缘往里缩，同样负 Margin 过绘，窗口边界自动裁掉
+            AppBgLayer.Effect = bg.Blur > 0
+                ? new System.Windows.Media.Effects.BlurEffect { Radius = bg.Blur }
+                : null;
+            AppBgLayer.Margin = bg.Blur > 0 ? new Thickness(-1.5 * bg.Blur) : new Thickness(0);
+        }
+        AppBgLayer.Opacity = Math.Clamp(bg.Opacity, 0, 1);
+        AppBgLayer.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>设置页背景区的统一出口（契约：页面不碰状态）。null = 这一项不动。</summary>
+    public void ApplyBackgroundPatch(string? mode = null, string? color = null, string? image = null,
+        double? opacity = null, double? blur = null, string? fit = null, bool reset = false)
+        => _s.PatchBackground(mode, color, image, opacity, blur, fit, reset);
+
+    /// <summary>当前背景设置快照，给设置页刷控件态用。</summary>
+    public Wuhuicl.Core.Stores.BackgroundSettings CurrentBackground => _s.Settings.Value.Background;
+
+    /// <summary>主题画刷取色（Bg / NavBg 都是 SolidColorBrush），取不到回退中灰。</summary>
+    System.Windows.Media.Color ResourceColor(string key)
+        => (TryFindResource(key) as System.Windows.Media.SolidColorBrush)?.Color
+           ?? System.Windows.Media.Color.FromRgb(0xed, 0xf0, 0xf7);
+
+    static System.Windows.Media.SolidColorBrush ShellBrush(System.Windows.Media.Color c, double alpha)
+        => new() { Color = System.Windows.Media.Color.FromArgb((byte)Math.Round(alpha * 255), c.R, c.G, c.B) };
+
+    static System.Windows.Media.Color ParseColor(string hex, System.Windows.Media.Color fallback)
+    {
+        try { return (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex); }
+        catch { return fallback; }
     }
 
     async void OnLoaded(object sender, RoutedEventArgs e)
@@ -60,9 +153,20 @@ public partial class MainWindow : Window
             MpCustomName.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         MpCustomNameHint.Visibility = Visibility.Visible;
         ApplyThemeFromSettings();
+        ApplyBackgroundFromSettings();
         LoadBanners();
         ApplyBrandArt();
         SkinDoll.Skin = SkinRenderer.SkinSource();
+        // 窗口/任务栏图标：皮肤脸（与 exe 图标同源），单文件下从内嵌资源读
+        try
+        {
+            var iconStream = typeof(SkinRenderer).Assembly.GetManifestResourceStream("Wuhuicl.App.Assets.app.ico");
+            if (iconStream is not null)
+            {
+                Icon = System.Windows.Media.Imaging.BitmapFrame.Create(iconStream);
+            }
+        }
+        catch { }
         SkinDoll.Slim = SkinRenderer.IsSlimSkin();
         PageHome.SkinModelText.Text = SkinDoll.Slim ? "纤细模型" : "经典模型";
         RefreshHero();
@@ -73,12 +177,19 @@ public partial class MainWindow : Window
             await Task.Delay(8000);
             Dispatcher.Invoke(() =>
             {
+                // 启动尘埃落定后修剪一次工作集：任务管理器默认列就是专用工作集，
+                // 启动期的高水位不该让用户一直看着
+                Native.TrimWorkingSet();
                 var dpi = VisualTreeHelper.GetDpi(this);
                 Diag($"t=8s state={WindowState} W={Width} H={Height} Actual={ActualWidth}x{ActualHeight} " +
                      $"screen={SystemParameters.PrimaryScreenWidth}x{SystemParameters.PrimaryScreenHeight} " +
                      $"dpi={dpi.DpiScaleX}x{dpi.DpiScaleY} ctx={DpiAwareness.Current().ToInt64()}");
             });
         });
+        // 每分钟修一次工作集：动画/解码的高水位不该一直挂在任务管理器里
+        var trimTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+        trimTimer.Tick += (_, _) => Native.TrimWorkingSet();
+        trimTimer.Start();
         await _s.LoadOnline();
         RefreshHero();
         Diag("after LoadOnline");
@@ -87,6 +198,9 @@ public partial class MainWindow : Window
     static readonly Stopwatch _clock = Stopwatch.StartNew();
 
     /// <summary>临时探针：量渲染层级与每张图的真实解码开销，定位完就删。</summary>
+    /// <summary>prefers-reduced-motion 对应 SystemParameters.ClientAreaAnimation（CreatorMotto 同判据）。</summary>
+    static bool ReducedMotion() => SystemParameters.ClientAreaAnimation == false;
+
     internal static void Diag(string line)
     {
         try
@@ -102,20 +216,19 @@ public partial class MainWindow : Window
     /// <summary>原版 hero 位是内置轮播图。缺图就留底色 #17231F，不硬撑。</summary>
     void LoadBanners()
     {
+        if (Environment.GetEnvironmentVariable("WUHUICL_NOHERO") == "1") return;  // 内存二分开关
         Diag($"tier={RenderCapability.Tier} dpiScale={PresentationSource.FromVisual(this)?.CompositionTarget?.TransformToDevice.M11} " +
              $"W={Width} H={Height} Actual={ActualWidth}x{ActualHeight} Left={Left} Top={Top}");
+        // 只存 LoadAsset 的相对名（磁盘优先 + 内嵌回退都归它管）；位图按需解码、最多驻留 2 张
         for (int i = 1; i <= 8; i++)
         {
-            var img = SkinRenderer.LoadAsset($"hero/banner{i}.png");
-            if (img is null) break;
-            Diag($"banner{i} {img.PixelWidth}x{img.PixelHeight} dpi={img.DpiX}x{img.DpiY} " +
-                 $"raw={img.PixelWidth * img.PixelHeight * 4 / 1048576}MB");
-            _banners.Add(img);
+            if (!SkinRenderer.HasAsset($"hero/banner{i}.png")) break;
+            _bannerFiles.Add($"hero/banner{i}.png");
         }
-        if (_banners.Count == 0) return;
-        SetHeroImage(HeroImageA, _banners[0]);
+        if (_bannerFiles.Count == 0) return;
+        SetHeroImage(HeroImageA, DecodeBanner(_bannerFiles[0]));
         ApplyHeroOffset();
-        if (_banners.Count < 2) return;
+        if (_bannerFiles.Count < 2) return;
         // 间隔默认 6.5s（shared/appearancePolicy.ts:5，夹在 1..120s），交叉淡入 500ms
         _bannerTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6.5) };
         _bannerTimer.Tick += (_, _) => StepBanner();
@@ -125,10 +238,10 @@ public partial class MainWindow : Window
     void StepBanner()
     {
         Diag($"step enter slot={HeroStage.ActualWidth}x{HeroStage.ActualHeight}");
-        _bannerIndex = (_bannerIndex + 1) % _banners.Count;
+        _bannerIndex = (_bannerIndex + 1) % _bannerFiles.Count;
         var enter = _frontA ? HeroImageB : HeroImageA;
         var leave = _frontA ? HeroImageA : HeroImageB;
-        SetHeroImage(enter, _banners[_bannerIndex]);
+        SetHeroImage(enter, DecodeBanner(_bannerFiles[_bannerIndex]));
         Diag("after source set");
         var d = new Duration(TimeSpan.FromMilliseconds(500));
         enter.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, d)
@@ -136,6 +249,9 @@ public partial class MainWindow : Window
         leave.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0, d)
         { FillBehavior = FillBehavior.HoldEnd });
         _frontA = !_frontA;
+        // 新刷子必须立刻算 cover 裁切：ViewportUnits 是 Absolute，没算过的 Viewport 默认 1x1 DIP，
+        // 整张图被画进一个点里 —— 第二张起 hero 就是纯黑（「背景没了」的根因）
+        ApplyHeroOffset();
         Diag("after animation begin");
     }
 
@@ -147,8 +263,9 @@ public partial class MainWindow : Window
     /// 而不是给 Image 挂 RenderTransform —— 后者的基准对齐取决于布局，
     /// 实测会在卡片顶部露出一条与 shift 等高的缝。
     /// </summary>
-    void SetHeroImage(Border target, BitmapSource src)
+    void SetHeroImage(Border target, BitmapSource? src)
     {
+        if (src is null) return;   // 解码失败就不动这块画布，绝不能 NPE 崩启动
         target.Background = new ImageBrush(src)
         {
             Stretch = Stretch.Fill,
@@ -168,7 +285,7 @@ public partial class MainWindow : Window
         if (slotW <= 0 || slotH <= 0) return;
         foreach (var (border, brush) in _heroBrushes)
         {
-            if (!_heroSrc.TryGetValue(border, out var bs)) continue;
+            if (!_heroSrc.TryGetValue(border, out var bs) || bs is null) continue;
             // cover 后的实际绘制尺寸（用 DIP，位图 DPI 不是 96 时 Pixel 尺寸会偏）
             double s = Math.Max(slotW / bs.Width, slotH / bs.Height);
             double drawnW = bs.Width * s, drawnH = bs.Height * s;
@@ -184,7 +301,6 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>
     /// <summary>
     /// 两层位置层的初始定位：水滴在没悬停时也停在选中项且不透明
     /// （useNavigationBubble.ts:22 的 target 为空时回落到 active），选条始终在选中项。
@@ -255,6 +371,7 @@ public partial class MainWindow : Window
                 case "packs": NavResources.IsChecked = true; NavPacks.IsChecked = true; break;
                 case "shaders": NavResources.IsChecked = true; NavShaders.IsChecked = true; break;
                 case "recordings": NavResources.IsChecked = true; NavRecordings.IsChecked = true; break;
+                case "projections": NavResources.IsChecked = true; NavProjections.IsChecked = true; break;
                 case "keys": NavDefaults.IsChecked = true; break;
                 case "friends": NavOnline.IsChecked = true; break;
                 // 服务器与 MOD 面板是资源管理子项：先展开父项再选中，否则子菜单是收起的
@@ -274,6 +391,10 @@ public partial class MainWindow : Window
             case "log":
                 ToggleLog_Click(this, new RoutedEventArgs());
                 break;
+            case "bgsec":
+                // 逐屏自测：展开设置页的「窗口背景」折叠体
+                PageSettings.BackgroundHead.IsChecked = true;
+                break;
             case "logfail":
                 _s.LaunchFailed = true;
                 foreach (var line in new[]
@@ -288,12 +409,17 @@ public partial class MainWindow : Window
             case "installed":
                 // 本机一个实例都没装时，已安装行的版式永远拍不到（列表是空的）。
                 // 只往内存集合塞两条假行，不动 SelectedInstalled、不写 settings.json，进程一退就没。
-                _s.InstalledList.Add(new VersionRow { Id = "1.20.1", Label = "1.20.1", Subtitle = "正式版" });
+                _s.InstalledList.Add(new VersionRow
+                {
+                    Id = "1.20.1", Label = "1.20.1", Subtitle = "正式版",
+                    McVersion = "1.20.1", LoaderLabel = "原版", IsolatedText = "已隔离",
+                });
                 _s.InstalledList.Add(new VersionRow
                 {
                     Id = "fabric-loader-0.15.11-1.20.4",
                     Label = "Fabric 1.20.4 这个实例名故意取长一点用来验证两行截断",
                     Kind = "loader", Subtitle = "Fabric 0.15.11",
+                    McVersion = "1.20.4", LoaderLabel = "Fabric 0.15.11", IsolatedText = "已隔离",
                 });
                 NavVersions.IsChecked = true;
                 PageVersions.TabInstalled.IsChecked = true;
@@ -304,9 +430,37 @@ public partial class MainWindow : Window
                 NavVersions.IsChecked = true;
                 PageVersions.DebugOpenInstall();
                 break;
+            case "mslogin":
+                // 微软设备码弹窗：--open=mslogin 走真实 /devicecode 请求（第一腿链路自测）
+                PageAccounts.Visibility = Visibility.Visible;
+                PageAccounts.DebugOpenMsLogin();
+                break;
+            case "center":
+                // 实例中心自测：没有实例时塞两条内存假行（进程退出即没），再开管理弹窗
+                if (_s.InstalledList.Count == 0)
+                {
+                    _s.InstalledList.Add(new VersionRow
+                    {
+                        Id = "1.20.1", Label = "1.20.1", McVersion = "1.20.1",
+                        LoaderLabel = "原版", IsolatedText = "已隔离", Subtitle = "正式版",
+                    });
+                    _s.InstalledList.Add(new VersionRow
+                    {
+                        Id = "fabric-loader-0.15.11-1.20.4", Label = "Fabric 1.20.4", Kind = "loader",
+                        McVersion = "1.20.4", LoaderLabel = "Fabric 0.15.11", IsolatedText = "已隔离",
+                        Subtitle = "Fabric 0.15.11",
+                    });
+                }
+                OpenInstanceCenter(_s.InstalledList[0].Id);
+                break;
             case "creator":
                 // 创作者卡的展开态只有 hover 才有，截图脚本没有指针，这里直接把它撑开
                 PageHome.DebugOpenCreator();
+                break;
+            case "dl":
+                // 下载中心浮层：开空面板（DlEmpty 态）
+                RefreshDlPanel();
+                ShowFloat(DlPanel);
                 break;
         }
     }
@@ -363,12 +517,13 @@ public partial class MainWindow : Window
         else if (ReferenceEquals(sender, NavPacks)) { PageMods.ResourceKind = "resourcepacks"; Show("mods", sender as RadioButton); }
         else if (ReferenceEquals(sender, NavShaders)) { PageMods.ResourceKind = "shaders"; Show("mods", sender as RadioButton); }
         else if (ReferenceEquals(sender, NavRecordings)) Show("recordings", sender as RadioButton);
+        else if (ReferenceEquals(sender, NavProjections)) Show("projections", sender as RadioButton);
         else ShowStub(sender);
     }
 
     /// <summary>页面显隐表驱动：加一页只改这里，不再堆 if-else。
     /// item 是触发本次切换的导航项，回退时要按它恢复选中（mods/packs/shaders 共用一页，只按 key 回不去）。</summary>
-    void Show(string which, RadioButton? item = null)
+    internal void Show(string which, RadioButton? item = null)
     {
         if (_view != which)
         {
@@ -383,7 +538,7 @@ public partial class MainWindow : Window
         var pages = new FrameworkElement[]
         {
             PageHome, PageVersions, PageSettings, PageAccounts, PageSkins, PageCommunity,
-            PageMods, PageKeys, PageRecordings, PageServers, PageBridge, PageFriends, PageStub,
+            PageMods, PageKeys, PageRecordings, PageProjections, PageServers, PageBridge, PageFriends, PageStub,
         };
         foreach (var p in pages) p.Visibility = Visibility.Collapsed;
         (which switch
@@ -397,11 +552,38 @@ public partial class MainWindow : Window
             "mods" => PageMods,
             "keys" => PageKeys,
             "recordings" => PageRecordings,
+            "projections" => PageProjections,
             "servers" => PageServers,
             "bridge" => PageBridge,
             "friends" => PageFriends,
             _ => PageStub,
         }).Visibility = Visibility.Visible;
+        // 路由切换 fade：<Transition name="fade"> 只有 enter（190ms var(--ease-out)），
+        // leave 是 display:none 无动画（ui-system.css:50-52）→ 切页时对进场页做一次透明度补间
+        if (!ReducedMotion())
+        {
+            var entering = (FrameworkElement)(which switch
+            {
+                "home" => PageHome,
+                "versions" => PageVersions,
+                "settings" => PageSettings,
+                "accounts" => PageAccounts,
+                "skins" => PageSkins,
+                "community" => PageCommunity,
+                "mods" => PageMods,
+                "keys" => PageKeys,
+                "recordings" => PageRecordings,
+                "projections" => PageProjections,
+                "servers" => PageServers,
+                "bridge" => PageBridge,
+                "friends" => PageFriends,
+                _ => PageStub,
+            });
+            entering.BeginAnimation(OpacityProperty, null);
+            entering.Opacity = 0;
+            entering.BeginAnimation(OpacityProperty,
+                Motion.To(OpacityProperty, 0, 1, Motion.Normal, Motion.EaseOut));
+        }
         // App.vue:1333/1342 下载与导入都只在非首页出现；:1359 更新日志图标钮只在首页出现；
         // :1351 首页那颗下载图标钮要「首页 且 有活动任务」，跟着 ApplyTaskBadge 一起算
         bool home = which == "home";
@@ -432,7 +614,7 @@ public partial class MainWindow : Window
     /// 图标与文字会整行隐形（实测就是这样把侧栏那一行抹白的），只有 ClearValue 才是「清掉本地值、
     /// 回到样式与模板触发器自己的取色」（hover 转 text 也还在）。
     /// </summary>
-    static readonly string[] ResourceGroupViews = { "mods", "packs", "shaders", "bridge", "servers", "recordings" };
+    static readonly string[] ResourceGroupViews = { "mods", "packs", "shaders", "bridge", "servers", "recordings", "projections" };
 
     void ApplyResourceGroup()
     {
@@ -440,6 +622,16 @@ public partial class MainWindow : Window
         bool inGroup = ResourceGroupViews.Contains(_view);
         if (inGroup) NavResources.Foreground = (Brush)FindResource("Fg");
         else NavResources.ClearValue(Control.ForegroundProperty);
+        // 选中资源子项时自动展开父组（用户语义：点子项=要看子项，组得撑开）；
+        // 其它情况完全跟随用户自己的开合意图，绝不在后台偷偷回弹。
+        if (inGroup && !_resourceExpanded && NavResources.IsChecked != true)
+        {
+            _resourceExpanded = true;
+            _syncingExpand = true;
+            NavResources.IsChecked = true;
+            _syncingExpand = false;
+            ApplyExpandVisual(true);
+        }
         if (inGroup && NavResources.IsChecked != true) NavResources.IsChecked = true;
     }
 
@@ -467,18 +659,32 @@ public partial class MainWindow : Window
 
     double _subOpenHeight = double.NaN;
 
+    /// <summary>用户对「资源管理」父项的展开意图 ＝ 原版 resourceExpanded（App.vue:207，localStorage 持久化的 ref）。
+    /// 子菜单视觉展开 = 意图 || 在组内（App.vue:1288）——之前把「组内强制撑开」错存进了
+    /// NavResources.IsChecked 当成意图，离开资源组后子菜单就永远收不起来。</summary>
+    bool _resourceExpanded;
+    /// <summary>ApplyResourceGroup 反向同步 IsChecked 时挂上，避免把程序化赋值当成用户点击。</summary>
+    bool _syncingExpand;
+
     /// <summary>.nav-sub 的 grid-template-rows 0fr→1fr 在 WPF 无对应，按 190ms ease-out 做高度动画。</summary>
     void NavExpand_Changed(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded) return;
-        // 原版子菜单的 open 条件是 resourceExpanded || inResourceGroup（App.vue:1285／:1278）：
-        // 人已经停在资源子页里时收不起来，这里把父项按回去（会重入一次本函数，走展开分支）
-        if (NavResources.IsChecked != true && ResourceGroupViews.Contains(_view))
+        if (_syncingExpand)
         {
-            NavResources.IsChecked = true;
+            ApplyExpandVisual(NavResources.IsChecked == true);
             return;
         }
+        // 用户要求：点父项永远直接切换（不沿用原版「停在子页就收不起来」的 inResourceGroup 撑开语义）。
+        // 选中资源子项时由 Show() 自动展开，因此收起后点其它子项还会再展开。
         bool open = NavResources.IsChecked == true;
+        _resourceExpanded = open;
+        ApplyExpandVisual(open);
+    }
+
+    /// <summary>子菜单开合的视觉部分（0fr→1fr 等效高度动画 ＋ 选中层跟移）。</summary>
+    void ApplyExpandVisual(bool open)
+    {
         if (open)
         {
             NavSubList.Visibility = Visibility.Visible;
@@ -545,17 +751,26 @@ public partial class MainWindow : Window
     void RefreshHero()
     {
         var v = _s.SelectedInstalled;
-        HeroTitle.Text = v?.Label ?? "还没有安装版本";
-        HeroLoaderText.Text = v is null ? "原版" :
+        // .hero-content 只有三个孩子：kicker / hero-metadata(h1 ＋ .hero-edition) / .hero-actions
+        // （HomeView.vue:529-543）。没有版本时 h1 取 '选择游戏实例'（:63），
+        // 而 .hero-game-version 与 .loader-badge 都是 v-if="currentVersion && …"（:538-540）→ 整条不渲染。
+        // 原来这里自造了一行副文案（HeroSub）与一个「原版」徽标，原版都没有，已删。
+        HeroTitle.Text = v?.Label ?? "选择游戏实例";
+        // .hero-game-version 显示 heroVersion（= MC 版本号，:64），且只在标题里没出现过时显示（:538）；
+        // .loader-badge 同理按 loaderText 是否已在标题里（:540）。端口里 MC 版本就是实例 Id。
+        string mc = v?.Id ?? "", loader = v is null ? "" :
             (v.Kind == "loader" ? v.Subtitle : v.Kind switch
             {
                 "snapshot" => "快照",
                 "release" => "正式版",
                 _ => v.Kind,
             });
-        HeroSub.Text = v is null
-            ? "先在「游戏版本」里安装一个版本，再回来启动。"
-            : $"账号 {_s.SelectedAccount?.Name ?? "未选择"} · 内存 {_s.MemorySummary} · Java {_s.RuntimeSummary}";
+        HeroGameVersion.Visibility = v is not null && !HeroTitle.Text.Contains(mc)
+            ? Visibility.Visible : Visibility.Collapsed;
+        HeroGameVersion.Text = mc;
+        HeroLoader.Visibility = v is not null && !HeroTitle.Text.Contains(loader)
+            ? Visibility.Visible : Visibility.Collapsed;
+        HeroLoaderText.Text = loader;
         EmptyHint.Visibility = _s.InstalledList.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         EmptyHintText.Text = "尚未安装游戏实例，点击前往版本管理";
         ApplyBrandArt();
@@ -592,14 +807,195 @@ public partial class MainWindow : Window
         Show("settings", sender as RadioButton);
     }
     internal void MoreVersion_Click(object sender, RoutedEventArgs e)
-        => _s.Log("实例菜单：管理实例 / 收藏 / 打开文件夹 / 删除，下一轮接入。");
+    {
+        // 位置 = 触发钮（HomeView.vue:403-406）：top = bounds.bottom+6，left = bounds.right-230
+        var host = PageHome;
+        if (sender is FrameworkElement btn)
+        {
+            var br = btn.TransformToVisual(host).TransformBounds(new Rect(0, 0, btn.ActualWidth, btn.ActualHeight));
+            double top = Math.Clamp(br.Bottom + 6, 8, Math.Max(8, host.ActualHeight - 300));
+            double left = Math.Clamp(br.Right - 230, 8, Math.Max(8, host.ActualWidth - 242));
+            System.Windows.Controls.Canvas.SetTop(PageHome.VersionMenu, top);
+            System.Windows.Controls.Canvas.SetLeft(PageHome.VersionMenu, left);
+        }
+        PageHome.VersionMenuOverlay.Visibility = Visibility.Visible;
+        PageHome.VersionMenuHost.Visibility = Visibility.Visible;
+    }
     internal void PickJava_Click(object sender, RoutedEventArgs e)
     {
         NavSettings.IsChecked = true;
         Show("settings", sender as RadioButton);
         TxtJava.Focus();
     }
-    void OpenDl_Click(object sender, RoutedEventArgs e) => ShowFloat(DlPanel);
+    void OpenDl_Click(object sender, RoutedEventArgs e) { RefreshDlPanel(); ShowFloat(DlPanel); }
+
+    // ==================== 下载中心（引擎 Services/DownloadCenter.cs，这里接面板） ====================
+    // KAMUCL tasks.ts 的 store.tasks：即注册即运行、AbortController 取消。
+    // 面板行按 XAML 里 Sh.DlItem 族的几何在代码里生成（DlRowShell 是没接任务模型前的静态壳，保持 Collapsed）。
+    readonly DownloadCenter _dl = new();
+    /// <summary>给后续页面接下载用的出口（版本安装 / 整合包导入都从这里排队）。</summary>
+    public DownloadCenter Downloads => _dl;
+
+    /// <summary>面板行里要就地更新的控件引用（每任务一套）。</summary>
+    sealed class DlRowRefs
+    {
+        public Border Root = null!;
+        public TextBlock Title = null!, Sub = null!;
+        public ColumnDefinition FillCol = null!, RestCol = null!;
+        public Button Cancel = null!, Dismiss = null!;
+    }
+    readonly Dictionary<DownloadTask, DlRowRefs> _dlRows = new();
+    bool _dlWired;
+
+    /// <summary>把任务队列接进徽标与面板：ApplyTaskBadge 第一次跑（OnLoaded 的 Show）就会进来。</summary>
+    void WireDlCenter()
+    {
+        if (_dlWired) return;
+        _dlWired = true;
+        _dl.Tasks.CollectionChanged += (_, _) => RefreshDlPanel();
+        _dl.TaskChanged += t => UpdateDlRow(t);
+        // Status 从后台线程改，徽标更新必须回 UI 线程；关窗期的 BeginInvoke 异常吞掉
+        _dl.ActiveCountChanged += () =>
+        { try { Dispatcher.BeginInvoke(() => ActiveTaskCount = _dl.ActiveCount); } catch { } };
+    }
+
+    void RefreshDlPanel()
+    {
+        if (!Dispatcher.CheckAccess()) { Dispatcher.BeginInvoke(RefreshDlPanel); return; }
+        WireDlCenter();
+        bool any = _dl.Tasks.Count > 0;
+        DlEmpty.Visibility = any ? Visibility.Collapsed : Visibility.Visible;
+        DlListScroll.Visibility = any ? Visibility.Visible : Visibility.Collapsed;
+        DlList.Items.Clear();
+        _dlRows.Clear();
+        foreach (var t in _dl.Tasks)
+        {
+            var row = BuildDlRow(t);
+            _dlRows[t] = row;
+            DlList.Items.Add(row.Root);
+            UpdateDlRow(t);
+        }
+    }
+
+    DlRowRefs BuildDlRow(DownloadTask t)
+    {
+        var title = new TextBlock
+        {
+            Style = (Style)FindResource("Sh.DlTitle"),
+            Text = t.Title, VerticalAlignment = VerticalAlignment.Center,
+        };
+        var cancel = new Button
+        {
+            Style = (Style)FindResource("Sh.BtnSmFloat"), Content = "取消",
+            Margin = new Thickness(4, 0, 0, 0), Tag = t,
+        };
+        cancel.Click += DlRowCancel_Click;
+        var dismiss = new Button
+        {
+            Style = (Style)FindResource("Sh.DlDismiss"), Margin = new Thickness(4, 0, 0, 0),
+            Tag = t, Visibility = Visibility.Collapsed,
+            Content = new TextBlock
+            {
+                Text = "\u00D7", FontSize = 14, LineHeight = 14,
+                LineStackingStrategy = System.Windows.LineStackingStrategy.BlockLineHeight,
+            },
+        };
+        dismiss.Click += DlRowDismiss_Click;
+        var actions = new StackPanel
+        { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        actions.Children.Add(cancel);
+        actions.Children.Add(dismiss);
+
+        // .dl-item-head：flex space-between gap 8 → 标题列 *（可收缩到省略号）、动作列 Auto、中间 8
+        var head = new Grid();
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.Children.Add(title);
+        Grid.SetColumn(actions, 2);
+        head.Children.Add(actions);
+
+        var sub = new TextBlock { Style = (Style)FindResource("Sh.DlSub") };
+
+        // .dl-bar-fill 的百分比宽度用星型列表达（同 SetDlRowProgress）；
+        // Sh.DlBarFill 自带 HorizontalAlignment=Left，空 Border 会收成 0 宽，这里改 Stretch 交给列宽管
+        var fill = new Border
+        { Style = (Style)FindResource("Sh.DlBarFill"), HorizontalAlignment = HorizontalAlignment.Stretch };
+        var fillCol = new ColumnDefinition { Width = new GridLength(0, GridUnitType.Star) };
+        var restCol = new ColumnDefinition { Width = new GridLength(100, GridUnitType.Star) };
+        var barGrid = new Grid();
+        barGrid.ColumnDefinitions.Add(fillCol);
+        barGrid.ColumnDefinitions.Add(restCol);
+        barGrid.Children.Add(fill);
+
+        var body = new StackPanel();
+        body.Children.Add(head);
+        body.Children.Add(sub);
+        body.Children.Add(new Border { Style = (Style)FindResource("Sh.DlBar"), Child = barGrid });
+        return new DlRowRefs
+        {
+            Root = new Border { Style = (Style)FindResource("Sh.DlItem"), Child = body },
+            Title = title, Sub = sub, FillCol = fillCol, RestCol = restCol, Cancel = cancel, Dismiss = dismiss,
+        };
+    }
+
+    void UpdateDlRow(DownloadTask t)
+    {
+        if (!Dispatcher.CheckAccess()) { try { Dispatcher.BeginInvoke(() => UpdateDlRow(t)); } catch { } return; }
+        if (!_dlRows.TryGetValue(t, out var r)) return;
+        bool error = t.Status == DlStatus.Error;
+        // .dl-error .dl-title 转 danger（App.vue:2268），其余回到主题字色
+        r.Title.Foreground = (Brush)FindResource(error ? "Danger" : "Fg");
+        r.Cancel.Visibility = t.Status is DlStatus.Running or DlStatus.Paused
+            ? Visibility.Visible : Visibility.Collapsed;
+        // done / error：.dl-dismiss 的 ×（原版 cancelled 与 error 同款）
+        r.Dismiss.Visibility = t.Status is DlStatus.Done or DlStatus.Error
+            ? Visibility.Visible : Visibility.Collapsed;
+        r.Sub.Text = t.Status switch
+        {
+            DlStatus.Running => DescribeRunning(t),
+            DlStatus.Paused => "已暂停",
+            DlStatus.Done => "已完成",
+            _ => t.Error ?? "下载失败",
+        };
+        double p = t.Status == DlStatus.Done ? 100 : Math.Clamp(t.Progress, 0, 100);
+        r.FillCol.Width = new GridLength(p, GridUnitType.Star);
+        r.RestCol.Width = new GridLength(Math.Max(0, 100 - p), GridUnitType.Star);
+    }
+
+    /// <summary>running 行的副标题：进度 + 速度 + 剩余时间（App.vue:2262 .dl-sub 的位）。</summary>
+    static string DescribeRunning(DownloadTask t)
+    {
+        var parts = new List<string>();
+        if (t.TotalBytes > 0) parts.Add($"{FmtBytes(t.ReceivedBytes)} / {FmtBytes(t.TotalBytes)}");
+        if (t.SpeedBps > 0) parts.Add($"{FmtBytes(t.SpeedBps)}/s");
+        if (t.EtaSeconds > 0) parts.Add($"剩余 {FmtEta(t.EtaSeconds)}");
+        return parts.Count == 0 ? "连接中…" : string.Join(" · ", parts);
+    }
+
+    static string FmtBytes(long b) => b switch
+    {
+        >= 1L << 30 => $"{b / 1073741824.0:0.0} GB",
+        >= 1L << 20 => $"{b / 1048576.0:0.0} MB",
+        >= 1L << 10 => $"{b / 1024.0:0} KB",
+        _ => $"{b} B",
+    };
+
+    static string FmtEta(long s) => s >= 3600
+        ? $"{s / 3600}:{s % 3600 / 60:00}:{s % 60:00}"
+        : $"{s / 60:00}:{s % 60:00}";
+
+    void DlRowCancel_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is DownloadTask t) t.Cancel();
+    }
+
+    /// <summary>done/error 行的 ×：移除记录（原版 .dl-dismiss）。</summary>
+    void DlRowDismiss_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is DownloadTask t) _dl.Remove(t.Id);
+    }
+
     internal void GotoMemory_Click(object sender, RoutedEventArgs e)
     {
         NavSettings.IsChecked = true;
@@ -760,6 +1156,7 @@ public partial class MainWindow : Window
 
     void ApplyTaskBadge()
     {
+        WireDlCenter();   // 首次走到这里（OnLoaded 的 Show）就把 DownloadCenter 的任务队列接上
         bool has = _activeTasks > 0;
         var vis = has ? Visibility.Visible : Visibility.Collapsed;
         DlBadge.Visibility = vis;
@@ -775,6 +1172,70 @@ public partial class MainWindow : Window
     // ---------------- 启动失败弹窗（App.vue:1573-1586 ＋ :2313-2325） ----------------
     System.Windows.Controls.Image? _failBlur;
     /// <summary>拉起失败／崩溃时调用：标题＋正文（正文是 pre-wrap，换行照原样保留）。</summary>
+    // ---------------- 内存分配（SettingsView.vue 内存区 + launch.ts 内存策略） ----------------
+
+    void MemAuto_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        _s.Settings.Value.MemoryAuto = PageSettings.ChkMemAuto.IsChecked == true;
+        _s.SaveSettings();
+        _s.Raise(nameof(LaunchSession.MemorySummary));
+    }
+
+    /// <summary>刷新内存信息行（memoryInfoText — SettingsView.vue:431-434）。</summary>
+    public void RefreshMemInfo()
+    {
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: false);
+        long totalMb = LaunchSession.TotalMemMb;
+        long availMb = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes == 0 ? 0 : GetAvailMb();
+        PageSettings.SetMemInfo(
+            $"已用 {FmtMb(totalMb - availMb)} · 可用 {FmtMb(availMb)} · 总计 {FmtMb(totalMb)}",
+            $"按物理内存 1/4 自动分配（本机当前 {FmtMb(Wuhuicl.Core.Minecraft.MemoryPolicy.AutoMemoryMB(LaunchSession.TotalMemMb))}，2-8GB 区间），启动时实时生效；开启后禁用手动调节。");
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    static extern void GlobalMemoryStatusEx(ref MEMORYSTATUSEX m);
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    class MEMORYSTATUSEX
+    {
+        public uint dwLength = (uint)System.Runtime.InteropServices.Marshal.SizeOf<MEMORYSTATUSEX>();
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys, ullAvailPhys, ullTotalPageFile, ullAvailPageFile, ullTotalVirtual, ullAvailVirtual, ullAvailExtendedVirtual;
+    }
+    static long GetAvailMb()
+    {
+        var m = new MEMORYSTATUSEX();
+        GlobalMemoryStatusEx(ref m);
+        return (long)(m.ullAvailPhys / 1024 / 1024);
+    }
+    static string FmtMb(long mb) => mb >= 1024 ? $"{mb}MB（{mb / 1024.0:0.0#}G）" : $"{mb}MB";
+
+    /// <summary>整理系统内存（organizeMemory 的等价物）：EmptyWorkingSet 扫描全进程。</summary>
+    internal void OrganizeSystemMemory()
+    {
+        long before = GetAvailMb();
+        int processed = 0, skipped = 0;
+        foreach (var proc in System.Diagnostics.Process.GetProcesses())
+        {
+            try
+            {
+                if (proc.Id == Environment.ProcessId || proc.SessionId == 0 || proc.ProcessName is "System" or "Registry" or "csrss" or "wininit" or "winlogon") { skipped++; continue; }
+                if (proc.WorkingSet64 < 128L * 1024 * 1024) { skipped++; continue; }
+                if (TrimWorkingSetOf(proc.Handle)) processed++;
+            }
+            catch { skipped++; }
+            finally { try { proc.Dispose(); } catch { } }
+        }
+        long after = GetAvailMb();
+        _s.Log($"内存整理：可用 {before} → {after} MB；处理 {processed}，跳过 {skipped}；完成");
+        _s.Status = $"内存整理完成：可用 {before} → {after} MB";
+        RefreshMemInfo();
+    }
+
+    [System.Runtime.InteropServices.DllImport("psapi.dll", SetLastError = true)]
+    static extern bool EmptyWorkingSet(IntPtr h);
+    static bool TrimWorkingSetOf(IntPtr h) => EmptyWorkingSet(h);
+
     internal void ShowLaunchFailure(string title, string text)
     {
         CloseFloats();
@@ -934,6 +1395,82 @@ public partial class MainWindow : Window
         RenderOptions.SetBitmapScalingMode(BrandHead, BitmapScalingMode.NearestNeighbor);
         AvatarImg.Source = SkinRenderer.Face(64);
     }
+    /// <summary>单行文本输入对话框（原版 rename 弹窗的 WPF 等价物；返回 null=取消）。</summary>
+    internal string? PromptText(string title, string label, string initial)
+    {
+        var win = new Window
+        {
+            Title = title,
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            ResizeMode = ResizeMode.NoResize,
+            Background = (System.Windows.Media.Brush)FindResource("Bg"),
+            BorderBrush = (System.Windows.Media.Brush)FindResource("Line"),
+            BorderThickness = new Thickness(1),
+        };
+        var box = new System.Windows.Controls.TextBox
+        {
+            Text = initial,
+            Margin = new Thickness(24, 8, 24, 0),
+            Padding = new Thickness(8, 6, 8, 6),
+        };
+        var ok = new System.Windows.Controls.Button { Content = "确定", IsDefault = true, MinWidth = 76, Margin = new Thickness(0, 0, 8, 0) };
+        var cancel = new System.Windows.Controls.Button { Content = "取消", IsCancel = true, MinWidth = 76 };
+        ok.Click += (_, _) => { win.DialogResult = true; win.Close(); };
+        var stack = new System.Windows.Controls.StackPanel { Margin = new Thickness(0, 20, 0, 20) };
+        stack.Children.Add(new System.Windows.Controls.TextBlock
+        {
+            Text = label, Margin = new Thickness(24, 0, 24, 0),
+            Foreground = (System.Windows.Media.Brush)FindResource("Fg"),
+        });
+        stack.Children.Add(box);
+        var row = new System.Windows.Controls.StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Right,
+            Margin = new Thickness(24, 16, 24, 0),
+        };
+        row.Children.Add(ok);
+        row.Children.Add(cancel);
+        stack.Children.Add(row);
+        win.Content = stack;
+        box.Focus();
+        box.SelectAll();
+        return win.ShowDialog() == true ? box.Text.Trim() : null;
+    }
+
+    /// <summary>实例改名（GameView.vue openRenameFor 的引擎侧等价）：目录改名 + LastVersion 修正。</summary>
+    internal void RenameVersion(string oldId, string newId)
+    {
+        try
+        {
+            var from = _s.Paths.VersionDir(oldId);
+            var to = _s.Paths.VersionDir(newId);
+            if (Directory.Exists(to)) { _s.Status = "已存在同名实例目录"; return; }
+            Directory.Move(from, to);
+            // 版本 json 的 id 字段同步改（原版 rename 会重写登记；launcher 托管目录同样要改，否则启动器解析失败）
+            var json = _s.Paths.VersionJson(newId);
+            if (File.Exists(json))
+            {
+                var text = File.ReadAllText(json);
+                text = text.Replace("\"id\": \"" + oldId + "\"", "\"id\": \"" + newId + "\"");
+                text = text.Replace("\"id\":\"" + oldId + "\"", "\"id\":\"" + newId + "\"");
+                File.WriteAllText(json, text);
+            }
+            if (_s.Settings.Value.LastVersion == oldId)
+            {
+                _s.Settings.Value.LastVersion = newId;
+                _s.SaveSettings();
+            }
+            _s.RefreshInstalled();
+            RefreshHero();
+            _s.Status = $"已重命名为 {newId}";
+        }
+        catch (Exception ex) { _s.Status = "重命名失败：" + ex.Message; }
+    }
+
     internal void RowPlay_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.Tag is VersionRow v)
@@ -942,10 +1479,133 @@ public partial class MainWindow : Window
             Play_Click(sender, e);
         }
     }
+    // ---------------- 卡片菜单（HomeView.vue:414-423 cardMenu + :696-707 的动作） ----------------
+    VersionRow? _cardMenuVersion;
+
+    /// <summary>实例管理中心宿主（InstanceCenter.cs；页签/内容全部代码构建）。</summary>
+    readonly InstanceCenter InstanceCenterW;
+
     internal void RowMore_Click(object sender, RoutedEventArgs e)
     {
+        if ((sender as FrameworkElement)?.Tag is not VersionRow v) return;
+        _cardMenuVersion = v;
+        // 位置 = 触发钮（HomeView.vue:422-423）：top = bounds.bottom+6 夹 innerHeight-272；
+        // left = bounds.right-232 夹 innerWidth-244。这里用页面坐标系（CardMenuHost 铺满整页）。
+        var host = PageHome;
+        if (sender is FrameworkElement btn)
+        {
+            var br = btn.TransformToVisual(host).TransformBounds(new Rect(0, 0, btn.ActualWidth, btn.ActualHeight));
+            double top = Math.Clamp(br.Bottom + 6, 8, Math.Max(8, host.ActualHeight - 272));
+            double left = Math.Clamp(br.Right - 232, 8, Math.Max(8, host.ActualWidth - 244));
+            System.Windows.Controls.Canvas.SetTop(PageHome.CardMenu, top);
+            System.Windows.Controls.Canvas.SetLeft(PageHome.CardMenu, left);
+        }
+        PageHome.CardMenuFavorite.Content = _s.IsFavorite(v.Id) ? "取消收藏" : "收藏实例";   // :701
+        PageHome.CardMenuOverlay.Visibility = Visibility.Visible;
+        PageHome.CardMenuHost.Visibility = Visibility.Visible;
+    }
+
+    internal void OpenInstanceCenter(string versionId) => InstanceCenterW.Open(versionId);
+
+    void CloseCardMenu()
+    {
+        PageHome.CardMenuOverlay.Visibility = Visibility.Collapsed;
+        PageHome.CardMenuHost.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>openInstanceCenter（:696）＝ 版本管理页。</summary>
+    internal void CardMenuManage_Click(object sender, RoutedEventArgs e)
+    {
+        CloseCardMenu();
+        if (_cardMenuVersion is not null) { InstanceCenterW.Open(_cardMenuVersion.Id); return; }
+        Show("versions");
+    }
+
+    internal void CardMenuLaunch_Click(object sender, RoutedEventArgs e)
+    {
+        CloseCardMenu();
+        if (_cardMenuVersion is null) return;
+        _s.SelectedInstalled = _cardMenuVersion;
+        _ = PlayFromMenuAsync(commandWorld: false);
+    }
+
+    /// <summary>启动并创建命令世界（:702 的 @click=launchWithCommandWorld）。</summary>
+    internal void CardMenuLaunchCommand_Click(object sender, RoutedEventArgs e)
+    {
+        CloseCardMenu();
+        if (_cardMenuVersion is null) return;
+        _s.SelectedInstalled = _cardMenuVersion;
+        _ = PlayFromMenuAsync(commandWorld: true);
+    }
+
+    async Task PlayFromMenuAsync(bool commandWorld)
+    {
+        try { await _s.PlayAsync(commandWorld); }
+        catch (Exception ex)
+        {
+            _s.Status = commandWorld ? "命令世界启动失败：" + ex.Message : "启动失败：" + ex.Message;
+            _s.Log("启动失败：" + ex.Message);
+        }
+    }
+
+    /// <summary>快速重启（:703 quickRestart）。</summary>
+    internal async void CardMenuQuickRestart_Click(object sender, RoutedEventArgs e)
+    {
+        CloseCardMenu();
+        try { await _s.QuickRestartAsync(); }
+        catch (Exception ex) { _s.Status = "重启失败：" + ex.Message; }
+    }
+
+    /// <summary>toggleFavorite（:701）。</summary>
+    internal void CardMenuFavorite_Click(object sender, RoutedEventArgs e)
+    {
+        if (_cardMenuVersion is null) return;
+        bool now = _s.ToggleFavorite(_cardMenuVersion.Id);
+        _s.Status = now ? $"已收藏 {_cardMenuVersion.Label}" : $"已取消收藏 {_cardMenuVersion.Label}";
+        CloseCardMenu();
+    }
+
+    /// <summary>openVersionFolder（:426）＝ 资源管理器定位实例目录。</summary>
+    internal void CardMenuOpenFolder_Click(object sender, RoutedEventArgs e)
+    {
+        CloseCardMenu();
+        if (_cardMenuVersion is null) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe")
+            {
+                Arguments = $"/select,\"{_s.Paths.VersionDir(_cardMenuVersion.Id)}\"",
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex) { _s.Status = "打开文件夹失败：" + ex.Message; }
+    }
+
+    /// <summary>删除实例（:706 的 danger 项）＝ 删除版本目录（存档与模组不动）。</summary>
+    internal void CardMenuDelete_Click(object sender, RoutedEventArgs e)
+    {
+        var v = _cardMenuVersion;
+        CloseCardMenu();
+        if (v is null) return;
+        if (MessageBox.Show($"删除版本 {v.Id} 的目录？存档与模组文件不会被碰。", "WUHUICL",
+                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        try
+        {
+            Directory.Delete(_s.Paths.VersionDir(v.Id), true);
+            _s.RefreshInstalled();
+            RefreshHero();
+            _s.Status = $"已删除 {v.Id}";
+        }
+        catch (Exception ex) { _s.Status = "删除失败：" + ex.Message; }
+    }
+
+    /// <summary>版本下拉菜单里选中一行（HomeView.vue:673 的菜单行 @click=selectInstance 等价）。</summary>
+    internal void VersionPick_Click(object sender, RoutedEventArgs e)
+    {
         if ((sender as FrameworkElement)?.Tag is VersionRow v)
-            _s.Log($"{v.Id} 的实例菜单下一轮接入（管理 / 收藏 / 打开文件夹 / 删除）。");
+            _s.SelectedInstalled = v;
+        PageHome.VersionMenuOverlay.Visibility = Visibility.Collapsed;
+        PageHome.VersionMenuHost.Visibility = Visibility.Collapsed;
     }
     /// <summary>.log-dialog footer 的「清空日志」（HomeView.vue:725 store.logs = []）。</summary>
     void ClearLog_Click(object sender, RoutedEventArgs e) => _s.ClearLogs();
@@ -991,11 +1651,6 @@ public partial class MainWindow : Window
         catch (Exception ex) { _s.Status = "删除失败：" + ex.Message; }
     }
 
-    internal void ShowSnap_Changed(object sender, RoutedEventArgs e)
-    {
-        if (!IsLoaded) return;
-        _s.ShowSnapshots = ChkSnap.IsChecked == true;
-    }
 
     // ---------------- 账号 ----------------
     internal void AddAccount_Click(object sender, RoutedEventArgs e)
@@ -1005,15 +1660,15 @@ public partial class MainWindow : Window
         {
             NavSettings.IsChecked = true;
             Show("settings", sender as RadioButton);
-            TxtNewName.Focus();
-            TxtAcctErr.Text = "输入玩家名后点「添加离线账号」。";
+            TxtNewName!.Focus();
+            TxtAcctErr!.Text = "输入玩家名后点「添加离线账号」。";
             return;
         }
         var err = _s.AddOfflineAccount(name);
-        TxtAcctErr.Text = err ?? "";
+        TxtAcctErr!.Text = err ?? "";
         if (err is null)
         {
-            TxtNewName.Clear();
+            TxtNewName!.Clear();
             RefreshHero();
             _ = _s.PlayAsync();
         }
@@ -1032,8 +1687,17 @@ public partial class MainWindow : Window
     void BindSettings()
     {
         var st = _s.Settings.Value;
-        TxtMin.Text = st.MinHeapMb.ToString();
-        TxtMax.Text = st.MaxHeapMb.ToString();
+        // 内存模型：ChkMemAuto 双向 + MemorySummary 由属性绑定刷新；旧 TxtMin/TxtMax 已退役（Collapsed）
+        PageSettings.ChkMemAuto.Checked -= MemAuto_Changed;
+        PageSettings.ChkMemAuto.Unchecked -= MemAuto_Changed;
+        PageSettings.ChkMemAuto.IsChecked = st.MemoryAuto;
+        PageSettings.ChkMemAuto.Checked += MemAuto_Changed;
+        PageSettings.ChkMemAuto.Unchecked += MemAuto_Changed;
+        _s.Raise(nameof(LaunchSession.MemorySummary));
+        PageSettings.BindMemory();
+        RefreshMemInfo();
+        _s.OrganizeBeforeLaunch -= OrganizeSystemMemory;
+        _s.OrganizeBeforeLaunch += OrganizeSystemMemory;
         TxtJava.Text = st.JavaPath ?? "";
         ChkAutoJava.IsChecked = st.AutoJava;
         TxtW.Text = st.Width.ToString();
@@ -1043,6 +1707,9 @@ public partial class MainWindow : Window
         TxtMirror.Text = st.MirrorRoot;
         TxtJvmArgs.Text = st.ExtraJvmArgs;
         TxtGameArgs.Text = st.ExtraGameArgs;
+        ChkCloseAfter.IsChecked = st.CloseAfterLaunch;
+        ChkMsProxy.IsChecked = st.MsUseProxy;
+        ChkDefaultIso.IsChecked = st.DefaultIsolation;
         BuildThemeChips(st.Theme);
         SetThemeNote(st.Theme);
     }
@@ -1284,10 +1951,8 @@ public partial class MainWindow : Window
 
     internal void Setting_Changed(object sender, RoutedEventArgs e)
     {
-        if (!IsLoaded || TxtMin is null) return;
+        if (!IsLoaded || TxtJava is null) return;
         var st = _s.Settings.Value;
-        st.MinHeapMb = Clamp(TxtMin.Text, 128, 4096, st.MinHeapMb);
-        st.MaxHeapMb = Math.Max(Clamp(TxtMax.Text, 256, 32768, st.MaxHeapMb), st.MinHeapMb);
         st.JavaPath = string.IsNullOrWhiteSpace(TxtJava.Text) ? null : TxtJava.Text.Trim();
         st.AutoJava = ChkAutoJava.IsChecked == true;
         st.Width = Clamp(TxtW.Text, 640, 7680, st.Width);
@@ -1298,6 +1963,10 @@ public partial class MainWindow : Window
             ? "https://bmclapi2.bangbang93.com" : TxtMirror.Text.Trim();
         st.ExtraJvmArgs = TxtJvmArgs.Text.Trim();
         st.ExtraGameArgs = TxtGameArgs.Text.Trim();
+        st.CloseAfterLaunch = ChkCloseAfter.IsChecked == true;
+        st.MsUseProxy = ChkMsProxy.IsChecked == true;
+        st.DefaultIsolation = ChkDefaultIso.IsChecked == true;
+        _s.Installer.DefaultIsolation = st.DefaultIsolation;
         _s.SaveSettings();
         _s.Installer.UseMirror = st.UseMirror;
         _s.Installer.MirrorRoot = st.MirrorRoot;
@@ -1368,15 +2037,16 @@ public partial class MainWindow : Window
     public System.Windows.Controls.TextBlock HeroPlayText => PageHome.HeroPlayText;
     public System.Windows.Controls.Button HeroSettings => PageHome.HeroSettings;
     public System.Windows.Controls.Grid HeroStage => PageHome.HeroStage;
-    public System.Windows.Controls.TextBlock HeroSub => PageHome.HeroSub;
     public System.Windows.Controls.TextBlock HeroTitle => PageHome.HeroTitle;
     public System.Windows.Controls.ListBox HomeInstalled => PageHome.HomeInstalled;
     public Controls.SkinDoll3D SkinDoll => PageHome.SkinDoll;
-    public System.Windows.Controls.CheckBox ChkSnap => PageVersions.ChkSnap;
     public System.Windows.Controls.TextBlock DlHint => PageVersions.DlHint;
     public System.Windows.Controls.CheckBox ChkAutoJava => PageSettings.ChkAutoJava;
+    public System.Windows.Controls.CheckBox ChkCloseAfter => PageSettings.ChkCloseAfter;
+    public System.Windows.Controls.CheckBox ChkDefaultIso => PageSettings.ChkDefaultIso;
     public System.Windows.Controls.CheckBox ChkFull => PageSettings.ChkFull;
     public System.Windows.Controls.CheckBox ChkMirror => PageSettings.ChkMirror;
+    public System.Windows.Controls.CheckBox ChkMsProxy => PageSettings.ChkMsProxy;
     public System.Windows.Controls.WrapPanel ThemePanel => PageSettings.ThemePanel;
     public System.Windows.Controls.TextBlock TxtAcctErr => PageSettings.TxtAcctErr;
     public System.Windows.Controls.TextBox TxtGameArgs => PageSettings.TxtGameArgs;

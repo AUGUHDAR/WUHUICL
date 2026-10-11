@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -11,7 +11,7 @@ public partial class HomePage : UserControl
     MainWindow Shell => (MainWindow)System.Windows.Application.Current.MainWindow!;
 
     /// <summary>原版 CreatorCard.vue:4 那 20 个名字是官方 1.1.10 的测试名单；本作只有作者一个人，
-    /// 按作者要求只留自己（就是名单里那个「物晖」，启动器名 WUHUICL/武慧 是另一回事）。
+    /// 按作者要求只留自己（对外一律只写 WUHUICL）。
     /// 要加人只改这个数组，气泡的错峰与漂移会自己跟上。</summary>
     static readonly string[] Creators = { "物晖" };
 
@@ -35,6 +35,24 @@ public partial class HomePage : UserControl
         // .runtime-strip 的关闭挂在整条的 @mouseleave（HomeView.vue:545）：
         // 指针在三格之间转移不关掉浮块，只有离开状态条才归零（脚本 :174 runtimeHover = -1）。
         RuntimeStrip.MouseLeave += (_, _) => HideRuntimeBlob();
+        // wideRecent（HomeView.vue:376-377）：窗口宽 ≥1500 取 8 条最近游戏，否则 4 条。
+        // 构造时 Shell 尚未就绪，拖到 Loaded 再挂。
+        Loaded += (_, _) =>
+        {
+            var w = Window.GetWindow(this);
+            if (w is null) return;
+            ApplyRecentWidth(w.ActualWidth);
+            w.SizeChanged += (_, se) => ApplyRecentWidth(se.NewSize.Width);
+        };
+    }
+
+    void ApplyRecentWidth(double width)
+    {
+        var s = Shell._s;
+        int cap = width >= 1500 ? 8 : 4;
+        if (s.RecentCap == cap) return;
+        s.RecentCap = cap;
+        s.RebuildRecent();
     }
 
     /// <summary>.creator-bubble：12px / radius 999 / 底 card-2 / padding 5 9，层内 gap 8（CreatorCard.vue:24）。
@@ -176,15 +194,28 @@ public partial class HomePage : UserControl
     /// 属于 docs/UI_MOTION.md 那一轮（共享样式 RuntimeCell 里的那份格内动画随之作废）。</summary>
     void ShowRuntimeBlob()
     {
-        RuntimeBlob.Opacity = 1;
-        if (RuntimeBlob.RenderTransform is ScaleTransform st) { st.ScaleX = 1; st.ScaleY = 1; }
+        // opacity 180ms ease + scale .97 变 1，200ms ease（HomeView.vue:869-872）
+        RuntimeBlob.BeginAnimation(OpacityProperty,
+            Services.Motion.To(OpacityProperty, RuntimeBlob.Opacity, 1, Services.Motion.Ms(180), Services.Motion.Ease));
+        if (RuntimeBlob.RenderTransform is ScaleTransform st)
+        {
+            Services.Motion.Run(st,
+                (ScaleTransform.ScaleXProperty, Services.Motion.ToCurrent(ScaleTransform.ScaleXProperty, 1, Services.Motion.Ms(200), Services.Motion.Ease, st.ScaleX)),
+                (ScaleTransform.ScaleYProperty, Services.Motion.ToCurrent(ScaleTransform.ScaleYProperty, 1, Services.Motion.Ms(200), Services.Motion.Ease, st.ScaleY)));
+        }
     }
 
-    /// <summary>基态（:866）：opacity 0 ＋ scale .97，pointer-events none 已经在 XAML 里用 IsHitTestVisible 表达。</summary>
+    /// <summary>基态（:866）：opacity 0 + scale .97，pointer-events none 已经在 XAML 里用 IsHitTestVisible 表达。</summary>
     void HideRuntimeBlob()
     {
-        RuntimeBlob.Opacity = 0;
-        if (RuntimeBlob.RenderTransform is ScaleTransform st) { st.ScaleX = 0.97; st.ScaleY = 0.97; }
+        RuntimeBlob.BeginAnimation(OpacityProperty,
+            Services.Motion.To(OpacityProperty, RuntimeBlob.Opacity, 0, Services.Motion.Ms(180), Services.Motion.Ease));
+        if (RuntimeBlob.RenderTransform is ScaleTransform st)
+        {
+            Services.Motion.Run(st,
+                (ScaleTransform.ScaleXProperty, Services.Motion.ToCurrent(ScaleTransform.ScaleXProperty, 0.97, Services.Motion.Ms(200), Services.Motion.Ease, st.ScaleX)),
+                (ScaleTransform.ScaleYProperty, Services.Motion.ToCurrent(ScaleTransform.ScaleYProperty, 0.97, Services.Motion.Ms(200), Services.Motion.Ease, st.ScaleY)));
+        }
     }
 
     // ---------------- 浮层菜单（B.11 / B.12） ----------------
@@ -212,6 +243,14 @@ public partial class HomePage : UserControl
     }
 
     // 事件一律转回 Shell：逻辑只有一份，页面不碰状态。
+    void CardMenuManage_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.CardMenuManage_Click(sender, e);
+    void CardMenuLaunch_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.CardMenuLaunch_Click(sender, e);
+    void CardMenuLaunchCommand_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.CardMenuLaunchCommand_Click(sender, e);
+    void CardMenuQuickRestart_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.CardMenuQuickRestart_Click(sender, e);
+    void CardMenuFavorite_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.CardMenuFavorite_Click(sender, e);
+    void CardMenuOpenFolder_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.CardMenuOpenFolder_Click(sender, e);
+    void CardMenuDelete_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.CardMenuDelete_Click(sender, e);
+    void VersionPick_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.VersionPick_Click(sender, e);
     void AccountMenu_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.AccountMenu_Click(sender, e);
     void AddAccount_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.AddAccount_Click(sender, e);
     void GotoMemory_Click(object sender, System.Windows.RoutedEventArgs e) => Shell.GotoMemory_Click(sender, e);

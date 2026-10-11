@@ -1,4 +1,4 @@
-<UserControl x:Class="Wuhuicl.App.Pages.AccountsPage"
+﻿<UserControl x:Class="Wuhuicl.App.Pages.AccountsPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ctl="clr-namespace:Wuhuicl.App.Controls"
@@ -193,6 +193,11 @@
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <!-- .user-code:hover 底 color-mix(accent 22%, transparent)（:953-955）取 Accent16：
+                 HoverFade 淡入 150ms；虚线描边走独立通道，保持不动 -->
+            <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
+            <Setter Property="ctl:HoverFade.BrushKey" Value="Accent16"/>
+            <Setter Property="ctl:HoverFade.DurationMs" Value="150"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
@@ -206,11 +211,6 @@
                             <ContentPresenter Margin="{TemplateBinding Padding}"
                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Grid>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="b" Property="Background" Value="{DynamicResource Accent16}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -498,7 +498,7 @@
                         <!-- p.muted.mode-description{margin-bottom:12; 12px; line-height 1.6} — :753-757 -->
                         <TextBlock Style="{StaticResource Micro}" TextWrapping="Wrap" LineHeight="19.2"
                                    Margin="0,0,0,12"
-                                   Text="通过微软设备代码完成正版授权，武慧启动器不会接触你的微软密码。"/>
+                                   Text="通过微软设备代码完成正版授权，WUHUICL不会接触你的微软密码。"/>
                         <!-- 第二段只有 .muted（color text-dim，字号继承 body 14px — styles.css:125-128），无 mode-description -->
                         <TextBlock FontSize="14" TextWrapping="Wrap" LineHeight="22.4"
                                    Foreground="{DynamicResource Fg2}"
@@ -506,7 +506,7 @@
                         <!-- .ms-btn{flex-shrink:0} — :777-780。面板内三段与按钮之间没有任何 margin，
                              所以这里不给上外边距（CSS 里第二个 p 与 button 的间距是 0） -->
                         <Button x:Name="BtnMsLogin" Style="{StaticResource BtnGold}"
-                                HorizontalAlignment="Left">
+                                HorizontalAlignment="Left" Click="MsLogin_Click">
                             <!-- .btn{gap:space-2=8}（styles.css:162）→ 图标与文字间 8。
                                  v-if ms.starting 时 .spin 顶掉 svg（:420-424），两者互斥；
                                  开始微软登录要走 msBeginLogin（:78），契约 §5 没这条命令 → 只在代码侧置位 -->
@@ -553,9 +553,9 @@
                         </StackPanel>
                         <!-- .add-btn{flex-shrink:0} — :777-780；文案 :445 -->
                         <Button Grid.Column="2" x:Name="BtnAddOffline" Style="{StaticResource BtnGold}"
-                                Content="添加离线账号" VerticalAlignment="Top" IsEnabled="False"/>
-                        <!-- 占位：等账号功能接入 —— 写库走引擎侧 addOfflineAccount（:54），
-                             契约 §5 的白名单里没有这条命令，按钮只做 :442 的禁用态反馈 -->
+                                Content="添加离线账号" VerticalAlignment="Top" IsEnabled="False"
+                                Click="AddOffline_Click"/>
+                        <!-- 写库走引擎侧 addOfflineAccount（:54）的等价：AccountStore.AddOffline -->
                     </Grid>
 
                     <!-- 外置 Yggdrasil：.ygg-panel{display:grid; gap:space-4=16} — :449-513 / :781-784 -->
@@ -797,8 +797,9 @@
                                              端口目前只能加离线账号 → 先常驻 Collapsed，按 Model.Kind 决定显隐交给代码侧 -->
                                         <Button Style="{StaticResource BtnSmGhost}" Margin="12,0,0,0"
                                                 Content="验证会话" Visibility="Collapsed"/>
+                                        <!-- 删除（:553-559）.btn.btn-sm；onRemove(acc)（:368）→ AccountStore.Remove -->
                                         <Button Style="{StaticResource AcBtnSmDanger}" Margin="12,0,0,0"
-                                                Content="删除"/>
+                                                Content="删除" Click="RowDelete_Click"/>
                                         <!-- 占位：等账号功能接入 —— onRemove(acc)(:368) 与 onRefreshAccount(:300)
                                              都不在契约 §5 白名单，不挂事件 -->
                                     </StackPanel>
@@ -830,8 +831,8 @@
                     <TextBlock Style="{StaticResource AcMsTip}" TextAlignment="Center"
                                Text="请在浏览器中打开验证地址，输入下方代码完成授权。登录成功后本窗口会自动关闭。"/>
 
-                    <!-- button.user-code（:573-575）：内容是 ms.info.userCode，登录开始前没有值 → 空壳 -->
-                    <Button x:Name="MsUserCode" Style="{StaticResource AcUserCode}">
+                    <!-- button.user-code（:573-575）：内容是 ms.info.userCode，点击复制（copyUserCode — :84） -->
+                    <Button x:Name="MsUserCode" Style="{StaticResource AcUserCode}" Click="UserCode_Click">
                         <TextBlock x:Name="MsUserCodeText" Text="" FontFamily="{StaticResource MonoFont}"
                                    FontSize="26" FontWeight="Bold"/>
                     </Button>
@@ -865,13 +866,18 @@
                         <TextBox x:Name="MsUri" Style="{StaticResource AcUriInput}" IsReadOnly="True"
                                  Opacity="0.7" Text=""/>
                         <Button Grid.Column="2" x:Name="BtnOpenVerify" Style="{StaticResource BtnGold}"
-                                Content="打开验证页面"/>
+                                Content="打开验证页面" Click="OpenVerify_Click"/>
                     </Grid>
+
+                    <!-- 登录失败信息：原版经 toast 弹出（onDone 的 error 分支），端口落在弹窗内联 -->
+                    <TextBlock x:Name="MsError" FontSize="12" Foreground="{DynamicResource Danger}"
+                               TextWrapping="Wrap" TextAlignment="Center" Margin="0,12,0,0"
+                               Visibility="Collapsed"/>
 
                     <!-- .ms-waiting（:587-590）：v-if ms.waiting，开始轮询才出现 → 收起 -->
                     <StackPanel x:Name="MsWaiting" Style="{StaticResource AcMsWaiting}" Visibility="Collapsed">
                         <ContentControl Style="{StaticResource Spin}"/>
-                        <TextBlock Text="正在等待授权完成…" FontSize="14" Foreground="{DynamicResource Fg2}"
+                        <TextBlock x:Name="MsWaitingText" Text="正在等待授权完成…" FontSize="14" Foreground="{DynamicResource Fg2}"
                                    Margin="12,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
 
@@ -893,7 +899,7 @@
                 <StackPanel>
                     <TextBlock Style="{StaticResource AcModalTitle}" Text="添加外置登录提供商"/>
                     <TextBlock Style="{StaticResource AcMsTip}"
-                               Text="支持 API Root、authlib-injector 拖拽 URI，以及武慧启动器提供商 JSON/TXT 文件。"/>
+                               Text="支持 API Root、authlib-injector 拖拽 URI，以及WUHUICL提供商 JSON/TXT 文件。"/>
 
                     <!-- label.provider-input-label（:603-612）：span 标签 + textarea.input.provider-source。
                          原先这段被内联进 ygg 面板，那是模板里没有的结构，已按 :603 搬回弹窗内 -->

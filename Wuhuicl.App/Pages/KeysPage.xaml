@@ -1,6 +1,7 @@
 <UserControl x:Class="Wuhuicl.App.Pages.KeysPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ctl="clr-namespace:Wuhuicl.App.Controls">
 
     <!-- 默认配置页，复刻 KAMUCL-1.1.5/src/renderer/src/views/KeysView.vue（options.txt / 默认按键预设）。
          数值取 docs/UI_GEOMETRY_PAGES.md §9 的最终值。这个 vue 只有基线块 :227-271 与后写的覆盖块 :273，
@@ -13,9 +14,9 @@
          注释里的 CSS 令牌一律去掉前导双横线写（accent-soft 指源码的 accent-soft 令牌），
          因为 XML 注释里不允许出现连续两个减号，否则共享工程报 MC3000。
 
-         数据：契约 §5 的 LaunchSession 白名单里没有任何 options / keybinding 字段，
-         所以整页不写一条 Binding（绑不存在的属性会静默失效＝假实现），
-         行内容全是与原版同形的静态文案，每块标了「// 占位：等默认配置功能接入」。 -->
+         数据：已接真实后端 —— DefaultKeys / DefaultGameOptions / DefaultResourcePacks（Core 翻译自
+         keybindings.ts / gameOptions.ts / defaultResourcePacks.ts），行全部动态生成；
+         启动时的 options.txt 同步在 LaunchSession.PlayAsync。 -->
     <UserControl.Resources>
 
         <!-- ============ 分类导航 .cfg-sections ============ -->
@@ -82,11 +83,10 @@
             <Setter Property="Padding" Value="8"/>
             <Setter Property="CornerRadius" Value="6"/>
             <Setter Property="Background" Value="Transparent"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
-                </Trigger>
-            </Style.Triggers>
+            <!-- .cfg-row:hover 底 card-2（KeysView.vue:250）：HoverFade 淡入 CardSoft，130ms 取默认；
+                 CfgPackRowBox 经 BasedOn 一并继承过渡 -->
+            <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
+            <Setter Property="ctl:HoverFade.BrushKey" Value="CardSoft"/>
         </Style>
 
         <!-- .default-packs .cfg-row：min-height 60 / gap 12 — :273 -->
@@ -219,6 +219,128 @@
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
 
+        <!-- ============ 游戏选项区（DefaultGameOptions.vue:80-81 覆盖后的扁平行词表） ============ -->
+        <!-- .option-entry：border 0 / 下边线 1 / radius 0 / min-height 48 / padding 10 4 / 透明底（:81）；
+             hover 底 hover（:81 .options-entrances .option-entry:hover） -->
+        <Style x:Key="VpOptionEntry" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="MinHeight" Value="48"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"
+                                BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="{DynamicResource Hover}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- .option-cell input[type=range]（:80）：高 22 / 全宽 / accent 填充；WPF 没有 accent-color，
+             模板照 BridgeSlider 的配方（4px 轨道 + accent 已填充段 + 16 圆钮） -->
+        <Style x:Key="VpRange" TargetType="Slider">
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="IsMoveToPointEnabled" Value="True"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Height="22" VerticalAlignment="Center">
+                            <Border Height="4" CornerRadius="2" VerticalAlignment="Center"
+                                    Background="{DynamicResource CardSoft}"
+                                    BorderBrush="{DynamicResource Line}" BorderThickness="1"/>
+                            <Track x:Name="PART_Track" Orientation="Horizontal" IsDirectionReversed="False">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Focusable="False" IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="4" CornerRadius="2" VerticalAlignment="Center"
+                                                        Background="{DynamicResource Accent}"/>
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Focusable="False" IsTabStop="False" Opacity="0"/>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="14" Height="14" VerticalAlignment="Center">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="{DynamicResource Accent}"
+                                                         Stroke="{DynamicResource Card}" StrokeThickness="1"/>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- .option-toggle（:80 基线）：全宽 / border 1 / radius 8 / padding 9 12 / 底 card / space-between -->
+        <Style x:Key="VpOptionToggle" TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource Card}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            <Setter Property="Padding" Value="12,9"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="{TemplateBinding Background}" CornerRadius="8"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="b" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- .option-foot button（:80）：无边透明 / accent-2 字 → AccentHi / 12px（:81 覆盖） -->
+        <Style x:Key="VpFootBtn" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource AccentHi}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="b" Background="{TemplateBinding Background}" Padding="4,2">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
     </UserControl.Resources>
 
     <!-- 根做两层：内层是页面流（.content 里滚动的 .cfg-page），外层留一格给捕获遮罩的接线锚点。
@@ -261,7 +383,7 @@
                             <StackPanel Orientation="Horizontal">
                                 <!-- // 占位：等默认配置功能接入（small 文案本该是 keyModifiedCount，computed，契约 §5 无） -->
                                 <TextBlock Text="按键配置" FontSize="14" FontWeight="Bold" VerticalAlignment="Center"/>
-                                <TextBlock Text="3 项自定义绑定" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                <TextBlock x:Name="KeysCount" Text="0 项自定义绑定" FontSize="12" Foreground="{DynamicResource Fg2}"
                                            VerticalAlignment="Center" Margin="8,0,0,0"/>
                             </StackPanel>
                         </Button>
@@ -269,7 +391,7 @@
                             <StackPanel Orientation="Horizontal">
                                 <!-- // 占位：等默认配置功能接入（small 文案本该是 resourcePacks.length） -->
                                 <TextBlock Text="默认材质包" FontSize="14" FontWeight="Bold" VerticalAlignment="Center"/>
-                                <TextBlock Text="3 个材质包" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                <TextBlock x:Name="PacksCount" Text="0 个材质包" FontSize="12" Foreground="{DynamicResource Fg2}"
                                            VerticalAlignment="Center" Margin="8,0,0,0"/>
                             </StackPanel>
                         </Button>
@@ -298,7 +420,7 @@
                             <Border Grid.Column="2" Style="{StaticResource CfgSync}" VerticalAlignment="Top">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Style="{StaticResource CfgSyncText}" Text="启动时同步"/>
-                                    <CheckBox x:Name="SwOptionSync" Style="{StaticResource Switch}" Margin="8,0,0,0"/>
+                                    <CheckBox x:Name="SwOptionSync" Style="{StaticResource Switch}" Margin="8,0,0,0" Checked="OptionSync_Changed" Unchecked="OptionSync_Changed"/>
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -307,240 +429,79 @@
                              padding-top 12 → 上边距；gap 22 → 中间间隔列（契约 §6.2）。
                              CSS grid 自动放置是行优先，所以第 1 组落 (0,0)、第 2 组 (0,2)、第 3 组 (1,0)。
                              @max-850 收单列（:245）WPF 无媒体查询，见 KeysPage.xaml.cs 尾注 -->
-                        <Grid MinHeight="220" Margin="0,12,0,0">
+                        <!-- .options-context（DefaultGameOptions.vue:48-50）：自定义计数 tag + 兼容性预览版本选择 -->
+                        <Grid Margin="0,20,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Style="{StaticResource Tag}" Padding="8,1" HorizontalAlignment="Left">
+                                <TextBlock x:Name="OptionsCustomCount" Style="{StaticResource TagText}" Text="0 项自定义"/>
+                            </Border>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource Dim}" VerticalAlignment="Center" Text="兼容性预览"/>
+                                <ComboBox x:Name="CboPreviewVersion" Width="180" Margin="10,0,0,0" FontSize="13"
+                                          SelectionChanged="PreviewVersion_Changed"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- .options-note（DefaultGameOptions.vue:52） -->
+                        <TextBlock Style="{StaticResource Dim}" Margin="0,14,0,0" TextWrapping="Wrap" LineHeight="20.8"
+                                   Text="只同步你修改的项目，其余保留游戏设置。预览版本用于检查兼容性，启动时会按实际版本转换数值。"/>
+
+                        <!-- .options-warning（:53）：预览版本不支持的自定义项 -->
+                        <Border x:Name="OptionsWarning" Margin="0,14,0,0" Padding="12" CornerRadius="10"
+                                Background="{DynamicResource AccentSoft}" Visibility="Collapsed">
+                            <TextBlock x:Name="OptionsWarningText" FontSize="13" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource Fg}"/>
+                        </Border>
+
+                        <!-- .options-path（:54）：返回按钮 + 子页路径标题 -->
+                        <StackPanel Orientation="Horizontal" Margin="0,25,0,15">
+                            <Button x:Name="BtnOptionsBack" Style="{StaticResource BtnGhost}" MinHeight="32"
+                                    Padding="12,4" FontSize="13" Content="← 返回" Margin="0,0,12,0"
+                                    Visibility="Collapsed" Click="OptionsBack_Click"/>
+                            <TextBlock x:Name="TxtOptionsPath" FontSize="14" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" Text="选项"/>
+                        </StackPanel>
+
+                        <!-- controls 子页顶部的两枚入口（:56）：鼠标设置 / 按键控制 -->
+                        <Grid x:Name="OptionsSubEntrances" MinHeight="0" Visibility="Collapsed"
+                              Margin="0,18,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="22"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-
-                            <!-- 组：图像 -->
-                            <StackPanel Grid.Row="0" Grid.Column="0" Style="{StaticResource CfgGroup}" Margin="0">
-                                <TextBlock Style="{StaticResource CfgCat}" Text="图像"/>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <!-- :title 绑的是 option id（模板 :197） -->
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="options.fov" Text="视野"/>
-                                        <!-- 视野 90°（原版默认 70）＝已改项，走 .cfg-bind.modified — :260 -->
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValueModified}" Content="90 °"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="options.renderDistance" Text="视距"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValueModified}" Content="16 区块"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="options.particles" Text="粒子效果"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="全部"/>
-                                        <!-- .cfg-reset.invisible 的 visibility hidden（:268）＝未改项，WPF Visibility Hidden 等价，保留占位 -->
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="options.graphicsMode" Text="图形设置"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="流畅"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="options.clouds" Text="云"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="关闭"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="options.fpsLimit" Text="FPS 上限"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="120"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                            </StackPanel>
-
-                            <!-- 组：声音 -->
-                            <StackPanel Grid.Row="0" Grid.Column="2" Style="{StaticResource CfgGroup}" Margin="0">
-                                <TextBlock Style="{StaticResource CfgCat}" Text="声音"/>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="soundCategory_master" Text="主音量"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="70 %"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="soundCategory_music" Text="音乐"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="30 %"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="soundCategory_record" Text="唱片与电台"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="100 %"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="soundCategory_weather" Text="天气"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValueModified}" Content="45 %"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                            </StackPanel>
-
-                            <!-- 组：控制（DefaultGameOptions.vue:56 的「鼠标设置」子页，本轮并成一组） -->
-                            <StackPanel Grid.Row="1" Grid.Column="0" Style="{StaticResource CfgGroup}">
-                                <TextBlock Style="{StaticResource CfgCat}" Text="控制"/>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="options.mouseSensitivity" Text="鼠标灵敏度"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="100 %"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="options.invertYmouse" Text="反转 Y 轴"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="关闭"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="options.viewBobbing" Text="视角摇晃"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="开启"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                            </StackPanel>
                         </Grid>
+
+                        <!-- 选项行动态容器（:58 的 mc-options-grid，行结构沿用本页 cfg-row 词表） -->
+                        <Grid x:Name="OptionsGrid" MinHeight="220" Visibility="Collapsed">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="22"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                        </Grid>
+
+                        <!-- 子页入口（:70）：每页一格，root 页显示 -->
+                        <Grid x:Name="OptionsEntries" MinHeight="220">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="22"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                        </Grid>
+
+                        <!-- world-option（:67）与 credits 说明（:71） -->
+                        <TextBlock x:Name="CreditsNote" Style="{StaticResource Dim}" Margin="0,16,0,0"
+                                   Visibility="Collapsed" TextWrapping="Wrap"
+                                   Text="Minecraft 的鸣谢与著作权信息请在游戏内查看；此入口不修改配置。"/>
+
+                        <!-- 同步规则说明（:73 的 details 摘要行） -->
+                        <TextBlock Style="{StaticResource Dim}" Margin="0,14,0,0" TextWrapping="Wrap" LineHeight="20.8"
+                                   Text="同步规则：只同步已修改的原版选项，未修改项跟随游戏；预览版本不切换实例，启动时按真实版本转换；模组接管的选项需同时检查模组配置。"/>
                     </StackPanel>
                 </Border>
 
@@ -568,14 +529,14 @@
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Style="{StaticResource CfgSyncText}" Text="按键设置同步"/>
                                         <!-- .cfg-sync 内 gap space-2 8 — :238 -->
-                                        <CheckBox x:Name="SwKeySync" Style="{StaticResource Switch}" Margin="8,0,0,0"/>
+                                        <CheckBox x:Name="SwKeySync" Style="{StaticResource Switch}" Margin="8,0,0,0" Checked="KeySync_Changed" Unchecked="KeySync_Changed"/>
                                     </StackPanel>
                                 </Border>
                                 <!-- .btn.btn-ghost.btn-sm「全部恢复默认」— 模板 :189；32 高 / padding 12 4 / 13px（§2 BtnSm 度量）
                                      与开关的间隔 16 = .cfg-head-actions 的 gap space-4 — :236 -->
                                 <Button x:Name="BtnResetAll" Style="{StaticResource BtnGhost}"
                                         MinHeight="32" Padding="12,4" FontSize="13"
-                                        Content="全部恢复默认" Margin="16,0,0,0"/>
+                                        Content="全部恢复默认" Margin="16,0,0,0" Click="ResetAllKeys_Click"/>
                             </StackPanel>
                         </Grid>
 
@@ -590,303 +551,18 @@
                         </Grid>
 
                         <!-- .cfg-scroll：min-height 220 / repeat(2,minmax(0,1fr)) / gap 22 / padding-top 12 — :244 -->
-                        <Grid MinHeight="220" Margin="0,12,0,0">
+                        <!-- .cfg-scroll：动态分区容器。组按 CSS grid 的行优先顺序落位（第 n 组 → row n/2, col n%2） -->
+                        <Grid x:Name="KeysScroll" MinHeight="220" Margin="0,12,0,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="22"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
 
-                            <!-- 组：移动 -->
-                            <StackPanel Grid.Row="0" Grid.Column="0" Style="{StaticResource CfgGroup}" Margin="0">
-                                <TextBlock Style="{StaticResource CfgCat}" Text="移动"/>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.forward" Text="前进"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="W"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.back" Text="后退"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="S"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.left" Text="左侧平移"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="A"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.right" Text="右侧平移"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="D"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.jump" Text="跳跃"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="空格"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <!-- 捕获态快照：模板 :198-206 在 capturing === item.id 时把按钮文字换成「按任意键…」、
-                                     右侧多挂一颗 cfg-clear，并由 :221 的全屏遮罩接管 Esc。
-                                     哪一行进入该态由 startCapture()（:70-79）决定 → 本轮按契约 §6.8 只留静态快照 + 命名节点 -->
-                                <Border x:Name="CaptureRow" Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.sneak" Text="潜行"/>
-                                        <!-- .cfg-bind.capturing 的 z-index 9001 — :271；WPF 的 ZIndex 只在本 Panel 内排序 -->
-                                        <Button x:Name="CaptureBind" Grid.Column="2"
-                                                Style="{StaticResource CfgValueCapturing}" Panel.ZIndex="9001"
-                                                Content="按任意键…" ToolTip="按任意键设置，Esc 取消"/>
-                                        <!-- .cfg-clear：30×30 / z-index 9001 / 字号 22 — :270；× 字形来自模板 :206 -->
-                                        <Button x:Name="BtnClearCapture" Grid.Column="4" Panel.ZIndex="9001"
-                                                Style="{StaticResource CfgClear}" Content="×" ToolTip="设为未指定"/>
-                                        <Button Grid.Column="6" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.sprint" Text="疾跑"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="左 Ctrl"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                            </StackPanel>
-
-                            <!-- 组：通用 -->
-                            <StackPanel Grid.Row="0" Grid.Column="2" Style="{StaticResource CfgGroup}" Margin="0">
-                                <TextBlock Style="{StaticResource CfgCat}" Text="通用"/>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.inventory" Text="物品栏"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="E"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.drop" Text="丢弃物品"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="Q"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.chat" Text="聊天"/>
-                                        <!-- 改成 U（非默认）→ modified 底 + reset 可见 — :260 / :268 -->
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValueModified}" Content="U"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.playerlist" Text="玩家列表"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="Tab"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.pickItem" Text="选取方块"/>
-                                        <!-- 置空的一行：mcKeyLabel(key.keyboard.unknown) 显示「未指定」— 模板 :118 -->
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValueModified}" Content="未指定"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.toggleFullscreen" Text="全屏"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="F11"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                            </StackPanel>
-
-                            <!-- 组：创造模式（grid 行优先自动放置 → 第 3 组落回左列） -->
-                            <StackPanel Grid.Row="1" Grid.Column="0" Style="{StaticResource CfgGroup}">
-                                <TextBlock Style="{StaticResource CfgCat}" Text="创造模式"/>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.fly 双击空格" Text="飞行"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="双击空格"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.attack" Text="破坏方块"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValue}" Content="鼠标左键"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" Visibility="Hidden"
-                                                ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                                <Border Style="{StaticResource CfgRowBox}">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                                   ToolTip="key.use" Text="使用 / 放置方块"/>
-                                        <Button Grid.Column="2" Style="{StaticResource CfgValueModified}" Content="鼠标右键"/>
-                                        <Button Grid.Column="4" Style="{StaticResource CfgReset}" ToolTip="恢复此项默认">
-                                            <ContentControl Width="13" Height="13" Style="{DynamicResource Icon.Refresh}"/>
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                            </StackPanel>
-
-                            <!-- 搜索无结果：模板 :217 的 .empty（.content .empty = min-height 120 / padding 32 16，ui-system.css:44）
-                                 // 占位：等默认配置功能接入（keyGrouped 为空才出现，故先 Collapsed 留位） -->
-                            <Border x:Name="KeysEmpty" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3"
+                            <!-- 搜索无结果：模板 :217 的 .empty（min-height 120 / padding 32 16） -->
+                            <Border x:Name="KeysEmpty" Grid.Column="0" Grid.ColumnSpan="3"
                                     MinHeight="120" Padding="32,16" Visibility="Collapsed">
-                                <TextBlock Style="{StaticResource Dim}" HorizontalAlignment="Center"
+                                <TextBlock x:Name="KeysEmptyText" Style="{StaticResource Dim}" HorizontalAlignment="Center"
                                            VerticalAlignment="Center" Text="没有匹配「」的按键"/>
                             </Border>
                         </Grid>
@@ -923,94 +599,19 @@
                             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top">
                                 <!-- .btn.btn-ghost「添加材质包…」— 模板 :159 -->
                                 <Button x:Name="BtnAddPack" Style="{StaticResource BtnGhost}" Content="添加材质包…"
-                                        VerticalAlignment="Center" Margin="0,0,16,0"/>
+                                        VerticalAlignment="Center" Margin="0,0,16,0" Click="AddPack_Click"/>
                                 <Border Style="{StaticResource CfgSync}">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Style="{StaticResource CfgSyncText}" Text="材质包同步"/>
-                                        <CheckBox x:Name="SwPackSync" Style="{StaticResource Switch}" Margin="8,0,0,0"/>
+                                        <CheckBox x:Name="SwPackSync" Style="{StaticResource Switch}" Margin="8,0,0,0" Checked="PackSync_Changed" Unchecked="PackSync_Changed"/>
                                     </StackPanel>
                                 </Border>
                             </StackPanel>
                         </Grid>
 
                         <!-- 三行占位包名。列序照模板 :163-167：label / 启用开关 / ↑ / ↓ / 移除，gap 12 全部走间隔列 -->
-                        <Border Style="{StaticResource CfgPackRowBox}">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <!-- .default-packs .cfg-label：flex 1 / min-width 0 — :273；title 是包名（模板 :163） -->
-                                <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                           ToolTip="faithful-32x.zip" Text="faithful-32x.zip"/>
-                                <!-- .cfg-sync.pack-enable：flex none / nowrap — :251，文案「已启用 / 未启用」来自模板 :164 -->
-                                <TextBlock Grid.Column="2" Style="{StaticResource CfgSyncText}" Text="已启用"
-                                           Margin="0,0,8,0"/>
-                                <CheckBox Grid.Column="4" Style="{StaticResource Switch}" IsChecked="True"
-                                          VerticalAlignment="Center"/>
-                                <!-- ↑ ↓ 用的是原文字形（模板 :165-166，契约 §3 不造几何）；首行的 ↑ 禁用 -->
-                                <Button Grid.Column="6" Style="{StaticResource BtnGhost}" Content="↑"
-                                        MinHeight="32" Padding="12,4" FontSize="13" IsEnabled="False"
-                                        ToolTip="降低优先级（已是首项）"/>
-                                <Button Grid.Column="8" Style="{StaticResource BtnGhost}" Content="↓"
-                                        MinHeight="32" Padding="12,4" FontSize="13" ToolTip="提高优先级"/>
-                            </Grid>
-                        </Border>
-                        <Border Style="{StaticResource CfgPackRowBox}">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                           ToolTip="CreateAdaptiveV8.zip" Text="CreateAdaptiveV8.zip"/>
-                                <TextBlock Grid.Column="2" Style="{StaticResource CfgSyncText}" Text="未启用"
-                                           Margin="0,0,8,0"/>
-                                <CheckBox Grid.Column="4" Style="{StaticResource Switch}" VerticalAlignment="Center"/>
-                                <Button Grid.Column="6" Style="{StaticResource BtnGhost}" Content="↑"
-                                        MinHeight="32" Padding="12,4" FontSize="13" ToolTip="降低优先级"/>
-                                <Button Grid.Column="8" Style="{StaticResource BtnGhost}" Content="↓"
-                                        MinHeight="32" Padding="12,4" FontSize="13" ToolTip="提高优先级"/>
-                                <!-- 移除 — 模板 :167 -->
-                                <Button Grid.Column="10" Style="{StaticResource BtnGhost}" Content="移除"
-                                        MinHeight="32" Padding="12,4" FontSize="13"/>
-                            </Grid>
-                        </Border>
-                        <Border Style="{StaticResource CfgPackRowBox}">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/><ColumnDefinition Width="12"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <!-- 超长包名：验 min-width 0 + 截断不撑破行（契约 §6.6） -->
-                                <TextBlock Grid.Column="0" Style="{StaticResource CfgLabel}"
-                                           ToolTip="SuperDuperDarkRealisticDramaticSurvivalCraft_v3_1_3.zip"
-                                           Text="SuperDuperDarkRealisticDramaticSurvivalCraft_v3_1_3.zip"/>
-                                <TextBlock Grid.Column="2" Style="{StaticResource CfgSyncText}" Text="已启用"
-                                           Margin="0,0,8,0"/>
-                                <CheckBox Grid.Column="4" Style="{StaticResource Switch}" IsChecked="True"
-                                          VerticalAlignment="Center"/>
-                                <Button Grid.Column="6" Style="{StaticResource BtnGhost}" Content="↑"
-                                        MinHeight="32" Padding="12,4" FontSize="13" ToolTip="降低优先级"/>
-                                <!-- 末行 ↓ 禁用（模板 :166 的 index === length - 1） -->
-                                <Button Grid.Column="8" Style="{StaticResource BtnGhost}" Content="↓"
-                                        MinHeight="32" Padding="12,4" FontSize="13" IsEnabled="False"
-                                        ToolTip="已是最后一项"/>
-                                <Button Grid.Column="10" Style="{StaticResource BtnGhost}" Content="移除"
-                                        MinHeight="32" Padding="12,4" FontSize="13"/>
-                            </Grid>
-                        </Border>
+                        <!-- 动态行容器：按清单逐行生成（label / 启用开关 / ↑ / ↓ / 移除），结构同上面注释的占位行 -->
+                        <StackPanel x:Name="PacksHost"/>
 
                         <!-- v-if 的空态（模板 :169）：有包时不显示，留命名节点给接线 -->
                         <TextBlock x:Name="PacksEmpty" Style="{StaticResource Dim}" Margin="0,8,0,0"

@@ -70,6 +70,29 @@
              字色 text-dim；hover 字色转 accent、底色转 accent-soft；收藏态 .on 是写死的 #f5b301；
              active scale(.9) 属动效待办。
              不能直接套 IconBtn：IconBtn 的 hover 是 card-2 底＋accent-2 字，两处都不是 .fav-btn 的值。 -->
+        <!-- .instance-name 是 button（GameView.vue:1161 @click=openRenameFor）：
+             透明底无边框、hover 字色转 accent（:2189 .instance-name:hover） -->
+        <Style x:Key="VpNameBtn" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource Fg}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <ContentPresenter/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <Style x:Key="VpFavBtn" TargetType="Button" BasedOn="{StaticResource IconBtn}">
             <Setter Property="Width" Value="28"/>
             <Setter Property="Height" Value="28"/>
@@ -137,19 +160,21 @@
         <Style x:Key="VpInstalledRow" TargetType="ListBoxItem">
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <!-- .installed-row:hover 才转 hover 底（:2185，installed-row 走 130ms 行组通道）：
+                 hover 底改走 HoverFade（默认键 Hover、130ms）；模板 b 相应改绑 TemplateBinding。
+                 键盘聚焦是持久态，b 的瞬时 Setter 原样保留 -->
+            <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="b" Background="Transparent"
+                        <Border x:Name="b" Background="{TemplateBinding Background}"
                                 BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0">
                             <ContentPresenter Margin="0,12" MinHeight="56" VerticalAlignment="Center"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="ItemsControl.AlternationIndex" Value="0">
                                 <Setter TargetName="b" Property="BorderThickness" Value="0"/>
-                            </Trigger>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="b" Property="Background" Value="{DynamicResource Hover}"/>
                             </Trigger>
                             <Trigger Property="IsKeyboardFocusWithin" Value="True">
                                 <Setter TargetName="b" Property="Background" Value="{DynamicResource Hover}"/>
@@ -238,11 +263,9 @@
             <Setter Property="BorderBrush" Value="{DynamicResource Line}"/>
             <Setter Property="BorderThickness" Value="0,0,0,1"/>
             <Setter Property="SnapsToDevicePixels" Value="True"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource Hover}"/>
-                </Trigger>
-            </Style.Triggers>
+            <!-- .version-row:hover 的底色通道 0.15s（GameView.vue:1729）：HoverFade 默认键 Hover -->
+            <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
+            <Setter Property="ctl:HoverFade.DurationMs" Value="150"/>
         </Style>
 
         <!-- .btn.btn-danger.btn-sm（styles.css:239-244 叠 :258-263）：BtnDanger 是 36/14/radius 10 的
@@ -445,14 +468,7 @@
                 <StackPanel>
                     <TextBlock Style="{StaticResource H1}" Text="游戏版本"/>
                     <TextBlock Style="{StaticResource PageSub}" Margin="0,4,0,0"
-                               Text="安装会校验客户端、库与资源的 SHA1；删除只动版本目录，存档与模组不碰。"/>
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
-                    <CheckBox x:Name="ChkSnap" Content="显示快照与旧版" VerticalAlignment="Center"
-                              Checked="ShowSnap_Changed" Unchecked="ShowSnap_Changed"/>
-                    <Button Style="{StaticResource BtnGold}" Content="安装所选版本" Margin="16,0,0,0"
-                            Click="Install_Click"
-                            IsEnabled="{Binding Busy, Converter={StaticResource InvBool}}"/>
+                               Text="浏览、安装与管理 Minecraft 版本"/>
                 </StackPanel>
             </Grid>
 
@@ -471,10 +487,9 @@
                                 BorderBrush="{DynamicResource Accent}" BorderThickness="0,0,0,2"/>
                     </Canvas>
                     <StackPanel Orientation="Horizontal">
-                        <RadioButton x:Name="TabDownload" Style="{StaticResource PillTab}" Content="版本下载"
-                                     IsChecked="True" Checked="Tab_Changed"/>
+                        <RadioButton x:Name="TabDownload" Style="{StaticResource PillTab}" Content="版本下载" Checked="Tab_Changed"/>
                         <RadioButton x:Name="TabInstalled" Style="{StaticResource PillTab}" Content="{Binding InstalledTabText}"
-                                     Margin="4,0,0,0" Checked="Tab_Changed"/>
+                                     Margin="4,0,0,0" Checked="Tab_Changed" IsChecked="True" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -517,7 +532,7 @@
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="管理文件夹"/>
                             <!-- folders.length：模型里还没有"受管文件夹"集合，先留槽不编数据 -->
-                            <TextBlock x:Name="FolderCount" Text="" Margin="8,0,0,0" Opacity="0.75"
+                            <TextBlock x:Name="FolderCount" Text="1" Margin="8,0,0,0" Opacity="0.75"
                                        Visibility="Collapsed"/>
                         </StackPanel>
                     </Button>
@@ -587,7 +602,7 @@
             </Border>
 
             <!-- ================= 下载页签 ================= -->
-            <StackPanel x:Name="BodyDownload">
+            <StackPanel x:Name="BodyDownload" Visibility="Collapsed">
 
                 <!-- .game-controls → .toolbar（GameView.vue:1003-1041）：一个 flex 行、gap 12，
                      顺序是 搜索框（flex:1，长条胶囊）→ 筛选胶囊 → 刷新 → 镜像 tag。
@@ -776,7 +791,7 @@
             </StackPanel>
 
             <!-- ================= 已安装页签 ================= -->
-            <StackPanel x:Name="BodyInstalled" Visibility="Collapsed">
+            <StackPanel x:Name="BodyInstalled">
                 <!-- .installed-card：padding 0 16 / border 0 / radius 10（:2178） -->
                 <Border Background="{DynamicResource Card}" CornerRadius="10" Padding="16,0" Margin="0,16,0,0">
                     <StackPanel>
@@ -950,24 +965,36 @@
                                             <ColumnDefinition Width="12"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <!-- .fav-btn：28×28 / 15×15 星形（:1144-1151） -->
+                                        <!-- .fav-btn：28×28 / 15×15 星形（:1144-1151）；on 时实心 accent（:2204 fav-btn.on） -->
                                         <Button Grid.Column="0" Style="{StaticResource VpFavBtn}"
-                                                ToolTip="收藏">
-                                            <ContentControl Width="15" Height="15"
-                                                            Style="{DynamicResource Icon.StarOutline}"/>
+                                                Tag="{Binding}" Click="FavRow_Click"
+                                                ToolTip="{Binding Favorite, Converter={StaticResource FavTip}}">
+                                            <Grid>
+                                                <ContentControl Width="15" Height="15"
+                                                                Visibility="{Binding Favorite, Converter={StaticResource BoolVis}}"
+                                                                Style="{DynamicResource Icon.Star}"
+                                                                Foreground="{DynamicResource Accent}"/>
+                                                <ContentControl Width="15" Height="15"
+                                                                Visibility="{Binding Favorite, Converter={StaticResource BoolVis}, ConverterParameter=invert}"
+                                                                Style="{DynamicResource Icon.StarOutline}"/>
+                                            </Grid>
                                         </Button>
                                         <!-- .inst-icon：34×34、padding 4 → 图标净 24（:1152-1155） -->
                                         <Button Grid.Column="2" Style="{StaticResource VpInstIcon}"
                                                 VerticalAlignment="Center" ToolTip="更换实例图标">
                                             <ContentControl Width="24" Height="24"
-                                                            Style="{DynamicResource Icon.GrassBlock}"/>
+                                                            Style="{DynamicResource Icon.Cube}"/>
                                         </Button>
                                         <StackPanel Grid.Column="4" VerticalAlignment="Center">
                                             <!-- .inst-names .instance-name（:2187）：font:inherit → 14px、
                                                  weight 650（WPF 取 SemiBold）、line-height 1.4 → 19.6、
                                                  两行截断 → MaxHeight 39.2、字色 text、hover 转 accent -->
-                                            <TextBlock Style="{StaticResource VpInstanceName}"
-                                                       Text="{Binding Label}"/>
+                                            <!-- .instance-name 是 button（点击改名 — :1161 的 @click=openRenameFor） -->
+                                            <Button Style="{StaticResource VpNameBtn}" Tag="{Binding}"
+                                                    Click="RenameRow_Click" ToolTip="点击改名">
+                                                <TextBlock Style="{StaticResource VpInstanceName}"
+                                                           Text="{Binding Label}"/>
+                                            </Button>
                                             <!-- .instance-meta（GameView.vue:1158-1164，样式 :2191-2194）：
                                                  flex wrap / gap 4 10 / 12px / text-dim，每个 span 单行截断，
                                                  相邻 span 之间由 ::before 补一个 opacity .5 的「·」，左右各 10。
@@ -976,15 +1003,22 @@
                                                  长了走省略号，完整值在 title 里。
                                                  .inst-names 的列间距最终是 8（:2186 覆盖 :1840 的 4）。 -->
                                             <WrapPanel Margin="0,8,0,0">
-                                                <TextBlock Text="{Binding Subtitle}" FontSize="12"
+                                                <TextBlock Text="{Binding McVersion}" FontSize="12"
                                                            Foreground="{DynamicResource Fg2}"/>
                                                 <TextBlock Text="·" FontSize="12" Opacity="0.5"
                                                            Foreground="{DynamicResource Fg2}" Margin="10,0,10,0"/>
-                                                <!-- span.instance-directory：12px / nowrap / ellipsis（:2192） -->
-                                                <TextBlock FontSize="12" Foreground="{DynamicResource Fg2}"
-                                                           TextTrimming="CharacterEllipsis"
-                                                           ToolTip="{Binding DataContext.Paths.Root, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"
-                                                           Text="{Binding DataContext.Paths.Root, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"/>
+                                                <TextBlock Text="{Binding LoaderLabel}" FontSize="12"
+                                                           Foreground="{DynamicResource Fg2}"/>
+                                                <TextBlock Text="·" FontSize="12" Opacity="0.5"
+                                                           Foreground="{DynamicResource Fg2}" Margin="10,0,10,0"/>
+                                                <!-- span.instance-directory：目录短名（folderShortName），title 是完整路径 -->
+                                                <TextBlock Text=".minecraft（启动器托管）" FontSize="12"
+                                                           Foreground="{DynamicResource Fg2}"
+                                                           ToolTip="{Binding DataContext.Paths.Root, RelativeSource={RelativeSource AncestorType={x:Type UserControl}}}"/>
+                                                <TextBlock Text="·" FontSize="12" Opacity="0.5"
+                                                           Foreground="{DynamicResource Fg2}" Margin="10,0,10,0"/>
+                                                <TextBlock Text="{Binding IsolatedText}" FontSize="12"
+                                                           Foreground="{DynamicResource Fg2}"/>
                                             </WrapPanel>
                                         </StackPanel>
                                         <!-- .instance-commands（:2195）：column / align flex-end / gap 8 -->

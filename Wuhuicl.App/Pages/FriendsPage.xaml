@@ -327,13 +327,48 @@
                                                TextWrapping="Wrap" Text="每条隧道独立连接，随时启停。"/>
                                 </StackPanel>
                             </Border>
-                            <!-- .connection-panel-body：padding 20 / gap card-gap 16（connection.css:20 + :114） -->
+                            <!-- .connection-panel-body：padding 20 / gap card-gap 16（connection.css:20 + :114）
+                                 已接 natfrp（樱花穿透）真实后端：填 token → 读隧道列表 → 启停 frpc -->
                             <StackPanel Margin="20">
                                 <TextBlock Style="{StaticResource FriendSectionTitle}"
                                            Text="樱花穿透账号"/>
                                 <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}" LineHeight="19"
                                            TextWrapping="Wrap"
                                            Text="填写访问密钥，读取账号中的隧道与节点。已连接的隧道不会被其他隧道的操作打断。"/>
+                                <!-- 访问密钥 + 读取隧道（natfrp GET /v4/tunnels，Authorization: Bearer） -->
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <PasswordBox x:Name="FrpTokenBox" PasswordChar="●" FontSize="13"
+                                                 VerticalContentAlignment="Center" MaxLength="128"/>
+                                    <Button x:Name="BtnFrpRefresh" Grid.Column="2" Style="{StaticResource BtnGold}"
+                                            MinWidth="96" Click="FrpRefresh_Click" Content="读取隧道"/>
+                                </Grid>
+                                <!-- frpc 客户端路径：默认从 DataDir\frpc\ 自动找，也可手动选择 -->
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="TxtFrpcPath" Style="{StaticResource Input}" FontSize="13"
+                                             IsReadOnly="True" VerticalContentAlignment="Center"/>
+                                    <Button x:Name="BtnFrpcBrowse" Grid.Column="2" Style="{StaticResource BtnGhost}"
+                                            MinWidth="72" Click="FrpcBrowse_Click" Content="浏览…"/>
+                                </Grid>
+                                <TextBlock x:Name="FrpStatus" Margin="0,8,0,0" Style="{StaticResource Micro}"
+                                           LineHeight="19" TextWrapping="Wrap" Foreground="{DynamicResource Fg2}"
+                                           Text="frpc 客户端可在 natfrp.com「软件下载」获取；放到启动器数据目录的 frpc 文件夹，或点「浏览…」手动选择 frpc.exe。"/>
+                                <!-- 隧道列表：FrpRefresh_Click 读取后由代码渲染（名称/节点/端口/状态/启停） -->
+                                <TextBlock Margin="0,16,0,0" Style="{StaticResource FriendSectionTitle}"
+                                           Text="隧道列表"/>
+                                <StackPanel x:Name="TunnelList" Margin="0,4,0,0"/>
+                                <TextBlock x:Name="TunnelEmpty" Margin="0,4,0,0" Style="{StaticResource Micro}"
+                                           LineHeight="19" TextWrapping="Wrap"
+                                           Text="尚未读取隧道。填写访问密钥后点击「读取隧道」。"/>
                                 <TextBlock Margin="0,16,0,0" Style="{StaticResource FriendSectionTitle}"
                                            Text="节点参考"/>
                                 <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}" LineHeight="19"
@@ -344,40 +379,116 @@
                                 <!-- details/summary（FrpPanel.vue:122）：折叠交互留给后续统一实现 // 占位：等联机功能接入 -->
                                 <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}" LineHeight="19"
                                            TextWrapping="Wrap"
-                                           Text="关闭启动器时，会记住未手动停止的隧道，下次打开自动恢复。"/>
+                                           Text="游戏内直接连接显示的公网地址（remote_addr:remote_port）即可；关闭启动器不会停止正在运行的 frpc，可在隧道列表手动停止。"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>
 
-                    <!-- VoxLink：VoxLinkPanel.vue -->
+                    <!-- VoxLink：VoxLinkPanel.vue → 已接 VoxLink 真实后端（server-go 房间 API：
+                         POST /room/create、/room/join、/room/leave、/room/heartbeat，见 Services/VoxLinkService.cs） -->
                     <Border x:Name="MethodVoxlink" Style="{StaticResource FriendPanel}" Visibility="Collapsed">
                         <StackPanel>
-                            <!-- 面板头取 :402 的 .connect-tabs 三个入口名（这排页签是 VoxLink 面板内部的
-                                 创建/加入/公共大厅切换，不是本轮被拆掉的三视图页签） -->
                             <Border Style="{StaticResource FriendPanelHead}">
                                 <StackPanel>
-                                    <TextBlock FontSize="16" FontWeight="Bold" Text="创建房间"/>
+                                    <TextBlock FontSize="16" FontWeight="Bold" Text="VoxLink 联机"/>
                                     <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}" LineHeight="19"
                                                TextWrapping="Wrap"
-                                               Text="加入房间 / 公共大厅（VoxLinkPanel.vue:402 的 .connect-tabs 三项）"/>
+                                               Text="创建房间拿到 6 位房间码，好友输入房间码加入，无需公网 IP。"/>
                                 </StackPanel>
                             </Border>
                             <StackPanel Margin="20">
-                                <!-- 真实小节标题，逐条带行号；正文控件未接入 // 占位：等联机功能接入 -->
-                                <TextBlock Style="{StaticResource FriendSectionTitle}" Text="邀请好友的步骤"/>
+
+                                <!-- VoxLink 服务器：默认官方 p2p.wuhui.icu（app-desktop/app.go defaultServerURL）；
+                                     自建服务端默认端口 1145（server-go/main.go 的 VOXLINK_PORT） -->
+                                <TextBlock Style="{StaticResource FriendSectionTitle}" Text="VoxLink 服务器"/>
+                                <TextBox x:Name="TxtVoxServer" Style="{StaticResource Input}" FontSize="13" Margin="0,8,0,0"
+                                         VerticalContentAlignment="Center" MaxLength="256"
+                                         Text="https://p2p.wuhui.icu"/>
                                 <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}" LineHeight="19"
                                            TextWrapping="Wrap"
-                                           Text="1. 启动游戏并进入世界；2. 选择「对局域网开放」；3. 创建房间，把房间码发给好友（VoxLinkPanel.vue:404）。"/>
+                                           Text="默认为官方服务器；自建 VoxLink 服务端填 http://地址:端口（Go 版默认端口 1145）。"/>
+
+                                <!-- 创建房间：POST /room/create（name/hostPort/password）→ 房间码 + hostToken -->
                                 <TextBlock Margin="0,16,0,0" Style="{StaticResource FriendSectionTitle}"
-                                           Text="也可以选择中继连接"/>
+                                           Text="创建房间"/>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="110"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="TxtVoxName" Style="{StaticResource Input}" FontSize="13"
+                                             MaxLength="20" VerticalContentAlignment="Center"/>
+                                    <TextBox x:Name="TxtVoxPort" Grid.Column="2" Style="{StaticResource Input}" FontSize="13"
+                                             MaxLength="5" VerticalContentAlignment="Center" Text="25565"/>
+                                    <Button x:Name="BtnVoxCreate" Grid.Column="4" Style="{StaticResource BtnGold}"
+                                            MinWidth="96" Click="VoxCreate_Click" Content="创建房间"/>
+                                </Grid>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <PasswordBox x:Name="VoxCreatePwdBox" PasswordChar="●" FontSize="13"
+                                                 MaxLength="32" VerticalContentAlignment="Center"/>
+                                    <TextBlock Grid.Column="2" FontSize="12" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource Fg2}" Margin="0,0,0,0"
+                                               Text="房间名 · 端口 · 密码（可选，房间名留空则用默认名）"/>
+                                </Grid>
+
+                                <!-- 房间码展示（create/join 成功后由代码填充；心跳保活中） -->
+                                <Border x:Name="VoxRoomCard" Visibility="Collapsed" Margin="0,12,0,0"
+                                        Background="{DynamicResource AccentSoft}" CornerRadius="8" Padding="14,10">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource Micro}" Text="房间码，发给好友即可加入"/>
+                                        <TextBlock x:Name="VoxRoomCode" FontSize="28" FontWeight="Bold"
+                                                   Margin="0,2,0,0"
+                                                   Foreground="{DynamicResource AccentHi}" Text="——"/>
+                                        <TextBlock x:Name="VoxRoomInfo" Margin="0,2,0,0" Style="{StaticResource Micro}"
+                                                   LineHeight="19" TextWrapping="Wrap" Text=""/>
+                                    </StackPanel>
+                                </Border>
+                                <Button x:Name="BtnVoxLeave" Visibility="Collapsed" Margin="0,8,0,0"
+                                        Style="{StaticResource BtnGhost}" MinWidth="96"
+                                        HorizontalAlignment="Left" Click="VoxLeave_Click" Content="退出房间"/>
+
+                                <!-- 加入房间：POST /room/join（code/password）→ clientToken + 房间公开信息 -->
+                                <TextBlock Margin="0,16,0,0" Style="{StaticResource FriendSectionTitle}"
+                                           Text="加入房间"/>
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="8"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox x:Name="TxtVoxCode" Style="{StaticResource Input}" FontSize="18" FontWeight="Bold"
+                                             MaxLength="6" CharacterCasing="Upper" HorizontalContentAlignment="Center"
+                                             VerticalContentAlignment="Center"/>
+                                    <PasswordBox x:Name="TxtVoxJoinPwd" Grid.Column="2" PasswordChar="●" FontSize="13"
+                                                 MaxLength="32" VerticalContentAlignment="Center"/>
+                                    <Button x:Name="BtnVoxJoin" Grid.Column="4" Style="{StaticResource BtnGold}"
+                                            MinWidth="96" Click="VoxJoin_Click" Content="加入房间"/>
+                                </Grid>
+                                <TextBlock x:Name="VoxStatus" Margin="0,8,0,0" Style="{StaticResource Micro}"
+                                           LineHeight="19" TextWrapping="Wrap" Foreground="{DynamicResource Fg2}"
+                                           Text="创建房间前请先在游戏里对局域网开放世界（单人世界按 Esc → 对局域网开放）。"/>
+
+                                <TextBlock Margin="0,16,0,0" Style="{StaticResource FriendSectionTitle}"
+                                           Text="邀请好友的步骤"/>
                                 <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}" LineHeight="19"
                                            TextWrapping="Wrap"
-                                           Text="直连已尝试若干秒，是否使用中继由玩家决定（VoxLinkPanel.vue:393）。"/>
+                                           Text="1. 启动游戏并进入世界，选择「对局域网开放」（或启动服务端）；2. 在上方填端口（开放后游戏聊天栏会显示端口，服务端默认 25565），点「创建房间」；3. 把房间码发给好友，好友在本页输入房间码加入。"/>
+
                                 <TextBlock Margin="0,16,0,0" Style="{StaticResource FriendSectionTitle}"
                                            Text="游戏内地址与加入指引"/>
                                 <TextBlock Margin="0,4,0,0" Style="{StaticResource Micro}" LineHeight="19"
                                            TextWrapping="Wrap"
-                                           Text="进入游戏 → 多人游戏 → 直接连接（VoxLinkPanel.vue:380）。"/>
+                                           Text="创建成功后本页面板会显示本机地址 127.0.0.1:端口；好友加入成功后，在游戏内多人游戏 → 直接连接输入房主提供的地址即可。房间创建后由本页自动发送心跳保活，退出房间或关闭页面后房间会被服务端回收。"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>

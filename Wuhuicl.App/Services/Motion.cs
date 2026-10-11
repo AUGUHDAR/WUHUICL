@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 
@@ -54,5 +55,31 @@ static class Motion
                            params (DependencyProperty p, DoubleAnimationUsingKeyFrames a)[] anims)
     {
         foreach (var (p, a) in anims) target.BeginAnimation(p, a);
+    }
+
+    /// <summary>
+    /// 胶囊/指示块类浮块的位移动画（.capsule-blob / .game-tabs-blob / .seg-blob 家族）。
+    /// K 侧是 JS 写内联 left/top/width/height + CSS transition；WPF 在 Canvas 层直接补间同四个属性。
+    /// 默认 190ms var(--ease-out)（GameView.vue:1891）；个别页给覆盖值（Community 的 height 0.32s、Skins 的过冲曲线）。
+    /// instant 或元素还没量出尺寸时直接落位（等价原版首次 measure 不位移）。
+    /// </summary>
+    public static void SlideBlob(FrameworkElement blob, double left, double top, double w, double h,
+                                 Duration? duration = null, KeySpline? spline = null, bool instant = false)
+    {
+        if (instant || blob.Width <= 0 || double.IsNaN(blob.Width))
+        {
+            Canvas.SetLeft(blob, left);
+            Canvas.SetTop(blob, top);
+            blob.Width = w;
+            blob.Height = h;
+            return;
+        }
+        var d = duration ?? Normal;
+        var sp = spline ?? EaseOut;
+        Run(blob,
+            (Canvas.LeftProperty, ToCurrent(Canvas.LeftProperty, left, d, sp, Canvas.GetLeft(blob))),
+            (Canvas.TopProperty, ToCurrent(Canvas.TopProperty, top, d, sp, Canvas.GetTop(blob))),
+            (FrameworkElement.WidthProperty, ToCurrent(FrameworkElement.WidthProperty, w, d, sp, blob.Width)),
+            (FrameworkElement.HeightProperty, ToCurrent(FrameworkElement.HeightProperty, h, d, sp, blob.Height)));
     }
 }

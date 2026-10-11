@@ -13,6 +13,7 @@
                 <ResourceDictionary Source="Themes/Icons.xaml"/>
             </ResourceDictionary.MergedDictionaries>
             <local:BoolVis x:Key="BoolVis"/>
+            <local:FavTipConverter x:Key="FavTip"/>
             <local:InvertBool x:Key="InvBool"/>
             <local:CountVis x:Key="CountVis"/>
             <local:BrushByKey x:Key="BrushByKey"/>

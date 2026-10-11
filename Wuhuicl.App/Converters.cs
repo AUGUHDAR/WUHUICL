@@ -1,9 +1,23 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
 
 namespace Wuhuicl.App;
+
+/// <summary>Switch 滑块：true=18（位移到右端），false=0。作为绑定基值，动画只在过渡期覆盖它。</summary>
+public sealed class BoolShift : IValueConverter
+{
+    public object Convert(object v, Type t, object p, CultureInfo c) => v is true ? 18d : 0d;
+    public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
+}
+
+/// <summary>Switch 选中底：true=1，false=0（同上，基值绑定）。</summary>
+public sealed class BoolOne : IValueConverter
+{
+    public object Convert(object v, Type t, object p, CultureInfo c) => v is true ? 1d : 0d;
+    public object ConvertBack(object v, Type t, object p, CultureInfo c) => Binding.DoNothing;
+}
 
 public sealed class InvertBool : IValueConverter
 {

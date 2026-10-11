@@ -1,4 +1,4 @@
-<UserControl x:Class="Wuhuicl.App.Pages.ModsPage"
+﻿<UserControl x:Class="Wuhuicl.App.Pages.ModsPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ctl="clr-namespace:Wuhuicl.App.Controls"
@@ -17,12 +17,8 @@
             <Setter Property="MinHeight" Value="68"/>
             <Setter Property="Padding" Value="0,12"/>
             <Setter Property="Background" Value="Transparent"/>
-            <Style.Triggers>
-                <!-- .fm-row:hover 的底是 hover 变量（写作 var(hover)）— :722（基线 :562-564 用 card-2 变量） -->
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource Hover}"/>
-                </Trigger>
-            </Style.Triggers>
+            <!-- .fm-row:hover 的底色通道 130ms（ui-system.css:45 行组）：HoverFade 默认键 Hover、默认 130ms -->
+            <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
         </Style>
 
         <!-- .fm-name：font-weight 500 / 两行截断 — :577-586（-webkit-line-clamp:2）；
@@ -94,11 +90,9 @@
             <Setter Property="Padding" Value="12,8"/>
             <Setter Property="CornerRadius" Value="10"/>
             <Setter Property="Background" Value="Transparent"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource CardSoft}"/>
-                </Trigger>
-            </Style.Triggers>
+            <!-- .upd-row:hover 底 card-2（FileManager.vue:659-671）：HoverFade 淡入 CardSoft，130ms 取默认 -->
+            <Setter Property="ctl:HoverFade.Enabled" Value="True"/>
+            <Setter Property="ctl:HoverFade.BrushKey" Value="CardSoft"/>
         </Style>
 
         <!-- .status-strip（ui-system.css:41，FileManager.vue:412 引用）：flex row 居中 wrap / gap 12 /
@@ -356,9 +350,9 @@
                 <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal"
                             VerticalAlignment="Bottom" Margin="0,0,0,8">
                     <TextBlock x:Name="HeadTitle" Style="{StaticResource PageTitle}" Text="模组"/>
-                    <!-- .fm-head .page-title small：13px / 400 / text-dim / margin-left 8 — :719。// 占位：等资源管理接入（resourceCount） -->
-                    <TextBlock FontSize="13" Foreground="{DynamicResource Fg2}" Margin="8,0,0,0"
-                               VerticalAlignment="Bottom" Text="4"/>
+                    <!-- .fm-head .page-title small：13px / 400 / text-dim / margin-left 8 — :719。// 计数：真实文件数（RenderList 落 HeadCount） -->
+                    <TextBlock x:Name="HeadCount" FontSize="13" Foreground="{DynamicResource Fg2}" Margin="8,0,0,0"
+                               VerticalAlignment="Bottom" Text="0"/>
                 </StackPanel>
 
                 <!-- .fm-actions：flex row / gap 12（space-3 变量）/ flex-wrap — :533-539 -->
@@ -390,54 +384,69 @@
             </Grid>
 
             <!-- ==================== .fm-context ====================
-                 flex / align-center / gap 12 / flex-wrap，margin-bottom 16 — :719；:722 又把 head/context/controls 的 margin 归零，
-                 这里保留 16（任务口径），页级 12 的 gap 由它承担 -->
-            <StackPanel Margin="0,0,0,12">
-                <!-- .fm-context>label：display grid / gap 6 / flex 0 1 440px / min-width 0 / 12px text-dim — :719 -->
-                <StackPanel MaxWidth="440">
-                    <TextBlock Text="游戏实例" FontSize="12" Foreground="{DynamicResource Fg2}"/>
-                    <!-- .fm-ver-select：SelectMenu 两行卡片，宽度撑满 440 的 label 轨
-                         （label flex 0 1 440px — :719；截图量得卡宽 ≈436）。label 13px/600，
-                         description 11px text-dim，右缘 14px chevron；radius 10 描边。 -->
-                    <Button x:Name="VerSelect" Margin="0,6,0,0" HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch" Cursor="Hand">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <Border Background="{DynamicResource Card}" CornerRadius="10"
-                                        BorderBrush="{DynamicResource Line}" BorderThickness="1" Padding="12,7">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="12"/>
-                                            <ColumnDefinition Width="14"/>
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel>
-                                            <TextBlock x:Name="VerName" FontSize="13" FontWeight="SemiBold"
-                                                       TextTrimming="CharacterEllipsis" Text="1.20.1 · Fabric 0.16.4"/>
-                                            <TextBlock x:Name="VerDesc" FontSize="11" Foreground="{DynamicResource Fg2}"
-                                                       Margin="0,2,0,0" TextTrimming="CharacterEllipsis"
-                                                       Text="1.20.1 · Fabric · 0.16.4 · 已隔离"/>
-                                        </StackPanel>
-                                        <ContentControl Grid.Column="2" Width="14" Height="14" VerticalAlignment="Center"
-                                                        Style="{DynamicResource Icon.ChevronDown}"/>
-                                    </Grid>
-                                </Border>
-                            </ControlTemplate>
-                        </Button.Template>
-                        <!-- 占位：等版本列表接入（原版来自 activeInstalled，:48） -->
-                    </Button>
-                </StackPanel>
+                 flex / align-center / gap 12 / flex-wrap，margin-bottom 16 — :719。
+                 第一行是「label(游戏实例) ＋ 非 mods 的刷新钮」，第二行是 .fm-path（flex-basis 100% 独占一行）。
+                 原来这里写成竖排 StackPanel，刷新与路径各自掉到下一行，与原版差一整行。 -->
+            <Grid x:Name="FmContext" Margin="0,0,0,16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <!-- label 的 flex 0 1 440px（:719）：基准 440、可收缩 —— Star + MaxWidth 等价 -->
+                        <ColumnDefinition Width="*" MaxWidth="440"/>
+                        <ColumnDefinition Width="12"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <!-- .fm-context>label：display grid / gap 6 / flex 0 1 440px / min-width 0 / 12px text-dim — :719 -->
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                        <TextBlock Text="游戏实例" FontSize="12" Foreground="{DynamicResource Fg2}"/>
+                        <!-- .fm-ver-select：SelectMenu 两行卡片，宽度撑满 440 的 label 轨
+                             （label flex 0 1 440px — :719；截图量得卡宽 ≈436）。label 13px/600，
+                             description 11px text-dim，右缘 14px chevron；radius 10 描边。 -->
+                        <Button x:Name="VerSelect" Margin="0,6,0,0" HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch" Cursor="Hand">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border Background="{DynamicResource Card}" CornerRadius="10"
+                                            BorderBrush="{DynamicResource Line}" BorderThickness="1" Padding="12,14">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="14"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock x:Name="VerName" FontSize="13" FontWeight="Normal"
+                                                           TextTrimming="CharacterEllipsis" Text="1.20.1 · Fabric 0.16.4"/>
+                                                <TextBlock x:Name="VerDesc" FontSize="12" Foreground="{DynamicResource Fg2}"
+                                                           Margin="0,2,0,0" TextTrimming="CharacterEllipsis"
+                                                           Text="1.20.1 · Fabric · 0.16.4 · 已隔离"/>
+                                            </StackPanel>
+                                            <ContentControl Grid.Column="2" Width="14" Height="14" VerticalAlignment="Center"
+                                                            Style="{DynamicResource Icon.ChevronDown}"/>
+                                        </Grid>
+                                    </Border>
+                                </ControlTemplate>
+                            </Button.Template>
+                            <!-- 占位：等版本列表接入（原版来自 activeInstalled，:48） -->
+                        </Button>
+                    </StackPanel>
 
-                <!-- v-if props.rel!=='mods' 的上下文刷新按钮 — :343（文案「↻ 刷新」用的是原文字形 ↻，契约 §3）；mods 下收起 -->
-                <Button x:Name="BtnCtxRefresh" Style="{StaticResource BtnGhost}" Content="↻ 刷新"
-                        HorizontalAlignment="Left" Margin="0,12,0,0" Visibility="Collapsed"/>
+                    <!-- v-if props.rel!=='mods' 的上下文刷新按钮 — :343；与 label 同一行、垂直居中，
+                         文案「↻ 刷新」用的是原文字形 ↻（契约 §3）；mods 下由 ApplyResourceKind 收起 -->
+                    <Button x:Name="BtnCtxRefresh" Grid.Column="2" Style="{StaticResource BtnGhost}"
+                            Content="↻ 刷新" VerticalAlignment="Center" Visibility="Collapsed"/>
+                </Grid>
 
                 <!-- .fm-context .fm-path：flex-basis 100%（自己占一行）/ 无边框 / 12px text-dim / cursor:copy / overflow-wrap anywhere — :719
-                     displayPath 的「>80 字符中间省略」是 :117 的逻辑，不是样式；文案占位，等路径拼接接入 -->
-                <TextBlock x:Name="PathText" Style="{StaticResource Micro}" Margin="0,12,0,0"
+                     displayPath = 游戏根 + '/' + rel（:116，是正斜杠不是反斜杠），>80 字符中间省略是 :117 的逻辑 -->
+                <TextBlock x:Name="PathText" Grid.Row="1" Style="{StaticResource Micro}" Margin="0,12,0,0"
                            TextWrapping="Wrap" Cursor="Hand" ToolTip="点击复制完整路径（未接入）"
-                           Text="versions\1.20.1-Fabric\mods"/>
-            </StackPanel>
+                           Text="versions/1.20.1-Fabric/mods"/>
+            </Grid>
 
             <!-- ==================== 1. .card.empty（FileManager.vue:347-349） ====================
                  v-if !currentVersion：当前游戏文件夹里一个可选版本都没有时，整页只留这一张卡。
@@ -617,30 +626,32 @@
                     <ColumnDefinition Width="140"/>
                     <ColumnDefinition Width="38"/>
                 </Grid.ColumnDefinitions>
-                <!-- .input.fm-search（:401）：36 高 / padding 12 8 / radius 10（契约 §2 Input）；WPF 无 placeholder → 覆盖文字 -->
+                <!-- .input.fm-search（:401）：36 高 / padding 12 8 / radius 10（契约 §2 Input）；WPF 无 placeholder → 覆盖文字。
+                     这颗 TextBox 不钉高度会被量到 50 高（其它页同款输入框也是），先钉死 36 -->
                 <Grid>
-                    <TextBox x:Name="SearchBox" Style="{StaticResource Input}" FontSize="13"
+                    <TextBox x:Name="SearchBox" Style="{StaticResource Input}" FontSize="13" Height="36"
+                             VerticalAlignment="Top"
                              TextChanged="Search_TextChanged" ToolTip="搜索文件名或模组名称…"/>
                     <TextBlock x:Name="SearchHint" Text="搜索文件名或模组名称…" FontSize="13"
                                Foreground="{DynamicResource Fg3}" Margin="13,0,0,0"
                                VerticalAlignment="Center" IsHitTestVisible="False"/>
                 </Grid>
-                <!-- 状态筛选 SelectMenu（:402 的四项）；宽度 160 来自 :719 的第二轨 -->
-                <ComboBox Grid.Column="1" Margin="10,0,0,0" FontSize="13" SelectedIndex="0">
+                <!-- 状态筛选 SelectMenu（:402 的四项）；宽度 160 来自 :719 的第二轨。筛选逻辑接 RenderList -->
+                <ComboBox x:Name="CmbStatus" Grid.Column="1" Margin="10,0,0,0" Height="36" VerticalAlignment="Top" FontSize="14" SelectedIndex="0">
                     <ComboBoxItem>全部状态</ComboBoxItem>
                     <ComboBoxItem>已启用</ComboBoxItem>
                     <ComboBoxItem>已禁用</ComboBoxItem>
                     <ComboBoxItem>已锁定</ComboBoxItem>
                 </ComboBox>
-                <!-- 排序 SelectMenu（:403 的三项）；宽度 140 来自 :719 的第三轨 -->
-                <ComboBox Grid.Column="2" Margin="10,0,0,0" FontSize="13" SelectedIndex="0">
+                <!-- 排序 SelectMenu（:403 的三项）；宽度 140 来自 :719 的第三轨。排序逻辑接 RenderList -->
+                <ComboBox x:Name="CmbSort" Grid.Column="2" Margin="10,0,0,0" Height="36" VerticalAlignment="Top" FontSize="14" SelectedIndex="0">
                     <ComboBoxItem>名称排序</ComboBoxItem>
                     <ComboBoxItem>最近修改</ComboBoxItem>
                     <ComboBoxItem>文件大小</ComboBoxItem>
                 </ComboBox>
                 <!-- .fm-refresh：38 轨里的 .btn-ghost，内容是原文字形 ↻（:405，契约 §3 允许的字形） -->
-                <Button Grid.Column="3" Style="{StaticResource BtnGhost}" Width="38" Height="36" Padding="0"
-                        FontSize="16" Content="↻" ToolTip="刷新文件列表（未接入）"/>
+                <Button x:Name="BtnRefresh" Grid.Column="3" Style="{StaticResource BtnGhost}" Width="38" Height="36" Padding="0"
+                        FontSize="16" Content="↻" ToolTip="刷新文件列表"/>
             </Grid>
 
             <!-- ==================== .fm-batch ====================
@@ -707,11 +718,12 @@
 
             <!-- ==================== .fm-card ====================
                  padding 0 16 !important / overflow visible — :719（基线 :545-547 是 padding 8）；
+                 CSS 的 padding:0 16px 是上下 0、左右 16 —— 表头紧贴卡顶，行内容左右缩进 16；
                  卡片平面无阴影（契约 §6.4 + §2 Panel：radius 14 / border 1 / Card 底）。
                  v-if currentVersion（:411）：没版本时整卡不渲染，只剩上面那张 .card.empty。
                  :class 的 shader-empty（:411，光影包且列表为空且不在读取且无错误）由 ApplyResourceKind 切
                  底色与描边（第 5 项，见那里的注释）。 -->
-            <Border x:Name="FmCard" Style="{StaticResource Panel}" Padding="0,16" Margin="0,0,0,12">
+            <Border x:Name="FmCard" Style="{StaticResource Panel}" Padding="16,0" Margin="0,0,0,12">
                 <!-- .fm-list：flex column / overflow visible — :490 + :548-551 -->
                 <StackPanel>
 
@@ -738,231 +750,39 @@
                     <Border BorderBrush="{DynamicResource Line}" BorderThickness="0,0,0,1" MinHeight="36">
                         <Grid x:Name="FmHead">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="18"/>
-                                <ColumnDefinition Width="32"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="88"/>
-                                <ColumnDefinition Width="132"/>
-                                <ColumnDefinition Width="42"/>
+                                <ColumnDefinition Width="18"/><ColumnDefinition Width="12"/><ColumnDefinition Width="32"/>
+                                <ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="88"/><ColumnDefinition Width="12"/><ColumnDefinition Width="132"/>
+                                <ColumnDefinition Width="12"/><ColumnDefinition Width="42"/><ColumnDefinition Width="12"/>
                                 <ColumnDefinition Width="40"/>
                             </Grid.ColumnDefinitions>
                             <!-- 表头全选：:checked / :indeterminate（:427）→ WPF 用 IsThreeState + IsChecked={x:Null} 表示半选 -->
                             <CheckBox Style="{StaticResource Check}" Tag="mods-only" IsThreeState="True"
                                       VerticalAlignment="Center" ToolTip="选择当前页模组"/>
-                            <!-- grid-column:2/4 ——「名称」压在图标轨+名称轨上，文字左缘对齐图标轨左缘（:719） -->
-                            <TextBlock Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Micro}"
+                            <!-- mods：grid-column:2/4 ——「名称」压在图标轨+gap+名称轨上，文字左缘对齐图标轨左缘（:719）；
+                                 非 mods（资源包/光影）：表头是 36 1fr 88 132 40 五轨，「名称」在名称轨上（:427 的 v-else 占位＋名称） -->
+                            <TextBlock Grid.Column="2" Grid.ColumnSpan="3" Style="{StaticResource Micro}" Tag="mods-only"
+                                       Text="名称" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="4" Style="{StaticResource Micro}" Tag="packs-only"
                                        Text="名称" VerticalAlignment="Center"/>
                             <!-- .fm-table-head>span:nth-child(3){text-align:right} — :719 -->
-                            <TextBlock Grid.Column="3" Style="{StaticResource Micro}" Margin="12,0,0,0"
+                            <TextBlock Grid.Column="6" Style="{StaticResource Micro}"
                                        Text="大小" TextAlignment="Right" VerticalAlignment="Center"/>
                             <!-- .fm-date{text-align:left} — :719 -->
-                            <TextBlock Grid.Column="4" Style="{StaticResource Micro}" Margin="12,0,0,0"
+                            <TextBlock Grid.Column="8" Style="{StaticResource Micro}"
                                        Text="修改时间" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="5" Style="{StaticResource Micro}" Margin="12,0,0,0" Tag="mods-only"
+                            <TextBlock Grid.Column="10" Style="{StaticResource Micro}" Tag="mods-only"
                                        Text="启用" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="6" Style="{StaticResource Micro}" Margin="12,0,0,0"
+                            <TextBlock Grid.Column="12" Style="{StaticResource Micro}"
                                        Text="操作" VerticalAlignment="Center"/>
                         </Grid>
                     </Border>
 
-                    <!-- ============ 行 1（占位：等资源管理接入，原版 entries 来自 fs:list，:74） ============ -->
-                    <Border Style="{StaticResource FmRow}">
-                        <Grid x:Name="FmRow1">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="18"/><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="88"/><ColumnDefinition Width="132"/><ColumnDefinition Width="42"/>
-                                <ColumnDefinition Width="40"/>
-                            </Grid.ColumnDefinitions>
-                            <!-- .fm-row input[type=checkbox]{accent-color:var(accent)} — :494；契约 §2 Check 的方框是 13px，比原版 18 小 -->
-                            <CheckBox Style="{StaticResource Check}" Tag="mods-only" VerticalAlignment="Center"/>
-                            <!-- .fm-file-icon：mods 下 32×32 — :719（基线 :565-571 是 36×36 + color:var(accent)）；
-                                 图标色给宿主 ContentControl，符合契约 §6.7。原版这里是内联 file SVG（:436-439），
-                                 契约 §3 白名单里没有 file 形，用 Icon.Mods 代替。 -->
-                            <ContentControl Grid.Column="1" Width="32" Height="32" Tag="file-icon"
-                                            VerticalAlignment="Center" Foreground="{DynamicResource Accent}"
-                                            Style="{DynamicResource Icon.Mods}"/>
-                            <Grid Grid.Column="2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Style="{StaticResource FmName}" Text="fabric-api-0.98.0+1.20.1.jar"/>
-                                </StackPanel>
-                                <!-- 状态胶囊用 .fm-disabled-tag 配方：12px / padding 1 8 / radius 999 / card-2 底 / text-3 字 / line 描边 — :612-620
-                                     （原版 mods 行是把「已禁用 / 已锁定」写在 .fm-internal 第二行 :441，7 列里没有状态轨，所以这里挂在名称右缘） -->
-                            </Grid>
-                            <!-- .fm-meta（大小）：12px 右对齐 nowrap — :719；e.isDir ? '文件夹' : fmtSize — :443 -->
-                            <TextBlock Grid.Column="3" Style="{StaticResource FmMeta}" Margin="12,0,0,0" Text="2.4 MB"/>
-                            <TextBlock Grid.Column="4" Style="{StaticResource FmMeta}" Margin="12,0,0,0"
-                                       TextAlignment="Left" Text="2025-06-12"/>
-                            <!-- 启用开关列（42 轨内）：.switch 40×22（docs §0 styles.css:356-401）+ .fm-toggle flex-shrink 0 — :496/:602 -->
-                            <CheckBox Grid.Column="5" Style="{StaticResource Switch}" Tag="mods-only" IsChecked="True"
-                                      HorizontalAlignment="Left" VerticalAlignment="Center" ToolTip="禁用模组"/>
-                            <Grid Grid.Column="6">
-                                <!-- .file-more summary：.btn.btn-ghost.btn-sm + font-size 18 / min-width 36 — :486 + :448；⋯ 是原文字形（契约 §3） -->
-                                <Button x:Name="MoreBtn1" Style="{StaticResource BtnSm}" MinWidth="36" Padding="0"
-                                        FontSize="18" Content="⋯" Tag="PopRow1" Click="More_Click" ToolTip="更多操作"/>
-                                <!-- .file-more-actions：absolute right:0 / top:100% / min-width 150 / padding 10 / gap 8 / radius 10 — :488 + :719
-                                     菜单项原版是 .btn-sm（32 高），契约 §2 指定用 MenuItem2（34 高）→ 取契约值 -->
-                                <Popup x:Name="PopRow1" PlacementTarget="{x:Reference MoreBtn1}" Placement="Bottom"
-                                       HorizontalOffset="-110" AllowsTransparency="True" Focusable="False" StaysOpen="False">
-                                    <Border Style="{StaticResource PopupCard}" MinWidth="150" Padding="10">
-                                        <StackPanel>
-                                            <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch" Content="锁定"/>
-                                            <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch"
-                                                    Content="版本" Margin="0,8,0,0"/>
-                                            <!-- .file-more-actions .fm-remove{border-top:1px;margin-top:4px} — :489 -->
-                                            <Border Height="1" Background="{DynamicResource Line}" Margin="0,4,0,0"/>
-                                            <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch"
-                                                    Content="删除" Margin="0,4,0,0" Foreground="{DynamicResource Danger}"/>
-                                        </StackPanel>
-                                    </Border>
-                                </Popup>
-                            </Grid>
-                        </Grid>
-                    </Border>
-
-                    <!-- ============ 行 2：选中态演示（占位：等资源管理接入） ============
-                         .fm-row:has(>input:checked){background:color-mix(in srgb,var(accent) 5%,transparent)} — :719
-                         WPF 没有 :has()，勾选行用生成器按公式出的 AccentPick（accent 5%，见 gen_theme_mixins.py）；
-                         真正接线时应由数据行的容器样式给 5% 的自定义底。 -->
-                    <Border Style="{StaticResource FmRow}" Background="{DynamicResource AccentPick}">
-                        <Grid x:Name="FmRow2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="18"/><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="88"/><ColumnDefinition Width="132"/><ColumnDefinition Width="42"/>
-                                <ColumnDefinition Width="40"/>
-                            </Grid.ColumnDefinitions>
-                            <CheckBox Style="{StaticResource Check}" Tag="mods-only" IsChecked="True" VerticalAlignment="Center"/>
-                            <ContentControl Grid.Column="1" Width="32" Height="32" Tag="file-icon"
-                                            VerticalAlignment="Center" Foreground="{DynamicResource Accent}"
-                                            Style="{DynamicResource Icon.Mods}"/>
-                            <Grid Grid.Column="2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Style="{StaticResource FmName}" Text="sodium-fabric-0.5.8+mc1.20.1.jar"/>
-                                </StackPanel>
-                            </Grid>
-                            <TextBlock Grid.Column="3" Style="{StaticResource FmMeta}" Margin="12,0,0,0" Text="1.2 MB"/>
-                            <TextBlock Grid.Column="4" Style="{StaticResource FmMeta}" Margin="12,0,0,0"
-                                       TextAlignment="Left" Text="2025-05-28"/>
-                            <CheckBox Grid.Column="5" Style="{StaticResource Switch}" Tag="mods-only" IsChecked="True"
-                                      HorizontalAlignment="Left" VerticalAlignment="Center" ToolTip="禁用模组"/>
-                            <Grid Grid.Column="6">
-                                <Button x:Name="MoreBtn2" Style="{StaticResource BtnSm}" MinWidth="36" Padding="0"
-                                        FontSize="18" Content="⋯" Tag="PopRow2" Click="More_Click" ToolTip="更多操作"/>
-                                <Popup x:Name="PopRow2" PlacementTarget="{x:Reference MoreBtn2}" Placement="Bottom"
-                                       HorizontalOffset="-110" AllowsTransparency="True" Focusable="False" StaysOpen="False">
-                                    <Border Style="{StaticResource PopupCard}" MinWidth="150" Padding="10">
-                                        <StackPanel>
-                                            <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch" Content="已锁定"/>
-                                            <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch"
-                                                    Content="版本" Margin="0,8,0,0"/>
-                                            <Border Height="1" Background="{DynamicResource Line}" Margin="0,4,0,0"/>
-                                            <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch"
-                                                    Content="删除" Margin="0,4,0,0" Foreground="{DynamicResource Danger}"/>
-                                        </StackPanel>
-                                    </Border>
-                                </Popup>
-                            </Grid>
-                        </Grid>
-                    </Border>
-
-                    <!-- ============ 行 3：已禁用（.fm-row-disabled — :605-611；opacity 被 :722 放回 1，只保留名称删除线） ============ -->
-                    <Border Style="{StaticResource FmRow}">
-                        <Grid x:Name="FmRow3">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="18"/><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="88"/><ColumnDefinition Width="132"/><ColumnDefinition Width="42"/>
-                                <ColumnDefinition Width="40"/>
-                            </Grid.ColumnDefinitions>
-                            <CheckBox Style="{StaticResource Check}" Tag="mods-only" VerticalAlignment="Center"/>
-                            <ContentControl Grid.Column="1" Width="32" Height="32" Tag="file-icon"
-                                            VerticalAlignment="Center" Foreground="{DynamicResource Accent}"
-                                            Style="{DynamicResource Icon.Mods}"/>
-                            <Grid Grid.Column="2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Center">
-                                    <!-- .fm-row-disabled .fm-name{text-decoration:line-through} — :608-611 -->
-                                    <TextBlock Style="{StaticResource FmName}" Text="OptiFine_1.20.1_HD_U_I6.jar"/>
-                                    <TextBlock Style="{StaticResource FmInternal}" Text="已禁用"/>
-                                </StackPanel>
-                            </Grid>
-                            <TextBlock Grid.Column="3" Style="{StaticResource FmMeta}" Margin="12,0,0,0" Text="8.6 MB"/>
-                            <TextBlock Grid.Column="4" Style="{StaticResource FmMeta}" Margin="12,0,0,0"
-                                       TextAlignment="Left" Text="2024-12-03"/>
-                            <CheckBox Grid.Column="5" Style="{StaticResource Switch}" Tag="mods-only" IsChecked="False"
-                                      HorizontalAlignment="Left" VerticalAlignment="Center" ToolTip="启用模组"/>
-                            <Grid Grid.Column="6">
-                                <Button x:Name="MoreBtn3" Style="{StaticResource BtnSm}" MinWidth="36" Padding="0"
-                                        FontSize="18" Content="⋯" Tag="PopRow3" Click="More_Click" ToolTip="更多操作"/>
-                                <Popup x:Name="PopRow3" PlacementTarget="{x:Reference MoreBtn3}" Placement="Bottom"
-                                       HorizontalOffset="-110" AllowsTransparency="True" Focusable="False" StaysOpen="False">
-                                    <Border Style="{StaticResource PopupCard}" MinWidth="150" Padding="10">
-                                        <StackPanel>
-                                            <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch" Content="锁定"/>
-                                            <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch"
-                                                    Content="版本" Margin="0,8,0,0"/>
-                                            <Border Height="1" Background="{DynamicResource Line}" Margin="0,4,0,0"/>
-                                            <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch"
-                                                    Content="删除" Margin="0,4,0,0" Foreground="{DynamicResource Danger}"/>
-                                        </StackPanel>
-                                    </Border>
-                                </Popup>
-                            </Grid>
-                        </Grid>
-                    </Border>
-
-                    <!-- ============ 行 4：已锁定（catalog[name].locked — :441/:448） ============ -->
-                    <Border Style="{StaticResource FmRow}">
-                        <Grid x:Name="FmRow4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="18"/><ColumnDefinition Width="32"/><ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="88"/><ColumnDefinition Width="132"/><ColumnDefinition Width="42"/>
-                                <ColumnDefinition Width="40"/>
-                            </Grid.ColumnDefinitions>
-                            <CheckBox Style="{StaticResource Check}" Tag="mods-only" VerticalAlignment="Center"/>
-                            <ContentControl Grid.Column="1" Width="32" Height="32" Tag="file-icon"
-                                            VerticalAlignment="Center" Foreground="{DynamicResource Accent}"
-                                            Style="{DynamicResource Icon.Mods}"/>
-                            <Grid Grid.Column="2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Center">
-                                    <TextBlock Style="{StaticResource FmName}" Text="iris-fabric-1.7.0+1.20.1.jar"/>
-                                    <TextBlock Style="{StaticResource FmInternal}" Text="已锁定"/>
-                                </StackPanel>
-                            </Grid>
-                            <TextBlock Grid.Column="3" Style="{StaticResource FmMeta}" Margin="12,0,0,0" Text="3.1 MB"/>
-                            <TextBlock Grid.Column="4" Style="{StaticResource FmMeta}" Margin="12,0,0,0"
-                                       TextAlignment="Left" Text="2025-06-01"/>
-                            <CheckBox Grid.Column="5" Style="{StaticResource Switch}" Tag="mods-only" IsChecked="True"
-                                      HorizontalAlignment="Left" VerticalAlignment="Center" ToolTip="禁用模组"/>
-                            <Grid Grid.Column="6">
-                                <Button x:Name="MoreBtn4" Style="{StaticResource BtnSm}" MinWidth="36" Padding="0"
-                                        FontSize="18" Content="⋯" Tag="PopRow4" Click="More_Click" ToolTip="更多操作"/>
-                                <Popup x:Name="PopRow4" PlacementTarget="{x:Reference MoreBtn4}" Placement="Bottom"
-                                       HorizontalOffset="-110" AllowsTransparency="True" Focusable="False" StaysOpen="False">
-                                    <Border Style="{StaticResource PopupCard}" MinWidth="150" Padding="10">
-                                        <StackPanel>
-                                            <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch" Content="已锁定"/>
-                                            <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch"
-                                                    Content="版本" Margin="0,8,0,0"/>
-                                            <Border Height="1" Background="{DynamicResource Line}" Margin="0,4,0,0"/>
-                                            <Button Style="{StaticResource MenuItem2}" HorizontalAlignment="Stretch"
-                                                    Content="删除" Margin="0,4,0,0" Foreground="{DynamicResource Danger}"/>
-                                        </StackPanel>
-                                    </Border>
-                                </Popup>
-                            </Grid>
-                        </Grid>
-                    </Border>
-
+                    <!-- ============ 文件列表行 ============
+                         行由代码侧按真实文件列表生成（ModsPage.xaml.cs 的 BuildRow）：
+                         结构逐项对齐被替换的四行占位行（FmRow 外框 + 13 轨 Grid + Check 复选框 /
+                         FmFile 图标 / FmName 名称(含 FmInternal 状态第二行) / FmMeta 大小·日期 /
+                         Switch 启用开关 / ⋯ + PopupCard 菜单），插入点在本注释与「卡内三种 empty」之间。 -->
                     <!-- ============ 卡内三种 empty（与列表 v-else-if 互斥，:414 / :418-422 / :423-425）============
                          .content .empty：min-height 120 / padding 32px 16px — ui-system.css:44（压过 styles.css:521 的 48/24）；
                          flex column / align-items center / justify-content center / gap 16 / text-dim — styles.css:515-524；
@@ -983,8 +803,11 @@
                     <!-- v-else-if !entries.length（:418-422）：内联图标 + 空态文案，光影包再补一条 small.muted（:421） -->
                     <Border x:Name="EmptyBlock" Style="{StaticResource MpEmpty}" Visibility="Collapsed">
                         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <!-- .empty-icon：44×44 / color:var(accent) / opacity .8 — :621-631；图标取 ModsView.vue:4-5 的方块形 → Icon.Mods -->
-                            <ContentControl Width="44" Height="44" Opacity="0.8" HorizontalAlignment="Center"
+                            <!-- .empty-icon：44×44 / color:var(accent) / opacity .8 — :621-631；
+                                 图形取各壳传进来的 props.icon（ModsView:4-5 方块 / PacksView:4-5 文件夹 /
+                                 ShadersView:4-5 太阳），由 ApplyResourceKind 切 EmptyIcon -->
+                            <ContentControl x:Name="EmptyIcon" Width="44" Height="44" Opacity="0.8"
+                                            HorizontalAlignment="Center"
                                             Foreground="{DynamicResource Accent}" Style="{DynamicResource Icon.Mods}"/>
                             <TextBlock x:Name="EmptyText" FontSize="14" TextWrapping="Wrap" Margin="0,16,0,0"
                                        TextAlignment="Center" Foreground="{DynamicResource Fg2}"

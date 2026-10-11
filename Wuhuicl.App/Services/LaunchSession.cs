@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -18,6 +18,12 @@ public sealed class VersionRow
     public string Kind { get; init; } = "release";
     public bool Installed { get; set; }
     public string Subtitle { get; init; } = "";
+    /// <summary>收藏标记（菜单行的星标 v-if isFavorite — HomeView.vue:682），随 ResortInstalledByFavorite 刷新。</summary>
+    public bool Favorite { get; set; }
+    /// <summary>instance-meta 四段（GameView.vue:1158-1163）：MC 版本 / 加载器 / 目录短名 / 隔离状态。</summary>
+    public string McVersion { get; set; } = "";
+    public string LoaderLabel { get; set; } = "";
+    public string IsolatedText { get; set; } = "已隔离";
 
     /// <summary>标签文字＝原版 typeText（GameView.vue:344-349）。之前直接把 'release' 显示在标签上。</summary>
     public string KindText => Kind switch
@@ -39,8 +45,8 @@ public sealed class VersionRow
 public sealed class AccountRow
 {
     public Account Model { get; init; } = new();
-    /// <summary>头像一律由玩家皮肤文件现算，不用任何外部图片。</summary>
-    public System.Windows.Media.ImageSource Avatar => SkinRenderer.Face(64);
+    /// <summary>头像：微软号用自己的档案皮肤脸（facecache），其余用全局皮肤文件现算。</summary>
+    public System.Windows.Media.ImageSource Avatar => SkinRenderer.FaceFor(string.IsNullOrEmpty(Model.Uuid) ? null : Model.Uuid, 64);
     public string Name => Model.Name;
     public string KindText => Model.Kind switch
     {
@@ -102,9 +108,16 @@ public sealed class LaunchSession : INotifyPropertyChanged
     public string RuntimeSummary => Settings.Value.AutoJava ? "自动选择" :
         (string.IsNullOrEmpty(Settings.Value.JavaPath) ? "自动选择"
             : Path.GetFileNameWithoutExtension(Settings.Value.JavaPath));
-    public string MemorySummary => Settings.Value.MaxHeapMb >= 1024
-        ? $"{Settings.Value.MaxHeapMb / 1024.0:0.#} GB"
-        : $"{Settings.Value.MaxHeapMb} MB";
+    // memoryText（HomeView.vue:310-316）与 memoryValue（SettingsView.vue:426-429）：
+    // 自动 → 「自动」/「自动（N GB）」；手动 → N GB（0.5GB 步进不会出现 .5 以外的零头）
+    public string MemorySummary => Settings.Value.MemoryAuto
+        ? $"自动（{FmtGb(MemoryPolicy.AutoMemoryMB(TotalMemMb))}）"
+        : FmtGb(Settings.Value.MemoryMb);
+    public string MemoryText => Settings.Value.MemoryAuto ? "自动" : FmtGb(Settings.Value.MemoryMb);
+    static string FmtGb(int mb) => mb % 1024 == 0 ? $"{mb / 1024} GB" : $"{mb / 1024.0:0.#} GB";
+
+    /// <summary>本机物理内存 MB（totalMemMB — os.totalmem() 等价，GC 报告的物理上限）。</summary>
+    public static long TotalMemMb => GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 1024 / 1024;
     // 原版 heroStatus 五态（HomeView.vue:192-200），判据顺序也照抄：
     // 没有当前实例 → 等待选择；运行中 → 游戏运行中；正在准备 → 正在准备；
     // launchFailed／实例损坏 → 需要检查；否则就绪。
@@ -201,6 +214,7 @@ public sealed class LaunchSession : INotifyPropertyChanged
             AtomicJson.Save(PlayTimeFile, _playTimes);
         }
         catch (Exception ex) { Log("游玩时间保存失败：" + ex.Message); }
+        RebuildRecent();   // 刚玩过的排到最近游戏首位
     }
 
     string LastPlayedText(string id)
@@ -218,6 +232,11 @@ public sealed class LaunchSession : INotifyPropertyChanged
         Paths.EnsureDirectories();
         Settings = new SettingsStore(Paths);
         Settings.Load();
+        // 旧 min/max → memoryMB 一次性迁移（取上限当手动值；memoryAuto 缺省即 true 不用动）
+        if (Settings.Value.MemoryMb == 4096 && Settings.Value.MaxHeapMb > 0 && Settings.Value.MaxHeapMb != 2048)
+        {
+            Settings.Value.MemoryMb = Settings.Value.MaxHeapMb;
+        }
         Accounts = new AccountStore(Paths);
         Accounts.Load();
         Installer = new InstallService(Paths)
@@ -227,6 +246,7 @@ public sealed class LaunchSession : INotifyPropertyChanged
             Progress = new Progress<string>(s => Dispatcher(() => Log(s))),
         };
         Installer.DL.PreferMirrorFirst = Settings.Value.UseMirror;
+        SkinRenderer.FaceCacheDir = Path.Combine(Paths.DataDir, "facecache");
         LoadPlayTimes();
         ReloadAccounts();
         RefreshInstalled();
@@ -250,7 +270,7 @@ public sealed class LaunchSession : INotifyPropertyChanged
     }
 
     // ---------------- 账号 ----------------
-    void ReloadAccounts()
+    public void ReloadAccounts()
     {
         AccountList.Clear();
         foreach (var a in Accounts.Accounts) AccountList.Add(new AccountRow { Model = a });
@@ -300,6 +320,10 @@ public sealed class LaunchSession : INotifyPropertyChanged
                     Kind = string.IsNullOrEmpty(inherit) ? kind : "loader",
                     Installed = true,
                     Subtitle = string.IsNullOrEmpty(inherit) ? DescribeKind(kind) : "基于 " + inherit,
+                    McVersion = string.IsNullOrEmpty(inherit) ? id : inherit,
+                    LoaderLabel = LoaderLabelOf(id, kind),
+                    IsolatedText = Settings.Value.GameDirOverride is null && Settings.Value.DefaultIsolation
+                        ? "已隔离" : "共享目录",
                 });
                 InstalledList[^1].LastPlayed = "";
             }
@@ -308,13 +332,75 @@ public sealed class LaunchSession : INotifyPropertyChanged
         // 原地重排：集合实例被界面绑定持有，换掉实例会让 ListBox 失去通知
         foreach (var v in InstalledList) v.LastPlayed = LastPlayedText(v.Id);
         Raise(nameof(InstalledList));
-        var sorted = InstalledList.OrderByDescending(v => v.Id, Comparer<string>.Create(VersionCompare.Compare)).ToList();
-        InstalledList.Clear();
-        foreach (var v in sorted) InstalledList.Add(v);
         SelectedInstalled ??= InstalledList.FirstOrDefault();
+        ResortInstalledByFavorite();   // GameView.vue:680 sortedInstalled = sortWithFavorite(...)：收藏优先 + 最近游玩降序
+        RebuildRecent();
         Raise(nameof(CanPlay));
         RaiseRunState();
         Raise(nameof(InstalledTabText));
+    }
+
+    // ---------------- 最近游戏（HomeView.vue:373-381）----------------
+    // 原版 recent = sortWithFavorite(activeInstalled).slice(0, wideRecent ? 8 : 4)：
+    // 收藏优先，组内按 lastPlayed 时间戳降序；宽度 ≥1500 取 8 条、否则 4 条（HomeView.vue:376）。
+    public ObservableCollection<VersionRow> RecentList { get; } = new();
+
+    /// <summary>首页在 SizeChanged 时按窗口宽更新（≥1500 → 8，否则 4）。</summary>
+    public int RecentCap { get; set; } = 8;
+
+    /// <summary>isFavorite（store.ts:315）：无文件夹概念，落 favoriteVersions 支路。</summary>
+    public bool IsFavorite(string id) => Settings.Value.FavoriteVersions.Contains(id);
+
+    /// <summary>toggleFavorite（store.ts:318-325）：翻转后落盘并重排（星标与排序即时反馈）。</summary>
+    public bool ToggleFavorite(string id)
+    {
+        var favs = Settings.Value.FavoriteVersions;
+        bool now = !favs.Contains(id);
+        if (now) favs.Add(id); else favs.Remove(id);
+        SaveSettings();
+        RebuildRecent();
+        ResortInstalledByFavorite();
+        return now;
+    }
+
+    /// <summary>sortWithFavorite（store.ts:327-334）：收藏优先，组内 lastPlayed 降序（稳定保持原相对序）。</summary>
+    IEnumerable<VersionRow> SortWithFavorite(IEnumerable<VersionRow> list) => list
+        .Select((v, i) => (v, i))
+        .OrderBy(t => IsFavorite(t.v.Id) ? 0 : 1)
+        .ThenByDescending(t => _playTimes.GetValueOrDefault(t.v.Id, 0))
+        .ThenBy(t => t.i)
+        .Select(t => t.v);
+
+    /// <summary>已安装列表就地重排（集合实例被绑定持有，不能换实例）。</summary>
+    public void ResortInstalledByFavorite()
+    {
+        var sorted = SortWithFavorite(InstalledList).ToList();
+        InstalledList.Clear();
+        foreach (var v in sorted)
+        {
+            v.Favorite = IsFavorite(v.Id);
+            InstalledList.Add(v);
+        }
+    }
+
+    public void RebuildRecent()
+    {
+        var recent = SortWithFavorite(InstalledList).Take(RecentCap).ToList();
+        RecentList.Clear();
+        foreach (var v in recent) RecentList.Add(v);
+    }
+
+    /// <summary>loaderLabel（GameView.vue 等价）：从实例 id 抠加载器名与版本。</summary>
+    static string LoaderLabelOf(string id, string kind)
+    {
+        if (kind != "loader") return "原版";
+        var m = System.Text.RegularExpressions.Regex.Match(id, @"(?i)(fabric|forge|quilt|optifine)[-_]?loader[-_]?(v?[0-9][^-]*)?");
+        if (m.Success)
+        {
+            var name = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(m.Groups[1].Value.ToLowerInvariant());
+            return m.Groups[2].Success ? $"{name} {m.Groups[2].Value}" : name;
+        }
+        return "模组加载器";
     }
 
     static string DescribeKind(string k) => k switch
@@ -416,8 +502,42 @@ public sealed class LaunchSession : INotifyPropertyChanged
         }
     }
 
+    /// <summary>memoryOrganizeBeforeLaunch=true 时启动前触发（UI 层执行 EmptyWorkingSet 扫描）。</summary>
+    public event Action? OrganizeBeforeLaunch;
+
+    /// <summary>launch.ts:627-629：mem = auto ? autoMemoryMB(total) : clamp(512..total, memoryMB)。</summary>
+    int ResolveMemoryMb()
+    {
+        long total = TotalMemMb;
+        return Settings.Value.MemoryAuto
+            ? MemoryPolicy.AutoMemoryMB(total)
+            : (int)Math.Min(Math.Max(512, Settings.Value.MemoryMb), total);
+    }
+
     // ---------------- 启动 ----------------
-    public async Task PlayAsync()
+    /// <summary>快速重启游戏（卡片菜单 quickRestart）：结束当前进程，等退出后原实例原账号再来一局。</summary>
+    public async Task QuickRestartAsync()
+    {
+        if (!GameRunning || _launcher is null) return;
+        Busy = true; Status = "正在重启游戏…";
+        var done = new TaskCompletionSource();
+        void OnExit(int _) { try { done.TrySetResult(); } catch { } }
+        _launcher.Exited += OnExit;
+        try
+        {
+            await Task.Run(() => _launcher.Stop());
+            await done.Task;
+            GameRunning = false;
+            Busy = false;
+            await PlayAsync();
+        }
+        finally
+        {
+            _launcher.Exited -= OnExit;
+        }
+    }
+
+    public async Task PlayAsync(bool commandWorld = false)
     {
         if (!CanPlay) return;
         var id = SelectedInstalled!.Id;
@@ -428,6 +548,10 @@ public sealed class LaunchSession : INotifyPropertyChanged
         LaunchFailed = false;
         try
         {
+            // 微软号临期（<5 分钟）自动刷新（accounts.ts getValidAccount）；刷新后要重取 Model
+            var valid = await MicrosoftAuth.EnsureValidAsync(Settings, Paths, Accounts, acc, Log);
+            if (!ReferenceEquals(valid, acc)) { ReloadAccounts(); acc = SelectedAccount!.Model; }
+
             VersionInfo Load(string vid)
             {
                 var f = Paths.VersionJson(vid);
@@ -456,20 +580,60 @@ public sealed class LaunchSession : INotifyPropertyChanged
                 Uuid = acc.Uuid,
                 Token = acc.Token ?? Guid.NewGuid().ToString("N"),
                 AccountType = acc.Kind,
-                MinHeapMb = Settings.Value.MinHeapMb,
-                MaxHeapMb = Settings.Value.MaxHeapMb,
+                MinHeapMb = 0,   // 由内存策略统一算（LaunchPlanBuilder 取 Xms=min(mem,1024)）
+                MaxHeapMb = ResolveMemoryMb(),
                 JavaPath = java,
                 Width = Settings.Value.Fullscreen ? 0 : Settings.Value.Width,
                 Height = Settings.Value.Fullscreen ? 0 : Settings.Value.Height,
                 Fullscreen = Settings.Value.Fullscreen,
-                GameDirOverride = Settings.Value.GameDirOverride,
+                GameDirOverride = Settings.Value.GameDirOverride
+                    ?? (Settings.Value.DefaultIsolation ? Paths.VersionDir(id) : null),
             };
             foreach (var a in ArgSplit(Settings.Value.ExtraJvmArgs)) opts.ExtraJvmArgs.Add(a);
             foreach (var a in ArgSplit(Settings.Value.ExtraGameArgs)) opts.ExtraGameArgs.Add(a);
 
+            // 「启动并创建命令世界」（HomeView 卡片菜单）：先造一个开作弊的空世界，再随参直进
+            if (commandWorld)
+            {
+                var mcVer0 = rv.Chain[^1].Id;
+                if (!CommandWorld.Supported(mcVer0))
+                    throw new Exception("此 Minecraft 版本不支持官方单人 Quick Play（需要 1.20+）");
+                var gameDir0 = Settings.Value.GameDirOverride ?? Paths.Root;
+                var created = CommandWorld.Create(gameDir0, Paths.ClientJar(mcVer0));
+                opts.SingleplayerWorld = created.Id;
+                Log($"已创建命令世界存档：{created.Id}");
+            }
+
             var plan = LaunchPlanBuilder.Build(Paths, rv, opts);
             plan.Java = java!;
             foreach (var w in plan.Warnings) Log("提醒：" + w);
+
+            // 启动前整理内存（launch.ts:622-626）：memoryOrganizeBeforeLaunch 开启且为 win 平台语义
+            if (Settings.Value.MemoryOrganizeBeforeLaunch)
+                try { OrganizeBeforeLaunch?.Invoke(); }
+                catch (Exception orgEx) { Log("内存整理失败，继续正常启动：" + orgEx.Message); }
+
+            // 默认配置同步（KeysView 三件套）：按键 / 游戏选项 / 材质包，都只动已修改项。
+            // MC 版本 = 继承链最后一段（加载器实例的 InheritsFrom，原版实例就是 Id 本身）
+            var mcVer = rv.Chain[^1].Id;
+            var gameDir = plan.GameDir;
+            try
+            {
+                if (Settings.Value.KeySync && DefaultKeys.KeySyncSupportedForVersion(mcVer))
+                {
+                    if (DefaultKeys.SyncKeysToGameDir(gameDir, Paths))
+                        Log("已同步默认按键到 options.txt");
+                }
+                var (applied, unsupported) = DefaultGameOptions.SyncToGameDir(Paths, gameDir, mcVer);
+                if (applied.Count > 0) Log($"已同步 {applied.Count} 项默认游戏选项");
+                foreach (var u in unsupported) Log($"此版本不支持同步：{u}");
+                if (Settings.Value.ResourcePackSync)
+                {
+                    var n = DefaultResourcePacks.SyncToGameDir(Paths, gameDir, mcVer, Paths.ClientJar(mcVer));
+                    if (n > 0) Log($"已同步 {n} 个默认材质包");
+                }
+            }
+            catch (Exception syncEx) { Log("默认配置同步失败：" + syncEx.Message); }
 
             _launcher?.Dispose();
             _launcher = new GameLauncher();
@@ -519,10 +683,30 @@ public sealed class LaunchSession : INotifyPropertyChanged
         try { Settings.Save(); } catch (Exception ex) { Log("设置保存失败：" + ex.Message); }
     }
 
+    /// <summary>窗口背景（壁纸）变更事件：设置页补丁保存后通知 MainWindow 重涂背景层
+    /// （背景层在窗口壳上，页面按契约 §1 不引用 MainWindow，走这条 sanctioned 桥）。</summary>
+    public event Action? BackgroundChanged;
+
+    /// <summary>对 background 段做一次补丁并持久化 + 广播。null 字段表示「这一项不动」。</summary>
+    public void PatchBackground(string? mode = null, string? color = null, string? image = null,
+        double? opacity = null, double? blur = null, string? fit = null, bool reset = false)
+    {
+        var bg = Settings.Value.Background;
+        if (reset) Settings.Value.Background = new BackgroundSettings();
+        if (mode is not null) bg.Mode = mode;
+        if (color is not null) bg.Color = color;
+        if (image is not null) bg.Image = image;
+        if (opacity is not null) bg.Opacity = Math.Clamp(opacity.Value, 0, 1);
+        if (blur is not null) bg.Blur = Math.Clamp(blur.Value, 0, 40);
+        if (fit is not null) bg.Fit = fit;
+        SaveSettings();
+        BackgroundChanged?.Invoke();
+    }
+
     public string DataDirSummary => $"{Paths.Root}\n启动器数据：{Paths.DataDir}";
 
     public event PropertyChangedEventHandler? PropertyChanged;
-    void Raise([CallerMemberName] string? n = null) => PropertyChanged?.Invoke(this, new(n));
+    public void Raise([CallerMemberName] string? n = null) => PropertyChanged?.Invoke(this, new(n));
     bool Set<T>(ref T field, T value, [CallerMemberName] string? n = null)
     {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
@@ -52,12 +52,12 @@ public sealed class BootSplashWindow : Window
         IsHitTestVisible = false;
         Topmost = true;
         Title = "WUHUICL · 正在启动";
-        Left = SystemParameters.PrimaryScreenWidth;
-        Top = SystemParameters.PrimaryScreenHeight;
-        Width = SystemParameters.PrimaryScreenWidth;
-        Height = SystemParameters.PrimaryScreenHeight;
-        Left = Top = 0;
-        WindowStartupLocation = WindowStartupLocation.Manual;
+        // 内存红线：全屏透明层的驱动分配实测 ~170MB（3200x2000 表面）。
+        // 舞台收缩为居中 960x600 的窗口——碎片飞行范围变小，桌面透视与汇聚时刻保留，
+        // 层表面缩到 ~1/7（≈15MB 级）。BootGlass.Make 用窗口自身尺寸铺碎片。
+        Width = 800;
+        Height = 500;
+        WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         _stage.ClipToBounds = true;
         Content = _stage;
@@ -143,7 +143,7 @@ public sealed class BootSplashWindow : Window
 
     void Build()
     {
-        _geo = BootGlass.Make(SystemParameters.PrimaryScreenWidth, SystemParameters.PrimaryScreenHeight);
+        _geo = BootGlass.Make(Width, Height);
         _items.Clear();
         foreach (var s in _geo.Shards)
         {

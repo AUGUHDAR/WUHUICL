@@ -1,58 +1,246 @@
-using System;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
+using Microsoft.Win32;
+using Wuhuicl.App.Services;
 
 namespace Wuhuicl.App.Pages;
 
 /// <summary>
 /// 资源管理 · 录像页，复刻 KAMUCL-1.1.5/src/renderer/src/views/RecordingsView.vue。
-/// 几何一律取 docs/UI_GEOMETRY_PAGES.md §10 的「最终值」，也就是该文件 :92 那个后写的 scoped 块
-/// （:91 的基线只在被覆盖处作括号注记），根选择器是 <c>.recordings-page</c> 而不是 <c>.page</c>。
-/// 契约 §5 的 LaunchSession 白名单里没有任何录像属性，所以本页不写一个 Binding（绑不存在的属性等于假实现），
-/// 四行录像、库路径、分页文案都是照原版格式写死的占位。
-/// 页内事件只动本页的可见性 / 文案 / 可用性，不发 IPC、不引用 MainWindow（契约 §1）：
-/// 筛选对应 :21 的 filtered 计算属性，勾选对应 :39 的整页反选与 :26 的「改筛选就清空选择」，
-/// 读取中对应 :27-32 与 :76 的 loading + inert。
+/// 几何取 docs/UI_GEOMETRY_PAGES.md §10 的「最终值」，根选择器是 <c>.recordings-page</c>。
+/// 列表已接真实后端 <see cref="RecordingsService"/>：扫 &lt;游戏根&gt;\recordings（集中收藏，含 library 子目录）
+/// + 各版本 replay_recordings\*.mcpr / flashback\replays\*.zip（.mcpr 必须含 recording.tmcpr + metaData.json，
+/// Flashback .zip 必须含 metadata.json + chunks），按修改时间降序。
+/// 行由 <see cref="BuildRow"/> 按 XAML 被替换的占位行结构逐项生成（RecRow / Check / RecName / RecMeta / RecPath /
+/// RecRowBtn 同一套样式键），筛选/勾选/分页语义与原版一致（:21 filtered、:26 改筛选清空、:22 每页 40）。
+/// 操作：定位 = explorer /select；移入回收站 = Microsoft.VisualBasic FileSystem（确认框）；导入 = OpenFileDialog
+/// 复制进集中收藏，同名自动加序号，结果进 :85 的「上次操作结果」块。
 /// </summary>
 public partial class RecordingsPage : UserControl
 {
-    /// <summary>每页 40 条 — RecordingsView.vue:22。本轮只有 4 行占位，页数恒为 1，
-    /// 所以分页条按 :83 的 v-if="pages &gt; 1" 常态收起，只保留结构与文案换算。</summary>
+    /// <summary>每页 40 条 — RecordingsView.vue:22。</summary>
     const int PageSize = 40;
 
-    Border[] _rows = Array.Empty<Border>();
-    CheckBox[] _checks = Array.Empty<CheckBox>();
-    TextBlock[] _names = Array.Empty<TextBlock>();
-    TextBlock[] _paths = Array.Empty<TextBlock>();
+    readonly RecordingsService _service = new();
 
-    // InitializeComponent 里 SelectedIndex="0" 会当场触发 SelectionChanged，那时数组还没装配，必须先挡住
+    // ---------------- 真实列表状态 ----------------
+    List<MediaEntry> _all = [];      // 全量扫描结果（modified 降序）
+    List<MediaEntry> _view = [];     // 筛选后的全集（分页的源）
+    List<string> _warnings = [];
+    string? _loadError;
+    List<(Border Row, CheckBox Check, MediaEntry Entry)> _rowItems = [];
+    int _page = 1;
+    int _generation;   // 重入保护：只认最后一次 reload 的回包
+    bool _loading;
     bool _ready;
-
-    // 只是把「读取中」这套态演一遍给主控看形状：真实 loading 由 recordings:list 的 await 决定（:27-32）
-    DispatcherTimer? _busyTimer;
+    bool _everLoaded;
+    bool _suppressFilter;
+    Run? _countRun;    // 页头「… N 个」的 Run（原版 data.entries.length，:57）
 
     public RecordingsPage()
     {
         InitializeComponent();
-        _rows = new[] { Row1, Row2, Row3, Row4 };
-        _checks = new[] { RowCheck1, RowCheck2, RowCheck3, RowCheck4 };
-        _names = new[] { RowName1, RowName2, RowName3, RowName4 };
-        _paths = new[] { RowPath1, RowPath2, RowPath3, RowPath4 };
-        _ready = true;
+        // XAML 里的四行是假数据占位：真实列表由 BuildRow 生成，先拆掉
+        RecordingList.Children.Clear();
 
+        BtnOpenLibrary.Click += (_, _) => OpenDir(_service.LibraryDir);
+        BtnImport.Click += Import_Click;
+        HookTrashButton();
+        PrevPageBtn.Click += (_, _) => { if (_page > 1) { _page--; ApplyFilter(); } };
+        NextPageBtn.Click += (_, _) => { if (_page < PagesOf(_view.Count)) { _page++; ApplyFilter(); } };
+
+        Loaded += (_, _) =>
+        {
+            if (_everLoaded || _loading) return;
+            _everLoaded = true;
+            _ = ReloadAsync();
+        };
+        _ready = true;   // 数组装配完成后放行事件处理器（SelectionChanged 在 InitializeComponent 里就会打进来）
         ApplyFilter();
         UpdateSelection();
-        Unloaded += (_, _) => _busyTimer?.Stop();
     }
 
     /// <summary>下拉当前项文案，等价于 SelectMenu 的 currentLabel（SelectMenu.vue:25-28）。</summary>
     static string Item(ComboBox box) => (box.SelectedItem as ComboBoxItem)?.Content as string ?? string.Empty;
 
+    static int PagesOf(int count) => Math.Max(1, (int)Math.Ceiling(count / (double)PageSize));
+
+    // ================= 数据加载 =================
+
+    /// <summary>recordings:list（:27）：后台扫目录，回包后重建行、库路径、文件夹下拉与告警块。</summary>
+    async Task ReloadAsync()
+    {
+        if (_loading) return;
+        _loading = true;
+        int gen = ++_generation;
+        SetBusy(true);
+        try
+        {
+            var res = await Task.Run(_service.Scan);
+            if (gen != _generation) return;
+            _loadError = null;
+            _all = res.Entries;
+            _warnings = res.Warnings;
+            _page = 1;
+            LibraryPathText.Text = _service.LibraryDir; // data.library（:58）
+            UpdateHeaderCount();
+            UpdateWarnings();
+            PopulateFolderSelect();
+            ApplyFilter();
+            UpdateSelection();
+        }
+        catch (Exception ex)
+        {
+            if (gen != _generation) return;
+            _loadError = ex.Message;
+            ApplyFilter();
+        }
+        finally
+        {
+            if (gen == _generation)
+            {
+                _loading = false;
+                SetBusy(false);
+            }
+        }
+    }
+
+    /// <summary>页头计数：data.entries.length（:57 的「4 个」占位 Run）。</summary>
+    void UpdateHeaderCount()
+    {
+        _countRun ??= FindCountRun();
+        if (_countRun is not null) _countRun.Text = $" {_all.Count} 个";
+    }
+
+    /// <summary>页头标题里那个「 N 个」Run 是 XAML 占位（无 x:Name），靠特征找：双 Inline 且末 Inline 以「 个」结尾。</summary>
+    Run? FindCountRun()
+    {
+        foreach (var tb in Descendants<TextBlock>(this))
+            if (tb.Inlines.Count == 2 && tb.Inlines.LastInline is Run r && r.Text.EndsWith(" 个"))
+                return r;
+        return null;
+    }
+
+    /// <summary>部分目录未读取（:67 details）：文案换成真实警告，条数为 0 时整块收起。</summary>
+    void UpdateWarnings()
+    {
+        WarningBody.Children.Clear();
+        for (int i = 0; i < _warnings.Count; i++)
+        {
+            var line = new TextBlock
+            {
+                FontSize = 14,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = i == 0 ? new Thickness(0, 0, 0, 0) : new Thickness(0, 4, 0, 0),
+                Text = _warnings[i],
+            };
+            line.SetResourceReference(TextBlock.ForegroundProperty, "Fg2");
+            WarningBody.Children.Add(line);
+        }
+        WarningSummary.Content = $"部分目录未读取（{_warnings.Count}）";
+        WarningBlock.Visibility = _warnings.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>folderOptions（:16）：「名 · 路径」，名按来源（集中收藏 / 版本 id / 游戏目录），筛选用路径段。</summary>
+    void PopulateFolderSelect()
+    {
+        _suppressFilter = true;
+        FolderSelect.Items.Clear();
+        FolderSelect.Items.Add(new ComboBoxItem { Content = "全部已绑定文件夹" });
+        foreach (var dir in _all.Select(e => e.Directory).Distinct())
+        {
+            var first = _all.First(e => e.Directory == dir);
+            string label = first.Library ? "集中收藏" : first.VersionId ?? "游戏目录";
+            FolderSelect.Items.Add(new ComboBoxItem { Content = $"{label} · {dir}", ToolTip = dir });
+        }
+        FolderSelect.SelectedIndex = 0;
+        _suppressFilter = false;
+    }
+
+    // ================= 列表行 =================
+
+    /// <summary>当前页切片（PageSize=40，:22）→ 逐项生成行。</summary>
+    void RebuildRows()
+    {
+        RecordingList.Children.Clear();
+        _rowItems.Clear();
+        foreach (var e in _view.Skip((_page - 1) * PageSize).Take(PageSize))
+        {
+            var (row, check) = BuildRow(e);
+            RecordingList.Children.Add(row);
+            _rowItems.Add((row, check, e));
+        }
+    }
+
+    /// <summary>按 XAML 占位行的结构建一行：checkbox / .recording-info（名称+元信息+目录）/ 定位文件按钮。</summary>
+    (Border Row, CheckBox Check) BuildRow(MediaEntry e)
+    {
+        var check = new CheckBox
+        {
+            Style = (Style)FindResource("Check"),
+            VerticalAlignment = VerticalAlignment.Center,
+            ToolTip = $"选择 {e.Name}",
+        };
+        check.Checked += Row_Check_Changed;
+        check.Unchecked += Row_Check_Changed;
+
+        var name = new TextBlock { Style = (Style)FindResource("RecName"), Text = e.Name, ToolTip = e.Name };
+        var meta = new TextBlock
+        {
+            Style = (Style)FindResource("RecMeta"),
+            Margin = new Thickness(0, 6, 0, 0),
+            // 元信息口径照 :79：格式 · 来源 · 大小 · 修改时间（时长/版本是占位段，真实数据里没有）
+            Text = $"{e.Kind} · {e.Source} · {RecordingsService.FormatSize(e.Size)} · {e.Modified:yyyy/M/d HH:mm:ss}",
+        };
+        var path = new TextBlock
+        {
+            Style = (Style)FindResource("RecPath"),
+            Margin = new Thickness(0, 6, 0, 0),
+            Text = e.Directory,
+            ToolTip = e.FullPath,
+        };
+        var info = new StackPanel
+        {
+            Margin = new Thickness(16, 0, 16, 0),
+            Cursor = Cursors.SizeAll, // :91 draggable → WPF 无 grab 光标，取 SizeAll（与占位一致）
+            ToolTip = "按住拖出录像文件（拖放需 recordings:drag，:36 未接入）",
+        };
+        info.Children.Add(name);
+        info.Children.Add(meta);
+        info.Children.Add(path);
+
+        var reveal = new Button
+        {
+            Style = (Style)FindResource("RecRowBtn"),
+            Content = "定位文件",
+            ToolTip = "在资源管理器中定位该录像文件",
+            Tag = e,
+        };
+        reveal.Click += Reveal_Click;
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(info, 1);
+        Grid.SetColumn(reveal, 2);
+        grid.Children.Add(check);
+        grid.Children.Add(info);
+        grid.Children.Add(reveal);
+
+        return (new Border { Style = (Style)FindResource("RecRow"), Tag = $"{e.Kind}|{e.Source}", Child = grid }, check);
+    }
+
+    // ================= 筛选 / 选择 =================
+
     /// <summary>
     /// 筛选四件事全在原版 :21 的 filtered 里：文件夹前缀、格式、位置、关键词（名称 + 来源 + 目录拼串后不区分大小写包含）。
-    /// 顺手把 :last-child 的无边框（:91）现算在「最后一条可见行」上而不是写死在第四行，
-    /// 否则筛掉第 4 行后，剩下的末行会带着不该有的下边线。
+    /// 行只渲染当前页，:last-child 的无边框（:91）落在最后一条渲染行上。
     /// </summary>
     void ApplyFilter()
     {
@@ -62,48 +250,40 @@ public partial class RecordingsPage : UserControl
         string kind = Item(KindSelect);
         string source = Item(SourceSelect);
         string folder = Item(FolderSelect);
-        // folderOptions 的 label 是「name · path」（:16），真正拿来筛的是 path 段
         int split = folder.LastIndexOf(" · ", StringComparison.Ordinal);
         string prefix = split < 0 ? string.Empty : folder[(split + 3)..];
 
-        int visible = 0;
-        int lastIndex = -1;
-        for (int i = 0; i < _rows.Length; i++)
-        {
-            string[] meta = (_rows[i].Tag as string ?? string.Empty).Split('|');
-            string hay = $"{_names[i].Text} {meta[1]} {_paths[i].Text}";
-            bool ok = (kind.Length == 0 || kind == "全部格式" || meta[0] == kind)
-                      && (source.Length == 0 || source == "全部位置" || meta[1] == source)
-                      && (prefix.Length == 0 || _paths[i].Text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                      && (q.Length == 0 || hay.Contains(q, StringComparison.OrdinalIgnoreCase));
+        _view = _all.Where(en =>
+            (kind.Length == 0 || kind == "全部格式" || en.Kind == kind)
+            && (source.Length == 0 || source == "全部位置" || en.Source == source)
+            && (prefix.Length == 0 || en.Directory.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            && (q.Length == 0 || $"{en.Name} {en.Source} {en.Directory}".Contains(q, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
 
-            _rows[i].Visibility = ok ? Visibility.Visible : Visibility.Collapsed;
-            if (ok) { lastIndex = i; visible++; }
-            // 改筛选就清空勾选 — :26 watch([query, kind, source, folderFilter])
-            else if (_checks[i].IsChecked == true) _checks[i].IsChecked = false;
-        }
+        int pages = PagesOf(_view.Count);
+        if (_page > pages) _page = pages;
+        RebuildRows();
 
-        for (int i = 0; i < _rows.Length; i++)
-            _rows[i].BorderThickness = i == lastIndex ? new Thickness(0) : new Thickness(0, 0, 0, 1);
+        for (int i = 0; i < _rowItems.Count; i++) // :last-child 无边框由最后一条渲染行承担
+            _rowItems[i].Row.BorderThickness = i == _rowItems.Count - 1 ? new Thickness(0, 0, 0, 0) : new Thickness(0, 0, 0, 1);
 
-        bool hasRows = visible > 0;
+        bool hasRows = _rowItems.Count > 0;
+        bool hasData = _all.Count > 0;
         RecordingList.Visibility = hasRows ? Visibility.Visible : Visibility.Collapsed;
         ControlsRow.Visibility = hasRows ? Visibility.Visible : Visibility.Collapsed; // v-if filtered.length — :68
-        EmptyBlock.Visibility = hasRows ? Visibility.Collapsed : Visibility.Visible;   // v-else-if !rows.length && !error — :75
+        ErrorCard.Visibility = _loadError is not null ? Visibility.Visible : Visibility.Collapsed; // v-if error — :66
+        EmptyBlock.Visibility = !hasRows && _loadError is null ? Visibility.Visible : Visibility.Collapsed; // :75
 
-        // :75 的两条文案按 data.entries.length（总量）二选一；静态数据下总量是 4，所以只走「没有匹配」那条，
-        // 另一条作为「目录真的为空」的结构占位留着（等录像功能接入）
-        bool noData = _rows.Length == 0;
-        EmptyTextNoMatch.Visibility = noData ? Visibility.Collapsed : Visibility.Visible;
-        EmptyTextNoData.Visibility = noData ? Visibility.Visible : Visibility.Collapsed;
-        ClearFilterBtn.Visibility = noData ? Visibility.Collapsed : Visibility.Visible;
+        // :75 的两条文案按 data.entries.length（总量）二选一
+        EmptyTextNoMatch.Visibility = hasData ? Visibility.Visible : Visibility.Collapsed;
+        EmptyTextNoData.Visibility = hasData ? Visibility.Collapsed : Visibility.Visible;
+        ClearFilterBtn.Visibility = hasData ? Visibility.Visible : Visibility.Collapsed;
 
-        SelectAllBtn.Content = $"全选筛选结果（{visible}）";                             // :69 的 filtered.length
-        int pages = Math.Max(1, (int)Math.Ceiling(visible / (double)PageSize));         // :22
-        PageText.Text = $"1 / {pages} · {visible} 个录像";                              // :83
+        SelectAllBtn.Content = $"全选筛选结果（{_view.Count}）"; // :69 的 filtered.length
+        PageText.Text = $"{_page} / {pages} · {_view.Count} 个录像"; // :83
         PaginationRow.Visibility = pages > 1 ? Visibility.Visible : Visibility.Collapsed;
-        PrevPageBtn.IsEnabled = false;    // :83 的 :disabled="page &lt;= 1"（每页 40，本轮没有第二页可去）
-        NextPageBtn.IsEnabled = pages > 1; // :83 的 :disabled="page &gt;= pages"
+        PrevPageBtn.IsEnabled = _page > 1 && !_loading;   // :83 的 :disabled="page &lt;= 1"
+        NextPageBtn.IsEnabled = _page < pages && !_loading; // :83 的 :disabled="page &gt;= pages"
     }
 
     /// <summary>
@@ -114,18 +294,16 @@ public partial class RecordingsPage : UserControl
     {
         if (!_ready) return;
 
-        int n = 0;
-        foreach (CheckBox c in _checks)
-            if (c.IsChecked == true) n++;
-
+        int n = _rowItems.Count(r => r.Check.IsChecked == true);
         SelectedCount.Text = $"已选 {n} 项";
         OperationRow.Visibility = n > 0 ? Visibility.Visible : Visibility.Collapsed;
         ClearSelectionBtn.Visibility = n > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    /// <summary>筛选控件的统一出口：SelectionChanged 与 TextChanged 都是 RoutedEventArgs 子类，共用一个处理器签名。</summary>
+    /// <summary>筛选控件的统一出口（SelectionChanged 与 TextChanged 共用）；下拉重建期间不触发。</summary>
     void Filter_Changed(object sender, RoutedEventArgs e)
     {
+        if (_suppressFilter) return;
         ApplyFilter();
         UpdateSelection(); // 筛选一变 selected 归零 — :26
     }
@@ -139,36 +317,25 @@ public partial class RecordingsPage : UserControl
 
     void Row_Check_Changed(object sender, RoutedEventArgs e) => UpdateSelection();
 
-    /// <summary>
-    /// 「选择当前页」的整页反选 — :39 selectPage：当前页 ids 全选中就整页取消，否则并集。
-    /// 每页 40 条（:22），所以「当前页」就是本页全部可见行。
-    /// </summary>
+    /// <summary>「选择当前页」的整页反选 — :39 selectPage：当前页全部选中就整页取消，否则并集。</summary>
     void SelectPage_Click(object sender, RoutedEventArgs e)
     {
-        bool allOn = true;
-        foreach (Border row in _rows)
-            if (row.Visibility == Visibility.Visible && _checks[Array.IndexOf(_rows, row)].IsChecked != true) allOn = false;
-
-        foreach (Border row in _rows)
-        {
-            if (row.Visibility != Visibility.Visible) continue;
-            _checks[Array.IndexOf(_rows, row)].IsChecked = !allOn;
-        }
+        bool allOn = _rowItems.All(r => r.Check.IsChecked == true);
+        foreach (var r in _rowItems) r.Check.IsChecked = !allOn;
         UpdateSelection();
     }
 
-    /// <summary>「全选筛选结果」是无条件全选可见行 — :69 的 selected = filtered.map(e =&gt; e.id)。</summary>
+    /// <summary>「全选筛选结果」全选可见行（行只渲染当前页，故为当前页全集）— :69 的 selected = filtered.map(e =&gt; e.id)。</summary>
     void SelectAll_Click(object sender, RoutedEventArgs e)
     {
-        foreach (Border row in _rows)
-            if (row.Visibility == Visibility.Visible) _checks[Array.IndexOf(_rows, row)].IsChecked = true;
+        foreach (var r in _rowItems) r.Check.IsChecked = true;
         UpdateSelection();
     }
 
     /// <summary>清空选择 — :69 的 selected = []。</summary>
     void ClearSelection_Click(object sender, RoutedEventArgs e)
     {
-        foreach (CheckBox c in _checks) c.IsChecked = false;
+        foreach (var r in _rowItems) r.Check.IsChecked = false;
         UpdateSelection();
     }
 
@@ -190,11 +357,7 @@ public partial class RecordingsPage : UserControl
         CopyToInstanceBtn.IsEnabled = TargetSelect.SelectedIndex > 0;
     }
 
-    /// <summary>
-    /// details 的开合：原版三处 summary 都是原生 details（使用说明 :58、部分目录未读取 :67、上次操作结果 :85），
-    /// WPF 没有对应控件，所以做成 RecSummary 按钮 + Tag 指正文块名字，只切 Visibility。
-    /// 原生 marker 的 90° 旋转属动效，本轮不做（契约 §6.8），模板里已留 Tag="SummaryChevron" 的独立元素待接。
-    /// </summary>
+    /// <summary>details 的开合（使用说明 :58、部分目录未读取 :67、上次操作结果 :85 的 WPF 等价）。</summary>
     void Disclosure_Toggle_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button b) return;
@@ -202,21 +365,146 @@ public partial class RecordingsPage : UserControl
         body.Visibility = body.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    /// <summary>
-    /// 刷新：原版调 recordings:list（:27），按钮 :disabled="busy || loading" 且文案随 loading 变「读取中…」（:57），
-    /// 列表还带 inert（:76），全局 [inert] 规则给到 opacity .65（ui-system.css:43）。
-    /// 本轮没有 IPC 可调，就把这套视觉态演 1.2 秒后自行还原；错误卡（:66）的「重试」共用这条路径。
-    /// </summary>
+    // ================= 操作 =================
+
+    /// <summary>recordings:open（:40）：定位单行文件（explorer /select）。</summary>
+    void Reveal_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: MediaEntry entry }) RecordingsService.Reveal(entry.FullPath);
+    }
+
+    /// <summary>「打开收藏文件夹」= recordings:open 无参分支（:40）：explorer 打开集中收藏。</summary>
+    void OpenDir(string dir)
+    {
+        try
+        {
+            Directory.CreateDirectory(dir);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", dir)
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex) { MessageBox.Show($"打开文件夹失败（{ex.Message}）", "录像", MessageBoxButton.OK, MessageBoxImage.Warning); }
+    }
+
+    /// <summary>recordings:import（:46）：OpenFileDialog 选 .mcpr / Flashback .zip，复制进集中收藏。</summary>
+    void Import_Click(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        var dlg = new OpenFileDialog
+        {
+            Title = "导入录像",
+            Multiselect = true,
+            Filter = "ReplayMod 录像|*.mcpr|Flashback 录像|*.zip|全部文件|*.*",
+        };
+        if (dlg.ShowDialog() != true) return;
+        _ = ImportAsync(dlg.FileNames);
+    }
+
+    async Task ImportAsync(string[] files)
+    {
+        _loading = true;
+        int gen = ++_generation;
+        SetBusy(true);
+        var results = new List<(string Name, bool Ok, string Detail)>();
+        try
+        {
+            MediaScanResult res = await Task.Run(() =>
+            {
+                foreach (var f in files)
+                {
+                    string dest = _service.Import(f, out var err);
+                    results.Add(dest.Length > 0
+                        ? (Path.GetFileName(f), true, dest)
+                        : (Path.GetFileName(f), false, err ?? "导入失败"));
+                }
+                return _service.Scan();
+            });
+            if (gen != _generation) return;
+            _loadError = null;
+            _all = res.Entries;
+            _warnings = res.Warnings;
+            _page = 1;
+            UpdateHeaderCount();
+            UpdateWarnings();
+            PopulateFolderSelect();
+            ApplyFilter();
+            UpdateSelection();
+            ShowResults(results);
+        }
+        finally
+        {
+            if (gen == _generation)
+            {
+                _loading = false;
+                SetBusy(false);
+            }
+        }
+    }
+
+    /// <summary>上次操作结果（:85）：「name：已完成 → path」，失败行套 .failed 的 danger 色。</summary>
+    void ShowResults(List<(string Name, bool Ok, string Detail)> results)
+    {
+        ResultsBody.Children.Clear();
+        for (int i = 0; i < results.Count; i++)
+        {
+            var (name, ok, detail) = results[i];
+            var line = new TextBlock { FontSize = 14, TextWrapping = TextWrapping.Wrap, Margin = i == 0 ? new Thickness(0, 0, 0, 0) : new Thickness(0, 4, 0, 0) };
+            if (ok)
+            {
+                line.Inlines.Add(new Run($"{name}：已完成"));
+                line.Inlines.Add(new Run($" → {detail}") { FontSize = 12 });
+                line.SetResourceReference(TextBlock.ForegroundProperty, "Fg2");
+            }
+            else
+            {
+                line.Text = $"{name}：{detail}";
+                line.SetResourceReference(TextBlock.ForegroundProperty, "Danger");
+            }
+            ResultsBody.Children.Add(line);
+        }
+        ResultsBlock.Visibility = results.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>「移入回收站」按钮在 XAML 里没挂事件（原版等确认弹窗），代码里找到它接上。</summary>
+    void HookTrashButton()
+    {
+        foreach (var child in OperationRow.Children)
+            if (child is Button b && b.Content as string == "移入回收站")
+            {
+                b.Click += Trash_Click;
+                break;
+            }
+    }
+
+    /// <summary>recordings:operate trash（:70/:86）：确认后把勾选行逐个移入系统回收站，再重扫。</summary>
+    void Trash_Click(object sender, RoutedEventArgs e)
+    {
+        var picked = _rowItems.Where(r => r.Check.IsChecked == true).Select(r => r.Entry).ToList();
+        if (picked.Count == 0) return;
+        if (MessageBox.Show($"确定把选中的 {picked.Count} 个录像移入回收站？", "移入回收站",
+                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+
+        var errors = new List<string>();
+        foreach (var en in picked)
+        {
+            try
+            {
+                if (File.Exists(en.FullPath)) RecordingsService.Recycle(en.FullPath);
+            }
+            catch (Exception ex) { errors.Add($"{en.Name}：{ex.Message}"); }
+        }
+        if (errors.Count > 0)
+            MessageBox.Show(string.Join("\n", errors), "部分录像删除失败", MessageBoxButton.OK, MessageBoxImage.Warning);
+        _ = ReloadAsync();
+    }
+
+    /// <summary>刷新（:27 recordings:list / :66 的重试共用）：真实重扫，「读取中」态由 _loading 驱动。</summary>
     void Refresh_Click(object sender, RoutedEventArgs e)
     {
-        if (_busyTimer is null)
-        {
-            _busyTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
-            _busyTimer.Tick += (_, _) => { _busyTimer!.Stop(); SetBusy(false); };
-        }
-        SetBusy(true);
-        _busyTimer.Stop();
-        _busyTimer.Start();
+        if (_loading) return;
+        _loadError = null;
+        _ = ReloadAsync();
     }
 
     /// <summary>读取中 / 空闲两套视觉态：按钮文案与禁用、status-strip（:73）、列表 inert（:76 + ui-system.css:43）。</summary>
@@ -225,9 +513,25 @@ public partial class RecordingsPage : UserControl
         BtnRefresh.Content = busy ? "读取中…" : "↻ 刷新"; // :57
         BtnRefresh.IsEnabled = !busy;                     // :57 的 :disabled="busy || loading"
         BtnImport.IsEnabled = !busy;                      // :57 的 :disabled="busy"
+        BtnOpenLibrary.IsEnabled = !busy;
         ErrorCard.IsEnabled = !busy;                      // :66 重试的 :disabled
         StatusStrip.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
-        RecordingList.Opacity = busy ? 0.65 : 1;
-        foreach (CheckBox c in _checks) c.IsEnabled = !busy; // :78 的 :disabled="busy"
+        RecordingList.Opacity = busy ? 0.65 : 1;          // 全局 [inert] 的 opacity .65
+        PrevPageBtn.IsEnabled = _page > 1 && !busy;
+        NextPageBtn.IsEnabled = _page < PagesOf(_view.Count) && !busy;
+        foreach (var r in _rowItems) r.Check.IsEnabled = !busy; // :78 的 :disabled="busy"
+    }
+
+    // ---------------- 树遍历（页头计数 Run 定位用） ----------------
+
+    static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        int n = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < n; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T hit) yield return hit;
+            foreach (var sub in Descendants<T>(child)) yield return sub;
+        }
     }
 }

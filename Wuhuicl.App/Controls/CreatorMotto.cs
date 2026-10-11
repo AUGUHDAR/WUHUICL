@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Automation;
@@ -45,6 +45,9 @@ public sealed class CreatorMotto : Border
         public SolidColorBrush Brush = new();
         public bool Accent;
         public Point Center;
+        /// <summary>上次下发的目标位，用来跳过「已在零位且目标仍为零」的字，
+        /// 避免每帧对全部 18 字 × 3 属性重建动画对象（掉帧根源）。</summary>
+        public double Tx, Ty, Tr;
     }
 
     readonly List<Glyph> _glyphs = new();
@@ -88,6 +91,9 @@ public sealed class CreatorMotto : Border
             tg.Children.Add(g.Spin);
             g.Tb.RenderTransformOrigin = new Point(.5, .5);
             g.Tb.RenderTransform = tg;
+            // 位移/旋转只发生在 RenderTransform：位图缓存让合成线程直接搬已光栅化的字，
+            // UI 线程每帧只剩属性写入（掉帧主诉的另一半）
+            g.Tb.CacheMode = new BitmapCache(1);
             row.Children.Add(g.Tb);
             _glyphs.Add(g);
         }
@@ -185,7 +191,9 @@ public sealed class CreatorMotto : Border
         }));
     }
 
-    /// <summary>:30-37 力场：沿"远离指针"方向推开 force 像素，x 分量兼作倾角。</summary>
+    /// <summary>:30-37 力场：沿"远离指针"方向推开 force 像素，x 分量兼作倾角。
+    /// 只对「目标有变化」的字下发补间：半径外的字若已在零位就直接跳过，
+    /// 否则指针每滑一帧都要对 18 字 × 3 属性重建动画对象，补间时钟反复重建会掉帧。</summary>
     void Push(Point pointer)
     {
         foreach (var g in _glyphs)
@@ -195,15 +203,21 @@ public sealed class CreatorMotto : Border
             var distance = Math.Sqrt(dx * dx + dy * dy);
             var k = Math.Max(0, 1 - distance / Radius);
             var force = k * k * Strength;
-            double x = 0, y = 0;
-            if (distance > .1)
+            double x = 0, y = 0, rot = 0;
+            if (force > 0)
             {
-                x = dx / distance * force;
-                y = dy / distance * force;
+                if (distance > .1)
+                {
+                    x = dx / distance * force;
+                    y = dy / distance * force;
+                }
+                else y = -force;
+                rot = x / RotationDiv;
             }
-            else y = -force;
             // :36 force 为 0 时写回 transform:''，也就是一条回到零位的补间
-            Displace(g, force > 0 ? x : 0, force > 0 ? y : 0, force > 0 ? x / RotationDiv : 0);
+            if (Math.Abs(x - g.Tx) < .05 && Math.Abs(y - g.Ty) < .05 && Math.Abs(rot - g.Tr) < .05) continue;
+            g.Tx = x; g.Ty = y; g.Tr = rot;
+            Displace(g, x, y, rot);
         }
     }
 
@@ -216,11 +230,16 @@ public sealed class CreatorMotto : Border
             (RotateTransform.AngleProperty, Motion.ToCurrent(RotateTransform.AngleProperty, rot, Nudge, NudgeCurve, g.Spin.Angle)));
     }
 
-    /// <summary>:19-22 reset：清指针、位移回零。</summary>
+    /// <summary>:19-22 reset：清指针、位移回零。已在零位的字不发补间（与 Push 同一省帧逻辑）。</summary>
     void Reset()
     {
         _pointer = null;
-        foreach (var g in _glyphs) Displace(g, 0, 0, 0);
+        foreach (var g in _glyphs)
+        {
+            if (g.Tx == 0 && g.Ty == 0 && g.Tr == 0) continue;
+            g.Tx = g.Ty = g.Tr = 0;
+            Displace(g, 0, 0, 0);
+        }
     }
 
     /// <summary>:24 prefers-reduced-motion 下 transform:none !important，位移与补间都关掉。</summary>

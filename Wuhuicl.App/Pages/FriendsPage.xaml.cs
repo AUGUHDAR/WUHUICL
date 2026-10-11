@@ -1,5 +1,9 @@
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using Microsoft.Win32;
+using Wuhuicl.App.Services;
 
 namespace Wuhuicl.App.Pages;
 
@@ -47,6 +51,9 @@ public partial class FriendsPage : UserControl
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+
+        // FRP：frpc 客户端路径默认从 DataDir\frpc\ 自动找（用户也可「浏览…」手选）
+        TxtFrpcPath.Text = NatfrpService.FindFrpc() ?? "";
     }
 
     void OnLoaded(object sender, RoutedEventArgs e)
@@ -61,6 +68,7 @@ public partial class FriendsPage : UserControl
     {
         if (_host != null) _host.SizeChanged -= Host_SizeChanged;
         _host = null;
+        VoxOnUnload(); // 房间靠心跳保活，页面卸载后无法继续发心跳 → 主动退房让服务端回收
     }
 
     void Host_SizeChanged(object? sender, SizeChangedEventArgs e) => ApplyMetrics();
@@ -113,4 +121,445 @@ public partial class FriendsPage : UserControl
     // 契约 §6.8 本轮不做动画，两个模式容器都留了 x:Name（ChooseView / MethodView）当动画挂点；
     // 卡片 hover 的描边换色在 PickCard 模板里（x:Name=CardBorder），:149/:159 的 overshoot 缓动留在这里接。
     // MethodFrp / MethodVoxlink / MethodTerracotta 是三个面板的占位壳（// 占位：等联机功能接入）。
+
+    // ---------------- FRP（樱花穿透 natfrp.com）：token → 隧道列表 → 启停 frpc ----------------
+
+    /// <summary>最近一次读取的隧道列表。</summary>
+    List<NatfrpTunnel> _tunnels = new();
+
+    /// <summary>用户填写的访问密钥（启动 frpc 时要用，不落盘）。</summary>
+    string _frpToken = "";
+
+    /// <summary>正在运行的 frpc 进程，key = 隧道 ID（一个隧道同时只跑一个 frpc）。</summary>
+    readonly Dictionary<uint, Process> _frpcProcs = new();
+
+    async void FrpRefresh_Click(object sender, RoutedEventArgs e)
+    {
+        var token = FrpTokenBox.Password.Trim();
+        if (token.Length == 0)
+        {
+            SetFrpStatus("请先填写访问密钥（natfrp.com → 用户面板 → 访问密钥）。", true);
+            return;
+        }
+        _frpToken = token;
+        BtnFrpRefresh.IsEnabled = false;
+        SetFrpStatus("正在读取隧道列表…", false);
+        try
+        {
+            _tunnels = await NatfrpService.GetTunnels(token);
+            RenderTunnels();
+            SetFrpStatus(_tunnels.Count == 0
+                ? "账号下没有隧道，请先到 natfrp.com 创建。"
+                : $"已加载 {_tunnels.Count} 条隧道。", false);
+        }
+        catch (Exception ex)
+        {
+            _tunnels = new List<NatfrpTunnel>();
+            RenderTunnels();
+            SetFrpStatus("读取失败：" + ex.Message, true);
+        }
+        finally
+        {
+            BtnFrpRefresh.IsEnabled = true;
+        }
+    }
+
+    void FrpcBrowse_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Title = "选择 frpc 可执行文件",
+            Filter = "frpc 可执行文件|frpc*.exe|所有程序|*.exe|所有文件|*.*",
+        };
+        var dir = NatfrpService.FrpcDir;
+        if (Directory.Exists(dir)) dlg.InitialDirectory = dir;
+        if (dlg.ShowDialog() == true)
+        {
+            TxtFrpcPath.Text = dlg.FileName;
+            SetFrpStatus("已选择 frpc 客户端。", false);
+        }
+    }
+
+    void RenderTunnels()
+    {
+        TunnelList.Children.Clear();
+        TunnelEmpty.Visibility = _tunnels.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var t in _tunnels)
+            TunnelList.Children.Add(MakeTunnelRow(t));
+    }
+
+    Border MakeTunnelRow(NatfrpTunnel t)
+    {
+        var row = new Border
+        {
+            BorderBrush = (System.Windows.Media.Brush)FindResource("Line"),
+            BorderThickness = new Thickness(0, 0, 0, 1),
+            Padding = new Thickness(0, 10, 0, 10),
+        };
+        var g = new Grid();
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        // 左侧：名称 + 节点 / 协议与本地→公网地址
+        var info = new StackPanel { MinWidth = 0 };
+        Grid.SetColumn(info, 0);
+        g.Children.Add(info);
+
+        var head = new StackPanel { Orientation = Orientation.Horizontal };
+        var name = new TextBlock { Text = t.Name, FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center };
+        name.SetResourceReference(TextBlock.ForegroundProperty, "Fg");
+        head.Children.Add(name);
+        if (!string.IsNullOrEmpty(t.Node))
+        {
+            var nodeTag = new Border
+            {
+                Style = (Style)FindResource("Tag"),
+                Background = (System.Windows.Media.Brush)FindResource("CardSoft"),
+                BorderThickness = new Thickness(0),
+                Margin = new Thickness(8, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            nodeTag.Child = new TextBlock
+            {
+                Text = "节点 " + t.Node,
+                Style = (Style)FindResource("TagTextSm"),
+                Foreground = (System.Windows.Media.Brush)FindResource("Fg2"),
+            };
+            head.Children.Add(nodeTag);
+        }
+        info.Children.Add(head);
+
+        var addr = new TextBlock
+        {
+            Style = (Style)FindResource("Micro"),
+            LineHeight = 19,
+            Margin = new Thickness(0, 4, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            Text = $"{t.Protocol.ToUpperInvariant()} · 本地 {t.LocalAddr}:{t.LocalPort} → 公网 {t.RemoteAddr}:{t.RemotePort}"
+                   + (t.Enabled ? "" : "（已停用）"),
+        };
+        addr.SetResourceReference(TextBlock.ForegroundProperty, "Fg2");
+        info.Children.Add(addr);
+
+        // 右侧：启动 / 停止
+        var btn = new Button
+        {
+            Style = (Style)FindResource("BtnGhost"),
+            MinWidth = 64,
+            VerticalAlignment = VerticalAlignment.Center,
+            Content = _frpcProcs.ContainsKey(t.Id) ? "停止" : "启动",
+        };
+        btn.Click += async (_, _) => await ToggleTunnelAsync(t, btn);
+        Grid.SetColumn(btn, 2);
+        g.Children.Add(btn);
+
+        row.Child = g;
+        return row;
+    }
+
+    async Task ToggleTunnelAsync(NatfrpTunnel t, Button btn)
+    {
+        // 运行中 → 停止
+        if (_frpcProcs.TryGetValue(t.Id, out var running))
+        {
+            NatfrpService.StopFrpc(running);
+            _frpcProcs.Remove(t.Id);
+            btn.Content = "启动";
+            SetFrpStatus($"隧道 {t.Name} 已停止。", false);
+            return;
+        }
+
+        btn.IsEnabled = false;
+        try
+        {
+            var proc = await NatfrpService.StartFrpc(TxtFrpcPath.Text, _frpToken, t);
+            if (proc.HasExited)
+                throw new InvalidOperationException("frpc 启动后立即退出，请检查访问密钥是否正确、frpc 是否为樱花穿透定制版");
+            proc.EnableRaisingEvents = true;
+            proc.Exited += (_, _) => Dispatcher.Invoke(() =>
+            {
+                if (_frpcProcs.TryGetValue(t.Id, out var p) && ReferenceEquals(p, proc))
+                {
+                    _frpcProcs.Remove(t.Id);
+                    btn.Content = "启动";
+                }
+            });
+            _frpcProcs[t.Id] = proc;
+            btn.Content = "停止";
+            SetFrpStatus($"隧道 {t.Name} 已启动：游戏内直接连接 {t.RemoteAddr}:{t.RemotePort}", false);
+        }
+        catch (Exception ex)
+        {
+            SetFrpStatus("启动失败：" + ex.Message, true);
+        }
+        finally
+        {
+            btn.IsEnabled = true;
+        }
+    }
+
+    void SetFrpStatus(string msg, bool warn)
+    {
+        FrpStatus.Text = msg;
+        FrpStatus.SetResourceReference(TextBlock.ForegroundProperty, warn ? "Danger" : "Fg2");
+    }
+
+    // ---------------- VoxLink（自研房间服务，Services/VoxLinkService.cs）：建房间 / 加入 / 心跳保活 / 退出 ----------------
+
+    /// <summary>心跳定时器：房间创建/加入成功后启动，间隔取服务端返回的 heartbeatInterval。</summary>
+    System.Windows.Threading.DispatcherTimer? _voxTimer;
+
+    /// <summary>当前会话：创建/加入成功后填充（code + token 是 leave/heartbeat 的凭证）。</summary>
+    string _voxCode = "", _voxToken = "";
+
+    bool _voxIsHost;
+
+    /// <summary>心跳序号（服务端 body.seq，桌面端同样递增，session.go heartbeatLoop :156）。</summary>
+    long _voxSeq;
+
+    /// <summary>连续心跳失败计数（服务端抖动容忍，连续多次才判失效）。</summary>
+    int _voxFails;
+
+    /// <summary>致命错误码：收到即结束会话（对应桌面端 410/ fatal 判定，session.go :171-176）。</summary>
+    static readonly HashSet<string> VoxFatalCodes = new()
+    {
+        "ROOM_EXPIRED", "ROOM_CLOSED", "ROOM_EVICTED", "ROOM_NOT_FOUND",
+        "ROOM_NOT_FOUND_OR_WRONG_PASSWORD", "INVALID_TOKEN", "SESSION_ACTIVE_FATAL",
+    };
+
+    /// <summary>会话是否存活（心跳回调与页面卸载竞态的护栏）。</summary>
+    bool VoxActive => _voxCode.Length > 0 && _voxToken.Length > 0;
+
+    void VoxSetBusy(bool creating, bool joining, bool leaving)
+    {
+        BtnVoxCreate.IsEnabled = !creating && !leaving && !VoxActive;
+        BtnVoxJoin.IsEnabled = !joining && !leaving && !VoxActive;
+        BtnVoxLeave.IsEnabled = !creating && !joining;
+    }
+
+    void SetVoxStatus(string msg, bool warn)
+    {
+        VoxStatus.Text = msg;
+        VoxStatus.SetResourceReference(TextBlock.ForegroundProperty, warn ? "Danger" : "Fg2");
+    }
+
+    async void VoxCreate_Click(object sender, RoutedEventArgs e)
+    {
+        if (VoxActive)
+        {
+            SetVoxStatus("已有进行中的房间，请先退出再操作。", true);
+            return;
+        }
+
+        string baseUrl, name, password;
+        int port;
+        try
+        {
+            baseUrl = VoxLinkService.NormalizeBaseUrl(TxtVoxServer.Text);
+            name = TxtVoxName.Text.Trim();
+            password = VoxCreatePwdBox.Password;
+            port = int.TryParse(TxtVoxPort.Text.Trim(), out var p) ? p : 25565;
+            if (port < 1 || port > 65535)
+                throw new InvalidOperationException("端口必须是 1-65535 的数字");
+        }
+        catch (Exception ex)
+        {
+            SetVoxStatus(ex.Message, true);
+            return;
+        }
+
+        // 与桌面端一致：本地端口没人在听就不建房（app-desktop/app.go PORT_NOT_LISTENING :466-469）
+        VoxSetBusy(creating: true, joining: false, leaving: false);
+        SetVoxStatus($"正在检查端口 {port} 是否有服务在监听…", false);
+        if (!await VoxLinkService.TestTcpAsync("127.0.0.1", port))
+        {
+            VoxSetBusy(creating: false, joining: false, leaving: false);
+            SetVoxStatus($"端口 {port} 没有服务在监听：请先在游戏里对局域网开放世界（开放后聊天栏会显示真实端口），或启动服务端后再试。", true);
+            return;
+        }
+
+        SetVoxStatus("正在创建房间…", false);
+        try
+        {
+            var room = await VoxLinkService.CreateRoomAsync(baseUrl, name, port, password);
+            VoxStartSession(room.Code, room.HostToken, isHost: true);
+            VoxShowRoom(room.Code,
+                $"房主视图 · 本机地址 127.0.0.1:{room.HostPort}（在游戏内对局域网开放的就是它）· 有效期约 {room.ExpiresIn} 秒（自动续期）");
+            SetVoxStatus($"房间已创建，把房间码 {room.Code} 发给好友即可。", false);
+        }
+        catch (VoxLinkException vex)
+        {
+            SetVoxStatus("创建失败：" + vex.Message, true);
+        }
+        catch (Exception ex)
+        {
+            SetVoxStatus("创建失败：" + ex.Message, true);
+        }
+        finally
+        {
+            VoxSetBusy(creating: false, joining: false, leaving: false);
+        }
+    }
+
+    async void VoxJoin_Click(object sender, RoutedEventArgs e)
+    {
+        if (VoxActive)
+        {
+            SetVoxStatus("已在房间中，请先退出再操作。", true);
+            return;
+        }
+
+        string baseUrl, code, password;
+        try
+        {
+            baseUrl = VoxLinkService.NormalizeBaseUrl(TxtVoxServer.Text);
+            code = TxtVoxCode.Text.Trim().ToUpperInvariant();
+            password = TxtVoxJoinPwd.Password;
+            if (!VoxLinkService.ValidateRoomCode(code))
+                throw new InvalidOperationException("房间码必须为 6 位（A-Z 去掉 I/O、2-9 去掉 0/1）");
+        }
+        catch (Exception ex)
+        {
+            SetVoxStatus(ex.Message, true);
+            return;
+        }
+
+        VoxSetBusy(joining: true, creating: false, leaving: false);
+        SetVoxStatus($"正在加入房间 {code}…", false);
+        try
+        {
+            var result = await VoxLinkService.JoinRoomAsync(baseUrl, code, password);
+            VoxStartSession(code, result.ClientToken, isHost: false);
+            var room = result.Room;
+            string info = room == null
+                ? "已加入房间"
+                : $"房间「{room.Name}」· {room.CurrentPlayers}/{room.MaxPlayers} 人"
+                  + (room.HasPassword ? " · 有密码" : "")
+                  + (room.HostPort > 0 ? $" · 主机端口 {room.HostPort}" : "");
+            VoxShowRoom(code, info + " · 请向房主索取游戏内直连地址（房主面板显示 127.0.0.1:端口）。");
+            SetVoxStatus($"已加入房间 {code}。", false);
+        }
+        catch (VoxLinkException vex)
+        {
+            SetVoxStatus("加入失败：" + vex.Message, true);
+        }
+        catch (Exception ex)
+        {
+            SetVoxStatus("加入失败：" + ex.Message, true);
+        }
+        finally
+        {
+            VoxSetBusy(joining: false, creating: false, leaving: false);
+        }
+    }
+
+    async void VoxLeave_Click(object sender, RoutedEventArgs e)
+    {
+        if (!VoxActive) return;
+        VoxSetBusy(leaving: true, creating: false, joining: false);
+        var (code, token, isHost) = (_voxCode, _voxToken, _voxIsHost);
+        VoxStopHeartbeat();
+        _voxCode = _voxToken = "";
+        VoxHideRoom();
+        await VoxLinkService.LeaveAsync(TxtVoxServer.Text, code, token, isHost);
+        SetVoxStatus($"已退出房间 {code}。", false);
+        VoxSetBusy(leaving: false, creating: false, joining: false);
+    }
+
+    /// <summary>会话建立：填状态 + 启动心跳（房间不心跳会被服务端按超时回收）。</summary>
+    void VoxStartSession(string code, string token, bool isHost)
+    {
+        _voxCode = code;
+        _voxToken = token;
+        _voxIsHost = isHost;
+
+        _voxSeq = 0;
+        _voxFails = 0;
+
+        _voxTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        _voxTimer.Tick += async (_, _) => await VoxHeartbeatTickAsync();
+        _voxTimer.Start();
+    }
+
+    void VoxStopHeartbeat()
+    {
+        _voxTimer?.Stop();
+        _voxTimer = null;
+    }
+
+    void VoxShowRoom(string code, string info)
+    {
+        VoxRoomCode.Text = code;
+        VoxRoomInfo.Text = info;
+        VoxRoomCard.Visibility = Visibility.Visible;
+        BtnVoxLeave.Visibility = Visibility.Visible;
+    }
+
+    void VoxHideRoom()
+    {
+        VoxRoomCard.Visibility = Visibility.Collapsed;
+        BtnVoxLeave.Visibility = Visibility.Collapsed;
+        VoxRoomCode.Text = "——";
+        VoxRoomInfo.Text = "";
+    }
+
+    async Task VoxHeartbeatTickAsync()
+    {
+        if (!VoxActive || _voxTimer == null) return;
+        _voxSeq++;
+        try
+        {
+            var hb = await VoxLinkService.HeartbeatAsync(TxtVoxServer.Text, _voxCode, _voxToken, _voxIsHost, _voxSeq);
+            _voxFails = 0;
+            if (hb.CurrentPlayers > 0 && VoxRoomInfo.Text.Length > 0)
+            {
+                // 把房间信息行里的人数刷成服务端口径（简单起见整行重建仅当有变化的关键字）
+                var text = VoxRoomInfo.Text;
+                var updated = System.Text.RegularExpressions.Regex.Replace(
+                    text, @"\d+/\d+ 人", $"{hb.CurrentPlayers}/{(ParseMax(text))} 人");
+                if (updated != text) VoxRoomInfo.Text = updated;
+            }
+            if (hb.HeartbeatInterval > 0 && _voxTimer != null)
+                _voxTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(hb.HeartbeatInterval, 3, 60));
+        }
+        catch (VoxLinkException vex) when (VoxFatalCodes.Contains(vex.Code))
+        {
+            VoxEndSession("房间已失效：" + vex.Message, warn: true);
+        }
+        catch (Exception)
+        {
+            // 网络抖动容忍（桌面端同款退避重试，session.go heartbeatBackoff），连续多次才放弃
+            if (++_voxFails >= 5)
+                VoxEndSession("与服务器失联（连续多次心跳失败），房间可能已被回收。", warn: true);
+        }
+    }
+
+    /// <summary>从信息行里抠回 maxPlayers（房间信息行格式「x/y 人」由 join 响应写入）。</summary>
+    static int ParseMax(string info)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(info, @"\d+/(\d+) 人");
+        return m.Success && int.TryParse(m.Groups[1].Value, out var v) ? v : 20;
+    }
+
+    /// <summary>会话终止（房间失效/失联）：停心跳、清状态、收起房间卡。</summary>
+    void VoxEndSession(string message, bool warn)
+    {
+        VoxStopHeartbeat();
+        _voxCode = _voxToken = "";
+        VoxHideRoom();
+        SetVoxStatus(message, warn);
+        VoxSetBusy(creating: false, joining: false, leaving: false);
+    }
+
+    /// <summary>页面卸载：停心跳并尽力退房（无心跳的房间服务端也会按超时回收，leave 只是加速）。</summary>
+    async void VoxOnUnload()
+    {
+        if (!VoxActive) return;
+        var (code, token, isHost) = (_voxCode, _voxToken, _voxIsHost);
+        VoxStopHeartbeat();
+        _voxCode = _voxToken = "";
+        VoxHideRoom();
+        await VoxLinkService.LeaveAsync(TxtVoxServer.Text, code, token, isHost);
+    }
 }

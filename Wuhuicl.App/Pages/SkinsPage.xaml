@@ -1,4 +1,4 @@
-<UserControl x:Class="Wuhuicl.App.Pages.SkinsPage"
+﻿<UserControl x:Class="Wuhuicl.App.Pages.SkinsPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ctl="clr-namespace:Wuhuicl.App.Controls">
@@ -282,10 +282,11 @@
                              HomePage 的 SkinDoll 走的同源路径（MainWindow.xaml.cs:45）。
                              契约 §5 的 LaunchSession 白名单里没有 SkinPreview 属性 → 这里不写 Binding（绑不存在的属性等于静默失效的假实现），
                              Source 由主控接线；NearestNeighbor 对应原版 image-rendering:pixelated（:937/:996）。 -->
-                        <!-- SkinViewer3D 的 WPF 等价（SkinDoll3D.cs）：拖拽 yaw/pitch、滚轮缩放、双击回正，
-                             行走/待机切 Walk；几何/相机/动画参数 1:1 抄 skinview3d v3.4.2 + SkinViewer3D.vue -->
+                        <!-- SkinViewer3D 的 WPF 等价（SkinDollHost = 快照 + 悬浮真 3D）：拖拽 yaw/pitch、
+                             滚轮缩放、双击回正，行走/待机切 Walk（previewAnim 默认 walk，SkinsView.vue:61）；
+                             几何/相机/动画参数 1:1 抄 skinview3d v3.4.2 + SkinViewer3D.vue -->
                         <Border CornerRadius="10" ClipToBounds="True" Margin="12">
-                            <ctl:SkinDoll3D x:Name="SkinDoll3D"/>
+                            <ctl:SkinDoll3D x:Name="SkinDoll" Walk="True"/>
                         </Border>
 
                         <!-- .skin-overlay 配方：absolute left 12 / right 12 / bottom 12，min-height 34，padding 7 10，radius 9，
@@ -402,15 +403,15 @@
                                             BorderBrush="{DynamicResource Line}" BorderThickness="1">
                                         <StackPanel Orientation="Horizontal">
                                             <Button x:Name="SegClassic" Style="{StaticResource SkinSegItemActive}"
-                                                    Content="经典 Classic"/>
+                                                    Content="经典 Classic" Click="SegVariant_Click"/>
                                             <Button x:Name="SegSlim" Style="{StaticResource SkinSegItem}"
-                                                    Content="纤细 Slim" Margin="2,0,0,0"/>
+                                                    Content="纤细 Slim" Margin="2,0,0,0" Click="SegVariant_Click"/>
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
                                 <!-- .icon-btn 32×32（此处不在 .pane-tools 内，走全局尺寸 — styles.css:266-301），svg 16×16 — :465-469 -->
                                 <Button x:Name="BtnClearPending" Grid.Column="4" Style="{StaticResource IconBtn}"
-                                        ToolTip="移除待上传文件">
+                                        ToolTip="移除待上传文件" Click="ClearPending_Click">
                                     <ContentControl Width="16" Height="16" Style="{DynamicResource Icon.Close}"/>
                                 </Button>
                             </Grid>
@@ -426,7 +427,7 @@
                             <Button x:Name="BtnPickSkin" Style="{StaticResource BtnGhost}" Content="选择皮肤文件…"
                                     Margin="0,0,12,12"/>
                             <Button x:Name="BtnUploadSkin" Style="{StaticResource BtnGold}" Content="上传"
-                                    Margin="0,0,12,12"/>
+                                    Margin="0,0,12,12" Click="UploadSkin_Click"/>
                         </WrapPanel>
 
                         <!-- .muted.skin-hint（styles.css:677 ＋ :872-876）：margin-top 8 / 12px text-dim，文案 :478 -->
