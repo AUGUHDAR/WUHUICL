@@ -2,6 +2,14 @@
 
 Since I haven't fully cleared Camu's technical debt yet, the current repo content doesn't represent the final product!
 
+因为现在处于初步阶段，也就是完整移植，导致原版的一些缺陷和法律问题也带过来了。你们先别急，我比你们更急
+
+Because we're still in the early stages, meaning a full port, some of the original version’s flaws and legal issues have also come over. Don't worry, I’m even more anxious than you are.
+
+另外，本启动器的 Client ID 确实拿到，但是 Mojang 申请还没过，所以导致目前的正版验证还过不了
+
+Also, the launcher’s Client ID has indeed been obtained, but the Mojang application hasn’t been approved yet, so the official verification still doesn’t work right now.
+
 ## English
 # WUHUICL
 
