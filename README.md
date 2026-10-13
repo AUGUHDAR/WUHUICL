@@ -10,6 +10,10 @@ Because we're still in the early stages, meaning a full port, some of the origin
 
 Also, the launcher’s Client ID has indeed been obtained, but the Mojang application hasn’t been approved yet, so the official verification still doesn’t work right now.
 
+还有，本项目为了赶开发进度，大量使用了 AI。如果你对 AI 反感，请移步其他启动器，但也不保证其他启动器未使用 AI
+
+Also, this project has made heavy use of AI in order to speed up development. If you're not into AI, please check out other launchers, though there's no guarantee that they haven't used AI either.
+
 ## English
 # WUHUICL
 
