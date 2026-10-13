@@ -1,22 +1,9 @@
-bin/
-obj/
-*.user
-__pycache__/
-*.pyc
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+*.log
+user-skin.png
 
-# 本地构建产物与截图
-publish/
-shots/
-shots$p.png
-
-# 已退役的娃娃烘焙帧（仅本地留参考）
-Wuhuicl.App/Assets/doll/
-
-# 本地一次性修补脚本
-_fix*.py
-
-# tools 只保留三个生成工具，其余为本地一次性修补脚本
-tools/*
-!tools/check_resource_keys.py
-!tools/gen_icons.py
-!tools/gen_theme_mixins.py
+# 工程台账（对表证据里含本地绝对路径、第三方群号等），只留本地，不进公开仓库
+docs/
