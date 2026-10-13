@@ -1,3 +1,7 @@
+由于卡慕的技术债我还没有清干净，目前仓库内容不代表未来成品！
+
+Since I haven't fully cleared Camu's technical debt yet, the current repo content doesn't represent the final product!
+
 ## English
 # WUHUICL
 
