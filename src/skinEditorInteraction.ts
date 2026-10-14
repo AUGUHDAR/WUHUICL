@@ -35,7 +35,8 @@ export class SkinGestureOwner {
 }
 
 export type SkinCloseIntent<Route extends string = string> =
-    { kind: 'editor' | 'window' | 'quit' } | { kind: 'navigate'; destination: Route };
+    | { kind: 'editor' | 'window' | 'quit' }
+    | { kind: 'navigate'; destination: Route };
 /** Native quit/close requests survive duplicate local close actions until cancelled. */
 export function mergeSkinCloseIntent<Route extends string>(
     current: SkinCloseIntent<Route> | undefined,

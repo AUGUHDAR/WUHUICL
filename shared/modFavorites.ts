@@ -23,7 +23,12 @@ export interface FavoriteSelection {
     fileId: string;
 }
 export type FavoriteSkipReason =
-    'incompatible' | 'unlinked' | 'unreliable' | 'query-error' | 'deselected' | 'base-only';
+    | 'incompatible'
+    | 'unlinked'
+    | 'unreliable'
+    | 'query-error'
+    | 'deselected'
+    | 'base-only';
 export interface FavoriteVersionResult {
     files: import('./types').CommunityFile[];
     status: 'available' | 'incompatible' | 'unreliable';

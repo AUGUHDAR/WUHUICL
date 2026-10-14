@@ -2,7 +2,13 @@
 export type ProductPlatform = 'windows' | 'macos' | 'linux' | 'harmonyos' | 'unsupported';
 export type ProductArchitecture = 'x64' | 'arm64' | 'unsupported';
 export type InstallationKind =
-    'portable-exe' | 'mac-app' | 'appimage' | 'deb' | 'portable-directory' | 'hap' | 'development';
+    | 'portable-exe'
+    | 'mac-app'
+    | 'appimage'
+    | 'deb'
+    | 'portable-directory'
+    | 'hap'
+    | 'development';
 export interface PlatformInfo {
     platform: ProductPlatform;
     architecture: ProductArchitecture;

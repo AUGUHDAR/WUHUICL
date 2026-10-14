@@ -196,7 +196,12 @@ export interface JavaInfo {
 
 // ---------------- 设置 ----------------
 export type ThemeName =
-    'blue-white' | 'black-orange' | 'white-pink' | 'black-pink' | 'custom' | 'transparent';
+    | 'blue-white'
+    | 'black-orange'
+    | 'white-pink'
+    | 'black-pink'
+    | 'custom'
+    | 'transparent';
 
 export type BuiltinThemeName = Exclude<ThemeName, 'custom'>;
 

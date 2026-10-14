@@ -567,12 +567,13 @@ function setLaunchFit(fit: ImageFit) {
                             :checked="store.settings?.launchThumbnail.randomPlayback === true"
                             @change="
                                 store.settings &&
-                                save({
-                                    launchThumbnail: {
-                                        ...store.settings.launchThumbnail,
-                                        randomPlayback: ($event.target as HTMLInputElement).checked
-                                    }
-                                })
+                                    save({
+                                        launchThumbnail: {
+                                            ...store.settings.launchThumbnail,
+                                            randomPlayback: ($event.target as HTMLInputElement)
+                                                .checked
+                                        }
+                                    })
                             "
                         /><span
                             ><strong>随机播放</strong

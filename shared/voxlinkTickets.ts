@@ -29,7 +29,8 @@ export interface TicketFileGrant extends VoxTicketAttachment {
     id: string;
 }
 export type TicketResult<T> =
-    { ok: true; value: T } | { ok: false; code: string; message: string; retryAt?: number };
+    | { ok: true; value: T }
+    | { ok: false; code: string; message: string; retryAt?: number };
 export const TICKET_DESCRIPTION_MAX = 10000,
     TICKET_MESSAGE_MAX = 2000,
     TICKET_MESSAGE_COUNT_MAX = 200,

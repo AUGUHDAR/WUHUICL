@@ -1,5 +1,10 @@
 export type FeedbackImagePhase =
-    'loading' | 'loaded' | 'decoding' | 'decoded' | 'cancelled' | 'failed';
+    | 'loading'
+    | 'loaded'
+    | 'decoding'
+    | 'decoded'
+    | 'cancelled'
+    | 'failed';
 export type FeedbackImageEvent = {
     name: 'palm' | 'print';
     phase: FeedbackImagePhase;
