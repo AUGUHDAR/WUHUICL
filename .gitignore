@@ -4,6 +4,5 @@ src-tauri/target/
 src-tauri/gen/
 *.log
 user-skin.png
-
-# 工程台账（对表证据里含本地绝对路径、第三方群号等），只留本地，不进公开仓库
+.idea/
 docs/

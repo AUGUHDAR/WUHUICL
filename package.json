@@ -8,7 +8,10 @@
     "dev:web": "vite",
     "build:web": "vite build",
     "dev": "tauri dev",
-    "build": "tauri build"
+    "build": "tauri build",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "skinview-utils": "0.7.1",
@@ -18,8 +21,11 @@
   "devDependencies": {
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/cli": "^2.9.0",
+    "@types/node": "^24.19.2",
     "@types/three": "0.185.0",
     "@vitejs/plugin-vue": "^5.2.0",
+    "prettier": "3.3.3",
+    "prettier-plugin-vue": "1.1.6",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"
   }
