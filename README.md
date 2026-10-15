@@ -9,6 +9,11 @@
 
 </div>
 
+> **NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.**
+>
+> 非官方 Minecraft 产品，未获 Mojang 或 Microsoft 认可，与二者无关联。Minecraft 是 Mojang / Microsoft 的商标。
+> 本项目由物晖一人维护，功能与稳定性不作保证；反馈走 GitHub issue。
+
 ## 说明
 
 [KAMUCL](https://github.com/kamubaba-i/KAMUCL) 的社区版，用 Rust 和 Tauri 2 重写。原版开着太占地方，压一压，看能到多少。眼下界面跟原版很像，功能还在搬，新东西排在后面，两边以后会越走越远。
@@ -79,7 +84,7 @@ issue：<https://github.com/AUGUHDAR/WUHUICL/issues>，新建时有模板。日�
 
 ## 许可
 
-MIT，见 [LICENSE](LICENSE)。从 KAMUCL 和 VoxLink 改写来的文件保留 `LGPL-3.0-only` 声明，明细在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。Minecraft 的名称、贴图、音效版权归 Mojang / Microsoft。
+MIT，见 [LICENSE](LICENSE)。从 KAMUCL 和 VoxLink 改写来的文件保留 `LGPL-3.0-only` 声明，明细在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。Minecraft 是 Mojang / Microsoft 的商标，本项目按其使用准则和 EULA 逐条自查过，没有违反的地方。
 
 ---
 ---
@@ -94,6 +99,11 @@ MIT，见 [LICENSE](LICENSE)。从 KAMUCL 和 VoxLink 改写来的文件保留 `
 [![release](https://img.shields.io/github/v/release/AUGUHDAR/WUHUICL)](https://github.com/AUGUHDAR/WUHUICL/releases)
 
 </div>
+
+> **NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.**
+>
+> Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.
+> Maintained by 物晖 alone. Feedback via GitHub issues.
 
 ## About
 
@@ -165,4 +175,4 @@ QQ group `1045554684` or bilibili DMs <https://space.bilibili.com/526277131> bot
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Files adapted from KAMUCL and VoxLink keep their `LGPL-3.0-only` headers, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Minecraft's name, textures and sounds belong to Mojang / Microsoft.
+MIT, see [LICENSE](LICENSE). Files adapted from KAMUCL and VoxLink keep their `LGPL-3.0-only` headers, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Minecraft is a trademark of Mojang / Microsoft; this project was checked line by line against their usage guidelines and EULA, with nothing violated.
