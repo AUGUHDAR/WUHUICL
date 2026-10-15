@@ -3,9 +3,12 @@ contact_links:
     - name: 报安全问题（不要开公开 issue）
       url: https://github.com/AUGUHDAR/WUHUICL/security/policy
       about: 令牌泄漏、下载校验被绕、路径穿越、联机鉴权等，看安全策略
+    - name: QQ 群 1045554684
+      url: https://qm.qq.com/cgi-bin/qm/qr?k=pS5Z0b1WocaTkgXgOz3bGOV4IwDzxHZP&jump_from=webapi&authKey=FAQpNkivTXZg2uyb72xNvP8MVa5OzvWHYJuL8vuq4PH/XLJkBKTfGQPMI233zQS+
+      about: 加群链接，群文件里也有最新安装包
     - name: B 站私信
       url: https://space.bilibili.com/526277131
-      about: QQ 群号 1045554684（群文件里也有最新安装包）
+      about: 原作者主页，私信能直达
     - name: 原版 KAMUCL
       url: https://github.com/kamubaba-i/KAMUCL
       about: 界面与行为合同来自它；原版自身的问题请到那边提
