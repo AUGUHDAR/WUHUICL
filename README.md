@@ -36,9 +36,9 @@
 | --- | --- |
 | GitHub Releases | <https://github.com/AUGUHDAR/WUHUICL/releases> |
 | Gitee | <https://gitee.com/AUGUHDAR/WUHUICL> |
-| QQ 群 [1045554684](https://qm.qq.com/cgi-bin/qm/qr?k=pS5Z0b1WocaTkgXgOz3bGOV4IwDzxHZP&jump_from=webapi&authKey=FAQpNkivTXZg2uyb72xNvP8MVa5OzvWHYJuL8vuq4PH/XLJkBKTfGQPMI233zQS+) 群文件 | 国内快一些 |
+| QQ 群 `1045554684` | [入群链接](https://qm.qq.com/cgi-bin/qm/qr?k=pS5Z0b1WocaTkgXgOz3bGOV4IwDzxHZP&jump_from=webapi&authKey=FAQpNkivTXZg2uyb72xNvP8MVa5OzvWHYJuL8vuq4PH/XLJkBKTfGQPMI233zQS+)，群文件里有同一份包 |
 
-三个渠道同一份文件。Release 里有 SHA-256：
+三个渠道同一份文件，国内从 Gitee 或群里下更快。Release 里有 SHA-256：
 
 ```powershell
 Get-FileHash .\WUHUICL-0.1.0.exe -Algorithm SHA256
@@ -127,9 +127,9 @@ Much of the code was written with AI to keep up the pace. Not your taste, use so
 | --- | --- |
 | GitHub Releases | <https://github.com/AUGUHDAR/WUHUICL/releases> |
 | Gitee | <https://gitee.com/AUGUHDAR/WUHUICL> |
-| QQ group [1045554684](https://qm.qq.com/cgi-bin/qm/qr?k=pS5Z0b1WocaTkgXgOz3bGOV4IwDzxHZP&jump_from=webapi&authKey=FAQpNkivTXZg2uyb72xNvP8MVa5OzvWHYJuL8vuq4PH/XLJkBKTfGQPMI233zQS+) files | faster in China |
+| QQ group `1045554684` | [Join link](https://qm.qq.com/cgi-bin/qm/qr?k=pS5Z0b1WocaTkgXgOz3bGOV4IwDzxHZP&jump_from=webapi&authKey=FAQpNkivTXZg2uyb72xNvP8MVa5OzvWHYJuL8vuq4PH/XLJkBKTfGQPMI233zQS+), group files carry the same build |
 
-Same file on all three. The release page lists a SHA-256:
+Same file on all three; inside China, Gitee or the group downloads faster. The release page lists a SHA-256:
 
 ```powershell
 Get-FileHash .\WUHUICL-0.1.0.exe -Algorithm SHA256
