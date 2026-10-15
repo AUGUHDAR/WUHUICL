@@ -22,7 +22,7 @@
 先别开公开 issue 写细节，留点处理时间。
 
 1. 首选 GitHub 的私密漏洞报告（New issue 页面若出现 "Report a vulnerability" 入口，走那里）。
-2. 没有该入口时，开一个标题只写"安全问题，请私信联系"的空 issue，或者直接来 [QQ 群 1045554684](https://qm.qq.com/cgi-bin/qm/qr?k=pS5Z0b1WocaTkgXgOz3bGOV4IwDzxHZP&jump_from=webapi&authKey=FAQpNkivTXZg2uyb72xNvP8MVa5OzvWHYJuL8vuq4PH/XLJkBKTfGQPMI233zQS+) / B 站 <https://space.bilibili.com/526277131> 私信。
+2. 没有该入口时，开一个标题只写"安全问题，请私信联系"的空 issue，或者直接来 [QQ 群 1045554684](https://qm.qq.com/cgi-bin/qm/qr?k=DPtuiKA-iNNM41kEjsEZNxBWUm8iYeTE&jump_from=webapi&authKey=agi9ZieszTBXoQNO6wNb4D/hmTY6rmi2yAdvEubPQoq2tz4cPi1XI/DNUMoaxyWj) / B 站 <https://space.bilibili.com/526277131> 私信。
 3. 拿到复现方式后，尽量在 3 个工作日内回进展，不承诺时限。修复发布前请别公开细节。
 
 ## 现在已经在做的事
