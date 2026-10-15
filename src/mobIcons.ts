@@ -1,4 +1,4 @@
-/** 内置 MC 生物头像清单（素材位于 public/mobs/<id>.png，源自 Minecraft Wiki 官方贴图） */
+/** 生物头像清单。贴图是 Minecraft 游戏资源，不放进仓库：需要时自己放到 public/mobs/<id>.png */
 export interface MobIcon {
     id: string;
     name: string;

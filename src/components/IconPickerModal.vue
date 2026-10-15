@@ -17,6 +17,11 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 
 const busy = ref(false);
 
+/** 生物贴图不在仓库里（Mojang 版权），没放进来时让格子留空而不是显示裂图 */
+function hideBroken(event: Event) {
+    (event.target as HTMLImageElement).style.visibility = 'hidden';
+}
+
 async function pick(icon: string) {
     if (busy.value) return;
     busy.value = true;
@@ -76,7 +81,12 @@ async function onUpload() {
                         :disabled="busy"
                         @click="pick('mob:' + m.id)"
                     >
-                        <img :src="`mobs/${m.id}.png`" :alt="m.name" loading="lazy" />
+                        <img
+                            :src="`mobs/${m.id}.png`"
+                            :alt="m.name"
+                            loading="lazy"
+                            @error="hideBroken"
+                        />
                     </button>
                 </div>
             </div>

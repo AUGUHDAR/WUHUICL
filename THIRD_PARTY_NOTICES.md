@@ -100,6 +100,12 @@ Metadata/API references: https://api.adoptium.net/ and
 https://api.azul.com/metadata/v1/docs/swagger . Runtime download, verification
 and fallback logic are independently implemented in KAMUCL.
 
+## Minecraft game assets
+
+Minecraft's name, textures, sounds, language files and fonts are Mojang /
+Microsoft property and are not part of this repository. Whatever a local build
+picks up comes from that machine's own game installation.
+
 ## Referenced launcher projects
 
 PCL: https://github.com/Meloong-Git/PCL
@@ -111,6 +117,5 @@ ATLauncher: https://github.com/ATLauncher/ATLauncher
 MultiMC: https://github.com/MultiMC/Launcher
 
 Acknowledgement does not grant permission or imply endorsement. Referencing
-behavior, formats or UI features does not relicense upstream code. Historical
-release issues are recorded in docs/LICENSE_REMEDIATION.md. New replacements
-do not retroactively establish permission for older releases.
+behavior, formats or UI features does not relicense upstream code. New
+replacements do not retroactively establish permission for older releases.
