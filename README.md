@@ -17,7 +17,7 @@
 
 ---
 
-## ⚠️ 写在前面（作者原话，未做润色）
+## 写在前面（作者原话，未做润色）
 
 > 由于卡慕的技术债我还没有清干净，目前仓库内容不代表未来成品！
 >
@@ -171,7 +171,7 @@ Get-FileHash .\WUHUICL-0.1.0.exe -Algorithm SHA256
 引擎的地基（RUDP 可靠传输、打洞策略、标准 TURN、TCP 同时开、模组同步）已经一块块移植并测试过，但接到界面上的那一步还没做。现在点连接会明确返回"引擎未移植"——它不会假装连上了然后让你干等。
 
 **代码是 AI 写的吗？**
-是，大量代码由 AI 辅助生成，作者原话就在[最上面](#️-写在前面作者原话未做润色)。约束是：每一处改动落地前都要跟原版对表，测试跑不过就不进树。你完全可以自己读，代码写得很朴素。
+是，大量代码由 AI 辅助生成，作者原话就在[最上面](#写在前面作者原话未做润色)。约束是：每一处改动落地前都要跟原版对表，测试跑不过就不进树。你完全可以自己读，代码写得很朴素。
 
 **我要怎么帮你？**
 提 issue（带日志）、提 PR、转发给需要的人、或者来群里骂一句哪里难用。见[反馈与贡献](#反馈与贡献)。
@@ -262,7 +262,7 @@ Get-FileHash .\WUHUICL-0.1.0.exe -Algorithm SHA256
 
 ---
 
-## ⚠️ Before you start (author's own words, unedited)
+## Before you start (author's own words, unedited)
 
 > Since I haven't fully cleared Camu's technical debt yet, the current repo content doesn't represent the final product!
 >
@@ -408,7 +408,7 @@ A community port, not a sequel. Screens are 1:1 and the IPC channel names and pa
 The foundation (RUDP, hole-punch policies, standard TURN, TCP simultaneous open, mod sync) is ported module by module and tested, but the wiring to the UI isn't done. Pressing connect returns "engine not ported" — it won't pretend to connect and leave you waiting.
 
 **Was this written by AI?**
-Yes, heavily. The author's own words are [at the top](#-before-you-start-author-own-words-unedited). The rule is: every change is cross-checked against the original before it lands, and if the tests don't pass it doesn't get in. The code is deliberately boring and readable if you want to look.
+Yes, heavily. The author's own words are [at the top](#before-you-start-authors-own-words-unedited). The rule is: every change is cross-checked against the original before it lands, and if the tests don't pass it doesn't get in. The code is deliberately boring and readable if you want to look.
 
 **How can I help?**
 Open an issue (with logs), send a PR, tell someone who needs it, or come tell me what's annoying in the group. See [Feedback & contributing](#feedback--contributing).
