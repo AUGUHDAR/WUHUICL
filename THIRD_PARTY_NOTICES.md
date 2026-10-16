@@ -1,7 +1,10 @@
 # Third-party notices / 第三方声明
 
-The root MIT license covers original KAMUCL contributions only. Third-party
-copyright, license and trademark rights remain with their respective holders.
+The repository as a whole is GPL-3.0-or-later. That covers the original
+contributions only: third-party copyright, license and trademark rights remain
+with their respective holders, and no file below is relicensed by this project
+except where its own license (MIT, or LGPL-3.0 via the upgrade in LGPL-3.0
+section 4) permits it.
 
 ## VoxLink protocol integration — LGPL-3.0-only
 

@@ -71,4 +71,4 @@ npx tauri build --no-bundle     # 产物：src-tauri/target/release/wuhuicl.exe
 
 ## 许可
 
-从 KAMUCL / VoxLink 改写来的文件保留原有的 `SPDX-License-Identifier: LGPL-3.0-only` 头，不要摘掉；新文件按仓库的 MIT。第三方组件往 `THIRD_PARTY_NOTICES.md` 里补一行。
+仓库整体是 GPL-3.0-or-later。从 KAMUCL / VoxLink 改写来的文件保留原有的 `SPDX-License-Identifier: LGPL-3.0-only` 头，第三方片段保留各自的 MIT 头，都别摘掉；新写的文件挂 `SPDX-License-Identifier: GPL-3.0-or-later`。抄别的项目之前先看它的许可证，GPL、LGPL、MIT、BSD、Apache-2.0 能进来，AGPL 的代码不能并进启动器（陶瓦是独立程序，只从官方下载）。第三方组件往 `THIRD_PARTY_NOTICES.md` 里补一行。

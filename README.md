@@ -4,7 +4,7 @@
 
 # WUHUICL
 
-[![license](https://img.shields.io/badge/license-MIT%20%2B%20LGPL--3.0-green)](LICENSE)
+[![license](https://img.shields.io/badge/license/GPL--3.0-green)](LICENSE)
 [![release](https://img.shields.io/github/v/release/AUGUHDAR/WUHUICL)](https://github.com/AUGUHDAR/WUHUICL/releases)
 
 </div>
@@ -84,7 +84,7 @@ issue：<https://github.com/AUGUHDAR/WUHUICL/issues>，新建时有模板。日�
 
 ## 许可
 
-MIT，见 [LICENSE](LICENSE)。从 KAMUCL 和 VoxLink 改写来的文件保留 `LGPL-3.0-only` 声明，明细在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。Minecraft 是 Mojang / Microsoft 的商标，本项目按其使用准则和 EULA 逐条自查过，没有违反的地方。
+GPL-3.0-or-later，见 [LICENSE](LICENSE)。从 KAMUCL 和 VoxLink 改写来的文件保留原来的 `LGPL-3.0-only` 头，第三方片段保留各自的 MIT 声明，明细在 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。拿这些代码改一改再分发，可以，但必须同样开源、同样挂 GPL。Minecraft 是 Mojang / Microsoft 的商标，本项目按其使用准则和 EULA 逐条自查过，没有违反的地方。
 
 ---
 ---
@@ -95,7 +95,7 @@ MIT，见 [LICENSE](LICENSE)。从 KAMUCL 和 VoxLink 改写来的文件保留 `
 
 # WUHUICL
 
-[![license](https://img.shields.io/badge/license-MIT%20%2B%20LGPL--3.0-green)](LICENSE)
+[![license](https://img.shields.io/badge/license/GPL--3.0-green)](LICENSE)
 [![release](https://img.shields.io/github/v/release/AUGUHDAR/WUHUICL)](https://github.com/AUGUHDAR/WUHUICL/releases)
 
 </div>
@@ -175,4 +175,4 @@ QQ group [1045554684](https://qm.qq.com/cgi-bin/qm/qr?k=DPtuiKA-iNNM41kEjsEZNxBW
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Files adapted from KAMUCL and VoxLink keep their `LGPL-3.0-only` headers, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Minecraft is a trademark of Mojang / Microsoft; this project was checked line by line against their usage guidelines and EULA, with nothing violated.
+GPL-3.0-or-later, see [LICENSE](LICENSE). Files adapted from KAMUCL and VoxLink keep their original `LGPL-3.0-only` headers and vendored snippets keep their MIT notices, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Fork this, change it, ship it, but the result stays open under the same license. Minecraft is a trademark of Mojang / Microsoft; this project was checked line by line against their usage guidelines and EULA, with nothing violated.
