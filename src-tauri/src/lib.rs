@@ -48,6 +48,7 @@ pub mod skins;
 pub mod sysinfo;
 pub mod tasks;
 pub mod versions;
+pub mod vlcli;
 pub mod windowctl;
 pub mod worlds;
 
@@ -76,6 +77,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![ipc::ipc_invoke, ipc::ipc_send])
         .register_uri_scheme_protocol("kamucl-asset", assetproto::handle)
         .setup(|app| {
+            crate::vlcli::session::bind(app.handle());
             crate::setup_windows(app.handle())?;
             Ok(())
         })

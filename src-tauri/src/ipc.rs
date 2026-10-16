@@ -6,7 +6,7 @@
 //! 启动关键通道（settings/accounts/versions/folders/systemInfo/exitHistory/…）
 //! 为真实现；未移植通道显式返回「未实现的通道」错误，便于移植期发现缺口。
 
-use crate::{accounts, appearance, bridge, catalog, direct, frp, selfupdate, centercmd, community, misc, modpacks, mods, projections, recordings, servers, skins, terracotta, voxlink, worlds, exportlogs, gate, gamedir, gamefolders, installer, javaman, launch, mslogin, settings, sysinfo, versions, windowctl};
+use crate::{accounts, appearance, bridge, catalog, direct, frp, selfupdate, centercmd, community, misc, modpacks, mods, projections, recordings, servers, skins, terracotta, voxlink, vlcli, worlds, exportlogs, gate, gamedir, gamefolders, installer, javaman, launch, mslogin, settings, sysinfo, versions, windowctl};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, WebviewWindow};
 
@@ -103,6 +103,9 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         return r;
     }
     if let Some(r) = mslogin::invoke(app, channel, args) {
+        return r;
+    }
+    if let Some(r) = vlcli::invoke(app, channel, args) {
         return r;
     }
     if let Some(r) = gamedir::invoke(app, channel, args) {
