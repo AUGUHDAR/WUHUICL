@@ -162,16 +162,9 @@ fn deep_merge(base: Value, overlay: Value) -> Value {
 
 /// 保存设置补丁（settings:set）：合并后落盘，返回完整设置
 pub fn save(app: &tauri::AppHandle, patch: Value) -> Result<Value, String> {
-    // 对应原版 settings.ts：保存前校验下载限额，保存后重配限流器
-    crate::download::validate_limits(&patch)?;
-    let mut current = get(app);
-    {
-        let obj = current.as_object_mut().ok_or("设置损坏")?;
-        let patch_obj = patch.as_object().cloned().unwrap_or_default();
-        for (k, v) in patch_obj {
-            obj.insert(k, v);
-        }
-    }
+    // 校验合并后的整份设置（原版 settings.ts:187 validateDownloadLimits({ ...cur, ...patch })），
+    // 只改主题时补丁里没有下载字段，拿补丁校验会误判成限额非法。
+    let current = merge_and_validate(&get(app), patch)?;
     let file = settings_file(app);
     if let Some(dir) = file.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -183,7 +176,54 @@ pub fn save(app: &tauri::AppHandle, patch: Value) -> Result<Value, String> {
     Ok(current)
 }
 
+/// 合并补丁并校验下载限额，返回可直接落盘的完整设置。
+fn merge_and_validate(current: &Value, patch: Value) -> Result<Value, String> {
+    let mut merged = current.clone();
+    let obj = merged.as_object_mut().ok_or("设置损坏")?;
+    for (k, v) in patch.as_object().cloned().unwrap_or_default() {
+        obj.insert(k, v);
+    }
+    crate::download::validate_limits(&merged)?;
+    Ok(merged)
+}
+
 /// 受管图片根目录（kamucl-asset 协议的授权范围）
 pub fn managed_dir(app: &tauri::AppHandle) -> PathBuf {
     user_data_dir(app).join("launcher-managed")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base() -> Value {
+        json!({ "appearance": { "theme": "default" }, "downloadThreads": 16, "downloadSpeedKBps": 0 })
+    }
+
+    #[test]
+    fn theme_only_patch_is_not_blocked_by_download_limits() {
+        let merged = merge_and_validate(&base(), json!({ "appearance": { "theme": "whiteBlue" } })).unwrap();
+        assert_eq!(merged["appearance"]["theme"], "whiteBlue");
+        assert_eq!(merged["downloadThreads"], 16);
+    }
+
+    #[test]
+    fn out_of_range_threads_still_rejected() {
+        let e = merge_and_validate(&base(), json!({ "downloadThreads": 999 })).unwrap_err();
+        assert!(e.contains("1–64"), "实际 {}", e);
+    }
+
+    #[test]
+    fn partial_limit_pair_validates_against_merged_value() {
+        let merged = merge_and_validate(&base(), json!({ "downloadSpeedKBps": 512 })).unwrap();
+        assert_eq!(merged["downloadSpeedKBps"], 512);
+        assert_eq!(merged["downloadThreads"], 16);
+    }
+
+    #[test]
+    fn missing_limits_in_storage_falls_back_to_defaults() {
+        let stored = json!({ "appearance": {} });
+        let merged = merge_and_validate(&stored, json!({ "appearance": { "theme": "pink" } }));
+        assert!(merged.is_err(), "默认值缺失时应报限额非法，不能静默写盘");
+    }
 }
