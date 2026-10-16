@@ -19,16 +19,17 @@ onMounted(() => {
     }
 });
 
+const CODE_RE = /^[A-HJ-NP-Z2-9]{6}$/;
+
 function normalize(raw: string): string {
-    const cleaned = raw.replace(/[^0-9a-zA-Z]/g, '').toUpperCase();
-    return cleaned.slice(0, 6);
+    return raw.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 6);
 }
 
 async function lookup() {
     error.value = '';
     preview.value = null;
     const c = normalize(code.value);
-    if (c.length !== 6) return;
+    if (!CODE_RE.test(c)) return;
     const r = await call<Record<string, unknown>>('vlcli:roomInfo', { code: c });
     if (!r.ok) {
         error.value = r.message || '没找到这个房间';
@@ -39,8 +40,8 @@ async function lookup() {
 
 async function submit() {
     const c = normalize(code.value);
-    if (c.length !== 6) {
-        error.value = '房号是 6 位，检查一下有没有少';
+    if (!CODE_RE.test(c)) {
+        error.value = 'VoxLink 房间码为 6 位字符（不含 I、L、O、0、1）';
         return;
     }
     code.value = c;
@@ -73,7 +74,7 @@ async function submit() {
                 v-model="code"
                 class="input"
                 maxlength="6"
-                placeholder="例如 AB12CD"
+                placeholder="6 位房号"
                 :disabled="busy"
                 @input="code = normalize(code)"
                 @blur="lookup"

@@ -22,8 +22,10 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             "alive": session::alive(), "snapshot": session::snapshot() } })),
         "vlcli:stop" => wrap(session::stop()),
         "vlcli:capabilities" => wrap(capabilities(app)),
+        "vlcli:pickFiles" => Ok(json!({ "ok": true, "data": { "files": pick_files(app) } })),
         "vlcli:lobby" => one_shot(app, "lobby list", &pick(&first, &[("page", "page"), ("size", "size"),
             ("category", "category"), ("loader", "loader"), ("search", "search")]), ONE_SHOT),
+        "vlcli:lobbyCategories" => one_shot(app, "lobby categories", "{}", ONE_SHOT),
         "vlcli:roomInfo" => one_shot(app, "room info", &pick(&first, &[("code", "code")]), ONE_SHOT),
         "vlcli:roomMods" => one_shot(app, "room mods", &pick(&first, &[("code", "code")]), ONE_SHOT),
         "vlcli:relayStatus" => one_shot(app, "relay status", "{}", ONE_SHOT),
@@ -145,6 +147,16 @@ fn tickets(app: &tauri::AppHandle, arg: &Value) -> Result<Value, String> {
     };
     one_shot(app, command, &pick(arg, &[("id", "id"), ("description", "description"), ("text", "text"),
         ("msg", "msg"), ("files", "files")]), ONE_SHOT)
+}
+
+/// 工单附件用系统文件框多选，路径交给组件的 --files。
+fn pick_files(app: &tauri::AppHandle) -> Vec<String> {
+    use tauri_plugin_dialog::DialogExt;
+    app.dialog()
+        .file()
+        .blocking_pick_files()
+        .map(|list| list.iter().map(|p| p.to_string()).collect())
+        .unwrap_or_default()
 }
 
 /// 从界面参数里挑出组件认识的字段，改名后拼成 --json 负载。

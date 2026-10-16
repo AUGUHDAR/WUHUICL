@@ -1,5 +1,9 @@
 /** VoxLink 联机控制台的共享状态：组件取件、会话事件、一次性命令。 */
 import { reactive, ref } from 'vue';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+
+/** 建房时上报的客户端标签，固定值，不给玩家改 */
+export const CLIENT_TAG = 'WUHUICL';
 
 export type VlSection = 'lobby' | 'join' | 'create' | 'room' | 'tickets' | 'settings';
 
@@ -62,6 +66,32 @@ export const vl = reactive({
 });
 
 export const section = ref<VlSection>('lobby');
+
+/** 建房分类标签由服务端给出，value → 中文名 */
+export const categories = ref<Record<string, string>>({});
+
+export async function loadCategories(): Promise<void> {
+    const r = await call<Record<string, string>>('vlcli:lobbyCategories');
+    if (r.ok && r.data && typeof r.data === 'object') categories.value = r.data as Record<string, string>;
+}
+
+/** 窗口级文件拖放：Tauri 的 drop 事件带真实路径，HTML5 dataTransfer 拿不到。 */
+export function onDropPaths(handler: (paths: string[]) => void): () => void {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void getCurrentWindow().onDragDropEvent((event) => {
+        if (disposed) return;
+        const payload = event.payload as { type: string; paths?: string[] };
+        if (payload.type === 'drop' && Array.isArray(payload.paths)) handler(payload.paths);
+    }).then((u) => {
+        if (disposed) u();
+        else unlisten = u;
+    });
+    return () => {
+        disposed = true;
+        if (unlisten) unlisten();
+    };
+}
 
 /** 大厅点加入时暂存房号，加入页读一次就清空 */
 export const pendingJoinCode = ref('');
