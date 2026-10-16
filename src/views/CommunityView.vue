@@ -10,7 +10,14 @@ import {
     ref,
     watch
 } from 'vue';
-import { communityFiles, communitySearch, errText, getManifest, getModTargets } from '../api';
+import {
+    communityFiles,
+    communityMcmod,
+    communitySearch,
+    errText,
+    getManifest,
+    getModTargets
+} from '../api';
 import { store, toast, selectedInstance, displayVersionName as versionLabel } from '../store';
 import { instanceKey } from '@shared/modCompatibility';
 import { communityFileMatchesInstance, usesCommunityLoader } from '@shared/communityPolicy';
@@ -59,10 +66,25 @@ function sourceUrl(r: CommunityProjectReference, kind: CommunityKind = query.kin
     return `https://www.curseforge.com/minecraft/${CF_KIND_SEGMENT[kind] ?? 'mc-mods'}/${r.slug || r.projectId}`;
 }
 
-function openMcmod(item: CommunityProjectReference) {
-    const url = mcmodSearchUrl({ ...item, slug: item.slug ?? '' });
-    if (url) openExternal(url);
-    else toast('该项目没有可用于检索的英文名称', 'error');
+/** MC 百科：先精确检索（PCL 式直达 class 页），失败或无命中回退搜索页 */
+async function openMcmod(item: CommunityProjectReference) {
+    const searchUrl = mcmodSearchUrl({ ...item, slug: item.slug ?? '' });
+    if (!searchUrl) {
+        toast('该项目没有可用于检索的英文名称', 'error');
+        return;
+    }
+    try {
+        const keyword = new URL(searchUrl).searchParams.get('key') ?? '';
+        const r = await communityMcmod(keyword);
+        const hit = r.hits[0];
+        if (hit?.url) {
+            openExternal(hit.url);
+            return;
+        }
+    } catch {
+        // 百科查询失败：回退到搜索页
+    }
+    openExternal(searchUrl);
 }
 
 function openExternal(url: string) {

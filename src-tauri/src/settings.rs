@@ -10,24 +10,135 @@ use std::sync::Mutex;
 
 static CACHE: Mutex<Option<Value>> = Mutex::new(None);
 
+/// exe 所在目录（对应 PCL 的 Paths.Base）：便携化的根。
+/// 取不到时回落 %APPDATA%\WUHUICL，保持可用。
+fn exe_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?.to_path_buf();
+    // current_exe 可能是临时目录里的短路径/符号链接，规范化成真实位置
+    Some(dunce_canonical(&dir))
+}
+
+/// 规范化并去掉 `\\?\` 逐字前缀（dunce 的行为）：canonicalize 会把盘符路径
+/// 变成 `\\?\D:\...`，直接入库会带进设置与 UI；UNC 前缀还原成 `\\server\share`。
+fn dunce_canonical(path: &PathBuf) -> PathBuf {
+    let canon = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+    let text = canon.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{}", rest));
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest.to_string());
+    }
+    canon
+}
+
+/// WUHUICL 启动器数据根（对应 PCL 在 exe 旁建的 `PCL\` 文件夹）：
+/// settings/账号/清单缓存/受管图片都落在这里，跟随 exe 移动。
+pub fn user_data_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
+    exe_dir()
+        .map(|d| d.join(LAUNCHER_DATA_DIR_NAME))
+        .unwrap_or_else(|| {
+            app.path()
+                .app_data_dir()
+                .unwrap_or_else(|_| dirs::data_dir().unwrap_or_default().join("WUHUICL"))
+        })
+}
+
+/// 启动器数据文件夹名（exe 旁）
+pub const LAUNCHER_DATA_DIR_NAME: &str = "WUHUICL";
+
+/// 旧版数据根（%APPDATA%\com.wuhuicl.app）：一次性迁移的来源。
+fn legacy_user_data_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+    let dir = app.path().app_data_dir().ok()?;
+    let new_dir = user_data_dir(app);
+    if same_dir(&dir, &new_dir) {
+        None
+    } else {
+        Some(dir)
+    }
+}
+
+fn same_dir(a: &PathBuf, b: &PathBuf) -> bool {
+    let norm = |p: &PathBuf| {
+        std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()).to_string_lossy().to_lowercase()
+    };
+    norm(a) == norm(b)
+}
+
+/// 游戏根目录默认值：exe 旁 `.minecraft\`（对应 PCL 首启创建
+/// `Paths.Base & ".minecraft\versions\"` 的逻辑，不再用 %APPDATA%）
+pub fn default_game_dir() -> PathBuf {
+    exe_dir()
+        .unwrap_or_else(|| dirs::data_dir().unwrap_or_default())
+        .join(".minecraft")
+}
+
+/// 旧默认游戏目录集合（%APPDATA%\.wuhuicl / %APPDATA%\.kamucl）：
+/// 落盘设置还指向它们时会被改写到新的 exe 旁默认值
+fn legacy_game_dirs() -> Vec<PathBuf> {
+    let data = dirs::data_dir();
+    let mut out = Vec::new();
+    if let Some(d) = data {
+        out.push(d.join(".wuhuicl"));
+        out.push(d.join(".kamucl"));
+    }
+    out
+}
+
+/// 首启建目录 + 旧数据迁移（lib.rs setup 调用，先于任何 settings 读取）：
+/// 1) PCL 式目录：exe 旁 `.minecraft\versions\` 与 `WUHUICL\`
+/// 2) 旧 %APPDATA%\com.wuhuicl.app 的小文件与子目录一次性搬进 `WUHUICL\`
+///    （条件：新目录还没有 settings.json；搬完不删旧目录，失败静默回退）
+pub fn ensure_exe_side_dirs<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let new_dir = user_data_dir(app);
+    let _ = std::fs::create_dir_all(&new_dir);
+    let _ = std::fs::create_dir_all(default_game_dir().join("versions"));
+
+    if let Some(old_dir) = legacy_user_data_dir(app) {
+        let marker = new_dir.join("settings.json");
+        let old_marker = old_dir.join("settings.json");
+        if !marker.exists() && old_marker.exists() {
+            for name in [
+                "settings.json",
+                "accounts.json",
+                "yggdrasil-providers.json",
+                "version_manifest.json",
+                "running-game.json",
+            ] {
+                let from = old_dir.join(name);
+                if from.is_file() {
+                    let _ = std::fs::copy(&from, new_dir.join(name));
+                }
+            }
+            for sub in ["yggdrasil-metadata", "authlib-injector", "launcher-managed"] {
+                let from = old_dir.join(sub);
+                if from.is_dir() {
+                    let _ = copy_dir_recursive(&from, &new_dir.join(sub));
+                }
+            }
+        }
+    }
+}
+
+fn copy_dir_recursive(from: &PathBuf, to: &PathBuf) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
 /// WUHUICL 自己的 Entra 应用注册：任何 Entra ID 租户 + 个人 Microsoft 账户，SPA 重定向 http://localhost
 const MS_CLIENT_ID: &str = "ced46a35-61d5-434d-8bf7-9dbca71ef616";
 /// 原版 shared/types.ts:978 的公共 client_id，社区版不再借用
 const LEGACY_MS_CLIENT_ID: &str = "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb";
-
-/// userData 根目录（WUHUICL 自己的，不碰原版 KAMUCL 数据）
-pub fn user_data_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
-    app.path()
-        .app_data_dir()
-        .unwrap_or_else(|_| dirs::data_dir().unwrap_or_default().join("WUHUICL"))
-}
-
-/// 游戏根目录默认值：%APPDATA%/.wuhuicl（与原版 .kamucl 平行，不共用）
-pub fn default_game_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".wuhuicl")
-}
 
 pub fn settings_file<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
     user_data_dir(app).join("settings.json")
@@ -50,7 +161,7 @@ pub fn defaults() -> Value {
         "jvmArgs": "",
         "resolution": { "width": 854, "height": 480, "mode": "windowed", "fullscreen": false },
         "mirror": "bmclapi",
-        "downloadThreads": 16,
+        "downloadThreads": 64,
         "downloadSpeedKBps": 0,
         "defaultIsolation": true,
         "reduceMotion": false,
@@ -108,8 +219,86 @@ pub fn get(app: &tauri::AppHandle) -> Value {
     if merged.get("msClientId").and_then(|v| v.as_str()) == Some(LEGACY_MS_CLIENT_ID) {
         merged["msClientId"] = Value::String(MS_CLIENT_ID.to_string());
     }
+    // 目录迁移：落盘设置还指向 %APPDATA% 旧默认（.wuhuicl/.kamucl）时，改写到 exe 旁 .minecraft；
+    // 旧 C 盘目录保留为非默认条目，已有实例不丢。只生效一次（改完落盘）。
+    if migrate_legacy_game_dir_entries(&mut merged) {
+        let file = settings_file(app);
+        if file.parent().map(|d| d.exists()).unwrap_or(false) {
+            let bytes = serde_json::to_vec_pretty(&merged).unwrap_or_default();
+            let _ = std::fs::write(&file, bytes);
+        }
+    }
     *CACHE.lock().unwrap() = Some(merged.clone());
     merged
+}
+
+/// 把 folders 里指向旧默认目录的条目改写到 exe 旁 .minecraft：
+/// 默认条目原位替换；旧目录若是独立条目则保留（去默认化），旧的 gameDir/activeFolder 一并跟移。
+fn migrate_legacy_game_dir_entries(merged: &mut Value) -> bool {
+    let new_default = default_game_dir();
+    let legacy = legacy_game_dirs();
+    let is_legacy = |p: &str| -> bool {
+        legacy
+            .iter()
+            .any(|l| same_dir(&PathBuf::from(p), l))
+    };
+    let mut changed = false;
+    if let Some(folders) = merged.get_mut("folders").and_then(|f| f.as_array_mut()) {
+        // 顺手归一化历史落盘的 \\?\ 逐字前缀路径
+        for f in folders.iter_mut() {
+            if let Some(p) = f["path"].as_str().map(str::to_string) {
+                if let Some(stripped) = p.strip_prefix(r"\\?\UNC\").map(|r| format!(r"\\{}", r)) {
+                    f["path"] = json!(stripped);
+                    changed = true;
+                } else if let Some(stripped) = p.strip_prefix(r"\\?\") {
+                    f["path"] = json!(stripped);
+                    changed = true;
+                }
+            }
+        }
+        let old_default_path = folders
+            .iter()
+            .find(|f| f["isDefault"] == true)
+            .and_then(|f| f["path"].as_str())
+            .map(str::to_string);
+        let old_default_is_legacy = old_default_path.as_deref().map(is_legacy).unwrap_or(false);
+        if old_default_is_legacy {
+            if let Some(def) = folders.iter_mut().find(|f| f["isDefault"] == true) {
+                def["path"] = json!(new_default.to_string_lossy());
+                def["name"] = json!("默认文件夹");
+                changed = true;
+            }
+        }
+        // 旧 C 盘目录作为独立条目保留（去默认化），实例清单不丢
+        if let Some(old_path) = &old_default_path {
+            if old_default_is_legacy {
+                let already_listed = folders.iter().any(|f| {
+                    f["isDefault"] != true
+                        && f["path"].as_str().map(|p| same_dir(&PathBuf::from(p), &PathBuf::from(old_path))).unwrap_or(false)
+                });
+                if !already_listed {
+                    folders.push(json!({
+                        "path": old_path,
+                        "name": "旧目录（C 盘）",
+                        "isDefault": false
+                    }));
+                }
+            }
+        }
+    }
+    if let Some(gd) = merged.get_mut("gameDir").and_then(|v| v.as_str()).map(str::to_string) {
+        if is_legacy(&gd) {
+            merged["gameDir"] = json!(new_default.to_string_lossy());
+            changed = true;
+        }
+    }
+    if let Some(af) = merged.get_mut("activeFolder").and_then(|v| v.as_str()).map(str::to_string) {
+        if is_legacy(&af) {
+            merged["activeFolder"] = json!(new_default.to_string_lossy());
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// 浅合并 + 指定字段深合并（对应 getSettings() 的合并顺序）

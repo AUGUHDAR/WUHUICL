@@ -5442,6 +5442,7 @@ name = "wuhuicl"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "bytes",
  "chrono",
  "dirs 6.0.0",
  "flate2",

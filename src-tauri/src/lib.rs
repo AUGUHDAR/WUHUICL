@@ -77,6 +77,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![ipc::ipc_invoke, ipc::ipc_send])
         .register_uri_scheme_protocol("kamucl-asset", assetproto::handle)
         .setup(|app| {
+            // PCL 式目录：exe 旁 .minecraft\versions 与 WUHUICL\，并把旧 %APPDATA% 数据一次性搬来
+            crate::settings::ensure_exe_side_dirs(app.handle());
             crate::vlcli::session::bind(app.handle());
             crate::setup_windows(app.handle())?;
             Ok(())

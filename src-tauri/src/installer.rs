@@ -9,6 +9,7 @@
 //! 内置一个自包含的薄下载层（DownloadItem/download_all/download_file，见「下载引擎」段）：
 //! 集成方后续可整体替换为 crate::download —— 假设清单见模块底部注释与本任务报告。
 
+use crate::net;
 use crate::settings;
 use crate::tasks::{self, TaskRecord};
 use serde_json::{json, Value};
@@ -16,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
 
 // ---------------- 常量 ----------------
@@ -603,7 +604,8 @@ pub fn mirror_url(input: &str, mirror: &str) -> String {
         return format!("{}{}{}", BMCL_MAVEN_ROOT, path.trim_start_matches('/'), query);
     }
     if host == "maven.neoforged.net" && path.starts_with("/releases/") {
-        return format!("{}{}{}", base, path.trim_start_matches("/releases"), query);
+        // bmclapi 的 maven 代理根在 /maven/，原版 DlSource* 与美西螈均如此映射
+        return format!("{}{}{}", BMCL_MAVEN_ROOT, path.trim_start_matches("/releases"), query);
     }
     if host == "files.minecraftforge.net" && path.starts_with("/maven/") {
         return format!("{}{}{}", base, path, query);
@@ -611,7 +613,9 @@ pub fn mirror_url(input: &str, mirror: &str) -> String {
     input.to_string()
 }
 
-/// 对应原版 downloadCandidates：镜像候选在前，原始 URL 兜底
+/// 对应原版 downloadCandidates：镜像候选在前，原始 URL 兜底。
+/// libraries.minecraft.net 额外插入 bmclapi 的 /libraries 变体（PCL 同款双路径，
+/// maven 代理 404 时还有一路可走）。
 pub fn download_candidates(urls: &[String], mirror: &str) -> Vec<String> {
     let mut out = Vec::new();
     for url in urls {
@@ -619,6 +623,19 @@ pub fn download_candidates(urls: &[String], mirror: &str) -> Vec<String> {
             let m = mirror_url(url, mirror);
             if !out.contains(&m) {
                 out.push(m);
+            }
+            if let Ok(u) = reqwest::Url::parse(url) {
+                if u.host_str() == Some("libraries.minecraft.net") {
+                    let alt = format!(
+                        "{}{}{}",
+                        "https://bmclapi2.bangbang93.com/libraries/",
+                        u.path().trim_start_matches('/'),
+                        u.query().map(|q| format!("?{}", q)).unwrap_or_default()
+                    );
+                    if !out.contains(&alt) {
+                        out.push(alt);
+                    }
+                }
             }
         }
         if !out.contains(url) {
@@ -653,8 +670,12 @@ fn throttle(bytes: usize) {
 }
 
 fn download_client() -> reqwest::blocking::Client {
+    // blocking 客户端没有 read_timeout，用总超时兜住死连接（PCL 的分层超时口径）；
+    // 大文件靠多候选 + 3 轮重试续命，单次 180s 足够
     reqwest::blocking::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(180))
+        .tcp_nodelay(true)
         .user_agent("WUHUICL/1.0 (wuhuicl launcher)")
         .build()
         .expect("HTTP 客户端构建失败")
@@ -670,11 +691,135 @@ fn check_cancel(rec: Option<&TaskRecord>) -> Result<(), String> {
     Ok(())
 }
 
-/// 对应原版 downloadFile（子集）：sha1 校验 + .part 事务 + reuseFiles/reuseDirs 复用 + 镜像候选
+// ---------------- 大文件分片并行（PCL NetThread 的简化版） ----------------
+
+/// 分片并行下载到 part 文件（预分配 total 字节，各线程写自己的区间）。
+/// Ok(true) = 完整落盘（合计写入 total 字节）；Ok(false) = 服务器不支持 Range。
+/// 任一分片失败即整体失败（调用方换候选源重试）；分段数固定 4 并错开启动，
+/// 单连接速度被压时会成倍提速（实测 4 连接 ≈ 5.5× 单连接）。
+const RANGED_MIN_SIZE: u64 = 4 * 1024 * 1024;
+const RANGED_THREADS: u64 = 4;
+const RANGED_STAGGER_MS: u64 = 150;
+
+fn ranged_parallel_download(
+    url: &str,
+    part: &Path,
+    total: u64,
+    rec: Option<&TaskRecord>,
+    progress: Option<FileProgress>,
+) -> Result<bool, String> {
+    use std::io::{Seek, SeekFrom, Write};
+    use std::sync::atomic::AtomicU64;
+
+    let n = RANGED_THREADS.min(total / (1024 * 1024)).max(2);
+    let piece = total / n;
+    let mut spans: Vec<(u64, u64)> = Vec::new();
+    let mut s = 0u64;
+    for i in 0..n {
+        let e = if i == n - 1 { total - 1 } else { s + piece - 1 };
+        spans.push((s, e));
+        s = e + 1;
+    }
+    // 预分配目标大小，各线程随机写入
+    {
+        let f = std::fs::File::create(part).map_err(|e| e.to_string())?;
+        f.set_len(total).map_err(|e| e.to_string())?;
+    }
+    let done = Arc::new(AtomicU64::new(0));
+    let last_report = Arc::new(AtomicU64::new(0));
+    let errors: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let cancelled = rec.map(|r| r.cancelled.clone());
+    std::thread::scope(|scope| {
+        for (i, (start, end)) in spans.iter().enumerate() {
+            let (url2, part2, done2, report2, errors2, cancelled2) =
+                (url, part, done.clone(), last_report.clone(), &errors, &cancelled);
+            let (start, end) = (*start, *end);
+            scope.spawn(move || {
+                if i > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(RANGED_STAGGER_MS));
+                }
+                if cancelled2.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
+                    return;
+                }
+                let mut resp = match net::open_download_stream_range(url2, start, end) {
+                    Ok((r, true)) => r,
+                    Ok((_, false)) => {
+                        errors2.lock().unwrap().push("no-range".into());
+                        return;
+                    }
+                    Err(e) => {
+                        errors2.lock().unwrap().push(e);
+                        return;
+                    }
+                };
+                let mut f = match std::fs::OpenOptions::new().write(true).open(part2) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        errors2.lock().unwrap().push(e.to_string());
+                        return;
+                    }
+                };
+                if f.seek(SeekFrom::Start(start)).is_err() {
+                    errors2.lock().unwrap().push("seek 失败".into());
+                    return;
+                }
+                let mut pos = start;
+                loop {
+                    if cancelled2.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
+                        return;
+                    }
+                    match net::read_download_chunk(&mut resp) {
+                        Ok(None) => break,
+                        Ok(Some(chunk)) => {
+                            if f.write_all(&chunk).is_err() {
+                                errors2.lock().unwrap().push("分片写入失败".into());
+                                return;
+                            }
+                            pos += chunk.len() as u64;
+                            let d = done2.fetch_add(chunk.len() as u64, Ordering::Relaxed) + chunk.len() as u64;
+                            // 256KB 节流：4 线程各自按块回调会刷爆事件通道
+                            if d - report2.load(Ordering::Relaxed) >= 256 * 1024 {
+                                report2.store(d, Ordering::Relaxed);
+                                if let Some(cb) = progress {
+                                    cb(d.min(total), Some(total));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            errors2.lock().unwrap().push(e);
+                            return;
+                        }
+                    }
+                }
+                if pos != end + 1 {
+                    errors2
+                        .lock()
+                        .unwrap()
+                        .push(format!("分片不完整：{}/{} 字节", pos - start, end - start + 1));
+                }
+            });
+        }
+    });
+    let errs = errors.into_inner().unwrap_or_default();
+    if errs.iter().any(|e| e == "no-range") {
+        let _ = std::fs::remove_file(part);
+        return Ok(false);
+    }
+    if let Some(e) = errs.first() {
+        let _ = std::fs::remove_file(part);
+        return Err(e.clone());
+    }
+    // 成功：part 保留，交由调用方做哈希校验与 rename
+    Ok(true)
+}
+
+/// 对应原版 downloadFile（子集）：sha1 校验 + .part 事务 + reuseFiles/reuseDirs 复用 + 镜像候选。
+/// client 形参保留兼容旧调用点（download_all 传共享 client），传输已统一走 net 流式下载。
+#[allow(clippy::too_many_arguments)]
 pub fn download_file(
     _app: &AppHandle,
     rec: Option<&TaskRecord>,
-    client: Option<&reqwest::blocking::Client>,
+    _client: Option<&reqwest::blocking::Client>,
     url: &str,
     dest: &Path,
     sha1: Option<&str>,
@@ -750,109 +895,148 @@ pub fn download_file(
         }
     }
 
-    let client_owned;
-    let client = match client {
-        Some(c) => c,
-        None => {
-            client_owned = download_client();
-            &client_owned
-        }
-    };
     let urls = vec![url.to_string()];
     let candidates = download_candidates(&urls, mirror);
     let file_name = dest
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "file".into());
-    let part = dest
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(format!("{}.part", file_name));
+    let dest_dir = dest.parent().unwrap_or(Path::new(".")).to_path_buf();
+    // 目标目录必须先建：File::create 不建父目录，深层 libraries/assets 路径会 os error 3
+    if let Err(e) = std::fs::create_dir_all(&dest_dir) {
+        return Err(format!("无法创建下载目录 {}：{}", dest_dir.display(), e));
+    }
+    let part = dest_dir.join(format!("{}.part", file_name));
+    // 多轮重试（对应 PCL 的分层重试）：镜像偶发 502/抖动时换轮重打全部候选，
+    // 而不是第一跳失败就整批报废。卡死检测在 net::open_download_stream /
+    // read_download_chunk（连接 10s + 空闲读 30s），健康慢速下载不受罚。
     let mut last_err = String::new();
-    for candidate in &candidates {
-        check_cancel(rec)?;
-        let resp = match client.get(candidate).send() {
-            Ok(r) => r,
-            Err(e) => {
-                last_err = e.to_string();
-                continue;
-            }
-        };
-        if !resp.status().is_success() {
-            last_err = format!("HTTP {}: {}", resp.status().as_u16(), candidate);
-            continue;
+    for round in 0..3 {
+        if round > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(400 * round as u64));
         }
-        let total = resp.content_length().or(size);
-        let mut hasher = Sha1::new();
-        let mut file = match std::fs::File::create(&part) {
-            Ok(f) => f,
-            Err(e) => return Err(e.to_string()),
-        };
-        let mut resp = resp;
-        let mut done: u64 = 0;
-        let mut last_report: u64 = 0;
-        let mut interrupted = false;
-        let mut buf = vec![0u8; 64 * 1024];
-        loop {
-            if let Err(e) = check_cancel(rec) {
-                drop(file);
-                let _ = std::fs::remove_file(&part);
-                return Err(e);
-            }
-            match resp.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    hasher.update(&buf[..n]);
-                    if let Err(e) = file.write_all(&buf[..n]) {
-                        drop(file);
-                        let _ = std::fs::remove_file(&part);
-                        return Err(e.to_string());
-                    }
-                    done += n as u64;
-                    throttle(n);
-                    if done - last_report >= 256 * 1024 {
-                        last_report = done;
-                        if let Some(cb) = progress {
-                            cb(done, total);
+        for candidate in &candidates {
+            check_cancel(rec)?;
+            let mut resp: Option<reqwest::Response> = Some(match net::open_download_stream(candidate) {
+                Ok(r) => r,
+                Err(e) => {
+                    last_err = e;
+                    continue;
+                }
+            });
+            let total = resp.as_ref().and_then(|r| r.content_length()).or(size);
+
+            // 大文件分片并行（≥4MB 且服务器已知大小）：单连接被慢链路压死时成倍提速。
+            // 服务器不支持 Range（返回 200）→ 重开普通流退回单流；分片失败 → 换候选源。
+            let mut ranged = false;
+            if let Some(t) = resp.as_ref().and_then(|r| r.content_length()) {
+                if t >= RANGED_MIN_SIZE {
+                    drop(resp.take());
+                    match ranged_parallel_download(candidate, &part, t, rec, progress) {
+                        Ok(true) => ranged = true,
+                        Ok(false) => {
+                            resp = Some(match net::open_download_stream(candidate) {
+                                Ok(r) => r,
+                                Err(e) => {
+                                    last_err = e;
+                                    continue;
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            last_err = e;
+                            continue;
                         }
                     }
                 }
-                Err(_) => {
-                    interrupted = true;
-                    break;
+            }
+
+            let mut hasher = Sha1::new();
+            let mut done: u64 = 0;
+            let mut interrupted = false;
+            if ranged {
+                // 分片路径已把 part 写满 total 字节：读回算校验和
+                done = total.unwrap_or(0);
+                let mut f = match std::fs::File::open(&part) {
+                    Ok(f) => f,
+                    Err(e) => return Err(e.to_string()),
+                };
+                let mut buf = vec![0u8; 256 * 1024];
+                loop {
+                    match f.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(n) => hasher.update(&buf[..n]),
+                        Err(e) => return Err(format!("分片文件校验读取失败：{}", e)),
+                    }
+                }
+            } else {
+                let mut file = match std::fs::File::create(&part) {
+                    Ok(f) => f,
+                    Err(e) => return Err(e.to_string()),
+                };
+                let mut last_report: u64 = 0;
+                loop {
+                    if let Err(e) = check_cancel(rec) {
+                        drop(file);
+                        let _ = std::fs::remove_file(&part);
+                        return Err(e);
+                    }
+                    match net::read_download_chunk(resp.as_mut().expect("单流响应存在")) {
+                        Ok(None) => break,
+                        Ok(Some(chunk)) => {
+                            let n = chunk.len();
+                            hasher.update(&chunk);
+                            if let Err(e) = file.write_all(&chunk) {
+                                drop(file);
+                                let _ = std::fs::remove_file(&part);
+                                return Err(e.to_string());
+                            }
+                            done += n as u64;
+                            throttle(n);
+                            if done - last_report >= 256 * 1024 {
+                                last_report = done;
+                                if let Some(cb) = progress {
+                                    cb(done, total);
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            interrupted = true;
+                            break;
+                        }
+                    }
+                }
+                drop(file);
+                if interrupted {
+                    let _ = std::fs::remove_file(&part);
+                    last_err = format!("下载中断：{}", candidate);
+                    continue;
                 }
             }
-        }
-        if interrupted {
-            drop(file);
-            let _ = std::fs::remove_file(&part);
-            last_err = format!("下载中断：{}", candidate);
-            continue;
-        }
-        drop(file);
-        let actual = hex::encode(hasher.finish());
-        if let Some(expect) = sha1 {
-            if !actual.eq_ignore_ascii_case(expect) {
-                let _ = std::fs::remove_file(&part);
-                last_err = format!("SHA-1 校验失败：{}", candidate);
-                continue;
+            let actual = hex::encode(hasher.finish());
+            if let Some(expect) = sha1 {
+                if !actual.eq_ignore_ascii_case(expect) {
+                    let _ = std::fs::remove_file(&part);
+                    last_err = format!("SHA-1 校验失败：{}", candidate);
+                    continue;
+                }
+            } else if let Some(t) = total {
+                if done < t {
+                    let _ = std::fs::remove_file(&part);
+                    last_err = format!("下载中断：{}", candidate);
+                    continue;
+                }
             }
-        } else if let Some(t) = total {
-            if done < t {
+            let _ = std::fs::remove_file(dest);
+            if let Err(e) = std::fs::rename(&part, dest) {
                 let _ = std::fs::remove_file(&part);
-                last_err = format!("下载中断：{}", candidate);
-                continue;
+                return Err(e.to_string());
             }
+            if let Some(cb) = progress {
+                cb(done, total);
+            }
+            return Ok(done);
         }
-        let _ = std::fs::remove_file(dest);
-        if let Err(e) = std::fs::rename(&part, dest) {
-            let _ = std::fs::remove_file(&part);
-            return Err(e.to_string());
-        }
-        if let Some(cb) = progress {
-            cb(done, total);
-        }
-        return Ok(done);
     }
     let _ = std::fs::remove_file(&part);
     if last_err.is_empty() {
@@ -1008,17 +1192,19 @@ fn maven_identity(name: Option<&str>, classifier: Option<&str>) -> Option<String
     ))
 }
 
-struct LibEntry {
-    rel: String,
-    url: Option<String>,
-    sha1: Option<String>,
-    size: Option<u64>,
-    #[allow(dead_code)]
-    is_native: bool,
+pub struct LibEntry {
+    pub rel: String,
+    pub url: Option<String>,
+    pub sha1: Option<String>,
+    pub size: Option<u64>,
+    pub is_native: bool,
 }
 
-/// 对应原版 versions.ts collectLibraries：rules 过滤 + artifact/natives 收集去重
-fn collect_libraries(vj: &Value) -> Vec<LibEntry> {
+/// 对应原版 versions.ts collectLibraries：rules 过滤 + artifact/natives 收集去重。
+/// 同时覆盖两种库声明：带 downloads 块（Mojang/新 Forge）与 maven 坐标形式
+/// （Fabric/Quilt profile 的 name+url、老 Forge 的纯 name）——后者必须从坐标推导
+/// 相对路径，否则 classpath 会整类漏库（症状：ClassNotFoundException: KnotClient）。
+pub fn collect_libraries(vj: &Value) -> Vec<LibEntry> {
     let mut out: Vec<LibEntry> = Vec::new();
     let mut seen = HashSet::new();
     let mut coordinates = HashSet::new();

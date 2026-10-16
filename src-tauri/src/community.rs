@@ -3138,6 +3138,93 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             community_files(app, &source, &project_id, Some(&filter)).map(|list| json!(list))
         })),
         "community:download" => Some(community_download_ipc(app, args)),
+        "community:mcmod" => Some(installer::run_blocking(|| mcmod_lookup(args.first().unwrap_or(&Value::Null)))),
         _ => None,
     }
+}
+
+// ---------------- MC 百科（mcmod.cn）精确检索（对应 PCL 的 WikiEntries 用途） ----------------
+
+/// community:mcmod：{keyword} → { hits: [{wikiId, title, zh, en, url}] }。
+/// PCL/美西螈用编译进二进制的离线库做 slug→WikiId 映射；我们实时查百科搜索页
+/// （页面结构稳定：`<a target="_blank" href="https://www.mcmod.cn/class/{id}.html">中文名 (English)</a>`），
+/// 命中后前端可直接跳转精确的 class 页并显示中文译名，无需人工搜索。
+fn mcmod_lookup(args: &Value) -> Result<Value, String> {
+    let keyword = args
+        .get("keyword")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
+    if keyword.is_empty() {
+        return Ok(json!({ "hits": [] }));
+    }
+    let url = format!("https://search.mcmod.cn/s?key={}&site=all&filter=0", enc(&keyword));
+    // 百科对非浏览器 UA 返回无结果的壳页，必须带浏览器 UA
+    const UA_BROWSER: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)";
+    let text = net::client()
+        .get(&url)
+        .header("User-Agent", UA_BROWSER)
+        .timeout(Duration::from_millis(12_000))
+        .send()
+        .map_err(|e| e.to_string())?
+        .text()
+        .map_err(|e| e.to_string())?;
+    // 标题锚点里常嵌 <i>/<b> 等标签，非贪婪捕到 </a> 再剥标签
+    let re = regex::Regex::new(r#"(?s)href="(?:https?://www\.mcmod\.cn)?/class/(\d+)\.html"[^>]*>(.*?)</a>"#)
+        .map_err(|e| e.to_string())?;
+    let tag_re = regex::Regex::new(r"<[^>]+>").ok();
+    let split_re = regex::Regex::new(r"^(.*?)\s*[（(]([^（）()]*)[)）]\s*$").ok();
+    let mut hits: Vec<Value> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for cap in re.captures_iter(&text) {
+        let wiki_id = cap.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+        let raw = cap
+            .get(2)
+            .map(|m| {
+                let t = m.as_str();
+                match tag_re.as_ref() {
+                    Some(r) => r.replace_all(t, "").to_string(),
+                    None => t.to_string(),
+                }
+            })
+            .map(|t| {
+                t.replace("&nbsp;", " ")
+                    .replace("&amp;", "&")
+                    .trim()
+                    .to_string()
+            })
+            .unwrap_or_default();
+        if wiki_id.is_empty() || raw.is_empty() {
+            continue;
+        }
+        // 先跳过“引用型”锚点（锚文本是链接本身）再去重，避免它们抢掉标题锚点的位置
+        if raw.contains("/class/") || raw.starts_with("www.") || raw.starts_with("http") {
+            continue;
+        }
+        if !seen.insert(wiki_id.clone()) {
+            continue;
+        }
+        let (zh, en) = split_re
+            .as_ref()
+            .and_then(|r| r.captures(&raw))
+            .map(|c| {
+                (
+                    c.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or(raw.clone()),
+                    c.get(2).map(|m| m.as_str().trim().to_string()).unwrap_or_default(),
+                )
+            })
+            .unwrap_or_else(|| (raw.clone(), String::new()));
+        hits.push(json!({
+            "wikiId": wiki_id,
+            "title": raw,
+            "zh": zh,
+            "en": en,
+            "url": format!("https://www.mcmod.cn/class/{}.html", wiki_id)
+        }));
+        if hits.len() >= 8 {
+            break;
+        }
+    }
+    Ok(json!({ "hits": hits, "keyword": keyword }))
 }

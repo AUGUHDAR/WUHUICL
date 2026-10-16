@@ -1285,49 +1285,21 @@ fn java_compatibility_error(info: &Value, need: i64, maximum: Option<i64>, arch:
 
 // ---------------- classpath / natives ----------------
 
-/// 对应 versions.ts resolvedLibraries：rules 过滤 + artifact/natives 分离
+/// 对应 versions.ts resolvedLibraries：复用 collect_libraries 的统一收集
+/// （downloads 块与 maven 坐标两种声明都要收，Fabric 库没有 downloads 块，
+///  漏收会导致 ClassNotFoundException: KnotClient → 游戏秒退）。
+/// 去重已由 collect_libraries 完成（坐标 + 相对路径），此处按落盘路径再兜一层。
 fn resolved_libraries(app: &AppHandle, merged: &Value) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let mut artifacts: Vec<PathBuf> = Vec::new();
     let mut natives: Vec<PathBuf> = Vec::new();
-    let mut seen: Vec<String> = Vec::new();
-    let mut push = |rel: &str, is_native: bool| {
-        let dest = installer::library_path(app, rel);
+    for entry in installer::collect_libraries(merged) {
+        let dest = installer::library_path(app, &entry.rel);
         let key = dest.to_string_lossy().to_lowercase();
-        if seen.contains(&key) {
-            return;
-        }
-        seen.push(key);
-        if is_native {
-            natives.push(dest);
-        } else {
-            artifacts.push(dest);
-        }
-    };
-    let empty = Vec::new();
-    let libs = merged.get("libraries").and_then(|l| l.as_array()).unwrap_or(&empty);
-    for lib in libs {
-        if !installer::rules_allow(lib.get("rules")) {
+        let seen = if entry.is_native { &mut natives } else { &mut artifacts };
+        if seen.iter().any(|p: &PathBuf| p.to_string_lossy().to_lowercase() == key) {
             continue;
         }
-        let downloads = lib.get("downloads");
-        if let Some(rel) = downloads
-            .and_then(|d| d.get("artifact"))
-            .and_then(|a| a.get("path"))
-            .and_then(|v| v.as_str())
-        {
-            push(rel, false);
-        }
-        if let Some(key) = lib.get("natives").and_then(|n| n.get("windows")).and_then(|v| v.as_str()) {
-            let key = key.replace("${arch}", "64");
-            if let Some(rel) = downloads
-                .and_then(|d| d.get("classifiers"))
-                .and_then(|c| c.get(key.as_str()))
-                .and_then(|a| a.get("path"))
-                .and_then(|v| v.as_str())
-            {
-                push(rel, true);
-            }
-        }
+        seen.push(dest);
     }
     (artifacts, natives)
 }

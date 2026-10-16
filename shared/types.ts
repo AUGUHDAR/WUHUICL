@@ -919,6 +919,7 @@ export const IPC = {
     communityProject: 'community:project', // (source, projectId, kind: 'mod') => CommunityModProject  校验来源与项目类型
     communityFiles: 'community:files', // (source: 'modrinth'|'curseforge', projectId: string) => CommunityFile[]
     communityDownload: 'community:download', // (file: CommunityFile, target: { versionId: string; kind: CommunityKind }) => string  同步下载完成返回保存路径；kind=modpack 时下载后自动进入整合包安装流程
+    communityMcmod: 'community:mcmod', // ({ keyword: string }) => { hits: { wikiId: string; title: string; zh: string; en: string; url: string }[]; keyword: string }  MC 百科精确检索
 
     tasksCancel: 'tasks:cancel', // (taskId: string) => Promise<boolean>  底层退出并清理完成后才返回
     tasksPause: 'tasks:pause', // (taskId: string) => boolean

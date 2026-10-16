@@ -264,6 +264,80 @@ pub fn get_text(url: &str, timeout_ms: u64) -> Result<String, String> {
     resp.text().map_err(|e| e.to_string())
 }
 
+// ---------------- 流式下载（PCL/美西螈的卡死检测口径） ----------------
+//
+// blocking 客户端只有整请求超时，会误杀"慢但在动"的大文件；这里用独立 tokio
+// runtime 跑 async 客户端（read_timeout = 两块之间的空闲超时）：
+// 连接 10s 兜底、正文 30s 无任何新字节判卡死，健康慢速下载不受罚。
+
+static DOWNLOAD_RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+static ASYNC_DOWNLOAD_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn download_runtime() -> &'static tokio::runtime::Runtime {
+    DOWNLOAD_RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("下载 runtime 初始化失败")
+    })
+}
+
+fn async_download_client() -> &'static reqwest::Client {
+    ASYNC_DOWNLOAD_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent("WUHUICL/1.0 (wuhuicl launcher)")
+            .no_proxy()
+            .connect_timeout(Duration::from_secs(10))
+            .read_timeout(Duration::from_secs(30))
+            .tcp_nodelay(true)
+            .pool_idle_timeout(Duration::from_secs(10))
+            .pool_max_idle_per_host(32)
+            .build()
+            .expect("异步下载客户端初始化失败")
+    })
+}
+
+/// 打开下载流。非 2xx 返回 Err（错误文案含状态码与 URL，与旧路径一致）。
+pub fn open_download_stream(url: &str) -> Result<reqwest::Response, String> {
+    download_runtime().block_on(async {
+        let resp = async_download_client().get(url).send().await.map_err(|e| e.to_string())?;
+        let status = resp.status().as_u16();
+        if !(200..300).contains(&status) {
+            return Err(format!("HTTP {status}: {url}"));
+        }
+        Ok(resp)
+    })
+}
+
+/// 打开 Range 下载流（bytes={start}-{end}）。Ok((resp, true)) = 206 分片流；
+/// Ok((resp, false)) = 服务器忽略 Range 返回 200 全量（调用方应退回单流）。
+pub fn open_download_stream_range(
+    url: &str,
+    start: u64,
+    end: u64,
+) -> Result<(reqwest::Response, bool), String> {
+    download_runtime().block_on(async {
+        let resp = async_download_client()
+            .get(url)
+            .header("Range", format!("bytes={}-{}", start, end))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let status = resp.status().as_u16();
+        match status {
+            206 => Ok((resp, true)),
+            200 => Ok((resp, false)),
+            _ => Err(format!("HTTP {status}: {url}")),
+        }
+    })
+}
+
+/// 读下一块（None = EOF）。空闲超过 read_timeout 时返回 Err → 调用方换源/换轮重试。
+pub fn read_download_chunk(resp: &mut reqwest::Response) -> Result<Option<bytes::Bytes>, String> {
+    download_runtime().block_on(async { resp.chunk().await.map_err(|e| e.to_string()) })
+}
+
 // ---------------- SHA-1（等价实现 crypto.createHash('sha1')，FIPS 180-1） ----------------
 
 /// 依赖清单没有 sha1 crate；按移植规约「缺能力等价实现」。实现已用

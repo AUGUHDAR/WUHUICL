@@ -244,6 +244,12 @@ export const importWorld = (inputPath: string, options: WorldImportOptions) =>
 /** 搜索 Modrinth / CurseForge 社区资源 */
 export const communitySearch = (q: CommunityQuery) =>
     invoke<CommunitySearchPage>(IPC.communitySearch, q);
+/** MC 百科精确检索：英文名/slug → 百科 class 页与中文译名（PCL 的 WikiEntries 用途的实时版） */
+export const communityMcmod = (keyword: string) =>
+    invoke<{
+        hits: { wikiId: string; title: string; zh: string; en: string; url: string }[];
+        keyword: string;
+    }>(IPC.communityMcmod, { keyword });
 /** Read verified MOD metadata independently of downloadable file versions. */
 export const communityProject = (source: CommunitySource, projectId: string) =>
     invoke<CommunityModProject>(IPC.communityProject, source, projectId, 'mod');
