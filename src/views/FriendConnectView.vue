@@ -4,8 +4,8 @@ import ConnectionStatus from '../components/connection/ConnectionStatus.vue';
 import '../components/connection/connection.css';
 
 const FrpPanel = defineAsyncComponent(() => import('../components/connection/FrpPanel.vue'));
-const VoxLinkPanel = defineAsyncComponent(
-    () => import('../components/connection/VoxLinkPanel.vue')
+const VlConsole = defineAsyncComponent(
+    () => import('../components/connection/voxlink/VlConsole.vue')
 );
 const TerracottaPanel = defineAsyncComponent(
     () => import('../components/connection/TerracottaPanel.vue')
@@ -152,7 +152,7 @@ function pick(key: ConnectPage) {
                             </header>
 
                             <FrpPanel v-if="page === 'frp'" />
-                            <VoxLinkPanel v-else-if="page === 'voxlink'" />
+                            <VlConsole v-else-if="page === 'voxlink'" />
                             <TerracottaPanel v-else-if="page === 'terracotta'" />
                         </div>
                     </template>

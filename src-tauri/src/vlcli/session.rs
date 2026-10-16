@@ -100,7 +100,9 @@ pub fn start(bin: &Path, command: &str, payload: &str) -> Result<Value, String> 
         return Err("联机组件尚未就绪".into());
     }
     let mut cmd = Command::new(bin);
-    cmd.args([command, "--json", payload, "--events", "ndjson", "--timeout", "0"])
+    let mut argv: Vec<String> = command.split_whitespace().map(str::to_string).collect();
+    argv.extend(["--json".into(), payload.into(), "--events".into(), "ndjson".into(), "--timeout".into(), "0".into()]);
+    cmd.args(&argv)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());

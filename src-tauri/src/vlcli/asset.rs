@@ -98,6 +98,11 @@ pub fn ensure(app: &tauri::AppHandle, force: bool) -> Value {
     let target = binary_path(app);
     let meta = read_meta(app);
     let cached_version = meta["version"].as_str().unwrap_or("").to_string();
+    // 24 小时内不重复问版本，玩家不该每次进联机都等一趟网络
+    let fresh = meta["checkedAt"].as_u64().unwrap_or(0) + 86_400_000 > crate::download::now_ms();
+    if !force && fresh && target.is_file() && !cached_version.is_empty() {
+        return json!({ "ok": true, "version": cached_version, "cached": true, "path": target.to_string_lossy() });
+    }
 
     let (tag, sha) = match resolve_latest() {
         Ok(v) => v,
@@ -111,8 +116,12 @@ pub fn ensure(app: &tauri::AppHandle, force: bool) -> Value {
     };
     if !force && cached_version == tag && target.is_file() {
         match sha256_of(&target) {
-            Ok(actual) if actual == sha => return json!({ "ok": true, "version": tag, "cached": true,
-                "path": target.to_string_lossy() }),
+            Ok(actual) if actual == sha => {
+                write_meta(app, &json!({ "version": tag, "sha256": sha,
+                    "updatedAt": meta["updatedAt"].clone(), "checkedAt": crate::download::now_ms(),
+                    "bytes": meta["bytes"].clone() }));
+                return json!({ "ok": true, "version": tag, "cached": true, "path": target.to_string_lossy() });
+            }
             Ok(_) => {
                 let _ = fs::remove_file(&target);
             }
@@ -125,6 +134,7 @@ pub fn ensure(app: &tauri::AppHandle, force: bool) -> Value {
     match fetch(&urls, &target, &sha, app) {
         Ok(bytes) => {
             write_meta(app, &json!({ "version": tag, "sha256": sha, "updatedAt": crate::download::now_ms(),
+                "checkedAt": crate::download::now_ms(),
                 "bytes": bytes }));
             emit_progress(app, "ready", bytes, Some(bytes), "联机组件就绪");
             json!({ "ok": true, "version": tag, "path": target.to_string_lossy(), "downloaded": true })

@@ -17,10 +17,11 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
     }
     let first = args.first().cloned().unwrap_or(Value::Null);
     let result = match channel {
-        "vlcli:ensure" => Ok(asset::ensure(app, first["force"].as_bool().unwrap_or(false))),
-        "vlcli:status" => Ok(json!({ "ok": true, "alive": session::alive(), "snapshot": session::snapshot() })),
-        "vlcli:stop" => Ok(session::stop()),
-        "vlcli:capabilities" => Ok(capabilities(app)),
+        "vlcli:ensure" => wrap(asset::ensure(app, first["force"].as_bool().unwrap_or(false))),
+        "vlcli:status" => Ok(json!({ "ok": true, "data": {
+            "alive": session::alive(), "snapshot": session::snapshot() } })),
+        "vlcli:stop" => wrap(session::stop()),
+        "vlcli:capabilities" => wrap(capabilities(app)),
         "vlcli:lobby" => one_shot(app, "lobby list", &pick(&first, &[("page", "page"), ("size", "size"),
             ("category", "category"), ("loader", "loader"), ("search", "search")]), ONE_SHOT),
         "vlcli:roomInfo" => one_shot(app, "room info", &pick(&first, &[("code", "code")]), ONE_SHOT),
@@ -41,6 +42,16 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         _ => Ok(json!({ "ok": false, "code": "UNKNOWN_CHANNEL", "message": "未知的联机通道" })),
     };
     Some(result)
+}
+
+/// 子系统自建的返回值统一套一层 data，跟组件返回的信封同构。
+fn wrap(v: Value) -> Result<Value, String> {
+    let ok = v["ok"].as_bool().unwrap_or(true);
+    let mut data = v.clone();
+    if let Some(obj) = data.as_object_mut() {
+        obj.remove("ok");
+    }
+    Ok(json!({ "ok": ok, "data": data }))
 }
 
 fn binary(app: &tauri::AppHandle) -> PathBuf {
@@ -65,7 +76,8 @@ fn envelope(v: Result<Value, cmd::Failure>) -> Value {
 }
 
 fn one_shot(app: &tauri::AppHandle, command: &str, payload: &str, timeout: Duration) -> Result<Value, String> {
-    let mut args: Vec<String> = vec![command.into()];
+    // 组件按 "域 动作" 两个参数解析，合成一个 token 会被判成未知命令
+    let mut args: Vec<String> = command.split_whitespace().map(str::to_string).collect();
     if payload != "{}" {
         args.push("--json".into());
         args.push(payload.into());
