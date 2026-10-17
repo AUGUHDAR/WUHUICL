@@ -253,9 +253,7 @@ test('formatting exemptions remain active and are documented for removal', async
 });
 
 test('documented quality command matches its actual scope', () => {
-    const packageJson = JSON.parse(
-        readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8')
-    );
+    const packageJson = JSON.parse(readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'));
     const quality = packageJson.scripts.quality;
     const readme = readFileSync(path.join(repositoryRoot, 'README.md'), 'utf8');
 
@@ -263,5 +261,49 @@ test('documented quality command matches its actual scope', () => {
     assert.match(quality, /npm run test:unit/);
     assert.match(quality, /npm run check:architecture/);
     assert.match(quality, /npm run format:check/);
-    assert.doesNotMatch(readme, /`npm run quality` runs typechecking, frontend unit tests, the architecture checker, and formatting\./);
+    assert.doesNotMatch(
+        readme,
+        /`npm run quality` runs typechecking, frontend unit tests, the architecture checker, and formatting\./
+    );
+});
+
+test('overlay base classes stay with their scoped DOM owner', () => {
+    const overlays = readFileSync(
+        path.join(repositoryRoot, 'src', 'app', 'overlays', 'AppOverlays.vue'),
+        'utf8'
+    );
+    const shell = readFileSync(
+        path.join(repositoryRoot, 'src', 'app', 'shell', 'AppShell.vue'),
+        'utf8'
+    );
+    const requiredOverlayClasses = [
+        'notice-mask',
+        'notice-panel',
+        'notice-head',
+        'notice-title',
+        'notice-empty',
+        'notice-list',
+        'notice-item',
+        'notice-dot',
+        'notice-body',
+        'notice-text',
+        'notice-time'
+    ];
+
+    for (const className of requiredOverlayClasses) {
+        assert.match(overlays, new RegExp(`\\.${className}\\s*\\{`));
+        assert.doesNotMatch(shell, new RegExp(`\\.${className}\\s*\\{`));
+    }
+});
+
+test('community MOD targets retain file-instance compatibility filtering', () => {
+    const source = readFileSync(
+        path.join(repositoryRoot, 'src', 'features', 'community', 'ui', 'CommunityView.vue'),
+        'utf8'
+    );
+
+    assert.match(
+        source,
+        /modal\.kind !== 'mod'[\s\S]{0,180}communityFileMatchesInstance\(selectedFile\.value,\s*v\)/
+    );
 });

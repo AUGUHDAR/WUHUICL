@@ -67,6 +67,16 @@
   installed Windows SDK contains the newer downlevel copy. A clean D-drive target rebuild
   reproduces the host failure, so it is not a stale project artifact. No system files were
   modified.
+- Final review follow-up: overlay base CSS was moved to `src/app/overlays/AppOverlays.vue`
+  because the DOM and scoped style owner had diverged; Community MOD target filtering was
+  restored; the architecture checker now rejects assertion-wrapped IPC access and stale
+  `legacyWindowKamuclAccesses` line entries. Regression coverage raised the frontend test
+  suite to 20 passing tests.
+- Final verification: TypeScript, Prettier, ESLint (0 errors; 106 legacy warnings), strict
+  architecture check, and Vite build pass on the review-fix tree. Rust 1.99.1 `cargo check
+  --lib` and `cargo fmt --all -- --check` pass in the Visual Studio 2026 developer
+  environment. `cargo test --lib` still links the test binary and then fails before the
+  harness with host `0xc0000139`.
 
 ## Rulings
 

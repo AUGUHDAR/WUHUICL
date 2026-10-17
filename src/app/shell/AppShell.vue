@@ -1023,67 +1023,6 @@ const {
     font-size: var(--text-xs);
 }
 
-/* 通知中心面板（Teleport 到 body，fixed 定位） */
-.notice-mask {
-    position: fixed;
-    inset: 0;
-    z-index: 9000;
-}
-
-.notes-panel {
-    width: 380px;
-    max-height: 480px;
-}
-
-.notice-panel {
-    position: fixed;
-    top: 82px;
-    right: 92px;
-    width: 320px;
-    max-height: 420px;
-    z-index: 9001;
-    display: flex;
-    flex-direction: column;
-    background: color-mix(in srgb, var(--card-solid, var(--card)) 94%, transparent);
-    backdrop-filter: blur(24px) saturate(130%);
-    -webkit-backdrop-filter: blur(24px) saturate(130%);
-    -webkit-app-region: no-drag;
-    isolation: isolate;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-lg);
-    overflow: hidden;
-    max-width: calc(100vw - 32px);
-}
-
-.notice-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--border);
-}
-
-.notice-title {
-    font-size: var(--text-md);
-    font-weight: 700;
-}
-
-.notice-empty {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 96px;
-    padding: var(--space-4);
-    text-align: center;
-    color: var(--text-dim);
-    font-size: var(--text-sm);
-}
-
-.notice-list {
-    overflow-y: auto;
-}
-
 /* 下载中心 */
 .dl-toggle {
     position: relative;
@@ -1101,50 +1040,6 @@ const {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-}
-
-.notice-item {
-    display: flex;
-    gap: var(--space-3);
-    min-height: var(--row-h);
-    padding: var(--space-3) var(--space-4);
-    border-bottom: 1px solid var(--border);
-    font-size: var(--text-sm);
-}
-
-.notice-item:last-child {
-    border-bottom: none;
-}
-
-.notice-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    margin-top: var(--space-1);
-    flex-shrink: 0;
-    background: var(--accent);
-}
-
-.notice-success .notice-dot {
-    background: var(--ok);
-}
-
-.notice-error .notice-dot {
-    background: var(--danger);
-}
-
-.notice-body {
-    min-width: 0;
-}
-
-.notice-text {
-    line-height: 1.5;
-    word-break: break-all;
-}
-
-.notice-time {
-    font-size: var(--text-xs);
-    color: var(--text-dim);
 }
 
 .top-divider {

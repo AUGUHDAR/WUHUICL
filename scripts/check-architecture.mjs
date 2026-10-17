@@ -135,6 +135,19 @@ function moduleSpecifier(specifier) {
 function inspectTree(sourceFile, block) {
     const imports = [];
     const ipcAccesses = [];
+    const unwrapExpression = (node) => {
+        let current = node;
+        while (
+            current &&
+            (ts.isAsExpression(current) ||
+                ts.isParenthesizedExpression(current) ||
+                ts.isNonNullExpression(current) ||
+                ts.isTypeAssertionExpression(current))
+        ) {
+            current = current.expression;
+        }
+        return current;
+    };
     const literalSpecifier = (node) => {
         if (ts.isStringLiteralLike(node)) return node;
         if (node && ts.isNoSubstitutionTemplateLiteral(node)) return node;
@@ -161,10 +174,10 @@ function inspectTree(sourceFile, block) {
         } else if (
             ts.isPropertyAccessExpression(node) &&
             node.name.text === 'kamucl' &&
-            (node.expression.kind === ts.SyntaxKind.Identifier ||
-                ts.isPropertyAccessExpression(node.expression))
+            (unwrapExpression(node.expression)?.kind === ts.SyntaxKind.Identifier ||
+                ts.isPropertyAccessExpression(unwrapExpression(node.expression)))
         ) {
-            const target = node.expression.getText(sourceFile);
+            const target = unwrapExpression(node.expression)?.getText(sourceFile);
             if (target === 'window' || target === 'globalThis') {
                 ipcAccesses.push({
                     line:
@@ -172,7 +185,7 @@ function inspectTree(sourceFile, block) {
                 });
             }
         } else if (ts.isElementAccessExpression(node)) {
-            const target = node.expression.getText(sourceFile);
+            const target = unwrapExpression(node.expression)?.getText(sourceFile);
             const key = literalSpecifier(node.argumentExpression)?.text;
             if (key === 'kamucl' && (target === 'window' || target === 'globalThis')) {
                 ipcAccesses.push({
@@ -371,6 +384,7 @@ async function checkArchitecture(root, { allowlistPath = null, strictAllowlist =
     );
     const sourceFiles = new Set(files.map((file) => relativePath(root, file)));
     const violations = [];
+    const inspectedAccesses = new Map();
     let allowedLegacySources = 0;
 
     for (const key of ['legacySourceFiles', 'legacyWindowKamuclAccesses']) {
@@ -396,6 +410,7 @@ async function checkArchitecture(root, { allowlistPath = null, strictAllowlist =
         const file = relativePath(root, filePath);
         const importerFeature = featureName(file);
         const { imports, ipcAccesses, parseErrors } = await inspectSourceFile(filePath);
+        inspectedAccesses.set(file, ipcAccesses);
 
         for (const error of parseErrors) {
             addViolation(
@@ -433,6 +448,27 @@ async function checkArchitecture(root, { allowlistPath = null, strictAllowlist =
                     access.line,
                     'direct-ipc-access',
                     'access window.kamucl only through src/core/ipc/**'
+                );
+            }
+        }
+    }
+
+    if (strictAllowlist) {
+        for (const allowed of allowlist.legacyWindowKamuclAccesses) {
+            const separator = allowed.lastIndexOf(':');
+            const sourcePath = allowed.slice(0, separator);
+            const line = Number(allowed.slice(separator + 1));
+            if (
+                !sourcePath ||
+                !Number.isInteger(line) ||
+                !inspectedAccesses.get(sourcePath)?.some((access) => access.line === line)
+            ) {
+                addViolation(
+                    violations,
+                    allowlist.displayPath,
+                    1,
+                    'allowlist-entry',
+                    `legacyWindowKamuclAccesses entry does not name a current IPC access: ${allowed}`
                 );
             }
         }

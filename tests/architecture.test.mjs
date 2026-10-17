@@ -102,6 +102,8 @@ test('reports forbidden directions, cross-feature internals, app imports, and IP
             '<script setup lang="ts">\nimport App from "../../../App.vue";\n</script>\n',
         'src/features/accounts/ui/bootstrap.ts': "import '../../../app/bootstrap';\n",
         'src/features/accounts/ui/direct.ts': 'const platform = window.kamucl.platform;\n',
+        'src/features/accounts/ui/asserted.ts':
+            'const platform = (window as Window & { kamucl: unknown }).kamucl;\n',
         'src/features/accounts/ui/Internal.ts': 'export const internal = true;\n',
         'src/features/settings/index.ts': 'export const settings = true;\n',
         'src/features/settings/ui/CrossImport.vue': [
@@ -129,6 +131,7 @@ test('reports forbidden directions, cross-feature internals, app imports, and IP
     assert.match(diagnostics, /features\/accounts\/ui\/AppImport\.vue:2:1 .*feature-app-boundary/);
     assert.match(diagnostics, /features\/accounts\/ui\/bootstrap\.ts:1:1 .*feature-app-boundary/);
     assert.match(diagnostics, /features\/accounts\/ui\/direct\.ts:1:1 .*direct-ipc-access/);
+    assert.match(diagnostics, /features\/accounts\/ui\/asserted\.ts:1:1 .*direct-ipc-access/);
     assert.match(diagnostics, /src\/components\/NewPanel\.vue:1:1 .*legacy-source/);
     assert.match(diagnostics, /Architecture check failed with \d+ violation\(s\)/);
 });
@@ -178,10 +181,35 @@ test('strict allowlist mode reports stale migration entries', async (t) => {
     assert.match(diagnostics, /allowlist-entry.*src\/features\/settings\/ui\/View\.vue:10/);
 });
 
-test('package architecture command rejects stale migration entries', () => {
-    const packageJson = JSON.parse(
-        readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8')
+test('strict allowlist mode reports stale IPC exemption lines', async (t) => {
+    const root = await createFixture(t, {
+        'scripts/legacy-source-allowlist.json': JSON.stringify({
+            legacySourceFiles: ['src/components/LegacyPanel.vue'],
+            legacyWindowKamuclAccesses: ['src/components/LegacyPanel.vue:99']
+        }),
+        'src/components/LegacyPanel.vue':
+            '<script setup lang="ts">\nconst bridge = window.kamucl;\n</script>\n'
+    });
+
+    const result = runStrictChecker(root);
+    const diagnostics = output(result);
+
+    assert.equal(result.status, 1, diagnostics);
+    assert.match(diagnostics, /allowlist-entry.*LegacyPanel\.vue:99/);
+});
+
+test('idle trimming uses the public IPC facade', () => {
+    const source = readFileSync(
+        path.join(repositoryRoot, 'src', 'core', 'runtime', 'idleTrim.ts'),
+        'utf8'
     );
+
+    assert.doesNotMatch(source, /window\.kamucl/);
+    assert.match(source, /subscribeIpc/);
+});
+
+test('package architecture command rejects stale migration entries', () => {
+    const packageJson = JSON.parse(readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'));
     const command = packageJson.scripts['check:architecture'];
 
     assert.match(command, /--strict-allowlist/);

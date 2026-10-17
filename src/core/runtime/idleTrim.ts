@@ -8,6 +8,8 @@
  * 本模块不直接持有任何视图引用。
  */
 
+import { subscribeIpc } from '../ipc';
+
 export interface IdleReleasable {
     /** 释放可重建的大缓存引用（不丢功能：回到前台时按需重建） */
     release(): void;
@@ -56,16 +58,5 @@ export function startIdleTrim(): void {
     if (started) return;
     started = true;
     document.addEventListener('visibilitychange', () => applyHiddenState(document.hidden));
-    try {
-        const bridge = (
-            window as Window & {
-                kamucl?: {
-                    on(channel: string, callback: (payload: unknown) => void): () => void;
-                };
-            }
-        ).kamucl;
-        bridge?.on('kamucl:mem-trim', () => applyHiddenState(true));
-    } catch {
-        /* 桥接不可用（测试环境）时仅靠 visibilitychange 工作 */
-    }
+    subscribeIpc('kamucl:mem-trim', () => applyHiddenState(true));
 }

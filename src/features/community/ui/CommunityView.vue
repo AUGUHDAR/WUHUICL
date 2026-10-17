@@ -23,7 +23,7 @@ import {
     displayVersionName as versionLabel
 } from '../../../store';
 import { instanceKey } from '@shared/modCompatibility';
-import { usesCommunityLoader } from '@shared/communityPolicy';
+import { communityFileMatchesInstance, usesCommunityLoader } from '@shared/communityPolicy';
 import { mcmodSearchUrl } from '@shared/communityLinks';
 import CommunitySectionTabs from './CommunitySectionTabs.vue';
 import CommunitySearchCard from './CommunitySearchCard.vue';
@@ -390,7 +390,13 @@ const modal = reactive({
 const isModpack = computed(() => modal.kind === 'modpack');
 const selectedFile = computed(() => modal.files.find((f) => f.fileId === modal.fileId) ?? null);
 const targetOptions = computed(() =>
-    allTargets.value.filter((v) => !v.failed && !v.incomplete)
+    allTargets.value.filter(
+        (v) =>
+            !v.failed &&
+            !v.incomplete &&
+            (modal.kind !== 'mod' ||
+                (selectedFile.value && communityFileMatchesInstance(selectedFile.value, v)))
+    )
 );
 watch(targetOptions, (options) => {
     if (!options.some((v) => instanceKey(v) === modal.versionId)) {
