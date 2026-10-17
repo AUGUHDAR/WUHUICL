@@ -89,7 +89,8 @@ fn path_key(value: &str) -> String {
     if let Some(stripped) = normalized.strip_prefix("\\\\?\\") {
         normalized = stripped.to_string();
     }
-    let normalized = normalized.to_lowercase();
+    // 斜杠方向归一（用户手输可能是正斜杠，探测路径是反斜杠）
+    let normalized = normalized.replace('/', "\\").to_lowercase();
     normalized
         .trim_end_matches(['\\', '/'])
         .to_string()
@@ -462,10 +463,34 @@ fn quick_candidates(app: &AppHandle, run_where: bool) -> Vec<JavaCandidate> {
         }
     }
 
-    // 5. 启动器自管理 runtimes 目录
+    // 5. 启动器自管理 runtimes 目录（官方包层级不定：组件目录本身或其子目录下找得到 bin\java.exe 才算）
     if let Ok(entries) = std::fs::read_dir(runtimes_dir(app)) {
         for sub in entries.flatten() {
-            add_candidate(&mut map, Some(&sub.path().to_string_lossy()), "WUHUICL Runtime");
+            let dir = sub.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let mut found = dir.join("bin").join(JAVA_EXE).is_file();
+            if !found {
+                if let Ok(l1s) = std::fs::read_dir(&dir) {
+                    for l1 in l1s.flatten() {
+                        if l1.path().join("bin").join(JAVA_EXE).is_file() {
+                            add_candidate(&mut map, Some(&l1.path().to_string_lossy()), "WUHUICL Runtime");
+                            found = true;
+                        } else if let Ok(l2s) = std::fs::read_dir(l1.path()) {
+                            for l2 in l2s.flatten() {
+                                if l2.path().join("bin").join(JAVA_EXE).is_file() {
+                                    add_candidate(&mut map, Some(&l2.path().to_string_lossy()), "WUHUICL Runtime");
+                                    found = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if found && dir.join("bin").join(JAVA_EXE).is_file() {
+                add_candidate(&mut map, Some(&dir.to_string_lossy()), "WUHUICL Runtime");
+            }
         }
     }
 
@@ -1233,4 +1258,187 @@ pub fn select_by_major(list: &[Value], need: i64, architecture: &str) -> Option<
                 && (architecture.is_empty() || j["architecture"].as_str().map(|a| a == architecture).unwrap_or(false))
         })
         .cloned()
+}
+
+// ---------------- Mojang 官方运行时自动下载（PCL SelectOrDownloadJava / 美西螈 jre.rs 同款） ----------------
+//
+// 索引：https://piston-meta.mojang.com/v1/products/java-runtime/<固定hash>/all.json
+// （piston-meta 在 bmclapi 模式下经 mirror_url 自动改写；文件下载走 download_candidates 双源兜底）
+// 组件映射（美西螈 jre.rs:736-745 口径）：8→jre-legacy、16→alpha、17→gamma、21→delta、25→epsilon；
+// 未映射的主版本按最近下限兜底（如 22/23/24 → delta 的 21 也能跑大多数场景，probe 校验兜底）。
+
+static JAVA_INSTALL_LOCK: Mutex<()> = Mutex::new(());
+
+const JAVA_RUNTIME_INDEX_URL: &str =
+    "https://piston-meta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json";
+
+fn runtime_component(need: i64) -> &'static str {
+    match need {
+        8 => "jre-legacy",
+        16 => "java-runtime-alpha",
+        17 => "java-runtime-gamma",
+        21 => "java-runtime-delta",
+        25 => "java-runtime-epsilon",
+        n if n >= 25 => "java-runtime-epsilon",
+        n if n >= 21 => "java-runtime-delta",
+        n if n >= 17 => "java-runtime-gamma",
+        n if n >= 16 => "java-runtime-alpha",
+        _ => "jre-legacy",
+    }
+}
+
+/// 已安装运行时的 java.exe：组件目录本身或其两层子目录里找 bin\java.exe
+fn runtime_java_exe(component_dir: &Path) -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = vec![component_dir.join("bin").join(JAVA_EXE)];
+    if let Ok(rd) = std::fs::read_dir(component_dir) {
+        for l1 in rd.flatten() {
+            let p1 = l1.path();
+            if !p1.is_dir() {
+                continue;
+            }
+            candidates.push(p1.join("bin").join(JAVA_EXE));
+            if let Ok(rd2) = std::fs::read_dir(&p1) {
+                for l2 in rd2.flatten() {
+                    let p2 = l2.path();
+                    if p2.is_dir() {
+                        candidates.push(p2.join("bin").join(JAVA_EXE));
+                    }
+                }
+            }
+        }
+    }
+    candidates.into_iter().find(|c| c.is_file())
+}
+
+/// 自动管理下的 Java 缺失：下载 Mojang 官方运行时并返回 java.exe 路径。
+/// 进度经 event:progress（stage=java）上报；全程持全局锁防并发重复下载。
+pub fn ensure_runtime(app: &AppHandle, need: i64, arch: &str) -> Result<PathBuf, String> {
+    if arch == "arm64" {
+        return Err(format!("自动下载暂不支持 {} 的 Java {} 运行时，请手动安装", arch, need));
+    }
+    let _guard = JAVA_INSTALL_LOCK.lock().unwrap();
+    let component = runtime_component(need);
+    let component_dir = runtimes_dir(app).join(component);
+
+    // 已装过：直接复用（.installing 残留视为半成品，删除重装）
+    if let Some(exe) = runtime_java_exe(&component_dir) {
+        return Ok(exe);
+    }
+    let _ = std::fs::remove_dir_all(&component_dir);
+    let _ = std::fs::create_dir_all(runtimes_dir(app));
+
+    let mirror = installer::mirror_pref(app).to_string();
+    let platform = "windows-x64";
+
+    // 1. 平台索引 → 组件 manifest
+    let fetch = |url: &str| -> Result<Value, String> {
+        let text = crate::net::get_text(url, 20_000)?;
+        serde_json::from_str(&text).map_err(|e| e.to_string())
+    };
+    let index = fetch(&installer::mirror_url(JAVA_RUNTIME_INDEX_URL, &mirror))
+        .or_else(|_| fetch(JAVA_RUNTIME_INDEX_URL))?;
+    let entries = index
+        .get(platform)
+        .and_then(|p| p.get(component))
+        .and_then(|c| c.as_array())
+        .ok_or_else(|| format!("官方运行时索引缺少 {} / {}", platform, component))?;
+    let manifest_url = entries
+        .iter()
+        .find_map(|e| e.get("manifest").and_then(|m| m.get("url")).and_then(|v| v.as_str()))
+        .ok_or_else(|| format!("官方运行时索引中 {} 没有 manifest", component))?;
+
+    // 2. manifest：现代格式 {"files": {相对路径: {type: file|directory|link, downloads: {raw|lzma}}}}
+    //    （链接只解析运行时内部目标，防目录穿越）
+    let manifest = fetch(&installer::mirror_url(manifest_url, &mirror)).or_else(|_| fetch(manifest_url))?;
+    let files = manifest
+        .get("files")
+        .and_then(|f| f.as_object())
+        .ok_or_else(|| "运行时 manifest 格式无效".to_string())?;
+
+    emit_java_progress(app, 0.0, &format!("准备下载 Java {} 运行时", need));
+    let staging = runtimes_dir(app).join(format!("{}.installing", component));
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+
+    let result = (|| -> Result<PathBuf, String> {
+        let mut items: Vec<installer::DownloadItem> = Vec::new();
+        for (rel, node) in files {
+            if rel.is_empty() || rel.contains("..") {
+                continue;
+            }
+            let dest = staging.join(rel.replace('/', "\\"));
+            match node.get("type").and_then(|v| v.as_str()).unwrap_or("") {
+                "directory" => {
+                    let _ = std::fs::create_dir_all(&dest);
+                }
+                "file" => {
+                    // 用 raw 原样包（lzma 包需解压；piston-data 域名在 bmclapi 模式下自动改写）
+                    let raw = node.get("downloads").and_then(|d| d.get("raw"));
+                    let Some(url) = raw.and_then(|r| r.get("url")).and_then(|v| v.as_str()) else {
+                        continue;
+                    };
+                    items.push(installer::DownloadItem {
+                        label: rel.clone(),
+                        url: url.to_string(),
+                        dest,
+                        sha1: raw.and_then(|r| r.get("sha1")).and_then(|v| v.as_str()).map(str::to_string),
+                        size: raw.and_then(|r| r.get("size")).and_then(|v| v.as_u64()),
+                        reuse_files: vec![],
+                        reuse_dirs: vec![],
+                    });
+                }
+                "link" => {
+                    let Some(target) = node.get("target").and_then(|v| v.as_str()) else { continue };
+                    if target.contains("..") {
+                        continue;
+                    }
+                    let from = staging.join(target.replace('/', "\\"));
+                    if from.is_file() {
+                        let _ = std::fs::create_dir_all(dest.parent().unwrap_or(&staging));
+                        let _ = std::fs::hard_link(&from, &dest).or_else(|_| std::fs::copy(&from, &dest).map(|_| ()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        if items.is_empty() {
+            return Err("运行时 manifest 里没有可下载文件".into());
+        }
+
+        let rec = tasks::register_task(&format!("下载 Java {} 运行时", need), "java");
+        let app2 = app.clone();
+        let progress = move |d: usize, t: usize, _speed: f64, detail: &installer::DownloadDetail| {
+            let fraction = detail
+                .bytes_total
+                .filter(|bt| *bt > 0)
+                .map(|bt| detail.bytes_done as f64 / bt as f64)
+                .unwrap_or_else(|| d as f64 / t.max(1) as f64);
+            emit_java_progress(&app2, fraction, &format!("下载 Java {} 运行时 {}/{}", need, d, t.max(1)));
+        };
+        let dl = installer::download_all(app, Some(&rec), items, &mirror, &progress);
+        tasks::task_done(app, &rec.id, dl.is_ok(), dl.as_ref().err().map(|e| e.clone()), false, None);
+        dl?;
+
+        // 3. 找 java.exe → 从 staging 就位
+        let exe = runtime_java_exe(&staging).ok_or_else(|| "运行时解压完成但未找到 java.exe".to_string())?;
+        std::fs::rename(&staging, &component_dir).map_err(|e| e.to_string())?;
+        let final_exe = component_dir.join(exe.strip_prefix(&staging).unwrap_or(&exe));
+        emit_java_progress(app, 1.0, &format!("Java {} 运行时就绪", need));
+        Ok(final_exe)
+    })();
+
+    match result {
+        Ok(p) => Ok(p),
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&staging);
+            Err(format!("自动下载 Java {} 失败：{}", need, e))
+        }
+    }
+}
+
+fn emit_java_progress(app: &AppHandle, fraction: f64, text: &str) {
+    tasks::emit_progress(
+        app,
+        json!({ "stage": "java", "progress": fraction.clamp(0.0, 1.0), "text": text }),
+    );
 }

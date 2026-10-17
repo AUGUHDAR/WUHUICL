@@ -660,6 +660,48 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         std::fs::create_dir_all(&natives_path).map_err(|e| e.to_string())?;
         let (artifacts, natives) = resolved_libraries(app, &merged);
         repair_missing_libraries(app, &merged, &mirror, deadline)?;
+        // 资源补全（PCL DlClientFix 的 assets 部分）：缺索引/缺对象都在启动前补齐，
+        // 否则缺音效贴图时游戏能开但内容残缺
+        {
+            let index_id = merged
+                .get("assetIndex")
+                .and_then(|a| a.get("id"))
+                .and_then(|v| v.as_str())
+                .or_else(|| merged.get("assets").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .to_string();
+            let index_url = merged
+                .get("assetIndex")
+                .and_then(|a| a.get("url"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            if !index_id.is_empty() {
+                match installer::asset_repair_tasks(app, None, &index_id, index_url.as_deref(), &mirror) {
+                    Ok(items) if !items.is_empty() => {
+                        let count = items.len();
+                        emit_progress(app, json!({ "stage": "repair", "progress": 0, "text": format!("补全资源文件 0/{}", count) }));
+                        let app2 = app.clone();
+                        let progress = move |d: usize, t: usize, _speed: f64, _detail: &installer::DownloadDetail| {
+                            emit_progress(
+                                &app2,
+                                json!({
+                                    "stage": "repair",
+                                    "progress": d as f64 / t.max(1) as f64,
+                                    "text": format!("补全资源文件 {}/{}", d, t.max(1))
+                                }),
+                            );
+                        };
+                        installer::download_all(app, None, items, &mirror, &progress)?;
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        // 资源缺失不阻断启动（与原版一致：assets 可后台补），只记日志
+                        let _ = e;
+                    }
+                }
+            }
+        }
+        deadline.touch();
         extract_natives(&natives, &natives_path)?;
         let mut classpath_entries: Vec<String> = Vec::new();
         for p in artifacts.iter().chain(natives.iter()).chain(std::iter::once(&client_jar)) {
@@ -846,6 +888,8 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         deadline.touch();
 
         // g) 启动进程（脱离式：Tauri/Rust 子进程不在 Job Object 内，天然与启动器生命周期解耦）
+        // 崩溃报告基线：启动前快照 crash-reports，退出后 diff（美西螈 process.rs 口径）
+        let crash_before = snapshot_crash_reports(&effective_dir);
         let mut cmd = std::process::Command::new(&java_path);
         cmd.args(&args)
             .current_dir(&effective_dir)
@@ -964,6 +1008,7 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         let ev2 = evidence.clone();
         let latest2 = latest_size.clone();
         let stop2 = watcher_stop.clone();
+        let crash_dir2 = effective_dir.clone();
         std::thread::spawn(move || {
             // 轮询等待退出（对应 DetachedGameProcess.waitForExit 的 250ms 零超时探测；
             // 不长期持有 child 锁，保证 kill/强杀路径能随时进入）
@@ -1007,11 +1052,19 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
             let app3 = app2.clone();
             let file = settings::user_data_dir(&app3).join("running-game.json");
             let _ = std::fs::remove_file(file);
-            let text = if exit_kind == "shutdown-timeout" {
+            let mut text = if exit_kind == "shutdown-timeout" {
                 "游戏已关闭；退出清理超时，日志已保留".to_string()
             } else {
                 format!("游戏已退出 (code={})", code)
             };
+            // 崩溃判定增强：新崩溃报告优先给原因（PCL CrashAnalyzer 的轻量版）
+            if exit_kind == "abnormal" {
+                if let Some(desc) = describe_new_crash(&crash_dir2, &crash_before) {
+                    text = format!("游戏崩溃：{}", desc);
+                } else if ev2.other_failure.load(Ordering::SeqCst) {
+                    text = format!("游戏异常退出（疑似崩溃，code={}，日志已保留）", code);
+                }
+            }
             send_state(
                 &app2,
                 json!({
@@ -1039,6 +1092,69 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
 
 fn take_intentional_restart(launch_id: &str) -> bool {
     RESTARTING.lock().unwrap().take().map(|id| id == launch_id).unwrap_or(false)
+}
+
+// ---------------- 崩溃报告快照（美西螈 process.rs:43-96 的 crash-reports 前后对比） ----------------
+
+type CrashSnapshot = Vec<(String, u64, u64)>; // (文件名, 大小, mtime 秒)
+
+fn snapshot_crash_reports(game_dir: &str) -> CrashSnapshot {
+    let dir = Path::new(game_dir).join("crash-reports");
+    let mut out: CrashSnapshot = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if !p.is_file() {
+                continue;
+            }
+            let Ok(meta) = e.metadata() else { continue };
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            out.push((e.file_name().to_string_lossy().to_string(), meta.len(), mtime));
+        }
+    }
+    out
+}
+
+/// 退出后发现新崩溃报告 → 读出 Description 行，拼成人话
+fn describe_new_crash(game_dir: &str, before: &CrashSnapshot) -> Option<String> {
+    let dir = Path::new(game_dir).join("crash-reports");
+    let mut newest: Option<(String, u64)> = None;
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if !p.is_file() {
+                continue;
+            }
+            let Ok(meta) = e.metadata() else { continue };
+            let name = e.file_name().to_string_lossy().to_string();
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let known = before.iter().any(|(n, size, t)| *n == name && *size == meta.len() && *t == mtime);
+            if known {
+                continue;
+            }
+            if newest.as_ref().map(|(_, t)| mtime > *t).unwrap_or(true) {
+                newest = Some((name, mtime));
+            }
+        }
+    }
+    let (name, _) = newest?;
+    let text = std::fs::read_to_string(dir.join(&name)).ok()?;
+    let desc = text
+        .lines()
+        .find(|l| l.trim_start().starts_with("Description: "))
+        .map(|l| l.trim_start()["Description: ".len()..].trim().to_string())
+        .unwrap_or_else(|| "未标注原因".to_string());
+    Some(format!("{}（崩溃报告 {}）", desc, name))
 }
 
 // ---------------- 会话操作 ----------------
@@ -1195,15 +1311,19 @@ fn resolve_launch_java(
             && (s["javaAuto"].as_bool().unwrap_or(true) || s["javaPath"].as_str().unwrap_or("").is_empty()));
     let arch = host_arch();
     let ensure = |need: i64| -> Result<String, String> {
-        // 自动管理：从本机扫描选择（Adoptium 自动下载运行时为 TODO 钩子）
+        // 自动管理：本机扫描选择；没有就自动下载 Mojang 官方运行时（PCL/美西螈同款）
         let list = crate::javaman::scan_quick(app, false);
-        match crate::javaman::select_by_major(&list, need, &arch) {
-            Some(j) => Ok(j["path"].as_str().unwrap_or("").to_string()),
-            None => Err(format!(
-                "该版本需要 Java {} (64位)，但未找到。请在设置中选择 Java 或开启自动管理",
-                need
-            )),
-        }
+        let java = match crate::javaman::select_by_major(&list, need, &arch) {
+            Some(j) => j["path"].as_str().unwrap_or("").to_string(),
+            None => {
+                let exe = crate::javaman::ensure_runtime(app, need, &arch)
+                    .map_err(|e| format!("{}；请在设置中选择 Java 或关闭自动管理", e))?;
+                // 新装运行时必须重扫才能进列表（并刷新探测缓存）
+                let _ = crate::javaman::scan_quick(app, true);
+                exe.to_string_lossy().to_string()
+            }
+        };
+        Ok(java)
     };
     let java_path: String;
     if instance_config.get("_javaAuto").and_then(|v| v.as_bool()).unwrap_or(false) {

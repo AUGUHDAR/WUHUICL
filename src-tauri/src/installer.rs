@@ -294,6 +294,68 @@ pub fn virtual_legacy_dir(app: &AppHandle) -> PathBuf {
     assets_dir(app).join("virtual").join("legacy")
 }
 
+/// 启动前资源补全（PCL DlClientFix 的 assets 部分）：索引 json 缺失且给了 url 时先补索引，
+/// 再返回缺失对象文件的下载任务（多文件夹复用扫描）。无 assetIndex（远古版本）返回空集。
+pub fn asset_repair_tasks(
+    app: &AppHandle,
+    rec: Option<&TaskRecord>,
+    index_id: &str,
+    index_url: Option<&str>,
+    mirror: &str,
+) -> Result<Vec<DownloadItem>, String> {
+    let idx_path = asset_index_path(app, index_id);
+    if !idx_path.exists() {
+        let Some(url) = index_url else {
+            return Ok(Vec::new());
+        };
+        let url = url.to_string();
+        let path = idx_path.clone();
+        let mirror2 = mirror.to_string();
+        run_blocking(move || {
+            download_file(app, rec, None, &url, &path, None, None, &mirror2, None, &[], &[])
+        })?;
+    }
+    if !idx_path.exists() {
+        return Ok(Vec::new());
+    }
+    let idx = read_version_json_from(&idx_path)?;
+    let objects = idx.get("objects").and_then(|o| o.as_object()).cloned().unwrap_or_default();
+    let folders = all_folders(app);
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut tasks: Vec<DownloadItem> = Vec::new();
+    for (name, o) in &objects {
+        let Some(hash) = o.get("hash").and_then(|v| v.as_str()).map(str::to_string) else {
+            continue;
+        };
+        if hash.len() < 2 || !seen.insert(hash.clone()) {
+            continue;
+        }
+        let dest = asset_object_path(app, &hash);
+        if dest.exists() {
+            continue;
+        }
+        tasks.push(DownloadItem {
+            label: name.clone(),
+            url: format!("https://resources.download.minecraft.net/{}/{}", &hash[..2], hash),
+            dest,
+            sha1: Some(hash.clone()),
+            size: o.get("size").and_then(|v| v.as_u64()),
+            reuse_files: folders
+                .iter()
+                .map(|f| {
+                    Path::new(f)
+                        .join("assets")
+                        .join("objects")
+                        .join(&hash[..2])
+                        .join(&hash)
+                })
+                .collect(),
+            reuse_dirs: Vec::new(),
+        });
+    }
+    Ok(tasks)
+}
+
 pub fn icons_dir(app: &AppHandle) -> PathBuf {
     Path::new(&default_folder_path(app)).join(DATA_DIR_NAME).join("icons")
 }
