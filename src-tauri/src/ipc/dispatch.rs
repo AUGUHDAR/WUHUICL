@@ -13,89 +13,80 @@ use crate::{
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
+type Handler = fn(&AppHandle, &str, &[Value]) -> Option<Result<Value, String>>;
+
+type DispatchStage = (&'static str, Handler);
+
+const DOCUMENTED_SUBSYSTEM_ORDER: &[&str] = &[
+    "gamefolders",
+    "installer",
+    "catalog",
+    "community",
+    "worlds",
+    "modpacks",
+    "servers",
+    "skins",
+    "centercmd",
+    "misc",
+    "appearance",
+    "selfupdate",
+    "mods",
+    "bridge",
+    "direct",
+    "terracotta",
+    "frp",
+    "voxlink",
+    "projections",
+    "recordings",
+    "launch",
+    "javaman",
+    "mslogin",
+    "vlcli",
+    "gamedir",
+    "exportlogs",
+];
+
+const DOCUMENTED_SUBSYSTEM_HANDLERS: &[DispatchStage] = &[
+    ("gamefolders", gamefolders::invoke),
+    ("installer", installer::invoke),
+    ("catalog", catalog::invoke),
+    ("community", community::invoke),
+    ("worlds", worlds::invoke),
+    ("modpacks", modpacks::invoke),
+    ("servers", servers::invoke),
+    ("skins", skins::invoke),
+    ("centercmd", centercmd::invoke),
+    ("misc", misc::invoke),
+    ("appearance", appearance::invoke),
+    ("selfupdate", selfupdate::invoke),
+    ("mods", mods::invoke),
+    ("bridge", bridge::invoke),
+    ("direct", direct::invoke),
+    ("terracotta", terracotta::invoke),
+    ("frp", frp::invoke),
+    ("voxlink", voxlink::invoke),
+    ("projections", projections::invoke),
+    ("recordings", recordings::invoke),
+    ("launch", launch::invoke),
+    ("javaman", javaman::invoke),
+    ("mslogin", mslogin::invoke),
+    ("vlcli", vlcli::invoke),
+    ("gamedir", gamedir::invoke),
+    ("exportlogs", exportlogs::invoke),
+];
+
+fn composed_handlers() -> impl Iterator<Item = DispatchStage> {
+    DOCUMENTED_SUBSYSTEM_HANDLERS.iter().copied().chain([
+        ("accounts", crate::features::accounts::invoke),
+        ("settings", crate::features::settings::invoke),
+    ])
+}
+
 pub(crate) fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, String> {
-    // Feature handlers claim their channels first. The order is part of the
-    // existing contract and must remain stable.
-    if let Some(result) = gamefolders::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = installer::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = catalog::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = community::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = worlds::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = modpacks::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = servers::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = skins::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = centercmd::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = misc::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = appearance::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = selfupdate::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = mods::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = bridge::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = direct::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = terracotta::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = frp::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = voxlink::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = projections::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = recordings::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = launch::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = javaman::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = mslogin::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = vlcli::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = gamedir::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = exportlogs::invoke(app, channel, args) {
-        return result;
-    }
-    if let Some(result) = crate::features::accounts::invoke(app, channel, args) {
-        return result;
+    for (_, handler) in composed_handlers() {
+        if let Some(result) = handler(app, channel, args) {
+            return result;
+        }
     }
     if channel == "settings:set" {
         if let Some(result) = crate::features::settings::invoke(app, channel, args) {
@@ -485,5 +476,28 @@ fn legacy_invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value
         | "voxlink:mods:download" => Err("工单系统未移植".into()),
 
         _ => Err(format!("未实现的通道：{}", channel)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subsystem_stages_are_ordered_and_before_typed_fallbacks() {
+        let names: Vec<&str> = DOCUMENTED_SUBSYSTEM_HANDLERS
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(names, DOCUMENTED_SUBSYSTEM_ORDER);
+        let composed: Vec<&str> = composed_handlers().map(|(name, _)| name).collect();
+        let expected: Vec<&str> = DOCUMENTED_SUBSYSTEM_ORDER
+            .iter()
+            .copied()
+            .chain(["accounts", "settings"])
+            .collect();
+        assert_eq!(composed, expected);
+        assert!(composed.contains(&"accounts"));
+        assert!(composed.contains(&"settings"));
     }
 }

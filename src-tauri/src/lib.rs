@@ -4,7 +4,6 @@ pub mod app;
 pub mod features;
 pub mod ipc;
 
-pub mod accounts;
 pub mod appearance;
 pub mod assetproto;
 pub mod bridge;
@@ -19,12 +18,10 @@ pub mod gamedir;
 pub mod gamefolders;
 pub mod gameoptions;
 pub mod gate;
-pub mod installer;
 pub mod javaman;
 pub mod launch;
 pub mod misc;
 pub mod modpacks;
-pub mod mods;
 pub mod mslogin;
 pub mod nbt;
 pub mod net;
@@ -32,7 +29,6 @@ pub mod projections;
 pub mod recordings;
 pub mod selfupdate;
 pub mod servers;
-pub mod settings;
 pub mod skins;
 pub mod sysinfo;
 pub mod tasks;
@@ -46,3 +42,19 @@ pub mod windowctl;
 pub mod worlds;
 
 pub use app::run;
+
+pub mod installer {
+    pub use crate::features::library::version_installer::*;
+}
+
+pub mod accounts {
+    pub use crate::features::accounts::*;
+}
+
+pub mod mods {
+    pub use crate::features::library::mods::*;
+}
+
+pub mod settings {
+    pub use crate::features::settings::*;
+}

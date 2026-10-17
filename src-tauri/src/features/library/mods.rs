@@ -31,13 +31,14 @@
 //! 9. mods:favoriteVersions 的订阅按 ticket 全局登记（Electron 按 sender 隔离；Tauri 单主窗口
 //!    等价）；单飞共享队列（4 并发、无完成缓存）语义保留。
 
+use super::compare_mod_version;
+use super::version_installer::{self as installer, ProgressGuard};
 use crate::community::{
     self, community_exact_file, community_favorite_candidates, community_file_matches_instance,
     community_files, community_search_items, matches_version_range, mod_matches_instance,
     mod_mismatch_reasons, mr_post, normalize_loader,
 };
 use crate::download::{self, DownloadFileOpts, SmoothedSpeedEstimator};
-use crate::installer::{self, ProgressGuard};
 use crate::net;
 use crate::tasks::{self, TaskRecord};
 use serde_json::{json, Value};
@@ -60,7 +61,10 @@ fn arg_str(args: &[Value], i: usize) -> Option<&str> {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 fn check_cancel(rec: &TaskRecord) -> Result<(), String> {
@@ -86,7 +90,13 @@ fn strip_bom(text: &str) -> &str {
 
 // ---------------- HTTP（modManagement json / modIcons request / modMigration post） ----------------
 
-fn post_json(url: &str, body: &Value, ua: &str, timeout_ms: u64, headers: &[(&str, &str)]) -> Result<Value, String> {
+fn post_json(
+    url: &str,
+    body: &Value,
+    ua: &str,
+    timeout_ms: u64,
+    headers: &[(&str, &str)],
+) -> Result<Value, String> {
     let mut req = net::client()
         .post(url)
         .timeout(Duration::from_millis(timeout_ms))
@@ -104,8 +114,16 @@ fn post_json(url: &str, body: &Value, ua: &str, timeout_ms: u64, headers: &[(&st
     resp.json::<Value>().map_err(|e| e.to_string())
 }
 
-fn get_json(url: &str, ua: &str, timeout_ms: u64, headers: &[(&str, &str)]) -> Result<Value, String> {
-    let mut req = net::client().get(url).timeout(Duration::from_millis(timeout_ms)).header("User-Agent", ua);
+fn get_json(
+    url: &str,
+    ua: &str,
+    timeout_ms: u64,
+    headers: &[(&str, &str)],
+) -> Result<Value, String> {
+    let mut req = net::client()
+        .get(url)
+        .timeout(Duration::from_millis(timeout_ms))
+        .header("User-Agent", ua);
     for (k, v) in headers {
         req = req.header(*k, *v);
     }
@@ -123,7 +141,13 @@ fn mgmt_json(url: &str, body: Option<&Value>, headers: &[(&str, &str)]) -> Resul
         Some(b) => post_json(url, b, UA_MGMT, 15_000, headers),
         None => get_json(url, UA_MGMT, 15_000, headers),
     };
-    result.map_err(|e| if e.starts_with("HTTP ") { format!("社区请求失败 {e}") } else { e })
+    result.map_err(|e| {
+        if e.starts_with("HTTP ") {
+            format!("社区请求失败 {e}")
+        } else {
+            e
+        }
+    })
 }
 
 // ---------------- modState.ts（目录级锁定/身份记录，userData/mod-state/<sha256>.json） ----------------
@@ -141,7 +165,9 @@ fn state_file(app: &tauri::AppHandle, dir: &Path) -> PathBuf {
         key_src = key_src.to_lowercase();
     }
     let digest = hex::encode(Sha256::digest(key_src.as_bytes()));
-    crate::settings::user_data_dir(app).join("mod-state").join(format!("{digest}.json"))
+    crate::settings::user_data_dir(app)
+        .join("mod-state")
+        .join(format!("{digest}.json"))
 }
 
 fn read_state(app: &tauri::AppHandle, dir: &Path) -> Result<DirectoryState, String> {
@@ -170,8 +196,16 @@ fn read_state(app: &tauri::AppHandle, dir: &Path) -> Result<DirectoryState, Stri
 }
 
 fn write_state(app: &tauri::AppHandle, dir: &Path, state: &DirectoryState) -> Result<(), String> {
-    let aliases: serde_json::Map<String, Value> = state.aliases.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
-    let locks: serde_json::Map<String, Value> = state.locks.iter().map(|(k, v)| (k.clone(), json!(v))).collect();
+    let aliases: serde_json::Map<String, Value> = state
+        .aliases
+        .iter()
+        .map(|(k, v)| (k.clone(), json!(v)))
+        .collect();
+    let locks: serde_json::Map<String, Value> = state
+        .locks
+        .iter()
+        .map(|(k, v)| (k.clone(), json!(v)))
+        .collect();
     let payload = json!({ "aliases": aliases, "locks": locks });
     let path = state_file(app, dir);
     if let Some(parent) = path.parent() {
@@ -184,15 +218,28 @@ fn write_state(app: &tauri::AppHandle, dir: &Path, state: &DirectoryState) -> Re
 
 /// modIdentity()
 pub fn mod_identity(app: &tauri::AppHandle, dir: &Path, sha1: &str) -> String {
-    read_state(app, dir).ok().and_then(|s| s.aliases.get(sha1).cloned()).unwrap_or_else(|| format!("sha1:{sha1}"))
+    read_state(app, dir)
+        .ok()
+        .and_then(|s| s.aliases.get(sha1).cloned())
+        .unwrap_or_else(|| format!("sha1:{sha1}"))
 }
 
 /// isModLocked()
 pub fn is_mod_locked(app: &tauri::AppHandle, dir: &Path, sha1: &str) -> bool {
-    let Ok(state) = read_state(app, dir) else { return false };
+    let Ok(state) = read_state(app, dir) else {
+        return false;
+    };
     let identity = state.aliases.get(sha1).cloned();
-    state.locks.get(identity.as_deref().unwrap_or(&format!("sha1:{sha1}"))).copied().unwrap_or(false)
-        || state.locks.get(&format!("sha1:{sha1}")).copied().unwrap_or(false)
+    state
+        .locks
+        .get(identity.as_deref().unwrap_or(&format!("sha1:{sha1}")))
+        .copied()
+        .unwrap_or(false)
+        || state
+            .locks
+            .get(&format!("sha1:{sha1}"))
+            .copied()
+            .unwrap_or(false)
 }
 
 /// setModLocked()
@@ -206,7 +253,12 @@ pub fn set_mod_locked(app: &tauri::AppHandle, dir: &Path, sha1: &str, locked: bo
     state.locks.insert(key, locked);
     state.locks.insert(format!("sha1:{sha1}"), locked);
     if let Some(id) = &identity {
-        let same: Vec<String> = state.aliases.iter().filter(|(_, v)| v == &id).map(|(h, _)| h.clone()).collect();
+        let same: Vec<String> = state
+            .aliases
+            .iter()
+            .filter(|(_, v)| v == &id)
+            .map(|(h, _)| h.clone())
+            .collect();
         for hash in same {
             state.locks.insert(format!("sha1:{hash}"), locked);
         }
@@ -218,8 +270,12 @@ pub fn set_mod_locked(app: &tauri::AppHandle, dir: &Path, sha1: &str, locked: bo
 pub fn remember_mod_identity(app: &tauri::AppHandle, dir: &Path, sha1: &str, identity: &str) {
     static ID_RE: OnceLock<regex::Regex> = OnceLock::new();
     static SHA_RE: OnceLock<regex::Regex> = OnceLock::new();
-    let id_ok = ID_RE.get_or_init(|| regex::Regex::new(r"^(modrinth|curseforge):[a-zA-Z0-9_-]+$").unwrap()).is_match(identity);
-    let sha_ok = SHA_RE.get_or_init(|| regex::Regex::new(r"^[a-f0-9]{40}$").unwrap()).is_match(sha1);
+    let id_ok = ID_RE
+        .get_or_init(|| regex::Regex::new(r"^(modrinth|curseforge):[a-zA-Z0-9_-]+$").unwrap())
+        .is_match(identity);
+    let sha_ok = SHA_RE
+        .get_or_init(|| regex::Regex::new(r"^[a-f0-9]{40}$").unwrap())
+        .is_match(sha1);
     if !id_ok || !sha_ok {
         return;
     }
@@ -230,7 +286,12 @@ pub fn remember_mod_identity(app: &tauri::AppHandle, dir: &Path, sha1: &str, ide
     if state.aliases.get(sha1).map(String::as_str) == Some(identity) {
         return;
     }
-    if state.locks.get(&format!("sha1:{sha1}")).copied().unwrap_or(false) {
+    if state
+        .locks
+        .get(&format!("sha1:{sha1}"))
+        .copied()
+        .unwrap_or(false)
+    {
         state.locks.insert(identity.to_string(), true);
     }
     state.aliases.insert(sha1.to_string(), identity.to_string());
@@ -263,17 +324,24 @@ pub fn require_resource_version(id: &str) -> Result<(), String> {
 }
 
 /// resolveResourceDirectory()：只读选定实例，绝不回退共享目录；junction 指向实例外即拒绝
-pub fn resolve_resource_directory(app: &tauri::AppHandle, folder: &str, id: &str, kind: &str) -> Result<PathBuf, String> {
+pub fn resolve_resource_directory(
+    app: &tauri::AppHandle,
+    folder: &str,
+    id: &str,
+    kind: &str,
+) -> Result<PathBuf, String> {
     require_resource_version(id)?;
     if folder.is_empty() || !["mods", "resourcepacks", "shaderpacks"].contains(&kind) {
         return Err("资源目录无效，请重新选择游戏版本".into());
     }
     let json_path = installer::version_json_path_in(folder, id);
-    let raw = std::fs::read(&json_path)
-        .map_err(|_| "所选游戏版本已移除或版本描述损坏，请到「游戏版本」页刷新或修复".to_string())?;
+    let raw = std::fs::read(&json_path).map_err(|_| {
+        "所选游戏版本已移除或版本描述损坏，请到「游戏版本」页刷新或修复".to_string()
+    })?;
     let text = String::from_utf8_lossy(&raw);
-    let version_json: Value =
-        serde_json::from_str(strip_bom(&text)).map_err(|_| "所选游戏版本已移除或版本描述损坏，请到「游戏版本」页刷新或修复".to_string())?;
+    let version_json: Value = serde_json::from_str(strip_bom(&text)).map_err(|_| {
+        "所选游戏版本已移除或版本描述损坏，请到「游戏版本」页刷新或修复".to_string()
+    })?;
     let game_directory = installer::instance_directory_state(app, folder, id, &version_json)
         .get("path")
         .and_then(|v| v.as_str())
@@ -327,7 +395,10 @@ fn list_all_installed(app: &tauri::AppHandle) -> Vec<Value> {
 
 fn versions_list_installed(settings: &Value, all: bool) -> Vec<Value> {
     // 对应原版 versions.listAllInstalled（复用 crate::versions 的扫描）
-    crate::versions::list_installed(settings, all).as_array().cloned().unwrap_or_default()
+    crate::versions::list_installed(settings, all)
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// assertModsIdle()：使用该模组目录的游戏正在运行 → 拒绝
@@ -342,8 +413,16 @@ pub fn assert_mods_idle(app: &tauri::AppHandle, dir: &Path) -> Result<(), String
         if !running.contains(id) {
             continue;
         }
-        let folder = v.get("folder").and_then(|x| x.as_str()).unwrap_or("").to_string();
-        let folder = if folder.is_empty() { installer::game_dir(app) } else { folder };
+        let folder = v
+            .get("folder")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let folder = if folder.is_empty() {
+            installer::game_dir(app)
+        } else {
+            folder
+        };
         if let Ok(other) = resolve_resource_directory(app, &folder, id, "mods") {
             if same_fs_path(&other, dir) {
                 return Err("使用该模组目录的游戏正在运行，请先退出游戏".into());
@@ -365,8 +444,16 @@ pub fn assert_instance_idle(app: &tauri::AppHandle, dir: &Path) -> Result<(), St
         if !running.contains(id) {
             continue;
         }
-        let folder = v.get("folder").and_then(|x| x.as_str()).unwrap_or("").to_string();
-        let folder = if folder.is_empty() { installer::game_dir(app) } else { folder };
+        let folder = v
+            .get("folder")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let folder = if folder.is_empty() {
+            installer::game_dir(app)
+        } else {
+            folder
+        };
         if let Ok(j) = installer::read_version_json(app, &folder, id) {
             let state = installer::instance_directory_state(app, &folder, id, &j);
             if let Some(p) = state.get("path").and_then(|x| x.as_str()) {
@@ -385,7 +472,9 @@ pub fn assert_instance_idle(app: &tauri::AppHandle, dir: &Path) -> Result<(), St
 pub fn safe_mod_name(name: &str) -> Result<String, String> {
     let ok = !name.contains(['\\', '/', ':', '\0'])
         && installer::basename_of(name) == name
-        && regex::Regex::new(r"(?i)^.+\.jar(?:\.disabled)?$").unwrap().is_match(name);
+        && regex::Regex::new(r"(?i)^.+\.jar(?:\.disabled)?$")
+            .unwrap()
+            .is_match(name);
     if !ok {
         return Err("无效的模组文件名".into());
     }
@@ -451,8 +540,14 @@ pub fn replace_mod_files(
     let mut olds: HashSet<String> = HashSet::new();
     for i in items {
         safe_mod_name(&i.name)?;
-        if !regex::Regex::new(r"^[a-f0-9]{40}$").unwrap().is_match(&i.sha1)
-            || !i.url.as_deref().map(|u| u.starts_with("https://")).unwrap_or(false)
+        if !regex::Regex::new(r"^[a-f0-9]{40}$")
+            .unwrap()
+            .is_match(&i.sha1)
+            || !i
+                .url
+                .as_deref()
+                .map(|u| u.starts_with("https://"))
+                .unwrap_or(false)
         {
             return Err("文件缺少可信哈希或下载地址".into());
         }
@@ -472,7 +567,8 @@ pub fn replace_mod_files(
         let parent = dir.parent().unwrap_or(dir);
         let mut created: Option<PathBuf> = None;
         for _ in 0..10 {
-            let candidate = parent.join(format!(".kamucl-mod-change-{}", crate::accounts::uuid_v4()));
+            let candidate =
+                parent.join(format!(".kamucl-mod-change-{}", crate::accounts::uuid_v4()));
             match std::fs::create_dir(&candidate) {
                 Ok(()) => {
                     created = Some(candidate);
@@ -500,7 +596,8 @@ pub fn replace_mod_files(
             let progress = |done: u64, ftotal: u64, _wire: u64| {
                 if let Some(cb) = on_progress {
                     let frac = if total > 0 {
-                        (finished_bytes.load(Ordering::SeqCst) + done.min(ftotal)) as f64 / total as f64
+                        (finished_bytes.load(Ordering::SeqCst) + done.min(ftotal)) as f64
+                            / total as f64
                     } else {
                         let count = items.len() as f64;
                         finished_count.load(Ordering::SeqCst) as f64 / count
@@ -523,7 +620,11 @@ pub fn replace_mod_files(
                 on_wait: None,
             };
             download::download_file(app, rec, &url, &dest, &opts)?;
-            finished_bytes.fetch_add(i.size.unwrap_or_else(|| std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0)), Ordering::SeqCst);
+            finished_bytes.fetch_add(
+                i.size
+                    .unwrap_or_else(|| std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0)),
+                Ordering::SeqCst,
+            );
             finished_count.fetch_add(1, Ordering::SeqCst);
         }
         phase = "检查模组状态".into();
@@ -578,7 +679,11 @@ pub fn replace_mod_files(
             for (n, i) in items.iter().enumerate() {
                 let src = stage.join(format!("new-{n}-{}", i.name));
                 let file = dir.join(&i.name);
-                match std::fs::OpenOptions::new().write(true).create_new(true).open(&file) {
+                match std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&file)
+                {
                     Ok(mut out) => {
                         let mut inp = std::fs::File::open(&src).map_err(|e| e.to_string())?;
                         std::io::copy(&mut inp, &mut out).map_err(|e| e.to_string())?;
@@ -609,7 +714,11 @@ pub fn replace_mod_files(
                 }
             }
             if let Some(re) = rollback_err {
-                return Err(format!("文件被外部修改，自动恢复未完成；原文件已保存在 {}。原因：{}", stage.to_string_lossy(), re));
+                return Err(format!(
+                    "文件被外部修改，自动恢复未完成；原文件已保存在 {}。原因：{}",
+                    stage.to_string_lossy(),
+                    re
+                ));
             }
             can_clean = true;
             return Err(e);
@@ -630,9 +739,15 @@ pub fn replace_mod_files(
 
 // ---------------- 运行实例元数据 ----------------
 
-fn resolve_instance_meta(app: &tauri::AppHandle, folder: &str, id: &str) -> Result<(String, Option<&'static str>, Option<String>), String> {
+fn resolve_instance_meta(
+    app: &tauri::AppHandle,
+    folder: &str,
+    id: &str,
+) -> Result<(String, Option<&'static str>, Option<String>), String> {
     let j = installer::read_version_json(app, folder, id)?;
-    let meta = installer::resolve_instance_metadata(&j, &|pid: &str| installer::read_version_json(app, &installer::folder_of_version(app, pid), pid).ok());
+    let meta = installer::resolve_instance_metadata(&j, &|pid: &str| {
+        installer::read_version_json(app, &installer::folder_of_version(app, pid), pid).ok()
+    });
     Ok((meta.mc_version, meta.loader, meta.loader_version))
 }
 
@@ -641,24 +756,38 @@ fn resolve_instance_meta(app: &tauri::AppHandle, folder: &str, id: &str) -> Resu
 /// mapUpdateEntries()：同 sha1 = 已最新；无响应 = 未匹配来源；有响应且文件不同 = 可更新
 fn map_update_entries(entries: &mut [Value], by_hash: &Value) {
     for entry in entries.iter_mut() {
-        let sha1 = entry.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let sha1 = entry
+            .get("sha1")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let version = by_hash.get(&sha1).cloned().unwrap_or(Value::Null);
         if version.is_null() {
             continue;
         }
         // hash 被 Modrinth 识别即标记来源；无可用文件时不产生更新项
         entry["source"] = json!("modrinth");
-        let files = version.get("files").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let files = version
+            .get("files")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
         if files.is_empty() {
             continue;
         }
-        let file = files.iter().find(|f| f.get("primary").and_then(|v| v.as_bool()).unwrap_or(false)).unwrap_or(&files[0]);
+        let file = files
+            .iter()
+            .find(|f| f.get("primary").and_then(|v| v.as_bool()).unwrap_or(false))
+            .unwrap_or(&files[0]);
         let url = file.get("url").and_then(|v| v.as_str()).unwrap_or("");
         let filename = file.get("filename").and_then(|v| v.as_str()).unwrap_or("");
         if url.is_empty() || filename.is_empty() {
             continue;
         }
-        let new_sha1 = file.pointer("/hashes/sha1").and_then(|v| v.as_str()).map(str::to_string);
+        let new_sha1 = file
+            .pointer("/hashes/sha1")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
         if new_sha1.as_deref() == Some(sha1.as_str()) {
             entry["alreadyLatest"] = json!(true);
             continue;
@@ -676,7 +805,12 @@ fn map_update_entries(entries: &mut [Value], by_hash: &Value) {
 }
 
 /// checkModUpdates()：按 jar sha1 在 Modrinth version_files 批量反查
-pub fn check_mod_updates(app: &tauri::AppHandle, dir: &Path, folder: &str, version_id: &str) -> Result<Value, String> {
+pub fn check_mod_updates(
+    app: &tauri::AppHandle,
+    dir: &Path,
+    folder: &str,
+    version_id: &str,
+) -> Result<Value, String> {
     let scanned = scan_managed_mod_directory(&dir.to_string_lossy(), "analysis")?;
     let (mc, loader, _lv) = resolve_instance_meta(app, folder, version_id)?;
     let mut report = json!({ "mcVersion": mc, "loader": loader.unwrap_or(""), "entries": [] });
@@ -688,8 +822,19 @@ pub fn check_mod_updates(app: &tauri::AppHandle, dir: &Path, folder: &str, versi
     }
     let hashes: Vec<String> = scanned
         .iter()
-        .filter(|i| i.get("error").is_none() && i.get("sha1").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false))
-        .map(|i| i.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string())
+        .filter(|i| {
+            i.get("error").is_none()
+                && i.get("sha1")
+                    .and_then(|v| v.as_str())
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false)
+        })
+        .map(|i| {
+            i.get("sha1")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        })
         .collect();
     let mut entries: Vec<Value> = scanned
         .iter()
@@ -716,7 +861,11 @@ pub fn check_mod_updates(app: &tauri::AppHandle, dir: &Path, folder: &str, versi
     let by_hash = mr_post(app, "/version_files/update", &body, UA_UPDATES, 15_000)?;
     map_update_entries(&mut entries, &by_hash);
     for e in &entries {
-        if let Some(project) = e.pointer("/update/projectId").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        if let Some(project) = e
+            .pointer("/update/projectId")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
             let sha1 = e.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
             remember_mod_identity(app, dir, sha1, &format!("modrinth:{project}"));
         }
@@ -726,17 +875,40 @@ pub fn check_mod_updates(app: &tauri::AppHandle, dir: &Path, folder: &str, versi
 }
 
 /// applyModUpdates()：按所选下载源校验后备份替换；单项失败不影响其他项
-pub fn apply_mod_updates(app: &tauri::AppHandle, dir: &Path, items: &[Value]) -> Result<Value, String> {
+pub fn apply_mod_updates(
+    app: &tauri::AppHandle,
+    dir: &Path,
+    items: &[Value],
+) -> Result<Value, String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let rec = tasks::register_task("模组更新", "download");
     let result = download::with_file_job(dir, Some(rec.as_ref()), || -> Result<Value, String> {
         let mut results: Vec<Value> = Vec::new();
         for item in items {
-            let file_name = item.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let old_sha1 = item.get("oldSha1").and_then(|v| v.as_str()).map(str::to_string);
-            let url = item.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let target_name = item.get("targetName").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let sha1 = item.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let file_name = item
+                .get("fileName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let old_sha1 = item
+                .get("oldSha1")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let url = item
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let target_name = item
+                .get("targetName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let sha1 = item
+                .get("sha1")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let size = item.get("size").and_then(|v| v.as_u64());
             let run = || -> Result<(), String> {
                 assert_mods_idle(app, dir)?;
@@ -747,8 +919,17 @@ pub fn apply_mod_updates(app: &tauri::AppHandle, dir: &Path, items: &[Value]) ->
                 }
                 let name = format!(
                     "{}{}",
-                    regex::Regex::new(r"(?i)\.disabled$").unwrap().replace(&target_name, ""),
-                    if regex::Regex::new(r"(?i)\.disabled$").unwrap().is_match(&file_name) { ".disabled" } else { "" }
+                    regex::Regex::new(r"(?i)\.disabled$")
+                        .unwrap()
+                        .replace(&target_name, ""),
+                    if regex::Regex::new(r"(?i)\.disabled$")
+                        .unwrap()
+                        .is_match(&file_name)
+                    {
+                        ".disabled"
+                    } else {
+                        ""
+                    }
                 );
                 let items = vec![ModReplacement {
                     old_name: Some(file_name.clone()),
@@ -783,12 +964,20 @@ pub fn apply_mod_updates(app: &tauri::AppHandle, dir: &Path, items: &[Value]) ->
 // ---------------- modManagement.ts ----------------
 
 /// modCatalog()
-pub fn mod_catalog(app: &tauri::AppHandle, version_id: &str, folder: &str) -> Result<(PathBuf, Vec<Value>), String> {
+pub fn mod_catalog(
+    app: &tauri::AppHandle,
+    version_id: &str,
+    folder: &str,
+) -> Result<(PathBuf, Vec<Value>), String> {
     let dir = resolve_resource_directory(app, folder, version_id, "mods")?;
     let entries = scan_managed_mod_directory(&dir.to_string_lossy(), "catalog")?;
     let mut list: Vec<Value> = Vec::new();
     for i in entries {
-        let sha1 = i.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let sha1 = i
+            .get("sha1")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let mut item = json!({
             "fileName": i.get("fileName").cloned().unwrap_or(json!("")),
             "name": i.get("name").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(Value::from).unwrap_or_else(|| i.get("fileName").cloned().unwrap_or(json!(""))),
@@ -815,8 +1004,16 @@ pub fn identify(app: &tauri::AppHandle, dir: &Path, mods: &[Value]) -> Result<()
     let missing: Vec<Value> = mods
         .iter()
         .filter(|m| {
-            m.get("sha1").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false)
-                && mod_identity(app, dir, m.get("sha1").and_then(|v| v.as_str()).unwrap_or("")).starts_with("sha1:")
+            m.get("sha1")
+                .and_then(|v| v.as_str())
+                .map(|s| !s.is_empty())
+                .unwrap_or(false)
+                && mod_identity(
+                    app,
+                    dir,
+                    m.get("sha1").and_then(|v| v.as_str()).unwrap_or(""),
+                )
+                .starts_with("sha1:")
         })
         .cloned()
         .collect();
@@ -827,9 +1024,18 @@ pub fn identify(app: &tauri::AppHandle, dir: &Path, mods: &[Value]) -> Result<()
     for chunk in missing.chunks(1000) {
         let hashes: Vec<String> = chunk
             .iter()
-            .map(|m| m.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string())
+            .map(|m| {
+                m.get("sha1")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
             .collect();
-        let r = mgmt_json("https://api.modrinth.com/v2/version_files", Some(&json!({ "hashes": hashes, "algorithm": "sha1" })), &[])?;
+        let r = mgmt_json(
+            "https://api.modrinth.com/v2/version_files",
+            Some(&json!({ "hashes": hashes, "algorithm": "sha1" })),
+            &[],
+        )?;
         if let Some(map) = r.as_object() {
             if let Some(target) = by_hash.as_object_mut() {
                 for (k, v) in map {
@@ -840,7 +1046,11 @@ pub fn identify(app: &tauri::AppHandle, dir: &Path, mods: &[Value]) -> Result<()
     }
     for m in &missing {
         let sha1 = m.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
-        if let Some(id) = by_hash.get(sha1).and_then(|v| v.get("project_id")).and_then(|v| v.as_str()) {
+        if let Some(id) = by_hash
+            .get(sha1)
+            .and_then(|v| v.get("project_id"))
+            .and_then(|v| v.as_str())
+        {
             remember_mod_identity(app, dir, sha1, &format!("modrinth:{id}"));
         }
     }
@@ -848,7 +1058,11 @@ pub fn identify(app: &tauri::AppHandle, dir: &Path, mods: &[Value]) -> Result<()
         .iter()
         .filter(|m| {
             let sha1 = m.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
-            by_hash.get(sha1).and_then(|v| v.get("project_id")).is_none() && m.get("fingerprint").is_some()
+            by_hash
+                .get(sha1)
+                .and_then(|v| v.get("project_id"))
+                .is_none()
+                && m.get("fingerprint").is_some()
         })
         .cloned()
         .collect();
@@ -856,9 +1070,20 @@ pub fn identify(app: &tauri::AppHandle, dir: &Path, mods: &[Value]) -> Result<()
         return Ok(());
     }
     let ch = community::cf_channel(app);
-    let headers: Vec<(&str, &str)> = if ch.official { vec![("x-api-key", &ch.key)] } else { vec![] };
-    let fingerprints: Vec<u64> = cf.iter().filter_map(|m| m.get("fingerprint").and_then(|v| v.as_u64())).collect();
-    let r = mgmt_json(&format!("{}/fingerprints", ch.base), Some(&json!({ "fingerprints": fingerprints })), &headers)?;
+    let headers: Vec<(&str, &str)> = if ch.official {
+        vec![("x-api-key", &ch.key)]
+    } else {
+        vec![]
+    };
+    let fingerprints: Vec<u64> = cf
+        .iter()
+        .filter_map(|m| m.get("fingerprint").and_then(|v| v.as_u64()))
+        .collect();
+    let r = mgmt_json(
+        &format!("{}/fingerprints", ch.base),
+        Some(&json!({ "fingerprints": fingerprints })),
+        &headers,
+    )?;
     for m in &cf {
         let sha1 = m.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
         let fp = m.get("fingerprint").and_then(|v| v.as_u64());
@@ -868,13 +1093,32 @@ pub fn identify(app: &tauri::AppHandle, dir: &Path, mods: &[Value]) -> Result<()
             .and_then(|list| {
                 list.iter().find(|x| {
                     x.pointer("/file/fileFingerprint").and_then(|v| v.as_u64()) == fp
-                        && x.pointer("/file/hashes").and_then(|v| v.as_array()).map(|hashes| {
-                            hashes.iter().any(|h| h.get("algo").and_then(|v| v.as_u64()) == Some(1) && h.get("value").and_then(|v| v.as_str()).map(|s| s.to_lowercase() == sha1).unwrap_or(false))
-                        }).unwrap_or(false)
+                        && x.pointer("/file/hashes")
+                            .and_then(|v| v.as_array())
+                            .map(|hashes| {
+                                hashes.iter().any(|h| {
+                                    h.get("algo").and_then(|v| v.as_u64()) == Some(1)
+                                        && h.get("value")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.to_lowercase() == sha1)
+                                            .unwrap_or(false)
+                                })
+                            })
+                            .unwrap_or(false)
                 })
             });
         if let Some(matched) = matched {
-            let id = matched.pointer("/file/modId").and_then(|v| v.as_u64()).map(|v| v.to_string()).unwrap_or_else(|| matched.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string());
+            let id = matched
+                .pointer("/file/modId")
+                .and_then(|v| v.as_u64())
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| {
+                    matched
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                });
             remember_mod_identity(app, dir, sha1, &format!("curseforge:{id}"));
         }
     }
@@ -882,7 +1126,13 @@ pub fn identify(app: &tauri::AppHandle, dir: &Path, mods: &[Value]) -> Result<()
 }
 
 /// setModsEnabled()：批量启停（.disabled 后缀交换，绝不覆盖）
-pub fn set_mods_enabled(app: &tauri::AppHandle, version_id: &str, folder: &str, names: &[String], enabled: bool) -> Result<Value, String> {
+pub fn set_mods_enabled(
+    app: &tauri::AppHandle,
+    version_id: &str,
+    folder: &str,
+    names: &[String],
+    enabled: bool,
+) -> Result<Value, String> {
     let dir = resolve_resource_directory(app, folder, version_id, "mods")?;
     let rec = tasks::register_task("批量启停模组", "download");
     let result = download::with_file_job(&dir, Some(rec.as_ref()), || -> Result<Value, String> {
@@ -892,13 +1142,24 @@ pub fn set_mods_enabled(app: &tauri::AppHandle, version_id: &str, folder: &str, 
         }
         let unique: Vec<String> = {
             let mut seen = HashSet::new();
-            names.iter().filter(|n| seen.insert((*n).clone())).cloned().collect()
+            names
+                .iter()
+                .filter(|n| seen.insert((*n).clone()))
+                .cloned()
+                .collect()
         };
-        let valid_names: Vec<String> = unique.iter().filter(|n| safe_mod_name(n).is_ok()).cloned().collect();
+        let valid_names: Vec<String> = unique
+            .iter()
+            .filter(|n| safe_mod_name(n).is_ok())
+            .cloned()
+            .collect();
         if !valid_names.is_empty() {
             let mut list: Vec<String> = Vec::new();
             for n in &valid_names {
-                let base = regex::Regex::new(r"(?i)\.disabled$").unwrap().replace(n, "").to_string();
+                let base = regex::Regex::new(r"(?i)\.disabled$")
+                    .unwrap()
+                    .replace(n, "")
+                    .to_string();
                 list.push(n.clone());
                 list.push(format!("{base}{}", if enabled { "" } else { ".disabled" }));
             }
@@ -908,7 +1169,10 @@ pub fn set_mods_enabled(app: &tauri::AppHandle, version_id: &str, folder: &str, 
         for name in &unique {
             let run = || -> Result<Value, String> {
                 safe_mod_name(name)?;
-                let base = regex::Regex::new(r"(?i)\.disabled$").unwrap().replace(name, "").to_string();
+                let base = regex::Regex::new(r"(?i)\.disabled$")
+                    .unwrap()
+                    .replace(name, "")
+                    .to_string();
                 let target = format!("{base}{}", if enabled { "" } else { ".disabled" });
                 if !dir.join(name).exists() && dir.join(&target).exists() {
                     validate_mod_file(&dir, &target, None)?;
@@ -930,7 +1194,8 @@ pub fn set_mods_enabled(app: &tauri::AppHandle, version_id: &str, folder: &str, 
             match run() {
                 Ok(v) => results.push(v),
                 // 对应原版 String(e)：Error 对象序列化带 "Error: " 前缀
-                Err(e) => results.push(json!({ "fileName": name, "ok": false, "error": format!("Error: {e}") })),
+                Err(e) => results
+                    .push(json!({ "fileName": name, "ok": false, "error": format!("Error: {e}") })),
             }
         }
         Ok(json!(results))
@@ -940,19 +1205,41 @@ pub fn set_mods_enabled(app: &tauri::AppHandle, version_id: &str, folder: &str, 
 }
 
 /// lockMods()
-pub fn lock_mods(app: &tauri::AppHandle, version_id: &str, folder: &str, names: &[String], locked: bool) -> Result<Value, String> {
+pub fn lock_mods(
+    app: &tauri::AppHandle,
+    version_id: &str,
+    folder: &str,
+    names: &[String],
+    locked: bool,
+) -> Result<Value, String> {
     let dir = resolve_resource_directory(app, folder, version_id, "mods")?;
     let (dir2, mods) = mod_catalog(app, version_id, folder)?;
     let _ = dir2;
-    let selected: Vec<Value> = mods.iter().filter(|m| names.contains(&m.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string())).cloned().collect();
+    let selected: Vec<Value> = mods
+        .iter()
+        .filter(|m| {
+            names.contains(
+                &m.get("fileName")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            )
+        })
+        .cloned()
+        .collect();
     // Hash identity remains stable when offline.
     let _ = identify(app, &dir, &selected);
     let mut results: Vec<Value> = Vec::new();
     for name in names {
         let run = || -> Result<(), String> {
             safe_mod_name(name)?;
-            let m = selected.iter().find(|m| m.get("fileName").and_then(|v| v.as_str()) == Some(name.as_str()));
-            let sha1 = m.and_then(|m| m.get("sha1")).and_then(|v| v.as_str()).unwrap_or("");
+            let m = selected
+                .iter()
+                .find(|m| m.get("fileName").and_then(|v| v.as_str()) == Some(name.as_str()));
+            let sha1 = m
+                .and_then(|m| m.get("sha1"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if sha1.is_empty() {
                 return Err("无法校验模组文件".into());
             }
@@ -962,7 +1249,8 @@ pub fn lock_mods(app: &tauri::AppHandle, version_id: &str, folder: &str, names: 
         };
         match run() {
             Ok(()) => results.push(json!({ "fileName": name, "ok": true })),
-            Err(e) => results.push(json!({ "fileName": name, "ok": false, "error": format!("Error: {e}") })),
+            Err(e) => results
+                .push(json!({ "fileName": name, "ok": false, "error": format!("Error: {e}") })),
         }
     }
     Ok(json!(results))
@@ -985,13 +1273,25 @@ pub struct PlanStore {
 
 impl PlanStore {
     fn new(ttl_ms: u64, limit: usize) -> Self {
-        Self { inner: Mutex::new((HashMap::new(), VecDeque::new())), ttl_ms, limit }
+        Self {
+            inner: Mutex::new((HashMap::new(), VecDeque::new())),
+            ttl_ms,
+            limit,
+        }
     }
 
     fn set(&self, id: &str, value: Value) {
         let (map, order) = &mut *self.inner.lock().unwrap();
         let expires = now_ms() + self.ttl_ms;
-        map.insert(id.to_string(), PlanEntry { value, expires, users: 0, retired: false });
+        map.insert(
+            id.to_string(),
+            PlanEntry {
+                value,
+                expires,
+                users: 0,
+                retired: false,
+            },
+        );
         order.push_back(id.to_string());
         self.trim_locked(map, order);
     }
@@ -1015,7 +1315,10 @@ impl PlanStore {
 
     fn get(&self, id: &str) -> Option<Value> {
         let (map, order) = &mut *self.inner.lock().unwrap();
-        let fresh = map.get(id).map(|e| !e.retired && e.expires > now_ms()).unwrap_or(false);
+        let fresh = map
+            .get(id)
+            .map(|e| !e.retired && e.expires > now_ms())
+            .unwrap_or(false);
         if !fresh {
             map.remove(id);
             return None;
@@ -1102,7 +1405,9 @@ pub fn discard_mod_version_plan(id: &str) {
     changes_store().delete(id);
     dependency_changes_store().delete(id);
     let source_id = id.to_string();
-    changes_store().delete_matching(move |v| v.get("_sourceId").and_then(|x| x.as_str()) == Some(source_id.as_str()));
+    changes_store().delete_matching(move |v| {
+        v.get("_sourceId").and_then(|x| x.as_str()) == Some(source_id.as_str())
+    });
 }
 
 fn compatible_choice_file(file: &Value, mc: &str, loader: &str) -> bool {
@@ -1111,22 +1416,46 @@ fn compatible_choice_file(file: &Value, mc: &str, loader: &str) -> bool {
     let file_name = file.get("fileName").and_then(|v| v.as_str()).unwrap_or("");
     url.starts_with("https://")
         && regex::Regex::new(r"^[a-f0-9]{40}$").unwrap().is_match(sha1)
-        && file.get("gameVersions").and_then(|v| v.as_array()).map(|a| a.iter().any(|x| x.as_str() == Some(mc))).unwrap_or(false)
-        && file.get("loaders").and_then(|v| v.as_array()).map(|a| a.iter().any(|x| x.as_str() == Some(loader))).unwrap_or(false)
+        && file
+            .get("gameVersions")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().any(|x| x.as_str() == Some(mc)))
+            .unwrap_or(false)
+        && file
+            .get("loaders")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().any(|x| x.as_str() == Some(loader)))
+            .unwrap_or(false)
         && installer::basename_of(file_name) == file_name
         && !file_name.contains(['\\', '/', ':', '\0'])
-        && regex::Regex::new(r"(?i)\.jar$").unwrap().is_match(file_name)
+        && regex::Regex::new(r"(?i)\.jar$")
+            .unwrap()
+            .is_match(file_name)
 }
 
 /// modVersionChoices()
-pub fn mod_version_choices(app: &tauri::AppHandle, version_id: &str, folder: &str, file_name: &str) -> Result<Value, String> {
+pub fn mod_version_choices(
+    app: &tauri::AppHandle,
+    version_id: &str,
+    folder: &str,
+    file_name: &str,
+) -> Result<Value, String> {
     safe_mod_name(file_name)?;
     let (dir, mods) = mod_catalog(app, version_id, folder)?;
     let dir2 = dir.clone();
     let _ = dir2;
-    let mod_item = mods.iter().find(|m| m.get("fileName").and_then(|v| v.as_str()) == Some(file_name)).cloned();
-    let Some(mod_item) = mod_item else { return Err("无法读取该模组，请刷新后重试".into()) };
-    let sha1 = mod_item.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let mod_item = mods
+        .iter()
+        .find(|m| m.get("fileName").and_then(|v| v.as_str()) == Some(file_name))
+        .cloned();
+    let Some(mod_item) = mod_item else {
+        return Err("无法读取该模组，请刷新后重试".into());
+    };
+    let sha1 = mod_item
+        .get("sha1")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     if sha1.is_empty() {
         return Err("无法读取该模组，请刷新后重试".into());
     }
@@ -1135,13 +1464,19 @@ pub fn mod_version_choices(app: &tauri::AppHandle, version_id: &str, folder: &st
     if identity.starts_with("sha1:") {
         return Err("未能在社区精确识别此文件，无法可靠提供其他版本；可手动下载并导入。".into());
     }
-    let (source, id) = identity.split_once(':').ok_or_else(|| "未能在社区精确识别此文件，无法可靠提供其他版本；可手动下载并导入。".to_string())?;
+    let (source, id) = identity.split_once(':').ok_or_else(|| {
+        "未能在社区精确识别此文件，无法可靠提供其他版本；可手动下载并导入。".to_string()
+    })?;
     let (mc, loader, _lv) = resolve_instance_meta(app, folder, version_id)?;
     if mc.is_empty() || loader.is_none() {
         return Err("实例缺少游戏或加载器版本信息".into());
     }
     let loader_str = loader.unwrap_or("");
-    let filter = community::FileFilter { mc_version: Some(mc.clone()), loader: Some(loader_str.to_string()), kind: Some("mod".into()) };
+    let filter = community::FileFilter {
+        mc_version: Some(mc.clone()),
+        loader: Some(loader_str.to_string()),
+        kind: Some("mod".into()),
+    };
     let mut files = community_files(app, source, &id, Some(&filter))?;
     files.retain(|f| compatible_choice_file(f, &mc, loader_str));
     let value = json!({
@@ -1154,38 +1489,75 @@ pub fn mod_version_choices(app: &tauri::AppHandle, version_id: &str, folder: &st
         "locked": is_mod_locked(app, &dir, &sha1),
         "files": files,
     });
-    let store_id = value.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    choices_store().set(&store_id, json!({
-        "value": value,
-        "dir": dir.to_string_lossy(),
-        "folder": folder,
-        "versionId": version_id,
-        "mods": mods,
-    }));
+    let store_id = value
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    choices_store().set(
+        &store_id,
+        json!({
+            "value": value,
+            "dir": dir.to_string_lossy(),
+            "folder": folder,
+            "versionId": version_id,
+            "mods": mods,
+        }),
+    );
     Ok(value)
 }
 
 /// planModVersionChange()：目标版本 + 必要前置替换清单 + changelog
-pub fn plan_mod_version_change(app: &tauri::AppHandle, id: &str, file_id: &str) -> Result<Value, String> {
-    let c = choices_store().get(id).ok_or_else(|| "版本列表已过期，请重新打开".to_string())?;
+pub fn plan_mod_version_change(
+    app: &tauri::AppHandle,
+    id: &str,
+    file_id: &str,
+) -> Result<Value, String> {
+    let c = choices_store()
+        .get(id)
+        .ok_or_else(|| "版本列表已过期，请重新打开".to_string())?;
     let value = c.get("value").cloned().unwrap_or(json!({}));
     let dir = PathBuf::from(c.get("dir").and_then(|v| v.as_str()).unwrap_or(""));
-    let mods: Vec<Value> = c.get("mods").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    let mc = value.get("mcVersion").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let loader = value.get("loader").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let mods: Vec<Value> = c
+        .get("mods")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mc = value
+        .get("mcVersion")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let loader = value
+        .get("loader")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let file = value
         .get("files")
         .and_then(|v| v.as_array())
-        .and_then(|files| files.iter().find(|f| f.get("fileId").and_then(|x| x.as_str()) == Some(file_id)))
+        .and_then(|files| {
+            files
+                .iter()
+                .find(|f| f.get("fileId").and_then(|x| x.as_str()) == Some(file_id))
+        })
         .cloned()
         .ok_or_else(|| "请选择列表内的适配版本".to_string())?;
     let mod_item = mods
         .iter()
-        .find(|m| m.get("fileName").and_then(|v| v.as_str()) == value.get("fileName").and_then(|v| v.as_str()))
+        .find(|m| {
+            m.get("fileName").and_then(|v| v.as_str())
+                == value.get("fileName").and_then(|v| v.as_str())
+        })
         .cloned()
         .unwrap_or(json!({}));
-    let mod_file_name = mod_item.get("fileName").and_then(|v| v.as_str()).unwrap_or("");
-    let disabled = regex::Regex::new(r"(?i)\.disabled$").unwrap().is_match(mod_file_name);
+    let mod_file_name = mod_item
+        .get("fileName")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let disabled = regex::Regex::new(r"(?i)\.disabled$")
+        .unwrap()
+        .is_match(mod_file_name);
     let mut warnings: Vec<String> = Vec::new();
     let mut replacements: Vec<Value> = vec![json!({
         "oldName": mod_file_name,
@@ -1208,7 +1580,12 @@ pub fn plan_mod_version_change(app: &tauri::AppHandle, id: &str, file_id: &str) 
     let mut queue: Vec<Value> = vec![file.clone()];
     let mut visited: HashSet<String> = HashSet::new();
     let mut used: HashSet<String> = HashSet::new();
-    used.insert(file.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_lowercase());
+    used.insert(
+        file.get("fileName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_lowercase(),
+    );
     let mut index = 0usize;
     while index < queue.len() {
         if queue.len() > 100 {
@@ -1216,14 +1593,26 @@ pub fn plan_mod_version_change(app: &tauri::AppHandle, id: &str, file_id: &str) 
         }
         let current = queue[index].clone();
         index += 1;
-        let deps = current.get("dependencies").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let deps = current
+            .get("dependencies")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
         for d in deps {
             let required = d.get("required").and_then(|v| v.as_bool()).unwrap_or(false);
             if !required || disabled {
                 continue;
             }
-            let source = current.get("source").and_then(|v| v.as_str()).unwrap_or("modrinth").to_string();
-            let dep_project = d.get("projectId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let source = current
+                .get("source")
+                .and_then(|v| v.as_str())
+                .unwrap_or("modrinth")
+                .to_string();
+            let dep_project = d
+                .get("projectId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let key = format!("{}:{}", source, dep_project);
             if !visited.insert(key.clone()) {
                 continue;
@@ -1232,7 +1621,9 @@ pub fn plan_mod_version_change(app: &tauri::AppHandle, id: &str, file_id: &str) 
             let installed = mods.iter().find(|m| {
                 let m_sha = m.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
                 mod_identity(app, &dir, m_sha) == key
-                    && !regex::Regex::new(r"(?i)\.disabled$").unwrap().is_match(m.get("fileName").and_then(|v| v.as_str()).unwrap_or(""))
+                    && !regex::Regex::new(r"(?i)\.disabled$")
+                        .unwrap()
+                        .is_match(m.get("fileName").and_then(|v| v.as_str()).unwrap_or(""))
                     && m.get("fileName").and_then(|v| v.as_str()) != Some(mod_file_name)
             });
             if installed.is_some() && dep_file.is_none() {
@@ -1241,10 +1632,19 @@ pub fn plan_mod_version_change(app: &tauri::AppHandle, id: &str, file_id: &str) 
             let outcome: Result<Value, String> = (|| {
                 let f = match &dep_file {
                     Some(fid) => community_exact_file(app, &source, Some(&dep_project), fid)?,
-                    None => community_files(app, &source, &dep_project, Some(&community::FileFilter { mc_version: Some(mc.clone()), loader: Some(loader.clone()), kind: Some("mod".into()) }))?
-                        .into_iter()
-                        .find(|f| compatible_choice_file(f, &mc, &loader))
-                        .ok_or_else(|| "无兼容版本".to_string())?,
+                    None => community_files(
+                        app,
+                        &source,
+                        &dep_project,
+                        Some(&community::FileFilter {
+                            mc_version: Some(mc.clone()),
+                            loader: Some(loader.clone()),
+                            kind: Some("mod".into()),
+                        }),
+                    )?
+                    .into_iter()
+                    .find(|f| compatible_choice_file(f, &mc, &loader))
+                    .ok_or_else(|| "无兼容版本".to_string())?,
                 };
                 if !compatible_choice_file(&f, &mc, &loader) {
                     return Err("无兼容版本".into());
@@ -1260,14 +1660,24 @@ pub fn plan_mod_version_change(app: &tauri::AppHandle, id: &str, file_id: &str) 
                     }
                     return Err("__skip__".into());
                 }
-                if used.contains(&f.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_lowercase()) {
+                if used.contains(
+                    &f.get("fileName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_lowercase(),
+                ) {
                     return Err("前置文件名冲突".into());
                 }
                 Ok(f)
             })();
             match outcome {
                 Ok(f) => {
-                    used.insert(f.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_lowercase());
+                    used.insert(
+                        f.get("fileName")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_lowercase(),
+                    );
                     replacements.push(json!({
                         "name": f.get("fileName").cloned().unwrap_or(json!("")),
                         "sha1": f.get("sha1").cloned().unwrap_or(json!("")),
@@ -1284,7 +1694,11 @@ pub fn plan_mod_version_change(app: &tauri::AppHandle, id: &str, file_id: &str) 
                 Err(e) if e == "__skip__" => {}
                 Err(e) => warnings.push(format!(
                     "必要前置 {} 未安装：Error: {}",
-                    if dep_project.is_empty() { dep_file.as_deref().unwrap_or("未知") } else { dep_project.as_str() },
+                    if dep_project.is_empty() {
+                        dep_file.as_deref().unwrap_or("未知")
+                    } else {
+                        dep_project.as_str()
+                    },
                     e
                 )),
             }
@@ -1294,17 +1708,40 @@ pub fn plan_mod_version_change(app: &tauri::AppHandle, id: &str, file_id: &str) 
     {
         let changelog_result: Result<String, String> = (|| {
             if file.get("source").and_then(|v| v.as_str()) == Some("modrinth") {
-                let r = get_json(&format!("https://api.modrinth.com/v2/version/{}", community::enc(file_id)), UA_MGMT, 15_000, &[])?;
-                Ok(r.get("changelog").and_then(|v| v.as_str()).unwrap_or("").to_string())
+                let r = get_json(
+                    &format!(
+                        "https://api.modrinth.com/v2/version/{}",
+                        community::enc(file_id)
+                    ),
+                    UA_MGMT,
+                    15_000,
+                    &[],
+                )?;
+                Ok(r.get("changelog")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string())
             } else {
                 let project = file.get("projectId").and_then(|v| v.as_str()).unwrap_or("");
                 if project.is_empty() {
                     return Ok(String::new());
                 }
                 let ch = community::cf_channel(app);
-                let headers: Vec<(&str, &str)> = if ch.official { vec![("x-api-key", &ch.key)] } else { vec![] };
-                let r = get_json(&format!("{}/mods/{}/files/{}/changelog", ch.base, project, file_id), UA_MGMT, 15_000, &headers)?;
-                Ok(r.get("data").and_then(|v| v.as_str()).unwrap_or("").to_string())
+                let headers: Vec<(&str, &str)> = if ch.official {
+                    vec![("x-api-key", &ch.key)]
+                } else {
+                    vec![]
+                };
+                let r = get_json(
+                    &format!("{}/mods/{}/files/{}/changelog", ch.base, project, file_id),
+                    UA_MGMT,
+                    15_000,
+                    &headers,
+                )?;
+                Ok(r.get("data")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string())
             }
         })();
         match changelog_result {
@@ -1316,7 +1753,10 @@ pub fn plan_mod_version_change(app: &tauri::AppHandle, id: &str, file_id: &str) 
     if choices_store().get(id).as_ref() != Some(&c) {
         return Err("版本列表已关闭或过期，请重新打开".into());
     }
-    let stripped = regex::Regex::new(r"<[^>]*>").unwrap().replace_all(&changelog, "").to_string();
+    let stripped = regex::Regex::new(r"<[^>]*>")
+        .unwrap()
+        .replace_all(&changelog, "")
+        .to_string();
     let view = json!({
         "id": crate::accounts::uuid_v4(),
         "fileName": mod_file_name,
@@ -1325,15 +1765,22 @@ pub fn plan_mod_version_change(app: &tauri::AppHandle, id: &str, file_id: &str) 
         "warnings": warnings,
         "changelog": stripped.chars().take(20_000).collect::<String>(),
     });
-    let plan_id = view.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    changes_store().set(&plan_id, json!({
-        "view": view,
-        "sourceId": id,
-        "dir": dir.to_string_lossy(),
-        "replacements": replacements,
-        "mods": mods,
-        "lockHash": lock_sha1,
-    }));
+    let plan_id = view
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    changes_store().set(
+        &plan_id,
+        json!({
+            "view": view,
+            "sourceId": id,
+            "dir": dir.to_string_lossy(),
+            "replacements": replacements,
+            "mods": mods,
+            "lockHash": lock_sha1,
+        }),
+    );
     Ok(view)
 }
 
@@ -1344,16 +1791,32 @@ fn validate_snapshot(dir: &Path, mods: &[Value]) -> Result<(), String> {
         .flatten()
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
         .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| regex::Regex::new(r"(?i)\.jar(?:\.disabled)?$").unwrap().is_match(n))
+        .filter(|n| {
+            regex::Regex::new(r"(?i)\.jar(?:\.disabled)?$")
+                .unwrap()
+                .is_match(n)
+        })
         .collect();
     names.sort();
-    let mut expected: Vec<String> = mods.iter().map(|m| m.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string()).collect();
+    let mut expected: Vec<String> = mods
+        .iter()
+        .map(|m| {
+            m.get("fileName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect();
     expected.sort();
     if names != expected {
         return Err("检查后模组列表发生变化，请重新检查".into());
     }
     for m in mods {
-        validate_mod_file(dir, m.get("fileName").and_then(|v| v.as_str()).unwrap_or(""), m.get("sha1").and_then(|v| v.as_str()))?;
+        validate_mod_file(
+            dir,
+            m.get("fileName").and_then(|v| v.as_str()).unwrap_or(""),
+            m.get("sha1").and_then(|v| v.as_str()),
+        )?;
     }
     Ok(())
 }
@@ -1361,10 +1824,24 @@ fn validate_snapshot(dir: &Path, mods: &[Value]) -> Result<(), String> {
 fn replacements_from(v: &[Value]) -> Vec<ModReplacement> {
     v.iter()
         .map(|r| ModReplacement {
-            old_name: r.get("oldName").and_then(|x| x.as_str()).map(str::to_string),
-            old_sha1: r.get("oldSha1").and_then(|x| x.as_str()).map(str::to_string),
-            name: r.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-            sha1: r.get("sha1").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            old_name: r
+                .get("oldName")
+                .and_then(|x| x.as_str())
+                .map(str::to_string),
+            old_sha1: r
+                .get("oldSha1")
+                .and_then(|x| x.as_str())
+                .map(str::to_string),
+            name: r
+                .get("name")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
+            sha1: r
+                .get("sha1")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
             url: r.get("url").and_then(|x| x.as_str()).map(str::to_string),
             size: r.get("size").and_then(|x| x.as_u64()),
         })
@@ -1372,12 +1849,26 @@ fn replacements_from(v: &[Value]) -> Vec<ModReplacement> {
 }
 
 /// applyModVersionChange()
-pub fn apply_mod_version_change(app: &tauri::AppHandle, id: &str, confirmed: bool) -> Result<Value, String> {
-    let c = changes_store().get(id).ok_or_else(|| "切换计划已过期".to_string())?;
+pub fn apply_mod_version_change(
+    app: &tauri::AppHandle,
+    id: &str,
+    confirmed: bool,
+) -> Result<Value, String> {
+    let c = changes_store()
+        .get(id)
+        .ok_or_else(|| "切换计划已过期".to_string())?;
     let view = c.get("view").cloned().unwrap_or(json!({}));
     let dir = PathBuf::from(c.get("dir").and_then(|v| v.as_str()).unwrap_or(""));
-    let lock_hash = c.get("lockHash").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let warnings = view.get("warnings").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let lock_hash = c
+        .get("lockHash")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let warnings = view
+        .get("warnings")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     if (!warnings.is_empty() || is_mod_locked(app, &dir, &lock_hash)) && !confirmed {
         return Err("请确认锁定模组与前置提醒".into());
     }
@@ -1387,9 +1878,17 @@ pub fn apply_mod_version_change(app: &tauri::AppHandle, id: &str, confirmed: boo
     let rec = tasks::register_task("切换模组版本", "download");
     let result = download::with_file_job(&dir, Some(rec.as_ref()), || -> Result<Value, String> {
         assert_mods_idle(app, &dir)?;
-        let mods: Vec<Value> = c.get("mods").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let mods: Vec<Value> = c
+            .get("mods")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
         validate_snapshot(&dir, &mods)?;
-        let replacements = replacements_from(c.get("replacements").and_then(|v| v.as_array()).unwrap_or(&Vec::new()));
+        let replacements = replacements_from(
+            c.get("replacements")
+                .and_then(|v| v.as_array())
+                .unwrap_or(&Vec::new()),
+        );
         let validate = || -> Result<(), String> {
             assert_mods_idle(app, &dir)?;
             validate_snapshot(&dir, &mods)?;
@@ -1411,34 +1910,64 @@ pub fn apply_mod_version_change(app: &tauri::AppHandle, id: &str, confirmed: boo
 }
 
 /// planMissingDependencies()（center:dependencyPlan 复用）
-pub fn plan_missing_dependencies(app: &tauri::AppHandle, version_id: &str, folder: &str, file_name: &str) -> Result<Value, String> {
+pub fn plan_missing_dependencies(
+    app: &tauri::AppHandle,
+    version_id: &str,
+    folder: &str,
+    file_name: &str,
+) -> Result<Value, String> {
     let list = mod_version_choices(app, version_id, folder, file_name)?;
     let mut plan_id: Option<String> = None;
     let result = (|| -> Result<Value, String> {
-        let stored = choices_store().get(list.get("id").and_then(|v| v.as_str()).unwrap_or("")).ok_or_else(|| "版本列表已过期，请重新打开".to_string())?;
-        let mods: Vec<Value> = stored.get("mods").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let stored = choices_store()
+            .get(list.get("id").and_then(|v| v.as_str()).unwrap_or(""))
+            .ok_or_else(|| "版本列表已过期，请重新打开".to_string())?;
+        let mods: Vec<Value> = stored
+            .get("mods")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
         let mod_item = mods
             .iter()
             .find(|m| m.get("fileName").and_then(|v| v.as_str()) == Some(file_name))
             .cloned()
             .ok_or_else(|| "无法读取该模组，请刷新后重试".to_string())?;
-        if regex::Regex::new(r"(?i)\.disabled$").unwrap().is_match(file_name) {
+        if regex::Regex::new(r"(?i)\.disabled$")
+            .unwrap()
+            .is_match(file_name)
+        {
             return Err("该模组已禁用，无需安装运行前置".into());
         }
         let mod_sha = mod_item.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
         let exact = list
             .get("files")
             .and_then(|v| v.as_array())
-            .and_then(|files| files.iter().find(|f| f.get("sha1").and_then(|x| x.as_str()) == Some(mod_sha)))
+            .and_then(|files| {
+                files
+                    .iter()
+                    .find(|f| f.get("sha1").and_then(|x| x.as_str()) == Some(mod_sha))
+            })
             .cloned()
-            .ok_or_else(|| "社区列表中没有与本地哈希完全一致的版本，无法可靠确定前置，请手动核对".to_string())?;
-        let plan = plan_mod_version_change(app, list.get("id").and_then(|v| v.as_str()).unwrap_or(""), exact.get("fileId").and_then(|v| v.as_str()).unwrap_or(""))?;
+            .ok_or_else(|| {
+                "社区列表中没有与本地哈希完全一致的版本，无法可靠确定前置，请手动核对".to_string()
+            })?;
+        let plan = plan_mod_version_change(
+            app,
+            list.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+            exact.get("fileId").and_then(|v| v.as_str()).unwrap_or(""),
+        )?;
         plan_id = plan.get("id").and_then(|v| v.as_str()).map(str::to_string);
-        let change = changes_store().get(plan_id.as_deref().unwrap_or("")).ok_or_else(|| "切换计划已过期".to_string())?;
+        let change = changes_store()
+            .get(plan_id.as_deref().unwrap_or(""))
+            .ok_or_else(|| "切换计划已过期".to_string())?;
         let mut warnings: Vec<String> = plan
             .get("warnings")
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|w| w.as_str().map(str::to_string)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|w| w.as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default();
         warnings.retain(|w| !w.starts_with("此模组已锁定"));
         if !warnings.is_empty() {
@@ -1447,7 +1976,20 @@ pub fn plan_missing_dependencies(app: &tauri::AppHandle, version_id: &str, folde
             }
             return Err(format!("无法完整确定兼容前置：{}", warnings.join("；")));
         }
-        let files: Vec<Value> = plan.get("files").and_then(|v| v.as_array()).map(|a| a.iter().filter(|f| f.get("dependency").and_then(|x| x.as_bool()).unwrap_or(false)).cloned().collect()).unwrap_or_default();
+        let files: Vec<Value> = plan
+            .get("files")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter(|f| {
+                        f.get("dependency")
+                            .and_then(|x| x.as_bool())
+                            .unwrap_or(false)
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
         if files.is_empty() {
             if let Some(pid) = &plan_id {
                 changes_store().delete(pid);
@@ -1480,18 +2022,35 @@ pub fn plan_missing_dependencies(app: &tauri::AppHandle, version_id: &str, folde
 }
 
 /// applyMissingDependencies()（center:dependencyApply 复用）
-pub fn apply_missing_dependencies(app: &tauri::AppHandle, id: &str, confirmed: bool, rec: &Arc<TaskRecord>, on_progress: Option<&(dyn Fn(f64) + Sync)>) -> Result<Value, String> {
-    let c = dependency_changes_store().get(id).filter(|_| confirmed).ok_or_else(|| "请重新检查并确认前置安装清单".to_string())?;
+pub fn apply_missing_dependencies(
+    app: &tauri::AppHandle,
+    id: &str,
+    confirmed: bool,
+    rec: &Arc<TaskRecord>,
+    on_progress: Option<&(dyn Fn(f64) + Sync)>,
+) -> Result<Value, String> {
+    let c = dependency_changes_store()
+        .get(id)
+        .filter(|_| confirmed)
+        .ok_or_else(|| "请重新检查并确认前置安装清单".to_string())?;
     if !dependency_changes_store().lease(id) {
         return Err("请重新检查并确认前置安装清单".into());
     }
     let result = (|| -> Result<Value, String> {
         let dir = PathBuf::from(c.get("dir").and_then(|v| v.as_str()).unwrap_or(""));
-        let mods: Vec<Value> = c.get("mods").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let mods: Vec<Value> = c
+            .get("mods")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
         download::with_file_job(&dir, Some(rec.as_ref()), || -> Result<Value, String> {
             assert_mods_idle(app, &dir)?;
             validate_snapshot(&dir, &mods)?;
-            let replacements = replacements_from(c.get("replacements").and_then(|v| v.as_array()).unwrap_or(&Vec::new()));
+            let replacements = replacements_from(
+                c.get("replacements")
+                    .and_then(|v| v.as_array())
+                    .unwrap_or(&Vec::new()),
+            );
             let validate = || -> Result<(), String> {
                 assert_mods_idle(app, &dir)?;
                 validate_snapshot(&dir, &mods)
@@ -1530,24 +2089,47 @@ fn clean_plan(id: &str, plan: &PrivatePlan) {
 fn provided(mod_info: &Value) -> Vec<Value> {
     match mod_info.get("provides").and_then(|v| v.as_array()) {
         Some(list) if !list.is_empty() => list.clone(),
-        _ => vec![json!({ "id": mod_info.get("id").cloned().unwrap_or(json!("")), "version": mod_info.get("version").cloned().unwrap_or(json!("")) })],
+        _ => vec![
+            json!({ "id": mod_info.get("id").cloned().unwrap_or(json!("")), "version": mod_info.get("version").cloned().unwrap_or(json!("")) }),
+        ],
     }
 }
 
 /// requirementsFor()
 fn requirements_for(mod_info: &Value, target: &Value) -> Vec<Value> {
     let loader = normalize_loader(target.get("loader").and_then(|v| v.as_str()));
-    let variants = mod_info.get("variants").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    let matched: Vec<&Value> = variants.iter().filter(|v| loader.is_some() && loader == normalize_loader(v.get("loader").and_then(|x| x.as_str()))).collect();
+    let variants = mod_info
+        .get("variants")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let matched: Vec<&Value> = variants
+        .iter()
+        .filter(|v| {
+            loader.is_some() && loader == normalize_loader(v.get("loader").and_then(|x| x.as_str()))
+        })
+        .collect();
     if !matched.is_empty() {
-        return matched.iter().flat_map(|v| v.get("requirements").and_then(|r| r.as_array()).cloned().unwrap_or_default()).collect();
+        return matched
+            .iter()
+            .flat_map(|v| {
+                v.get("requirements")
+                    .and_then(|r| r.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .collect();
     }
     match mod_info.get("requirements").and_then(|v| v.as_array()) {
         Some(list) if !list.is_empty() => list.clone(),
         _ => mod_info
             .get("dependencies")
             .and_then(|v| v.as_array())
-            .map(|a| a.iter().map(|id| json!({ "id": id, "range": "*" })).collect())
+            .map(|a| {
+                a.iter()
+                    .map(|id| json!({ "id": id, "range": "*" }))
+                    .collect()
+            })
             .unwrap_or_default(),
     }
 }
@@ -1562,7 +2144,10 @@ fn missing_requirements(mods: &[Value], target: &Value, available: &[Value]) -> 
             !available.iter().any(|m| {
                 provided(m).iter().any(|p| {
                     p.get("id").and_then(|v| v.as_str()) == Some(dep_id)
-                        && matches_version_range(dep_range, p.get("version").and_then(|v| v.as_str()).unwrap_or(""))
+                        && matches_version_range(
+                            dep_range,
+                            p.get("version").and_then(|v| v.as_str()).unwrap_or(""),
+                        )
                 })
             })
         })
@@ -1571,11 +2156,20 @@ fn missing_requirements(mods: &[Value], target: &Value, available: &[Value]) -> 
 
 /// installedMods()：实例 mods 目录已启用 jar 解析
 fn installed_mods(target: &Value) -> Vec<Value> {
-    let game_dir = target.get("gameDirectory").and_then(|v| v.as_str()).unwrap_or("");
+    let game_dir = target
+        .get("gameDirectory")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let dir = Path::new(game_dir).join("mods");
     let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(&dir) else { return out };
-    let mut names: Vec<String> = rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.to_lowercase().ends_with(".jar")).collect();
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return out;
+    };
+    let mut names: Vec<String> = rd
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.to_lowercase().ends_with(".jar"))
+        .collect();
     names.sort();
     for n in names {
         let info = parse_mod_file(&dir.join(n).to_string_lossy());
@@ -1617,32 +2211,63 @@ fn dependency_graph(
             return Err(format!(
                 "{} 不支持 MC {} / {}",
                 file.get("fileName").and_then(|v| v.as_str()).unwrap_or(""),
-                target.get("mcVersion").and_then(|v| v.as_str()).unwrap_or(""),
+                target
+                    .get("mcVersion")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(""),
                 target.get("loader").and_then(|v| v.as_str()).unwrap_or("")
             ));
         }
         if seen.len() >= 96 {
             return Err("依赖图超过 96 项，请检查项目元数据".into());
         }
-        let project_id = file.get("projectId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let project = format!("{}:{}", file.get("source").and_then(|v| v.as_str()).unwrap_or(""), project_id);
+        let project_id = file
+            .get("projectId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let project = format!(
+            "{}:{}",
+            file.get("source").and_then(|v| v.as_str()).unwrap_or(""),
+            project_id
+        );
         if !project_id.is_empty() {
             if let Some(prev) = projects.get(&project) {
                 if prev != file.get("fileId").and_then(|v| v.as_str()).unwrap_or("") {
                     return Err(format!("前置版本冲突：{project_id}"));
                 }
             }
-            projects.insert(project, file.get("fileId").and_then(|v| v.as_str()).unwrap_or("").to_string());
+            projects.insert(
+                project,
+                file.get("fileId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            );
         }
         seen.insert(key);
-        let deps = file.get("dependencies").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let deps = file
+            .get("dependencies")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
         for dep in deps {
-            if !dep.get("required").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if !dep
+                .get("required")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 continue;
             }
             let dep_project = dep.get("projectId").and_then(|v| v.as_str()).unwrap_or("");
             let dep_file = dep.get("fileId").and_then(|v| v.as_str()).unwrap_or("");
-            if file.get("source").and_then(|v| v.as_str()).unwrap_or("").is_empty() || (dep_project.is_empty() && dep_file.is_empty()) {
+            if file
+                .get("source")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .is_empty()
+                || (dep_project.is_empty() && dep_file.is_empty())
+            {
                 return Err(format!(
                     "无法定位 {} 的必要前置，请手动安装",
                     file.get("fileName").and_then(|v| v.as_str()).unwrap_or("")
@@ -1651,38 +2276,98 @@ fn dependency_graph(
             let source = file.get("source").and_then(|v| v.as_str()).unwrap_or("");
             let selected = roots.iter().find(|root| {
                 root.get("source").and_then(|v| v.as_str()) == Some(source)
-                    && (!dep_project.is_empty() && root.get("projectId").and_then(|v| v.as_str()) == Some(dep_project)
+                    && (!dep_project.is_empty()
+                        && root.get("projectId").and_then(|v| v.as_str()) == Some(dep_project)
                         || root.get("fileId").and_then(|v| v.as_str()) == Some(dep_file))
             });
             if let Some(selected) = selected {
-                if !dep_file.is_empty() && selected.get("fileId").and_then(|v| v.as_str()) != Some(dep_file) {
-                    return Err(format!("前置版本冲突：{}", if dep_project.is_empty() { dep_file } else { dep_project }));
+                if !dep_file.is_empty()
+                    && selected.get("fileId").and_then(|v| v.as_str()) != Some(dep_file)
+                {
+                    return Err(format!(
+                        "前置版本冲突：{}",
+                        if dep_project.is_empty() {
+                            dep_file
+                        } else {
+                            dep_project
+                        }
+                    ));
                 }
             }
             let next = match selected {
                 Some(s) => s.clone(),
                 None => {
                     if !dep_file.is_empty() {
-                        community_exact_file(app, source, if dep_project.is_empty() { None } else { Some(dep_project) }, dep_file)?
+                        community_exact_file(
+                            app,
+                            source,
+                            if dep_project.is_empty() {
+                                None
+                            } else {
+                                Some(dep_project)
+                            },
+                            dep_file,
+                        )?
                     } else {
-                        community_files(app, source, dep_project, Some(&community::FileFilter {
-                            mc_version: Some(target.get("mcVersion").and_then(|v| v.as_str()).unwrap_or("").to_string()),
-                            loader: Some(target.get("loader").and_then(|v| v.as_str()).unwrap_or("").to_string()),
-                            kind: None,
-                        }))?
+                        community_files(
+                            app,
+                            source,
+                            dep_project,
+                            Some(&community::FileFilter {
+                                mc_version: Some(
+                                    target
+                                        .get("mcVersion")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                ),
+                                loader: Some(
+                                    target
+                                        .get("loader")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string(),
+                                ),
+                                kind: None,
+                            }),
+                        )?
                         .into_iter()
                         .next()
                         .ok_or_else(|| format!("前置 {dep_project} 没有兼容版本"))?
                     }
                 }
             };
-            if !dep_file.is_empty() && next.get("fileId").and_then(|v| v.as_str()) != Some(dep_file) {
-                return Err(format!("前置版本冲突：{}", if dep_project.is_empty() { dep_file } else { dep_project }));
+            if !dep_file.is_empty() && next.get("fileId").and_then(|v| v.as_str()) != Some(dep_file)
+            {
+                return Err(format!(
+                    "前置版本冲突：{}",
+                    if dep_project.is_empty() {
+                        dep_file
+                    } else {
+                        dep_project
+                    }
+                ));
             }
             if !dep_file.is_empty() {
-                pinned_files.insert(format!("{}:{}", next.get("source").and_then(|v| v.as_str()).unwrap_or(""), next.get("fileId").and_then(|v| v.as_str()).unwrap_or("")), next.clone());
+                pinned_files.insert(
+                    format!(
+                        "{}:{}",
+                        next.get("source").and_then(|v| v.as_str()).unwrap_or(""),
+                        next.get("fileId").and_then(|v| v.as_str()).unwrap_or("")
+                    ),
+                    next.clone(),
+                );
             }
-            visit(app, next, target, roots, seen, projects, result, pinned_files)?;
+            visit(
+                app,
+                next,
+                target,
+                roots,
+                seen,
+                projects,
+                result,
+                pinned_files,
+            )?;
         }
         result.push(file);
         Ok(())
@@ -1691,7 +2376,16 @@ fn dependency_graph(
     let mut seen = HashSet::new();
     let mut projects = HashMap::new();
     for root in roots {
-        visit(app, root.clone(), target, roots, &mut seen, &mut projects, &mut result, pinned_files)?;
+        visit(
+            app,
+            root.clone(),
+            target,
+            roots,
+            &mut seen,
+            &mut projects,
+            &mut result,
+            pinned_files,
+        )?;
     }
     Ok(result)
 }
@@ -1712,7 +2406,12 @@ pub struct TaskEmit {
 }
 
 impl TaskEmit {
-    pub fn new(app: &tauri::AppHandle, task_id: &str, task_title: &str, operation_id: Option<String>) -> Self {
+    pub fn new(
+        app: &tauri::AppHandle,
+        task_id: &str,
+        task_title: &str,
+        operation_id: Option<String>,
+    ) -> Self {
         Self {
             app: app.clone(),
             guard: Mutex::new(ProgressGuard::new()),
@@ -1726,7 +2425,11 @@ impl TaskEmit {
     pub fn emit(&self, event: &Value) {
         let mut g = self.guard.lock().unwrap();
         let normalized = g.normalize(event);
-        let stage = normalized.get("stage").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let stage = normalized
+            .get("stage")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if stage != "error" && stage != "done" {
             *self.last_stage.lock().unwrap() = stage.clone();
         }
@@ -1765,9 +2468,22 @@ fn download_plan_file(
     let text = text.to_string();
     let progress = move |done: u64, total: u64, wire: u64| {
         bytes.fetch_add(wire, Ordering::SeqCst);
-        let remaining = if total > done { Some(total - done) } else { None };
-        let snap = est.lock().unwrap().sample(bytes.load(Ordering::SeqCst), remaining, start.elapsed().as_millis() as f64, paused_flag.load(Ordering::SeqCst));
-        let frac = if total > 0 { done as f64 / total as f64 } else { 0.0 };
+        let remaining = if total > done {
+            Some(total - done)
+        } else {
+            None
+        };
+        let snap = est.lock().unwrap().sample(
+            bytes.load(Ordering::SeqCst),
+            remaining,
+            start.elapsed().as_millis() as f64,
+            paused_flag.load(Ordering::SeqCst),
+        );
+        let frac = if total > 0 {
+            done as f64 / total as f64
+        } else {
+            0.0
+        };
         let mut ev = json!({
             "stage": "download",
             "progress": frac,
@@ -1812,7 +2528,11 @@ pub fn prepare_mod_install(
 ) -> Result<Value, String> {
     {
         let mut store = plans_store().lock().unwrap();
-        let expired: Vec<String> = store.iter().filter(|(_, p)| p.expires < now_ms()).map(|(k, _)| k.clone()).collect();
+        let expired: Vec<String> = store
+            .iter()
+            .filter(|(_, p)| p.expires < now_ms())
+            .map(|(k, _)| k.clone())
+            .collect();
         for id in expired {
             if let Some(p) = store.remove(&id) {
                 let _ = std::fs::remove_dir_all(&p.directory);
@@ -1822,7 +2542,8 @@ pub fn prepare_mod_install(
             return Err("待确认安装过多，请取消已有安装计划".into());
         }
     }
-    let directory = std::env::temp_dir().join(format!("kamucl-mod-plan-{}", crate::accounts::uuid_v4()));
+    let directory =
+        std::env::temp_dir().join(format!("kamucl-mod-plan-{}", crate::accounts::uuid_v4()));
     std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
     let id = crate::accounts::uuid_v4();
     let mut plan = PrivatePlan {
@@ -1843,16 +2564,54 @@ pub fn prepare_mod_install(
             if source.is_empty() || project_id.is_empty() {
                 return Err("缺少项目来源，请重新打开下载页".into());
             }
-            let exact = community_exact_file(app, source, Some(project_id), file.get("fileId").and_then(|v| v.as_str()).unwrap_or(""))?;
+            let exact = community_exact_file(
+                app,
+                source,
+                Some(project_id),
+                file.get("fileId").and_then(|v| v.as_str()).unwrap_or(""),
+            )?;
             if !community_file_matches_instance(&exact, target) {
-                let gv: Vec<String> = exact.get("gameVersions").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str()).map(String::from).collect()).unwrap_or_default();
-                let lds: Vec<String> = exact.get("loaders").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|x| x.as_str()).map(String::from).collect()).unwrap_or_default();
+                let gv: Vec<String> = exact
+                    .get("gameVersions")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str())
+                            .map(String::from)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let lds: Vec<String> = exact
+                    .get("loaders")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str())
+                            .map(String::from)
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 return Err(format!(
                     "所选 MOD 文件不支持目标 MC {} / {}；文件声明 MC {} / {}",
-                    target.get("mcVersion").and_then(|v| v.as_str()).unwrap_or(""),
-                    target.get("loader").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("纯净版"),
-                    if gv.is_empty() { "未知".to_string() } else { gv.join(" / ") },
-                    if lds.is_empty() { "未知".to_string() } else { lds.join(" / ") }
+                    target
+                        .get("mcVersion")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    target
+                        .get("loader")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("纯净版"),
+                    if gv.is_empty() {
+                        "未知".to_string()
+                    } else {
+                        gv.join(" / ")
+                    },
+                    if lds.is_empty() {
+                        "未知".to_string()
+                    } else {
+                        lds.join(" / ")
+                    }
                 ));
             }
             let file_name = exact.get("fileName").and_then(|v| v.as_str()).unwrap_or("");
@@ -1869,10 +2628,21 @@ pub fn prepare_mod_install(
                 &format!("下载所选 MOD：{file_name}"),
             )?;
             plan.roots.push(dest.to_string_lossy().into_owned());
-            plan.root_files.insert(format!("{}:{}", source, exact.get("fileId").and_then(|v| v.as_str()).unwrap_or("")), dest.to_string_lossy().into_owned());
+            plan.root_files.insert(
+                format!(
+                    "{}:{}",
+                    source,
+                    exact.get("fileId").and_then(|v| v.as_str()).unwrap_or("")
+                ),
+                dest.to_string_lossy().into_owned(),
+            );
             roots.push(exact);
         } else {
-            let paths = input.get("paths").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let paths = input
+                .get("paths")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
             for (index, file) in paths.iter().enumerate() {
                 check_cancel(rec)?;
                 let src = file.as_str().unwrap_or("");
@@ -1892,7 +2662,17 @@ pub fn prepare_mod_install(
         for m in &mods {
             if !mod_matches_instance(m, target) {
                 let reasons = mod_mismatch_reasons(m, target).join("；");
-                return Err(format!("{}：{}", m.get("name").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or_else(|| m.get("fileName").and_then(|v| v.as_str()).unwrap_or("")), reasons));
+                return Err(format!(
+                    "{}：{}",
+                    m.get("name")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| m
+                            .get("fileName")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")),
+                    reasons
+                ));
             }
         }
         let installed = installed_mods(target);
@@ -1903,21 +2683,45 @@ pub fn prepare_mod_install(
         check_cancel(rec)?;
         let root_keys: HashSet<String> = roots
             .iter()
-            .map(|f| format!("{}:{}", f.get("source").and_then(|v| v.as_str()).unwrap_or(""), f.get("fileId").and_then(|v| v.as_str()).unwrap_or("")))
+            .map(|f| {
+                format!(
+                    "{}:{}",
+                    f.get("source").and_then(|v| v.as_str()).unwrap_or(""),
+                    f.get("fileId").and_then(|v| v.as_str()).unwrap_or("")
+                )
+            })
             .collect();
-        plan.downloads = graph.into_iter().filter(|f| !root_keys.contains(&format!("{}:{}", f.get("source").and_then(|v| v.as_str()).unwrap_or(""), f.get("fileId").and_then(|v| v.as_str()).unwrap_or("")))).collect();
+        plan.downloads = graph
+            .into_iter()
+            .filter(|f| {
+                !root_keys.contains(&format!(
+                    "{}:{}",
+                    f.get("source").and_then(|v| v.as_str()).unwrap_or(""),
+                    f.get("fileId").and_then(|v| v.as_str()).unwrap_or("")
+                ))
+            })
+            .collect();
         // 本地拖入无仓库项目 ID：按 mod id 单独检索候选
         let mut missing_unique: Vec<Value> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
         for d in &missing {
-            if seen.insert(d.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string()) {
+            if seen.insert(
+                d.get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            ) {
                 missing_unique.push(d.clone());
             }
         }
         let mut warnings: Vec<String> = Vec::new();
         for req in &missing_unique {
             check_cancel(rec)?;
-            let req_id = req.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let req_id = req
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let normalized = req_id.replace(['-', '_'], "");
             let already = plan.downloads.iter().any(|f| {
                 f.get("projectId")
@@ -1953,7 +2757,11 @@ pub fn prepare_mod_install(
             let mut map: HashMap<String, Value> = HashMap::new();
             let mut order: Vec<String> = Vec::new();
             for f in &plan.downloads {
-                let key = format!("{}:{}", f.get("source").and_then(|v| v.as_str()).unwrap_or(""), f.get("fileId").and_then(|v| v.as_str()).unwrap_or(""));
+                let key = format!(
+                    "{}:{}",
+                    f.get("source").and_then(|v| v.as_str()).unwrap_or(""),
+                    f.get("fileId").and_then(|v| v.as_str()).unwrap_or("")
+                );
                 if map.insert(key.clone(), f.clone()).is_none() {
                     order.push(key);
                 }
@@ -1966,7 +2774,11 @@ pub fn prepare_mod_install(
             let mut present = false;
             if let Some(sha1) = file.get("sha1").and_then(|v| v.as_str()) {
                 for m in &installed {
-                    let fp = m.get("filePath").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let fp = m
+                        .get("filePath")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     let mut cache = installed_hashes.lock().unwrap();
                     let hash = match cache.get(&fp) {
                         Some(h) => h.clone(),
@@ -1987,7 +2799,14 @@ pub fn prepare_mod_install(
                 plan.downloads.push(file);
             }
         }
-        plan.view["missing"] = json!(missing.iter().map(|d| format!("{} {}", d.get("id").and_then(|v| v.as_str()).unwrap_or(""), d.get("range").and_then(|v| v.as_str()).unwrap_or("*"))).collect::<Vec<String>>());
+        plan.view["missing"] = json!(missing
+            .iter()
+            .map(|d| format!(
+                "{} {}",
+                d.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                d.get("range").and_then(|v| v.as_str()).unwrap_or("*")
+            ))
+            .collect::<Vec<String>>());
         let mut files_view: Vec<Value> = mods
             .iter()
             .map(|m| json!({ "name": m.get("name").cloned().unwrap_or(json!("")), "version": m.get("version").cloned().unwrap_or(json!("")), "dependency": false, "fileName": m.get("fileName").cloned().unwrap_or(json!("")) }))
@@ -2023,11 +2842,20 @@ pub fn prepare_mod_install(
 }
 
 fn plan_view_value(id: &str) -> Value {
-    plans_store().lock().unwrap().get(id).map(|p| p.view.clone()).unwrap_or(Value::Null)
+    plans_store()
+        .lock()
+        .unwrap()
+        .get(id)
+        .map(|p| p.view.clone())
+        .unwrap_or(Value::Null)
 }
 
 /// dependencyRepository.find()：检索仅作候选查找；下载 JAR 的实际 mod id/版本必须满足要求
-fn dependency_find(app: &tauri::AppHandle, id: &str, target: &Value) -> Result<Option<Value>, String> {
+fn dependency_find(
+    app: &tauri::AppHandle,
+    id: &str,
+    target: &Value,
+) -> Result<Option<Value>, String> {
     let q = json!({
         "keyword": id,
         "kind": "mod",
@@ -2039,7 +2867,10 @@ fn dependency_find(app: &tauri::AppHandle, id: &str, target: &Value) -> Result<O
     });
     let hits = community_search_items(app, &q)?;
     let key = |s: &str| -> String {
-        s.to_lowercase().chars().filter(|c| c.is_ascii_alphanumeric()).collect()
+        s.to_lowercase()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .collect()
     };
     for hit in hits {
         let slug = hit.get("slug").and_then(|v| v.as_str()).unwrap_or("");
@@ -2052,8 +2883,14 @@ fn dependency_find(app: &tauri::AppHandle, id: &str, target: &Value) -> Result<O
             hit.get("source").and_then(|v| v.as_str()).unwrap_or(""),
             hit.get("projectId").and_then(|v| v.as_str()).unwrap_or(""),
             Some(&community::FileFilter {
-                mc_version: target.get("mcVersion").and_then(|v| v.as_str()).map(str::to_string),
-                loader: target.get("loader").and_then(|v| v.as_str()).map(str::to_string),
+                mc_version: target
+                    .get("mcVersion")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                loader: target
+                    .get("loader")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
                 kind: None,
             }),
         )?;
@@ -2100,7 +2937,16 @@ pub fn execute_mod_plan(
     let mut created: Vec<PathBuf> = Vec::new();
     let mut run = || -> Result<String, String> {
         let target = revalidate(&plan.view.get("target").cloned().unwrap_or(json!({})))?;
-        if target.get("gameDirectory").and_then(|v| v.as_str()).unwrap_or("") != plan.view.pointer("/target/gameDirectory").and_then(|v| v.as_str()).unwrap_or("") {
+        if target
+            .get("gameDirectory")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            != plan
+                .view
+                .pointer("/target/gameDirectory")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+        {
             return Err("实例隔离目录已变更，请重新解析".into());
         }
         let mut installed = installed_mods(&target);
@@ -2112,7 +2958,12 @@ pub fn execute_mod_plan(
                 .iter()
                 .enumerate()
                 .map(|(index, file)| {
-                    let dest = plan.directory.join(format!("dep-{index}")).join(installer::basename_of(file.get("fileName").and_then(|v| v.as_str()).unwrap_or("")));
+                    let dest =
+                        plan.directory
+                            .join(format!("dep-{index}"))
+                            .join(installer::basename_of(
+                                file.get("fileName").and_then(|v| v.as_str()).unwrap_or(""),
+                            ));
                     (file.clone(), dest)
                 })
                 .collect()
@@ -2134,7 +2985,12 @@ pub fn execute_mod_plan(
             let paused_flag = rec.paused.clone();
             let text = format!("下载 {dep_count} 个必要前置");
             // 各文件 (done, total) 状态表（对应原版 downloadAll 聚合 fraction）
-            let state: Mutex<Vec<(u64, u64)>> = Mutex::new(dependencies.iter().map(|(f, _)| (0u64, f.get("size").and_then(|v| v.as_u64()).unwrap_or(0))).collect());
+            let state: Mutex<Vec<(u64, u64)>> = Mutex::new(
+                dependencies
+                    .iter()
+                    .map(|(f, _)| (0u64, f.get("size").and_then(|v| v.as_u64()).unwrap_or(0)))
+                    .collect(),
+            );
             for (index, (file, dest)) in dependencies.iter().enumerate() {
                 let progress = |done: u64, ftotal: u64, wire: u64| {
                     bytes.fetch_add(wire, Ordering::SeqCst);
@@ -2152,12 +3008,25 @@ pub fn execute_mod_plan(
                         (done_sum, total_sum, all_known)
                     };
                     let fraction = if all_known {
-                        if total_sum > 0 { done_sum as f64 / total_sum as f64 } else { 1.0 }
+                        if total_sum > 0 {
+                            done_sum as f64 / total_sum as f64
+                        } else {
+                            1.0
+                        }
                     } else {
                         0.0
                     };
-                    let remaining = if total_sum > done_sum { Some(total_sum - done_sum) } else { None };
-                    let snap = est.lock().unwrap().sample(bytes.load(Ordering::SeqCst), remaining, start.elapsed().as_millis() as f64, paused_flag.load(Ordering::SeqCst));
+                    let remaining = if total_sum > done_sum {
+                        Some(total_sum - done_sum)
+                    } else {
+                        None
+                    };
+                    let snap = est.lock().unwrap().sample(
+                        bytes.load(Ordering::SeqCst),
+                        remaining,
+                        start.elapsed().as_millis() as f64,
+                        paused_flag.load(Ordering::SeqCst),
+                    );
                     let mut ev = json!({
                         "stage": "download",
                         "progress": fraction,
@@ -2192,7 +3061,13 @@ pub fn execute_mod_plan(
                 if let Some(parent) = dest.parent() {
                     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 }
-                download::download_file(app, rec, file.get("url").and_then(|v| v.as_str()).unwrap_or(""), dest, &opts)?;
+                download::download_file(
+                    app,
+                    rec,
+                    file.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+                    dest,
+                    &opts,
+                )?;
             }
         }
         emit.emit(&json!({
@@ -2207,34 +3082,75 @@ pub fn execute_mod_plan(
             let m = parse_mod_file(&dest.to_string_lossy());
             if !mod_matches_instance(&m, &target) {
                 let reasons = mod_mismatch_reasons(&m, &target).join("；");
-                return Err(format!("{} 的 JAR 元数据不兼容目标实例：{}", file.get("fileName").and_then(|v| v.as_str()).unwrap_or(""), reasons));
+                return Err(format!(
+                    "{} 的 JAR 元数据不兼容目标实例：{}",
+                    file.get("fileName").and_then(|v| v.as_str()).unwrap_or(""),
+                    reasons
+                ));
             }
-            let pinned_key = format!("{}:{}", file.get("source").and_then(|v| v.as_str()).unwrap_or(""), file.get("fileId").and_then(|v| v.as_str()).unwrap_or(""));
+            let pinned_key = format!(
+                "{}:{}",
+                file.get("source").and_then(|v| v.as_str()).unwrap_or(""),
+                file.get("fileId").and_then(|v| v.as_str()).unwrap_or("")
+            );
             if let Some(pinned) = plan.pinned_files.get(&pinned_key) {
-                pinned_paths.insert(m.get("filePath").and_then(|v| v.as_str()).unwrap_or("").to_string(), pinned.clone());
+                pinned_paths.insert(
+                    m.get("filePath")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    pinned.clone(),
+                );
             }
             // pinned 边要求精确文件；同 mod id 的既有提供者只能满足未钉定的兼容依赖
-            let has_provider = installed.iter().any(|inst| provided(inst).iter().any(|p| p.get("id").and_then(|v| v.as_str()) == m.get("id").and_then(|v| v.as_str())));
+            let has_provider = installed.iter().any(|inst| {
+                provided(inst).iter().any(|p| {
+                    p.get("id").and_then(|v| v.as_str()) == m.get("id").and_then(|v| v.as_str())
+                })
+            });
             if pinned_files_contains(&plan.pinned_files, &pinned_key) || !has_provider {
                 staged.push(m);
             }
         }
         let current = revalidate(&plan.view.get("target").cloned().unwrap_or(json!({})))?;
-        if current.get("gameDirectory").and_then(|v| v.as_str()).unwrap_or("") != target.get("gameDirectory").and_then(|v| v.as_str()).unwrap_or("") {
+        if current
+            .get("gameDirectory")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            != target
+                .get("gameDirectory")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+        {
             return Err("下载期间实例目录发生变化，未安装任何 MOD".into());
         }
         installed = installed_mods(&current);
         for m in &staged {
             if !mod_matches_instance(m, &current) {
-                return Err(format!("{} 的兼容性已变化，请重新解析", m.get("name").and_then(|v| v.as_str()).unwrap_or("")));
+                return Err(format!(
+                    "{} 的兼容性已变化，请重新解析",
+                    m.get("name").and_then(|v| v.as_str()).unwrap_or("")
+                ));
             }
         }
         let mut staged_installed = staged.clone();
         staged_installed.extend(installed.iter().cloned());
         let missing = missing_requirements(&staged, &target, &staged_installed);
         if !missing.is_empty() {
-            let list: Vec<String> = missing.iter().map(|d| format!("{} {}", d.get("id").and_then(|v| v.as_str()).unwrap_or(""), d.get("range").and_then(|v| v.as_str()).unwrap_or("*"))).collect();
-            return Err(format!("未写入任何 MOD；仍缺少或版本不满足：{}。请补齐前置或处理旧版冲突后重试", list.join("、")));
+            let list: Vec<String> = missing
+                .iter()
+                .map(|d| {
+                    format!(
+                        "{} {}",
+                        d.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                        d.get("range").and_then(|v| v.as_str()).unwrap_or("*")
+                    )
+                })
+                .collect();
+            return Err(format!(
+                "未写入任何 MOD；仍缺少或版本不满足：{}。请补齐前置或处理旧版冲突后重试",
+                list.join("、")
+            ));
         }
         // pinned 精确性复核（准备阶段可能省略已存在的同哈希文件）
         let mut hash_cache: HashMap<String, String> = HashMap::new();
@@ -2249,14 +3165,30 @@ pub fn execute_mod_plan(
             }
         };
         for pinned in plan.pinned_files.values() {
-            let pinned_key = format!("{}:{}", pinned.get("source").and_then(|v| v.as_str()).unwrap_or(""), pinned.get("fileId").and_then(|v| v.as_str()).unwrap_or(""));
-            let downloaded = dependencies.iter().find(|(f, _)| format!("{}:{}", f.get("source").and_then(|v| v.as_str()).unwrap_or(""), f.get("fileId").and_then(|v| v.as_str()).unwrap_or("")) == pinned_key);
-            let prepared = downloaded.map(|(_, dest)| dest.to_string_lossy().into_owned()).or_else(|| plan.root_files.get(&pinned_key).cloned());
+            let pinned_key = format!(
+                "{}:{}",
+                pinned.get("source").and_then(|v| v.as_str()).unwrap_or(""),
+                pinned.get("fileId").and_then(|v| v.as_str()).unwrap_or("")
+            );
+            let downloaded = dependencies.iter().find(|(f, _)| {
+                format!(
+                    "{}:{}",
+                    f.get("source").and_then(|v| v.as_str()).unwrap_or(""),
+                    f.get("fileId").and_then(|v| v.as_str()).unwrap_or("")
+                ) == pinned_key
+            });
+            let prepared = downloaded
+                .map(|(_, dest)| dest.to_string_lossy().into_owned())
+                .or_else(|| plan.root_files.get(&pinned_key).cloned());
             let expected_hash = pinned
                 .get("sha1")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_lowercase())
-                .or_else(|| prepared.as_deref().and_then(|p| hash_of(p, &mut hash_cache).ok()));
+                .or_else(|| {
+                    prepared
+                        .as_deref()
+                        .and_then(|p| hash_of(p, &mut hash_cache).ok())
+                });
             let mut present = false;
             if let Some(expected) = &expected_hash {
                 for m in staged.iter().chain(installed.iter()) {
@@ -2278,15 +3210,27 @@ pub fn execute_mod_plan(
         let mut accepted: Vec<Value> = Vec::new();
         for m in &staged {
             let existing = installed.iter().chain(accepted.iter()).find(|inst| {
-                provided(inst).iter().any(|p| p.get("id").and_then(|v| v.as_str()) == m.get("id").and_then(|v| v.as_str()))
+                provided(inst).iter().any(|p| {
+                    p.get("id").and_then(|v| v.as_str()) == m.get("id").and_then(|v| v.as_str())
+                })
             });
             if let Some(existing) = existing {
-                let existing_hash = hash_of(existing.get("filePath").and_then(|v| v.as_str()).unwrap_or(""), &mut hash_cache)?;
-                let staged_hash = hash_of(m.get("filePath").and_then(|v| v.as_str()).unwrap_or(""), &mut hash_cache)?;
+                let existing_hash = hash_of(
+                    existing
+                        .get("filePath")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    &mut hash_cache,
+                )?;
+                let staged_hash = hash_of(
+                    m.get("filePath").and_then(|v| v.as_str()).unwrap_or(""),
+                    &mut hash_cache,
+                )?;
                 if existing_hash == staged_hash {
                     continue;
                 }
-                let pinned = pinned_paths.get(m.get("filePath").and_then(|v| v.as_str()).unwrap_or(""));
+                let pinned =
+                    pinned_paths.get(m.get("filePath").and_then(|v| v.as_str()).unwrap_or(""));
                 if let Some(pinned) = pinned {
                     return Err(format!(
                         "前置版本冲突：{} 要求精确版本 {}，已有 {}；未写入任何 MOD，请先处理旧文件后重新检测",
@@ -2295,24 +3239,46 @@ pub fn execute_mod_plan(
                         existing.get("version").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("其他版本")
                     ));
                 }
-                return Err(format!("已存在 {}，未覆盖或重复安装；请先处理旧文件", m.get("id").and_then(|v| v.as_str()).unwrap_or("")));
+                return Err(format!(
+                    "已存在 {}，未覆盖或重复安装；请先处理旧文件",
+                    m.get("id").and_then(|v| v.as_str()).unwrap_or("")
+                ));
             }
             accepted.push(m.clone());
         }
-        let mods_dir = Path::new(target.get("gameDirectory").and_then(|v| v.as_str()).unwrap_or("")).join("mods");
+        let mods_dir = Path::new(
+            target
+                .get("gameDirectory")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+        )
+        .join("mods");
         std::fs::create_dir_all(&mods_dir).map_err(|e| e.to_string())?;
         emit.emit(&json!({ "stage": "mod-commit", "progress": 0, "overall": 0.95, "indeterminate": true, "text": format!("正在写入 {} 个 MOD…", accepted.len()) }));
         for m in &accepted {
             check_cancel(rec)?;
-            let dest = mods_dir.join(installer::basename_of(m.get("fileName").and_then(|v| v.as_str()).unwrap_or("")));
-            std::fs::OpenOptions::new().write(true).create_new(true).open(&dest).and_then(|mut o| {
-                let mut inp = std::fs::File::open(m.get("filePath").and_then(|v| v.as_str()).unwrap_or(""))?;
-                std::io::copy(&mut inp, &mut o)?;
-                Ok(())
-            }).map_err(|e| e.to_string())?;
+            let dest = mods_dir.join(installer::basename_of(
+                m.get("fileName").and_then(|v| v.as_str()).unwrap_or(""),
+            ));
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&dest)
+                .and_then(|mut o| {
+                    let mut inp = std::fs::File::open(
+                        m.get("filePath").and_then(|v| v.as_str()).unwrap_or(""),
+                    )?;
+                    std::io::copy(&mut inp, &mut o)?;
+                    Ok(())
+                })
+                .map_err(|e| e.to_string())?;
             created.push(dest);
         }
-        let message = format!("已安装 {} 个 MOD 到 {}", created.len(), mods_dir.to_string_lossy());
+        let message = format!(
+            "已安装 {} 个 MOD 到 {}",
+            created.len(),
+            mods_dir.to_string_lossy()
+        );
         emit.emit(&json!({ "stage": "done", "progress": 1, "overall": 1, "indeterminate": false, "text": message.clone() }));
         Ok(message)
     };
@@ -2339,7 +3305,11 @@ pub fn scan_mod_targets(app: &tauri::AppHandle) -> Value {
     let folders: Vec<String> = settings
         .get("folders")
         .and_then(|f| f.as_array())
-        .map(|a| a.iter().filter_map(|f| f.get("path").and_then(|p| p.as_str()).map(String::from)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|f| f.get("path").and_then(|p| p.as_str()).map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
     let mut versions: Vec<Value> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
@@ -2351,7 +3321,9 @@ pub fn scan_mod_targets(app: &tauri::AppHandle) -> Value {
         }
         match std::fs::metadata(&folder) {
             Ok(m) if m.is_dir() => {
-                let canonical = installer::canonical_path(&folder).to_string_lossy().into_owned();
+                let canonical = installer::canonical_path(&folder)
+                    .to_string_lossy()
+                    .into_owned();
                 versions.extend(crate::versions::scan_folder_public(&canonical, true));
             }
             Ok(_) => errors.push(format!("{folder}：不是文件夹")),
@@ -2371,7 +3343,13 @@ pub fn select_mod_target(versions: &[Value], id: &str, folder: &str) -> Result<V
                 .unwrap_or(false)
     });
     match target {
-        Some(t) if t.get("incomplete").and_then(|x| x.as_bool()).unwrap_or(false) || t.get("failed").and_then(|x| x.as_bool()).unwrap_or(false) || t.get("gameDirectory").is_none() => {
+        Some(t)
+            if t.get("incomplete")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(false)
+                || t.get("failed").and_then(|x| x.as_bool()).unwrap_or(false)
+                || t.get("gameDirectory").is_none() =>
+        {
             Err("目标实例已移除、不完整或未登记，请重新扫描".into())
         }
         Some(t) => Ok(t.clone()),
@@ -2381,7 +3359,13 @@ pub fn select_mod_target(versions: &[Value], id: &str, folder: &str) -> Result<V
 
 /// copyCompatibleMods()：拖入即装
 pub fn copy_compatible_mods(files: &[String], target: &Value) -> Vec<Value> {
-    let dir = Path::new(target.get("gameDirectory").and_then(|v| v.as_str()).unwrap_or("")).join("mods");
+    let dir = Path::new(
+        target
+            .get("gameDirectory")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
+    )
+    .join("mods");
     let mut results: Vec<Value> = Vec::new();
     for file in files {
         let name = installer::basename_of(file);
@@ -2390,17 +3374,29 @@ pub fn copy_compatible_mods(files: &[String], target: &Value) -> Vec<Value> {
             if !mod_matches_instance(&m, target) {
                 return Err(format!(
                     "不兼容：MC {} / {} {}",
-                    target.get("mcVersion").and_then(|v| v.as_str()).unwrap_or(""),
+                    target
+                        .get("mcVersion")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
                     target.get("loader").and_then(|v| v.as_str()).unwrap_or(""),
-                    target.get("loaderVersion").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("版本未知")
+                    target
+                        .get("loaderVersion")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("版本未知")
                 ));
             }
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            std::fs::OpenOptions::new().write(true).create_new(true).open(dir.join(&name)).and_then(|mut o| {
-                let mut inp = std::fs::File::open(file)?;
-                std::io::copy(&mut inp, &mut o)?;
-                Ok(())
-            }).map_err(|e| e.to_string())?;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(dir.join(&name))
+                .and_then(|mut o| {
+                    let mut inp = std::fs::File::open(file)?;
+                    std::io::copy(&mut inp, &mut o)?;
+                    Ok(())
+                })
+                .map_err(|e| e.to_string())?;
             Ok(())
         };
         match run() {
@@ -2421,7 +3417,9 @@ pub fn copy_compatible_mods(files: &[String], target: &Value) -> Vec<Value> {
 // ---------------- modIcons.ts ----------------
 
 fn icons_cache_dir(app: &tauri::AppHandle) -> PathBuf {
-    let dir = crate::settings::user_data_dir(app).join("cache").join("mod-icons-v1");
+    let dir = crate::settings::user_data_dir(app)
+        .join("cache")
+        .join("mod-icons-v1");
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
@@ -2429,29 +3427,68 @@ fn icons_cache_dir(app: &tauri::AppHandle) -> PathBuf {
 /// matchModIcons()：精确文件身份（Modrinth 哈希反查 → CurseForge 指纹），绝不按文件名猜项目
 fn match_mod_icons(app: &tauri::AppHandle, items: &[Value]) -> HashMap<String, String> {
     let mut icons: HashMap<String, String> = HashMap::new();
-    let hashes: Vec<String> = items.iter().map(|i| i.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string()).collect();
-    let Ok(versions) = post_json("https://api.modrinth.com/v2/version_files", &json!({ "hashes": hashes, "algorithm": "sha1" }), UA_MGMT, 8_000, &[]) else {
+    let hashes: Vec<String> = items
+        .iter()
+        .map(|i| {
+            i.get("sha1")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect();
+    let Ok(versions) = post_json(
+        "https://api.modrinth.com/v2/version_files",
+        &json!({ "hashes": hashes, "algorithm": "sha1" }),
+        UA_MGMT,
+        8_000,
+        &[],
+    ) else {
         return cf_icon_fallback(app, items, icons);
     };
     let mut ids: Vec<String> = Vec::new();
     for i in items {
         let sha1 = i.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
-        if let Some(pid) = versions.get(sha1).and_then(|v| v.get("project_id")).and_then(|v| v.as_str()) {
+        if let Some(pid) = versions
+            .get(sha1)
+            .and_then(|v| v.get("project_id"))
+            .and_then(|v| v.as_str())
+        {
             if !ids.contains(&pid.to_string()) {
                 ids.push(pid.to_string());
             }
         }
     }
     if !ids.is_empty() {
-        let Ok(projects) = get_json(&format!("https://api.modrinth.com/v2/projects?ids={}", community::enc(&serde_json::to_string(&ids).unwrap_or_default())), UA_MGMT, 8_000, &[]) else {
+        let Ok(projects) = get_json(
+            &format!(
+                "https://api.modrinth.com/v2/projects?ids={}",
+                community::enc(&serde_json::to_string(&ids).unwrap_or_default())
+            ),
+            UA_MGMT,
+            8_000,
+            &[],
+        ) else {
             return cf_icon_fallback(app, items, icons);
         };
         for item in items {
             let sha1 = item.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
-            let project_id = versions.get(sha1).and_then(|v| v.get("project_id")).and_then(|v| v.as_str()).unwrap_or("");
-            if let Some(project) = projects.as_array().and_then(|a| a.iter().find(|p| p.get("id").and_then(|v| v.as_str()) == Some(project_id))) {
+            let project_id = versions
+                .get(sha1)
+                .and_then(|v| v.get("project_id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if let Some(project) = projects.as_array().and_then(|a| {
+                a.iter()
+                    .find(|p| p.get("id").and_then(|v| v.as_str()) == Some(project_id))
+            }) {
                 if let Some(icon) = project.get("icon_url").and_then(|v| v.as_str()) {
-                    icons.insert(item.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string(), icon.to_string());
+                    icons.insert(
+                        item.get("fileName")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        icon.to_string(),
+                    );
                 }
             }
         }
@@ -2459,15 +3496,38 @@ fn match_mod_icons(app: &tauri::AppHandle, items: &[Value]) -> HashMap<String, S
     cf_icon_fallback(app, items, icons)
 }
 
-fn cf_icon_fallback(app: &tauri::AppHandle, items: &[Value], mut icons: HashMap<String, String>) -> HashMap<String, String> {
-    let missing: Vec<&Value> = items.iter().filter(|i| !icons.contains_key(i.get("fileName").and_then(|v| v.as_str()).unwrap_or("")) && i.get("fingerprint").is_some()).collect();
+fn cf_icon_fallback(
+    app: &tauri::AppHandle,
+    items: &[Value],
+    mut icons: HashMap<String, String>,
+) -> HashMap<String, String> {
+    let missing: Vec<&Value> = items
+        .iter()
+        .filter(|i| {
+            !icons.contains_key(i.get("fileName").and_then(|v| v.as_str()).unwrap_or(""))
+                && i.get("fingerprint").is_some()
+        })
+        .collect();
     if missing.is_empty() {
         return icons;
     }
     let ch = community::cf_channel(app);
-    let headers: Vec<(&str, &str)> = if ch.official { vec![("x-api-key", &ch.key)] } else { vec![] };
-    let fingerprints: Vec<u64> = missing.iter().filter_map(|i| i.get("fingerprint").and_then(|v| v.as_u64())).collect();
-    let Ok(matches) = post_json(&format!("{}/fingerprints", ch.base), &json!({ "fingerprints": fingerprints }), UA_MGMT, 8_000, &headers) else {
+    let headers: Vec<(&str, &str)> = if ch.official {
+        vec![("x-api-key", &ch.key)]
+    } else {
+        vec![]
+    };
+    let fingerprints: Vec<u64> = missing
+        .iter()
+        .filter_map(|i| i.get("fingerprint").and_then(|v| v.as_u64()))
+        .collect();
+    let Ok(matches) = post_json(
+        &format!("{}/fingerprints", ch.base),
+        &json!({ "fingerprints": fingerprints }),
+        UA_MGMT,
+        8_000,
+        &headers,
+    ) else {
         return icons;
     };
     let exact: Vec<Value> = matches
@@ -2480,9 +3540,18 @@ fn cf_icon_fallback(app: &tauri::AppHandle, items: &[Value], mut icons: HashMap<
                         let sha1 = i.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
                         let fp = i.get("fingerprint").and_then(|v| v.as_u64());
                         m.pointer("/file/fileFingerprint").and_then(|v| v.as_u64()) == fp
-                            && m.pointer("/file/hashes").and_then(|v| v.as_array()).map(|hashes| {
-                                hashes.iter().any(|h| h.get("algo").and_then(|v| v.as_u64()) == Some(1) && h.get("value").and_then(|v| v.as_str()).map(|s| s.to_lowercase() == sha1).unwrap_or(false))
-                            }).unwrap_or(false)
+                            && m.pointer("/file/hashes")
+                                .and_then(|v| v.as_array())
+                                .map(|hashes| {
+                                    hashes.iter().any(|h| {
+                                        h.get("algo").and_then(|v| v.as_u64()) == Some(1)
+                                            && h.get("value")
+                                                .and_then(|v| v.as_str())
+                                                .map(|s| s.to_lowercase() == sha1)
+                                                .unwrap_or(false)
+                                    })
+                                })
+                                .unwrap_or(false)
                     })
                 })
                 .cloned()
@@ -2491,7 +3560,11 @@ fn cf_icon_fallback(app: &tauri::AppHandle, items: &[Value], mut icons: HashMap<
         .unwrap_or_default();
     let mut ids: Vec<String> = Vec::new();
     for m in &exact {
-        if let Some(id) = m.pointer("/file/modId").and_then(|v| v.as_u64()).map(|v| v.to_string()) {
+        if let Some(id) = m
+            .pointer("/file/modId")
+            .and_then(|v| v.as_u64())
+            .map(|v| v.to_string())
+        {
             if !ids.contains(&id) {
                 ids.push(id);
             }
@@ -2500,7 +3573,13 @@ fn cf_icon_fallback(app: &tauri::AppHandle, items: &[Value], mut icons: HashMap<
     if ids.is_empty() {
         return icons;
     }
-    let Ok(projects) = post_json(&format!("{}/mods", ch.base), &json!({ "modIds": ids }), UA_MGMT, 8_000, &headers) else {
+    let Ok(projects) = post_json(
+        &format!("{}/mods", ch.base),
+        &json!({ "modIds": ids }),
+        UA_MGMT,
+        8_000,
+        &headers,
+    ) else {
         return icons;
     };
     for item in &missing {
@@ -2508,14 +3587,44 @@ fn cf_icon_fallback(app: &tauri::AppHandle, items: &[Value], mut icons: HashMap<
         let match_id = exact
             .iter()
             .find(|m| {
-                m.pointer("/file/hashes").and_then(|v| v.as_array()).map(|hashes| {
-                    hashes.iter().any(|h| h.get("algo").and_then(|v| v.as_u64()) == Some(1) && h.get("value").and_then(|v| v.as_str()).map(|s| s.to_lowercase() == sha1).unwrap_or(false))
-                }).unwrap_or(false)
+                m.pointer("/file/hashes")
+                    .and_then(|v| v.as_array())
+                    .map(|hashes| {
+                        hashes.iter().any(|h| {
+                            h.get("algo").and_then(|v| v.as_u64()) == Some(1)
+                                && h.get("value")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_lowercase() == sha1)
+                                    .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false)
             })
-            .and_then(|m| m.pointer("/file/modId").and_then(|v| v.as_u64()).map(|v| v.to_string()).or_else(|| m.get("id").and_then(|v| v.as_str()).map(String::from)));
-        let project = projects.pointer("/data").and_then(|v| v.as_array()).and_then(|a| a.iter().find(|p| match_id.as_deref() == p.get("id").and_then(|v| v.as_str())));
-        if let Some(icon) = project.and_then(|p| p.get("logo")).and_then(|l| l.get("thumbnailUrl")).and_then(|v| v.as_str()) {
-            icons.insert(item.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string(), icon.to_string());
+            .and_then(|m| {
+                m.pointer("/file/modId")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v.to_string())
+                    .or_else(|| m.get("id").and_then(|v| v.as_str()).map(String::from))
+            });
+        let project = projects
+            .pointer("/data")
+            .and_then(|v| v.as_array())
+            .and_then(|a| {
+                a.iter()
+                    .find(|p| match_id.as_deref() == p.get("id").and_then(|v| v.as_str()))
+            });
+        if let Some(icon) = project
+            .and_then(|p| p.get("logo"))
+            .and_then(|l| l.get("thumbnailUrl"))
+            .and_then(|v| v.as_str())
+        {
+            icons.insert(
+                item.get("fileName")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                icon.to_string(),
+            );
         }
     }
     icons
@@ -2524,13 +3633,36 @@ fn cf_icon_fallback(app: &tauri::AppHandle, items: &[Value], mut icons: HashMap<
 /// imageData()：仅限可信 CDN 白名单；≤512KB → dataURL
 fn icon_image_data(url: &str) -> Result<String, String> {
     let parsed = parse_url_simple(url)?;
-    if parsed.0 != "https" || !["cdn.modrinth.com", "cdn-raw.modrinth.com", "media.forgecdn.net", "mediafilez.forgecdn.net"].contains(&parsed.1.as_str()) {
+    if parsed.0 != "https"
+        || ![
+            "cdn.modrinth.com",
+            "cdn-raw.modrinth.com",
+            "media.forgecdn.net",
+            "mediafilez.forgecdn.net",
+        ]
+        .contains(&parsed.1.as_str())
+    {
         return Ok(String::new());
     }
-    let resp = net::client().get(url).timeout(Duration::from_secs(8)).header("User-Agent", UA_MGMT).send().map_err(|e| e.to_string())?;
-    let ctype = resp.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").split(';').next().unwrap_or("").to_string();
+    let resp = net::client()
+        .get(url)
+        .timeout(Duration::from_secs(8))
+        .header("User-Agent", UA_MGMT)
+        .send()
+        .map_err(|e| e.to_string())?;
+    let ctype = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .to_string();
     let status = resp.status().as_u16();
-    if !(200..300).contains(&status) || !["image/png", "image/jpeg", "image/webp", "image/gif"].contains(&ctype.as_str()) {
+    if !(200..300).contains(&status)
+        || !["image/png", "image/jpeg", "image/webp", "image/gif"].contains(&ctype.as_str())
+    {
         return Ok(String::new());
     }
     let body = resp.bytes().map_err(|e| e.to_string())?;
@@ -2538,7 +3670,10 @@ fn icon_image_data(url: &str) -> Result<String, String> {
         return Ok(String::new());
     }
     use base64::Engine;
-    Ok(format!("data:{ctype};base64,{}", base64::engine::general_purpose::STANDARD.encode(&body)))
+    Ok(format!(
+        "data:{ctype};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(&body)
+    ))
 }
 
 fn parse_url_simple(url: &str) -> Result<(String, String), String> {
@@ -2550,7 +3685,13 @@ fn parse_url_simple(url: &str) -> Result<(String, String), String> {
 static ICON_QUEUE: Mutex<()> = Mutex::new(());
 
 /// getModIcons()：缓存目录 userData/cache/mod-icons-v1；远程 7 天 / 内嵌 60 秒
-pub fn get_mod_icons(app: &tauri::AppHandle, version: &str, folder: &str, requested: &[String], kind: &str) -> Value {
+pub fn get_mod_icons(
+    app: &tauri::AppHandle,
+    version: &str,
+    folder: &str,
+    requested: &[String],
+    kind: &str,
+) -> Value {
     let _guard = ICON_QUEUE.lock().unwrap();
     let kind = if kind.is_empty() { "mods" } else { kind };
     let names: Vec<String> = {
@@ -2558,7 +3699,11 @@ pub fn get_mod_icons(app: &tauri::AppHandle, version: &str, folder: &str, reques
         requested
             .iter()
             .filter(|n| {
-                installer::basename_of(n.as_str()).as_str() == n.as_str() && !n.contains(['\\', '/', ':', '\0']) && regex::Regex::new(r"(?i)\.(?:jar(?:\.disabled)?|zip)$").unwrap().is_match(n)
+                installer::basename_of(n.as_str()).as_str() == n.as_str()
+                    && !n.contains(['\\', '/', ':', '\0'])
+                    && regex::Regex::new(r"(?i)\.(?:jar(?:\.disabled)?|zip)$")
+                        .unwrap()
+                        .is_match(n)
             })
             .filter(|n| seen.insert((*n).clone()))
             .take(100)
@@ -2573,20 +3718,42 @@ pub fn get_mod_icons(app: &tauri::AppHandle, version: &str, folder: &str, reques
         let mut keys: HashMap<String, PathBuf> = HashMap::new();
         for name in &names {
             let path = dir.join(name);
-            let Ok(stat) = std::fs::symlink_metadata(&path) else { continue };
+            let Ok(stat) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
             if !stat.is_file() {
                 continue;
             }
-            let mtime = stat.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-            let ctime = stat.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-            let key_src = serde_json::to_string(&json!([dir.to_string_lossy(), name, stat.len(), mtime, ctime])).unwrap_or_default();
+            let mtime = stat
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let ctime = stat
+                .created()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let key_src = serde_json::to_string(&json!([
+                dir.to_string_lossy(),
+                name,
+                stat.len(),
+                mtime,
+                ctime
+            ]))
+            .unwrap_or_default();
             let key = hex::encode(Sha256::digest(key_src.as_bytes()));
             let cache_path = cache_dir.join(format!("{key}.json"));
             keys.insert(name.clone(), cache_path.clone());
             if let Ok(raw) = std::fs::read(&cache_path) {
                 if let Ok(cache) = serde_json::from_slice::<Value>(&raw) {
                     if cache.get("expires").and_then(|v| v.as_u64()).unwrap_or(0) > now_ms() {
-                        result.insert(name.clone(), cache.get("icon").cloned().unwrap_or(json!("")));
+                        result.insert(
+                            name.clone(),
+                            cache.get("icon").cloned().unwrap_or(json!("")),
+                        );
                         continue;
                     }
                 }
@@ -2596,20 +3763,34 @@ pub fn get_mod_icons(app: &tauri::AppHandle, version: &str, folder: &str, reques
         if todo.is_empty() {
             return Ok(Value::Object(result));
         }
-        let identities: Vec<Value> = scan_mod_directory(&dir.to_string_lossy(), true, Some(&todo), "icons")?
-            .into_iter()
-            .filter(|i| i.get("sha1").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false))
-            .collect();
+        let identities: Vec<Value> =
+            scan_mod_directory(&dir.to_string_lossy(), true, Some(&todo), "icons")?
+                .into_iter()
+                .filter(|i| {
+                    i.get("sha1")
+                        .and_then(|v| v.as_str())
+                        .map(|s| !s.is_empty())
+                        .unwrap_or(false)
+                })
+                .collect();
         let matches = match_mod_icons(app, &identities);
         for info in &identities {
-            let name = info.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name = info
+                .get("fileName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let mut icon = String::new();
             if let Some(url) = matches.get(&name) {
                 icon = icon_image_data(url).unwrap_or_default();
             }
             let remote = !icon.is_empty();
             if !remote {
-                icon = info.get("iconDataUrl").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                icon = info
+                    .get("iconDataUrl")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
             }
             result.insert(name.clone(), json!(icon));
             if let Some(cache_path) = keys.get(&name) {
@@ -2635,8 +3816,11 @@ pub fn mod_favorites(app: &tauri::AppHandle) -> Result<Vec<Value>, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(_) => return Err("收藏记录读取失败，未覆盖原记录".into()),
     };
-    let value: Value = serde_json::from_slice(&raw).map_err(|_| "收藏记录读取失败，未覆盖原记录".to_string())?;
-    let list = value.as_array().ok_or_else(|| "收藏记录读取失败，未覆盖原记录".to_string())?;
+    let value: Value =
+        serde_json::from_slice(&raw).map_err(|_| "收藏记录读取失败，未覆盖原记录".to_string())?;
+    let list = value
+        .as_array()
+        .ok_or_else(|| "收藏记录读取失败，未覆盖原记录".to_string())?;
     Ok(list
         .iter()
         .map(|v| {
@@ -2655,7 +3839,11 @@ fn write_favorites(app: &tauri::AppHandle, list: Vec<Value>) -> Result<Vec<Value
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_string(&list).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::write(
+        &tmp,
+        serde_json::to_string(&list).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
     Ok(list)
 }
@@ -2665,14 +3853,22 @@ pub fn favorite_key(value: &Value) -> Result<String, String> {
     static ID_RE: OnceLock<regex::Regex> = OnceLock::new();
     static SHA_RE: OnceLock<regex::Regex> = OnceLock::new();
     let source = value.get("source").and_then(|v| v.as_str()).unwrap_or("");
-    let project_id = value.get("projectId").and_then(|v| v.as_str()).unwrap_or("");
+    let project_id = value
+        .get("projectId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if (source == "modrinth" || source == "curseforge")
-        && ID_RE.get_or_init(|| regex::Regex::new(r"^[a-zA-Z0-9_-]{1,100}$").unwrap()).is_match(project_id)
+        && ID_RE
+            .get_or_init(|| regex::Regex::new(r"^[a-zA-Z0-9_-]{1,100}$").unwrap())
+            .is_match(project_id)
     {
         return Ok(format!("{source}:{project_id}"));
     }
     let sha1 = value.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
-    if SHA_RE.get_or_init(|| regex::Regex::new(r"^[a-f0-9]{40}$").unwrap()).is_match(sha1) {
+    if SHA_RE
+        .get_or_init(|| regex::Regex::new(r"^[a-f0-9]{40}$").unwrap())
+        .is_match(sha1)
+    {
         return Ok(format!("sha1:{}", sha1.to_lowercase()));
     }
     Err("收藏缺少可信项目或文件标识".into())
@@ -2681,12 +3877,18 @@ pub fn favorite_key(value: &Value) -> Result<String, String> {
 /// favoriteIconUrl() 在 community.rs；setFavorite()
 pub fn set_favorite(app: &tauri::AppHandle, value: &Value, on: bool) -> Result<Vec<Value>, String> {
     let key = favorite_key(value)?;
-    let hash = value.get("sha1").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
+    let hash = value
+        .get("sha1")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_lowercase());
     let mut list: Vec<Value> = mod_favorites(app)?
         .into_iter()
         .filter(|f| {
             f.get("key").and_then(|v| v.as_str()) != Some(key.as_str())
-                && !(hash.as_ref().map(|h| f.get("key").and_then(|v| v.as_str()) == Some(&format!("sha1:{h}"))).unwrap_or(false))
+                && !(hash
+                    .as_ref()
+                    .map(|h| f.get("key").and_then(|v| v.as_str()) == Some(&format!("sha1:{h}")))
+                    .unwrap_or(false))
         })
         .collect();
     if on {
@@ -2726,21 +3928,45 @@ pub fn set_favorite(app: &tauri::AppHandle, value: &Value, on: bool) -> Result<V
 
 /// removeFavoriteRecords()
 pub fn remove_favorite_records(list: &[Value], keys: &[String]) -> Result<Vec<Value>, String> {
-    if keys.is_empty() || keys.len() > 1000 || keys.iter().any(|k| !list.iter().any(|f| f.get("key").and_then(|v| v.as_str()) == Some(k.as_str()))) {
+    if keys.is_empty()
+        || keys.len() > 1000
+        || keys.iter().any(|k| {
+            !list
+                .iter()
+                .any(|f| f.get("key").and_then(|v| v.as_str()) == Some(k.as_str()))
+        })
+    {
         return Err("收藏选择已失效，请刷新后重试".into());
     }
     let removed: HashSet<&String> = keys.iter().collect();
-    Ok(list.iter().filter(|f| !removed.contains(&f.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string())).cloned().collect())
+    Ok(list
+        .iter()
+        .filter(|f| {
+            !removed.contains(
+                &f.get("key")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+            )
+        })
+        .cloned()
+        .collect())
 }
 
 /// linkFavoriteRecords()：合并为来源身份（保留全部文件哈希）
-pub fn link_favorite_records(list: &[Value], old_key: &str, project: &Value) -> Result<Vec<Value>, String> {
+pub fn link_favorite_records(
+    list: &[Value],
+    old_key: &str,
+    project: &Value,
+) -> Result<Vec<Value>, String> {
     let original = list
         .iter()
         .find(|f| f.get("key").and_then(|v| v.as_str()) == Some(old_key))
         .ok_or_else(|| "该收藏已被取消，请刷新列表".to_string())?;
     let key = favorite_key(project)?;
-    let existing = list.iter().find(|f| f.get("key").and_then(|v| v.as_str()) == Some(key.as_str()));
+    let existing = list
+        .iter()
+        .find(|f| f.get("key").and_then(|v| v.as_str()) == Some(key.as_str()));
     let mut hashes: Vec<String> = Vec::new();
     for src in [Some(original), existing] {
         if let Some(f) = src {
@@ -2767,16 +3993,31 @@ pub fn link_favorite_records(list: &[Value], old_key: &str, project: &Value) -> 
         .collect();
     let added = {
         let a = original.get("added").and_then(|v| v.as_u64()).unwrap_or(0);
-        let b = existing.and_then(|f| f.get("added")).and_then(|v| v.as_u64()).unwrap_or(a);
+        let b = existing
+            .and_then(|f| f.get("added"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(a);
         a.min(b)
     };
     let mut merged = serde_json::Map::new();
     merged.insert("key".into(), json!(key));
-    merged.insert("source".into(), project.get("source").cloned().unwrap_or(json!("")));
-    merged.insert("projectId".into(), project.get("projectId").cloned().unwrap_or(json!("")));
+    merged.insert(
+        "source".into(),
+        project.get("source").cloned().unwrap_or(json!("")),
+    );
+    merged.insert(
+        "projectId".into(),
+        project.get("projectId").cloned().unwrap_or(json!("")),
+    );
     merged.insert(
         "name".into(),
-        json!(project.get("name").and_then(|v| v.as_str()).unwrap_or("").chars().take(200).collect::<String>()),
+        json!(project
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .chars()
+            .take(200)
+            .collect::<String>()),
     );
     merged.insert("added".into(), json!(added));
     if !hashes.is_empty() {
@@ -2784,7 +4025,14 @@ pub fn link_favorite_records(list: &[Value], old_key: &str, project: &Value) -> 
         merged.insert("sha1s".into(), json!(hashes));
     }
     let icon = project.get("iconUrl").cloned().unwrap_or(Value::Null);
-    let icon = if icon.is_null() { existing.and_then(|f| f.get("iconUrl")).cloned().unwrap_or(Value::Null) } else { icon };
+    let icon = if icon.is_null() {
+        existing
+            .and_then(|f| f.get("iconUrl"))
+            .cloned()
+            .unwrap_or(Value::Null)
+    } else {
+        icon
+    };
     if let Some(icon_url) = community::favorite_icon_url(Some(&icon)) {
         merged.insert("iconUrl".into(), json!(icon_url));
     }
@@ -2801,7 +4049,10 @@ pub fn link_favorite_records(list: &[Value], old_key: &str, project: &Value) -> 
 }
 
 /// validateFavoriteInstallIntent()
-fn validate_favorite_install_intent(selections: &[Value], intent: Option<&Value>) -> Result<(usize, usize, Vec<Value>, bool), String> {
+fn validate_favorite_install_intent(
+    selections: &[Value],
+    intent: Option<&Value>,
+) -> Result<(usize, usize, Vec<Value>, bool), String> {
     if selections.len() > 100 {
         return Err("收藏模组过多（每次最多 100 项）".into());
     }
@@ -2810,8 +4061,12 @@ fn validate_favorite_install_intent(selections: &[Value], intent: Option<&Value>
         if !selection.is_object() {
             return Err("收藏模组选择已失效，请重新检查".into());
         }
-        let key = favorite_key(selection).map_err(|_| "收藏模组选择已失效，请重新检查".to_string())?;
-        let file_id = selection.get("fileId").and_then(|v| v.as_str()).unwrap_or("");
+        let key =
+            favorite_key(selection).map_err(|_| "收藏模组选择已失效，请重新检查".to_string())?;
+        let file_id = selection
+            .get("fileId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         if file_id.is_empty() || file_id.len() > 300 || !selected.insert(key) {
             return Err("收藏模组选择重复或已失效，请重新检查".into());
         }
@@ -2820,15 +4075,30 @@ fn validate_favorite_install_intent(selections: &[Value], intent: Option<&Value>
         return Ok((selected.len(), selected.len(), Vec::new(), false));
     };
     if intent.get("enabled").and_then(|v| v.as_bool()) != Some(true)
-        || intent.get("expected").and_then(|v| v.as_array()).map(|a| a.len() > 1000).unwrap_or(true)
-        || intent.get("approvedSkips").and_then(|v| v.as_array()).map(|a| a.len() > 1000).unwrap_or(true)
+        || intent
+            .get("expected")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len() > 1000)
+            .unwrap_or(true)
+        || intent
+            .get("approvedSkips")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len() > 1000)
+            .unwrap_or(true)
     {
         return Err("收藏安装意图无效，请重新选择".into());
     }
     let mut expected: HashMap<String, String> = HashMap::new();
     static KEY_RE: OnceLock<regex::Regex> = OnceLock::new();
-    let key_re = KEY_RE.get_or_init(|| regex::Regex::new(r"^(?:(?:modrinth|curseforge):[a-zA-Z0-9_-]{1,100}|sha1:[a-f0-9]{40})$").unwrap());
-    for item in intent.get("expected").and_then(|v| v.as_array()).unwrap_or(&Vec::new()) {
+    let key_re = KEY_RE.get_or_init(|| {
+        regex::Regex::new(r"^(?:(?:modrinth|curseforge):[a-zA-Z0-9_-]{1,100}|sha1:[a-f0-9]{40})$")
+            .unwrap()
+    });
+    for item in intent
+        .get("expected")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&Vec::new())
+    {
         let key = item.get("key").and_then(|v| v.as_str()).unwrap_or("");
         let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
         if !key_re.is_match(key) || name.len() > 200 || expected.contains_key(key) {
@@ -2842,15 +4112,32 @@ fn validate_favorite_install_intent(selections: &[Value], intent: Option<&Value>
         }
     }
     let mut skipped: HashMap<String, Value> = HashMap::new();
-    let valid_reasons = ["incompatible", "unlinked", "unreliable", "query-error", "deselected", "base-only"];
-    for item in intent.get("approvedSkips").and_then(|v| v.as_array()).unwrap_or(&Vec::new()) {
+    let valid_reasons = [
+        "incompatible",
+        "unlinked",
+        "unreliable",
+        "query-error",
+        "deselected",
+        "base-only",
+    ];
+    for item in intent
+        .get("approvedSkips")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&Vec::new())
+    {
         let key = item.get("key").and_then(|v| v.as_str()).unwrap_or("");
         let reason = item.get("reason").and_then(|v| v.as_str()).unwrap_or("");
-        if !expected.contains_key(key) || selected.contains(key) || skipped.contains_key(key) || !valid_reasons.contains(&reason) {
+        if !expected.contains_key(key)
+            || selected.contains(key)
+            || skipped.contains_key(key)
+            || !valid_reasons.contains(&reason)
+        {
             return Err("收藏跳过决定无效，请重新检查".into());
         }
         if let Some(message) = item.get("message") {
-            if !message.is_null() && (message.as_str().is_none() || message.as_str().unwrap_or("").len() > 1000) {
+            if !message.is_null()
+                && (message.as_str().is_none() || message.as_str().unwrap_or("").len() > 1000)
+            {
                 return Err("收藏跳过决定无效，请重新检查".into());
             }
         }
@@ -2858,22 +4145,39 @@ fn validate_favorite_install_intent(selections: &[Value], intent: Option<&Value>
             return Err("尚未确认不安装收藏模组".into());
         }
         let mut skip = json!({ "key": key, "name": expected.get(key).cloned().unwrap_or_default(), "reason": reason });
-        if let Some(message) = item.get("message").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        if let Some(message) = item
+            .get("message")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
             skip["message"] = json!(message);
         }
         skipped.insert(key.to_string(), skip);
     }
-    let base_only = intent.get("baseOnly").and_then(|v| v.as_bool()).unwrap_or(false);
+    let base_only = intent
+        .get("baseOnly")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if base_only && !selected.is_empty() {
         return Err("仅安装基础实例与收藏模组选择冲突".into());
     }
     if selected.is_empty() && !base_only {
-        return Err("没有已确认的收藏模组；请重试、逐项跳过并选择不安装收藏模组，或关闭此选项".into());
+        return Err(
+            "没有已确认的收藏模组；请重试、逐项跳过并选择不安装收藏模组，或关闭此选项".into(),
+        );
     }
-    if expected.keys().any(|key| !selected.contains(key) && !skipped.contains_key(key)) {
+    if expected
+        .keys()
+        .any(|key| !selected.contains(key) && !skipped.contains_key(key))
+    {
         return Err("部分收藏模组尚未确认，请重试或明确跳过每一项".into());
     }
-    Ok((expected.len(), selected.len(), skipped.into_values().collect(), base_only))
+    Ok((
+        expected.len(),
+        selected.len(),
+        skipped.into_values().collect(),
+        base_only,
+    ))
 }
 
 // ---------------- 收藏版本查询队列（favoriteVersionQueue.ts，4 并发 + 单飞共享） ----------------
@@ -2888,11 +4192,13 @@ struct FavJob {
 }
 
 fn fav_jobs() -> &'static Mutex<(HashMap<String, Arc<FavJob>>, VecDeque<String>, u32)> {
-    static J: OnceLock<Mutex<(HashMap<String, Arc<FavJob>>, VecDeque<String>, u32)>> = OnceLock::new();
+    static J: OnceLock<Mutex<(HashMap<String, Arc<FavJob>>, VecDeque<String>, u32)>> =
+        OnceLock::new();
     J.get_or_init(|| Mutex::new((HashMap::new(), VecDeque::new(), 0)))
 }
 
-static FAV_TICKETS: std::sync::LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+static FAV_TICKETS: std::sync::LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// 泵：并发上限 4；任务完成时续泵排队任务
 fn fav_pump() {
@@ -2901,12 +4207,21 @@ fn fav_pump() {
         if state.2 >= 4 {
             return;
         }
-        let Some(next_key) = state.1.pop_front() else { return };
-        let Some(next) = state.0.get(&next_key).cloned() else { continue };
-        if *next.clients.lock().unwrap() == 0 || next.started.load(Ordering::SeqCst) || next.cancel.load(Ordering::SeqCst) {
+        let Some(next_key) = state.1.pop_front() else {
+            return;
+        };
+        let Some(next) = state.0.get(&next_key).cloned() else {
+            continue;
+        };
+        if *next.clients.lock().unwrap() == 0
+            || next.started.load(Ordering::SeqCst)
+            || next.cancel.load(Ordering::SeqCst)
+        {
             continue;
         }
-        let Some(run) = next.run.lock().unwrap().take() else { continue };
+        let Some(run) = next.run.lock().unwrap().take() else {
+            continue;
+        };
         next.started.store(true, Ordering::SeqCst);
         state.2 += 1;
         drop(state);
@@ -2915,7 +4230,12 @@ fn fav_pump() {
             let result = run(next.cancel.clone());
             {
                 let mut state = fav_jobs().lock().unwrap();
-                if state.0.get(&key2).map(|j| Arc::ptr_eq(j, &next)).unwrap_or(false) {
+                if state
+                    .0
+                    .get(&key2)
+                    .map(|j| Arc::ptr_eq(j, &next))
+                    .unwrap_or(false)
+                {
                     state.0.remove(&key2);
                 }
                 state.2 = state.2.saturating_sub(1);
@@ -2927,7 +4247,11 @@ fn fav_pump() {
     }
 }
 
-fn fav_request(key: String, run: impl FnOnce(Arc<AtomicBool>) -> Result<Value, String> + Send + 'static, cancel: Arc<AtomicBool>) -> Result<Value, String> {
+fn fav_request(
+    key: String,
+    run: impl FnOnce(Arc<AtomicBool>) -> Result<Value, String> + Send + 'static,
+    cancel: Arc<AtomicBool>,
+) -> Result<Value, String> {
     let job = {
         let mut state = fav_jobs().lock().unwrap();
         if let Some(existing) = state.0.get(&key).cloned() {
@@ -2964,21 +4288,39 @@ fn fav_request(key: String, run: impl FnOnce(Arc<AtomicBool>) -> Result<Value, S
             if last {
                 job.cancel.store(true, Ordering::SeqCst);
                 let mut state = fav_jobs().lock().unwrap();
-                if state.0.get(&key).map(|j| Arc::ptr_eq(j, &job)).unwrap_or(false) {
+                if state
+                    .0
+                    .get(&key)
+                    .map(|j| Arc::ptr_eq(j, &job))
+                    .unwrap_or(false)
+                {
                     state.0.remove(&key);
                 }
             }
             return Err("收藏查询已取消".into());
         }
-        let (g, _) = job.cv.wait_timeout(guard, Duration::from_millis(200)).unwrap();
+        let (g, _) = job
+            .cv
+            .wait_timeout(guard, Duration::from_millis(200))
+            .unwrap();
         guard = g;
     }
 }
 
 /// favoriteVersionResult()：兼容 → 可靠（录像模组校验）→ 不可靠/不兼容 三态
-pub fn favorite_version_result(app: &tauri::AppHandle, source: &str, project: &str, mc: &str, loader: &str, cancel: Arc<AtomicBool>) -> Result<Value, String> {
+pub fn favorite_version_result(
+    app: &tauri::AppHandle,
+    source: &str,
+    project: &str,
+    mc: &str,
+    loader: &str,
+    cancel: Arc<AtomicBool>,
+) -> Result<Value, String> {
     favorite_key(&json!({ "source": source, "projectId": project }))?;
-    if !["fabric", "quilt", "forge", "neoforge"].contains(&loader) || mc.trim().is_empty() || mc.len() > 100 {
+    if !["fabric", "quilt", "forge", "neoforge"].contains(&loader)
+        || mc.trim().is_empty()
+        || mc.len() > 100
+    {
         return Err("请选择游戏与加载器".into());
     }
     let mc = mc.trim().to_string();
@@ -2993,15 +4335,26 @@ pub fn favorite_version_result(app: &tauri::AppHandle, source: &str, project: &s
             if cancel.load(Ordering::SeqCst) {
                 return Err("收藏查询已取消".into());
             }
-            let compatible: Vec<Value> = community_favorite_candidates(&app2, &source, &project, &mc, &loader)?
-                .into_iter()
-                .filter(|f| {
-                    f.get("projectId").and_then(|v| v.as_str()) == Some(project.as_str())
-                        && f.get("gameVersions").and_then(|v| v.as_array()).map(|a| a.iter().any(|x| x.as_str() == Some(mc.as_str()))).unwrap_or(false)
-                        && f.get("loaders").and_then(|v| v.as_array()).map(|a| a.iter().any(|x| x.as_str() == Some(loader.as_str()))).unwrap_or(false)
-                })
+            let compatible: Vec<Value> =
+                community_favorite_candidates(&app2, &source, &project, &mc, &loader)?
+                    .into_iter()
+                    .filter(|f| {
+                        f.get("projectId").and_then(|v| v.as_str()) == Some(project.as_str())
+                            && f.get("gameVersions")
+                                .and_then(|v| v.as_array())
+                                .map(|a| a.iter().any(|x| x.as_str() == Some(mc.as_str())))
+                                .unwrap_or(false)
+                            && f.get("loaders")
+                                .and_then(|v| v.as_array())
+                                .map(|a| a.iter().any(|x| x.as_str() == Some(loader.as_str())))
+                                .unwrap_or(false)
+                    })
+                    .collect();
+            let files: Vec<Value> = compatible
+                .iter()
+                .filter(|f| compatible_recording_mod(f, &mc, &loader))
+                .cloned()
                 .collect();
-            let files: Vec<Value> = compatible.iter().filter(|f| compatible_recording_mod(f, &mc, &loader)).cloned().collect();
             let status = if !files.is_empty() {
                 "available"
             } else if !compatible.is_empty() {
@@ -3016,84 +4369,187 @@ pub fn favorite_version_result(app: &tauri::AppHandle, source: &str, project: &s
 }
 
 /// favoriteVersions()
-pub fn favorite_versions(app: &tauri::AppHandle, source: &str, project: &str, mc: &str, loader: &str, cancel: Arc<AtomicBool>) -> Result<Vec<Value>, String> {
+pub fn favorite_versions(
+    app: &tauri::AppHandle,
+    source: &str,
+    project: &str,
+    mc: &str,
+    loader: &str,
+    cancel: Arc<AtomicBool>,
+) -> Result<Vec<Value>, String> {
     let result = favorite_version_result(app, source, project, mc, loader, cancel)?;
-    Ok(result.get("files").and_then(|v| v.as_array()).cloned().unwrap_or_default())
+    Ok(result
+        .get("files")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default())
 }
 
 // ---------------- recordingMods.ts（shared/recordingMods.ts） ----------------
 
-pub const RECORDING_PROJECTS: &[(&str, &str)] = &[("replaymod", "Nv2fQJo5"), ("flashback", "4das1Fjq")];
+pub const RECORDING_PROJECTS: &[(&str, &str)] =
+    &[("replaymod", "Nv2fQJo5"), ("flashback", "4das1Fjq")];
 
 pub fn compatible_recording_mod(file: &Value, mc: &str, loader: &str) -> bool {
     let sha1 = file.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
     let url = file.get("url").and_then(|v| v.as_str()).unwrap_or("");
     let file_name = file.get("fileName").and_then(|v| v.as_str()).unwrap_or("");
-    file.get("gameVersions").and_then(|v| v.as_array()).map(|a| a.iter().any(|x| x.as_str() == Some(mc))).unwrap_or(false)
-        && file.get("loaders").and_then(|v| v.as_array()).map(|a| a.iter().any(|x| x.as_str() == Some(loader))).unwrap_or(false)
+    file.get("gameVersions")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().any(|x| x.as_str() == Some(mc)))
+        .unwrap_or(false)
+        && file
+            .get("loaders")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().any(|x| x.as_str() == Some(loader)))
+            .unwrap_or(false)
         && !sha1.is_empty()
         && regex::Regex::new(r"^[a-f0-9]{40}$").unwrap().is_match(sha1)
         && url.starts_with("https://")
-        && regex::Regex::new(r"^[^\\/:]+\.jar$").unwrap().is_match(file_name)
+        && regex::Regex::new(r"^[^\\/:]+\.jar$")
+            .unwrap()
+            .is_match(file_name)
 }
 
 /// recordingModVersions()（recordings:modVersions 由 recordings 模块复用）
-pub fn recording_mod_versions(app: &tauri::AppHandle, kind: &str, mc: &str, loader: &str) -> Result<Vec<Value>, String> {
-    if !RECORDING_PROJECTS.iter().any(|(k, _)| *k == kind) || !["fabric", "quilt", "forge", "neoforge"].contains(&loader) || mc.is_empty() || mc.len() > 100 {
+pub fn recording_mod_versions(
+    app: &tauri::AppHandle,
+    kind: &str,
+    mc: &str,
+    loader: &str,
+) -> Result<Vec<Value>, String> {
+    if !RECORDING_PROJECTS.iter().any(|(k, _)| *k == kind)
+        || !["fabric", "quilt", "forge", "neoforge"].contains(&loader)
+        || mc.is_empty()
+        || mc.len() > 100
+    {
         return Err("请选择游戏版本、加载器和录像模组".into());
     }
-    let project = RECORDING_PROJECTS.iter().find(|(k, _)| *k == kind).unwrap().1;
-    let files = community_files(app, "modrinth", project, Some(&community::FileFilter { mc_version: Some(mc.to_string()), loader: Some(loader.to_string()), kind: Some("mod".into()) }))?;
+    let project = RECORDING_PROJECTS
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .unwrap()
+        .1;
+    let files = community_files(
+        app,
+        "modrinth",
+        project,
+        Some(&community::FileFilter {
+            mc_version: Some(mc.to_string()),
+            loader: Some(loader.to_string()),
+            kind: Some("mod".into()),
+        }),
+    )?;
     Ok(files
         .into_iter()
-        .filter(|f| f.get("projectId").and_then(|v| v.as_str()) == Some(project) && compatible_recording_mod(f, mc, loader))
+        .filter(|f| {
+            f.get("projectId").and_then(|v| v.as_str()) == Some(project)
+                && compatible_recording_mod(f, mc, loader)
+        })
         .collect())
 }
 
 /// resolveRecordingDependencies()
-fn resolve_recording_dependencies(app: &tauri::AppHandle, roots: &[Value], mc: &str, loader: &str) -> Result<Vec<Value>, String> {
+fn resolve_recording_dependencies(
+    app: &tauri::AppHandle,
+    roots: &[Value],
+    mc: &str,
+    loader: &str,
+) -> Result<Vec<Value>, String> {
     let mut chosen: HashMap<String, Value> = HashMap::new();
     let mut queue: VecDeque<Value> = roots.iter().cloned().collect();
     while let Some(file) = queue.pop_front() {
         if queue.len() > 100 {
             return Err("录像模组必要前置过多".into());
         }
-        let project = file.get("projectId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let project = file
+            .get("projectId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if project.is_empty() || !compatible_recording_mod(&file, mc, loader) {
             return Err("模组或必要前置没有当前游戏与加载器的兼容文件".into());
         }
         if let Some(existing) = chosen.get(&project) {
-            if existing.get("fileId").and_then(|v| v.as_str()) != file.get("fileId").and_then(|v| v.as_str()) {
+            if existing.get("fileId").and_then(|v| v.as_str())
+                != file.get("fileId").and_then(|v| v.as_str())
+            {
                 return Err(format!("必要前置版本冲突，请调整模组版本：{project}"));
             }
             continue;
         }
         chosen.insert(project.clone(), file.clone());
-        for dependency in file.get("dependencies").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
-            if !dependency.get("required").and_then(|v| v.as_bool()).unwrap_or(false) {
+        for dependency in file
+            .get("dependencies")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default()
+        {
+            if !dependency
+                .get("required")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 continue;
             }
-            let dep_project = dependency.get("projectId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let dep_file = dependency.get("fileId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let current = chosen.get(&dep_project).cloned().or_else(|| roots.iter().find(|r| r.get("projectId").and_then(|v| v.as_str()) == Some(dep_project.as_str())).cloned());
+            let dep_project = dependency
+                .get("projectId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let dep_file = dependency
+                .get("fileId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let current = chosen.get(&dep_project).cloned().or_else(|| {
+                roots
+                    .iter()
+                    .find(|r| {
+                        r.get("projectId").and_then(|v| v.as_str()) == Some(dep_project.as_str())
+                    })
+                    .cloned()
+            });
             if let Some(cur) = current {
-                if dep_file.is_empty() || dep_file == cur.get("fileId").and_then(|v| v.as_str()).unwrap_or("") {
+                if dep_file.is_empty()
+                    || dep_file == cur.get("fileId").and_then(|v| v.as_str()).unwrap_or("")
+                {
                     continue;
                 }
             }
             let next = if !dep_file.is_empty() {
-                let exact = community_exact_file(app, "modrinth", if dep_project.is_empty() { None } else { Some(&dep_project) }, &dep_file)?;
-                if !dep_project.is_empty() && exact.get("projectId").and_then(|v| v.as_str()) != Some(dep_project.as_str()) {
+                let exact = community_exact_file(
+                    app,
+                    "modrinth",
+                    if dep_project.is_empty() {
+                        None
+                    } else {
+                        Some(&dep_project)
+                    },
+                    &dep_file,
+                )?;
+                if !dep_project.is_empty()
+                    && exact.get("projectId").and_then(|v| v.as_str()) != Some(dep_project.as_str())
+                {
                     return Err("前置项目标识不匹配".into());
                 }
                 exact
             } else if dep_project.is_empty() {
                 return Err("必要前置缺少可信项目标识".into());
             } else {
-                community_files(app, "modrinth", &dep_project, Some(&community::FileFilter { mc_version: Some(mc.to_string()), loader: Some(loader.to_string()), kind: Some("mod".into()) }))?
-                    .into_iter()
-                    .find(|f| compatible_recording_mod(f, mc, loader))
-                    .ok_or_else(|| format!("必要前置没有兼容版本：{dep_project}"))?
+                community_files(
+                    app,
+                    "modrinth",
+                    &dep_project,
+                    Some(&community::FileFilter {
+                        mc_version: Some(mc.to_string()),
+                        loader: Some(loader.to_string()),
+                        kind: Some("mod".into()),
+                    }),
+                )?
+                .into_iter()
+                .find(|f| compatible_recording_mod(f, mc, loader))
+                .ok_or_else(|| format!("必要前置没有兼容版本：{dep_project}"))?
             };
             queue.push_back(next);
         }
@@ -3102,25 +4558,47 @@ fn resolve_recording_dependencies(app: &tauri::AppHandle, roots: &[Value], mc: &
 }
 
 /// prepareRecordingMod()
-pub fn prepare_recording_mod(app: &tauri::AppHandle, mc: &str, opts: &Value) -> Result<Vec<Value>, String> {
-    let Some(recording) = opts.get("recordingMod").filter(|v| v.is_object()) else { return Ok(Vec::new()) };
+pub fn prepare_recording_mod(
+    app: &tauri::AppHandle,
+    mc: &str,
+    opts: &Value,
+) -> Result<Vec<Value>, String> {
+    let Some(recording) = opts.get("recordingMod").filter(|v| v.is_object()) else {
+        return Ok(Vec::new());
+    };
     let loader = opts.get("loader").and_then(|v| v.as_str()).unwrap_or("");
     if loader.is_empty() {
         return Err("录像模组需要模组加载器".into());
     }
     let kind = recording.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-    let file_id = recording.get("fileId").and_then(|v| v.as_str()).unwrap_or("");
+    let file_id = recording
+        .get("fileId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let selected = recording_mod_versions(app, kind, mc, loader)?
         .into_iter()
         .find(|f| f.get("fileId").and_then(|v| v.as_str()) == Some(file_id))
         .ok_or_else(|| "所选录像模组版本已不可用或不兼容，请重新选择".to_string())?;
     let mut roots = vec![selected];
     if loader == "fabric" {
-        if let Some(fabric_api) = opts.get("fabricApi").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            let api = community_files(app, "modrinth", "P7dR8mSH", Some(&community::FileFilter { mc_version: Some(mc.to_string()), loader: Some(loader.to_string()), kind: Some("mod".into()) }))?
-                .into_iter()
-                .find(|f| f.get("version").and_then(|v| v.as_str()) == Some(fabric_api))
-                .ok_or_else(|| "所选 Fabric API 已不可用，请重新选择".to_string())?;
+        if let Some(fabric_api) = opts
+            .get("fabricApi")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            let api = community_files(
+                app,
+                "modrinth",
+                "P7dR8mSH",
+                Some(&community::FileFilter {
+                    mc_version: Some(mc.to_string()),
+                    loader: Some(loader.to_string()),
+                    kind: Some("mod".into()),
+                }),
+            )?
+            .into_iter()
+            .find(|f| f.get("version").and_then(|v| v.as_str()) == Some(fabric_api))
+            .ok_or_else(|| "所选 Fabric API 已不可用，请重新选择".to_string())?;
             roots.push(api);
         }
     }
@@ -3136,7 +4614,10 @@ pub fn install_recording_mods(
     progress: Option<&(dyn Fn(f64) + Sync)>,
 ) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    if std::fs::symlink_metadata(dir).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+    if std::fs::symlink_metadata(dir)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
         return Err("模组目录不能是链接".into());
     }
     download::with_file_job(dir, Some(rec.as_ref()), || -> Result<(), String> {
@@ -3159,8 +4640,16 @@ pub fn install_recording_mods(
                 .map(|f| ModReplacement {
                     old_name: None,
                     old_sha1: None,
-                    name: f.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                    sha1: f.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    name: f
+                        .get("fileName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    sha1: f
+                        .get("sha1")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     url: f.get("url").and_then(|v| v.as_str()).map(str::to_string),
                     size: f.get("size").and_then(|v| v.as_u64()),
                 })
@@ -3183,17 +4672,30 @@ pub fn install_recording_mods(
 // ---------------- prepareInstallMods / favoriteInstallResult（versions:install 收藏模组链路） ----------------
 
 /// prepareInstallMods()
-pub fn prepare_install_mods(app: &tauri::AppHandle, mc: &str, opts: &Value, rec: &Arc<TaskRecord>) -> Result<Vec<Value>, String> {
+pub fn prepare_install_mods(
+    app: &tauri::AppHandle,
+    mc: &str,
+    opts: &Value,
+    rec: &Arc<TaskRecord>,
+) -> Result<Vec<Value>, String> {
     check_cancel(rec)?;
-    let selections: Vec<Value> = opts.get("favoriteMods").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    let (_, _, _, _) = validate_favorite_install_intent(&selections, opts.get("favoriteInstallIntent"))?;
+    let selections: Vec<Value> = opts
+        .get("favoriteMods")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let (_, _, _, _) =
+        validate_favorite_install_intent(&selections, opts.get("favoriteInstallIntent"))?;
     let mut list = selections.clone();
     if list.len() > 100 {
         return Err("收藏模组过多".into());
     }
     if let Some(recording) = opts.get("recordingMod").filter(|v| v.is_object()) {
         let kind = recording.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-        let project = RECORDING_PROJECTS.iter().find(|(k, _)| *k == kind).map(|(_, p)| p.to_string());
+        let project = RECORDING_PROJECTS
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .map(|(_, p)| p.to_string());
         if let Some(project) = project {
             list.push(json!({ "source": "modrinth", "projectId": project, "fileId": recording.get("fileId").cloned().unwrap_or(json!("")) }));
         }
@@ -3209,22 +4711,53 @@ pub fn prepare_install_mods(app: &tauri::AppHandle, mc: &str, opts: &Value, rec:
     for selected in &list {
         let files = favorite_versions(
             app,
-            selected.get("source").and_then(|v| v.as_str()).unwrap_or(""),
-            selected.get("projectId").and_then(|v| v.as_str()).unwrap_or(""),
+            selected
+                .get("source")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+            selected
+                .get("projectId")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
             mc,
             loader,
             rec.cancelled.clone(),
         )?;
-        let file_id = selected.get("fileId").and_then(|v| v.as_str()).unwrap_or("");
-        let exact = files.into_iter().find(|f| f.get("fileId").and_then(|v| v.as_str()) == Some(file_id)).ok_or_else(|| format!("所选模组版本已不可用或不兼容：{}", selected.get("projectId").and_then(|v| v.as_str()).unwrap_or("")))?;
+        let file_id = selected
+            .get("fileId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let exact = files
+            .into_iter()
+            .find(|f| f.get("fileId").and_then(|v| v.as_str()) == Some(file_id))
+            .ok_or_else(|| {
+                format!(
+                    "所选模组版本已不可用或不兼容：{}",
+                    selected
+                        .get("projectId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                )
+            })?;
         roots.push(exact);
     }
     if loader == "fabric" {
-        if let Some(fabric_api) = opts.get("fabricApi").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            let api = favorite_versions(app, "modrinth", "P7dR8mSH", mc, loader, rec.cancelled.clone())?
-                .into_iter()
-                .find(|f| f.get("version").and_then(|v| v.as_str()) == Some(fabric_api))
-                .ok_or_else(|| "Fabric API 已不可用".to_string())?;
+        if let Some(fabric_api) = opts
+            .get("fabricApi")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            let api = favorite_versions(
+                app,
+                "modrinth",
+                "P7dR8mSH",
+                mc,
+                loader,
+                rec.cancelled.clone(),
+            )?
+            .into_iter()
+            .find(|f| f.get("version").and_then(|v| v.as_str()) == Some(fabric_api))
+            .ok_or_else(|| "Fabric API 已不可用".to_string())?;
             roots.push(api);
         }
     }
@@ -3232,13 +4765,24 @@ pub fn prepare_install_mods(app: &tauri::AppHandle, mc: &str, opts: &Value, rec:
     let graph = dependency_graph(app, &roots, &target, &mut HashMap::new())?;
     for f in &graph {
         if !compatible_recording_mod(f, mc, loader) {
-            return Err(format!("模组缺少可校验下载文件：{}", f.get("fileName").and_then(|v| v.as_str()).unwrap_or("")));
+            return Err(format!(
+                "模组缺少可校验下载文件：{}",
+                f.get("fileName").and_then(|v| v.as_str()).unwrap_or("")
+            ));
         }
     }
     let mut names: HashMap<String, String> = HashMap::new();
     for f in &graph {
-        let name = f.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let sha1 = f.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let name = f
+            .get("fileName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let sha1 = f
+            .get("sha1")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if let Some(old) = names.get(&name) {
             if old != &sha1 {
                 return Err(format!("模组文件名冲突：{name}"));
@@ -3260,19 +4804,31 @@ pub fn favorite_install_result(
     instance_id: &str,
     rec: &Arc<TaskRecord>,
 ) -> Result<Option<Value>, String> {
-    let selections: Vec<Value> = opts.get("favoriteMods").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    let intent = opts.get("favoriteInstallIntent").cloned().unwrap_or(Value::Null);
+    let selections: Vec<Value> = opts
+        .get("favoriteMods")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let intent = opts
+        .get("favoriteInstallIntent")
+        .cloned()
+        .unwrap_or(Value::Null);
     if intent.is_null() && selections.is_empty() {
         return Ok(None);
     }
-    let (requested, selected, skipped, base_only) = validate_favorite_install_intent(&selections, Some(&intent))?;
+    let (requested, selected, skipped, base_only) =
+        validate_favorite_install_intent(&selections, Some(&intent))?;
     let mut verified: Vec<Value> = Vec::new();
     let mut unique: Vec<Value> = Vec::new();
     {
         let mut map: HashMap<String, Value> = HashMap::new();
         let mut order: Vec<String> = Vec::new();
         for f in files {
-            let key = f.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let key = f
+                .get("fileName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             if map.insert(key.clone(), f.clone()).is_none() {
                 order.push(key);
             }
@@ -3290,7 +4846,12 @@ pub fn favorite_install_result(
             return Err(format!("收藏模组落盘校验失败：{name}"));
         }
         let sha1 = installer::sha1_file_hex(&target)?;
-        if file.get("sha1").and_then(|v| v.as_str()).map(|s| s.to_lowercase()) != Some(sha1.clone()) {
+        if file
+            .get("sha1")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_lowercase())
+            != Some(sha1.clone())
+        {
             return Err(format!("收藏模组落盘哈希不符：{name}"));
         }
         verified.push(json!({
@@ -3301,9 +4862,18 @@ pub fn favorite_install_result(
         }));
     }
     for selected_item in &selections {
-        let s = selected_item.get("source").and_then(|v| v.as_str()).unwrap_or("");
-        let p = selected_item.get("projectId").and_then(|v| v.as_str()).unwrap_or("");
-        let fid = selected_item.get("fileId").and_then(|v| v.as_str()).unwrap_or("");
+        let s = selected_item
+            .get("source")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let p = selected_item
+            .get("projectId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let fid = selected_item
+            .get("fileId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         if !files.iter().any(|f| {
             f.get("source").and_then(|v| v.as_str()) == Some(s)
                 && f.get("projectId").and_then(|v| v.as_str()) == Some(p)
@@ -3312,22 +4882,46 @@ pub fn favorite_install_result(
             return Err(format!("收藏模组未出现在实际安装结果中：{p}"));
         }
     }
-    let selected_keys: HashSet<String> = selections.iter().map(|f| format!("{}:{}", f.get("source").and_then(|v| v.as_str()).unwrap_or(""), f.get("fileId").and_then(|v| v.as_str()).unwrap_or(""))).collect();
+    let selected_keys: HashSet<String> = selections
+        .iter()
+        .map(|f| {
+            format!(
+                "{}:{}",
+                f.get("source").and_then(|v| v.as_str()).unwrap_or(""),
+                f.get("fileId").and_then(|v| v.as_str()).unwrap_or("")
+            )
+        })
+        .collect();
     let mut favorite_graph: HashSet<String> = HashSet::new();
     fn visit(file: &Value, files: &[Value], favorite_graph: &mut HashSet<String>) {
-        let key = format!("{}:{}", file.get("source").and_then(|v| v.as_str()).unwrap_or(""), file.get("fileId").and_then(|v| v.as_str()).unwrap_or(""));
+        let key = format!(
+            "{}:{}",
+            file.get("source").and_then(|v| v.as_str()).unwrap_or(""),
+            file.get("fileId").and_then(|v| v.as_str()).unwrap_or("")
+        );
         if !favorite_graph.insert(key) {
             return;
         }
-        for dep in file.get("dependencies").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
-            if !dep.get("required").and_then(|v| v.as_bool()).unwrap_or(false) {
+        for dep in file
+            .get("dependencies")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default()
+        {
+            if !dep
+                .get("required")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 continue;
             }
             let dep_file = dep.get("fileId").and_then(|v| v.as_str()).unwrap_or("");
             let dep_project = dep.get("projectId").and_then(|v| v.as_str()).unwrap_or("");
             let next = files.iter().find(|candidate| {
-                candidate.get("source").and_then(|v| v.as_str()) == file.get("source").and_then(|v| v.as_str())
-                    && (!dep_file.is_empty() && candidate.get("fileId").and_then(|v| v.as_str()) == Some(dep_file)
+                candidate.get("source").and_then(|v| v.as_str())
+                    == file.get("source").and_then(|v| v.as_str())
+                    && (!dep_file.is_empty()
+                        && candidate.get("fileId").and_then(|v| v.as_str()) == Some(dep_file)
                         || candidate.get("projectId").and_then(|v| v.as_str()) == Some(dep_project))
             });
             if let Some(next) = next {
@@ -3336,12 +4930,19 @@ pub fn favorite_install_result(
         }
     }
     for root in files {
-        let key = format!("{}:{}", root.get("source").and_then(|v| v.as_str()).unwrap_or(""), root.get("fileId").and_then(|v| v.as_str()).unwrap_or(""));
+        let key = format!(
+            "{}:{}",
+            root.get("source").and_then(|v| v.as_str()).unwrap_or(""),
+            root.get("fileId").and_then(|v| v.as_str()).unwrap_or("")
+        );
         if selected_keys.contains(&key) {
             visit(root, files, &mut favorite_graph);
         }
     }
-    let dependencies = favorite_graph.iter().filter(|key| !selected_keys.contains(*key)).count();
+    let dependencies = favorite_graph
+        .iter()
+        .filter(|key| !selected_keys.contains(*key))
+        .count();
     check_cancel(rec)?;
     let folder_real = std::fs::canonicalize(folder).unwrap_or_else(|_| PathBuf::from(folder));
     let mods_real = if Path::new(mods_directory).exists() {
@@ -3375,8 +4976,11 @@ fn supplemental_rows(app: &tauri::AppHandle) -> Result<Vec<Value>, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(_) => return Err("附加模组重试记录无法读取，已保留原文件".into()),
     };
-    let value: Value = serde_json::from_slice(&raw).map_err(|_| "附加模组重试记录无法读取，已保留原文件".to_string())?;
-    let list = value.as_array().ok_or_else(|| "附加模组重试记录无法读取，已保留原文件".to_string())?;
+    let value: Value = serde_json::from_slice(&raw)
+        .map_err(|_| "附加模组重试记录无法读取，已保留原文件".to_string())?;
+    let list = value
+        .as_array()
+        .ok_or_else(|| "附加模组重试记录无法读取，已保留原文件".to_string())?;
     if list.len() > 100 {
         return Err("附加模组重试记录无法读取，已保留原文件".into());
     }
@@ -3384,7 +4988,9 @@ fn supplemental_rows(app: &tauri::AppHandle) -> Result<Vec<Value>, String> {
         .iter()
         .filter(|v| {
             v.get("id").and_then(|x| x.as_str()).is_some()
-                && v.pointer("/target/folder").and_then(|x| x.as_str()).is_some()
+                && v.pointer("/target/folder")
+                    .and_then(|x| x.as_str())
+                    .is_some()
                 && v.pointer("/target/id").and_then(|x| x.as_str()).is_some()
                 && v.get("versionId").and_then(|x| x.as_str()).is_some()
                 && v.get("options").map(|o| o.is_object()).unwrap_or(false)
@@ -3410,7 +5016,11 @@ fn supplemental_save(app: &tauri::AppHandle, list: Vec<Value>) -> Result<Vec<Val
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let tmp = path.with_extension(format!("{}.tmp", crate::accounts::uuid_v4()));
-    std::fs::write(&tmp, serde_json::to_string(&list).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::write(
+        &tmp,
+        serde_json::to_string(&list).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
     let visible = supplemental_visible(list);
     installer::emit_event(app, "mods:supplementalPending", &json!(visible));
@@ -3423,11 +5033,19 @@ fn supplemental_running() -> &'static Mutex<HashSet<String>> {
 }
 
 /// recordSupplementalFailure()（versions:install 收藏模组失败记录）
-pub fn record_supplemental_failure(app: &tauri::AppHandle, target: &Value, version_id: &str, options: &Value, error: &str) -> Result<Vec<Value>, String> {
+pub fn record_supplemental_failure(
+    app: &tauri::AppHandle,
+    target: &Value,
+    version_id: &str,
+    options: &Value,
+    error: &str,
+) -> Result<Vec<Value>, String> {
     let mut rows = supplemental_rows(app)?;
     rows.retain(|r| {
-        r.pointer("/target/id").and_then(|v| v.as_str()) != target.get("id").and_then(|v| v.as_str())
-            || r.pointer("/target/folder").and_then(|v| v.as_str()) != target.get("folder").and_then(|v| v.as_str())
+        r.pointer("/target/id").and_then(|v| v.as_str())
+            != target.get("id").and_then(|v| v.as_str())
+            || r.pointer("/target/folder").and_then(|v| v.as_str())
+                != target.get("folder").and_then(|v| v.as_str())
     });
     rows.push(json!({
         "id": crate::accounts::uuid_v4(),
@@ -3463,19 +5081,38 @@ pub fn compatible_migration_file(file: &Value, mc: &str, loader: &str) -> bool {
     let url = file.get("url").and_then(|v| v.as_str()).unwrap_or("");
     let sha1 = file.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
     let file_name = file.get("fileName").and_then(|v| v.as_str()).unwrap_or("");
-    !url.is_empty() && url.starts_with("https://")
+    !url.is_empty()
+        && url.starts_with("https://")
         && regex::Regex::new(r"^[a-f0-9]{40}$").unwrap().is_match(sha1)
-        && file.get("gameVersions").and_then(|v| v.as_array()).map(|a| a.iter().any(|x| x.as_str() == Some(mc))).unwrap_or(false)
-        && file.get("loaders").and_then(|v| v.as_array()).map(|a| a.iter().any(|x| x.as_str() == Some(loader))).unwrap_or(false)
-        && regex::Regex::new(r"(?i)\.jar$").unwrap().is_match(file_name)
+        && file
+            .get("gameVersions")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().any(|x| x.as_str() == Some(mc)))
+            .unwrap_or(false)
+        && file
+            .get("loaders")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().any(|x| x.as_str() == Some(loader)))
+            .unwrap_or(false)
+        && regex::Regex::new(r"(?i)\.jar$")
+            .unwrap()
+            .is_match(file_name)
         && installer::basename_of(file_name) == file_name
         && !file_name.contains(['\\', '/', ':', '\0'])
 }
 
 /// planModMigration()
-pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str, mc_version: &str, loader: &str) -> Result<Value, String> {
+pub fn plan_mod_migration(
+    app: &tauri::AppHandle,
+    source_id: &str,
+    folder: &str,
+    mc_version: &str,
+    loader: &str,
+) -> Result<Value, String> {
     require_resource_version(source_id)?;
-    let mc_ok = regex::Regex::new(r"^[a-zA-Z0-9._-]{1,40}$").unwrap().is_match(mc_version);
+    let mc_ok = regex::Regex::new(r"^[a-zA-Z0-9._-]{1,40}$")
+        .unwrap()
+        .is_match(mc_version);
     if !mc_ok || !["fabric", "forge", "neoforge", "quilt"].contains(&loader) {
         return Err("请选择有效的游戏版本与加载器".into());
     }
@@ -3485,7 +5122,11 @@ pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str,
             .flatten()
             .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
             .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| regex::Regex::new(r"(?i)\.jar(?:\.disabled)?$").unwrap().is_match(n))
+            .filter(|n| {
+                regex::Regex::new(r"(?i)\.jar(?:\.disabled)?$")
+                    .unwrap()
+                    .is_match(n)
+            })
             .collect(),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => return Err(e.to_string()),
@@ -3503,15 +5144,29 @@ pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str,
     }
     let mut entries: Vec<Value> = Vec::new();
     for i in &scanned {
-        let sha1 = i.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let file_name = i.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let sha1 = i
+            .get("sha1")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let file_name = i
+            .get("fileName")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let sha1_value = if sha1.is_empty() {
             json!(file_hash(&dir.join(&file_name))?)
         } else {
             json!(sha1)
         };
-        let disabled = regex::Regex::new(r"(?i)\.disabled$").unwrap().is_match(&file_name);
-        let reason = if i.get("error").is_some() { "文件无法解析，保留为禁用文件" } else { "未匹配社区来源" };
+        let disabled = regex::Regex::new(r"(?i)\.disabled$")
+            .unwrap()
+            .is_match(&file_name);
+        let reason = if i.get("error").is_some() {
+            "文件无法解析，保留为禁用文件"
+        } else {
+            "未匹配社区来源"
+        };
         entries.push(json!({
             "fileName": file_name,
             "name": i.get("name").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(Value::from).unwrap_or_else(|| i.get("fileName").cloned().unwrap_or(json!(""))),
@@ -3522,9 +5177,29 @@ pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str,
             "reason": reason,
         }));
     }
-    let hashes: Vec<String> = entries.iter().map(|e| e.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string()).collect();
-    let originals = mr_post(app, "/version_files", &json!({ "hashes": hashes, "algorithm": "sha1" }), UA_MGMT, 20_000);
-    let updates = mr_post(app, "/version_files/update", &json!({ "hashes": hashes, "algorithm": "sha1", "game_versions": [mc_version], "loaders": [loader] }), UA_MGMT, 20_000);
+    let hashes: Vec<String> = entries
+        .iter()
+        .map(|e| {
+            e.get("sha1")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string()
+        })
+        .collect();
+    let originals = mr_post(
+        app,
+        "/version_files",
+        &json!({ "hashes": hashes, "algorithm": "sha1" }),
+        UA_MGMT,
+        20_000,
+    );
+    let updates = mr_post(
+        app,
+        "/version_files/update",
+        &json!({ "hashes": hashes, "algorithm": "sha1", "game_versions": [mc_version], "loaders": [loader] }),
+        UA_MGMT,
+        20_000,
+    );
     let mr_error = match (&originals, &updates) {
         (Ok(_), Ok(_)) => String::new(),
         (Err(e), _) => e.clone(),
@@ -3535,7 +5210,11 @@ pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str,
     let missing: Vec<usize> = entries
         .iter()
         .enumerate()
-        .filter(|(_, e)| originals.get(e.get("sha1").and_then(|v| v.as_str()).unwrap_or("")).is_none())
+        .filter(|(_, e)| {
+            originals
+                .get(e.get("sha1").and_then(|v| v.as_str()).unwrap_or(""))
+                .is_none()
+        })
         .map(|(i, _)| i)
         .collect();
     let mut cf_ids: HashMap<String, String> = HashMap::new();
@@ -3543,31 +5222,73 @@ pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str,
         let ch = community::cf_channel(app);
         let fingerprints: Vec<u64> = scanned
             .iter()
-            .filter(|i| missing.iter().any(|idx| entries[*idx].get("fileName").and_then(|v| v.as_str()) == i.get("fileName").and_then(|v| v.as_str())))
+            .filter(|i| {
+                missing.iter().any(|idx| {
+                    entries[*idx].get("fileName").and_then(|v| v.as_str())
+                        == i.get("fileName").and_then(|v| v.as_str())
+                })
+            })
             .filter_map(|i| i.get("fingerprint").and_then(|v| v.as_u64()))
             .collect();
-        let headers: Vec<(&str, &str)> = if ch.official { vec![("x-api-key", &ch.key)] } else { vec![] };
-        match post_json(&format!("{}/fingerprints", ch.base), &json!({ "fingerprints": fingerprints }), UA_MGMT, 20_000, &headers) {
+        let headers: Vec<(&str, &str)> = if ch.official {
+            vec![("x-api-key", &ch.key)]
+        } else {
+            vec![]
+        };
+        match post_json(
+            &format!("{}/fingerprints", ch.base),
+            &json!({ "fingerprints": fingerprints }),
+            UA_MGMT,
+            20_000,
+            &headers,
+        ) {
             Ok(result) => {
                 for idx in &missing {
-                    let sha1 = entries[*idx].get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let sha1 = entries[*idx]
+                        .get("sha1")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     let matched = result
                         .pointer("/data/exactMatches")
                         .and_then(|v| v.as_array())
                         .and_then(|list| {
                             list.iter().find(|m| {
-                                m.pointer("/file/hashes").and_then(|v| v.as_array()).map(|hashes| {
-                                    hashes.iter().any(|h| h.get("algo").and_then(|v| v.as_u64()) == Some(1) && h.get("value").and_then(|v| v.as_str()).map(|s| s.to_lowercase() == sha1).unwrap_or(false))
-                                }).unwrap_or(false)
+                                m.pointer("/file/hashes")
+                                    .and_then(|v| v.as_array())
+                                    .map(|hashes| {
+                                        hashes.iter().any(|h| {
+                                            h.get("algo").and_then(|v| v.as_u64()) == Some(1)
+                                                && h.get("value")
+                                                    .and_then(|v| v.as_str())
+                                                    .map(|s| s.to_lowercase() == sha1)
+                                                    .unwrap_or(false)
+                                        })
+                                    })
+                                    .unwrap_or(false)
                             })
                         });
                     if let Some(m) = matched {
-                        let id = m.pointer("/file/modId").and_then(|v| v.as_u64()).map(|v| v.to_string()).unwrap_or_else(|| m.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string());
+                        let id = m
+                            .pointer("/file/modId")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| {
+                                m.get("id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string()
+                            });
                         cf_ids.insert(sha1, id);
                     }
                 }
             }
-            Err(e) => return Err(format!("无法完成社区来源识别，请检查网络后重试。{}{}", mr_error, e)),
+            Err(e) => {
+                return Err(format!(
+                    "无法完成社区来源识别，请检查网络后重试。{}{}",
+                    mr_error, e
+                ))
+            }
         }
     }
     if !mr_error.is_empty() {
@@ -3576,13 +5297,28 @@ pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str,
     // 目标版本匹配（4 路并发 → 顺序等价）
     let mut versions_map: HashMap<String, Value> = HashMap::new();
     for idx in 0..entries.len() {
-        let sha1 = entries[idx].get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let project = originals.get(&sha1).and_then(|v| v.get("project_id")).and_then(|v| v.as_str()).map(str::to_string);
+        let sha1 = entries[idx]
+            .get("sha1")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let project = originals
+            .get(&sha1)
+            .and_then(|v| v.get("project_id"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
         if let Some(project) = project {
             entries[idx]["reason"] = json!("该项目没有适配目标版本与加载器的文件");
             if let Some(v) = updates.get(&sha1) {
-                let files = v.get("files").and_then(|f| f.as_array()).cloned().unwrap_or_default();
-                let f = files.iter().find(|x| x.get("primary").and_then(|p| p.as_bool()).unwrap_or(false)).or_else(|| files.first());
+                let files = v
+                    .get("files")
+                    .and_then(|f| f.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let f = files
+                    .iter()
+                    .find(|x| x.get("primary").and_then(|p| p.as_bool()).unwrap_or(false))
+                    .or_else(|| files.first());
                 if let Some(f) = f {
                     let file = json!({
                         "source": "modrinth",
@@ -3606,18 +5342,38 @@ pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str,
                     if compatible_migration_file(&file, mc_version, loader) {
                         entries[idx]["target"] = file.clone();
                         entries[idx]["status"] = json!("compatible");
-                        let key = format!("{}:{}", file.get("source").and_then(|x| x.as_str()).unwrap_or(""), file.get("projectId").map(proj_id_str).unwrap_or_default());
+                        let key = format!(
+                            "{}:{}",
+                            file.get("source").and_then(|x| x.as_str()).unwrap_or(""),
+                            file.get("projectId").map(proj_id_str).unwrap_or_default()
+                        );
                         versions_map.insert(key, file);
                     }
                 }
             }
         } else if let Some(cf_id) = cf_ids.get(&sha1).cloned() {
             entries[idx]["reason"] = json!("该项目没有适配目标版本与加载器的可下载文件");
-            let list = community_files(app, "curseforge", &cf_id, Some(&community::FileFilter { mc_version: Some(mc_version.to_string()), loader: Some(loader.to_string()), kind: Some("mod".into()) }))?;
-            if let Some(file) = list.into_iter().find(|f| compatible_migration_file(f, mc_version, loader)) {
+            let list = community_files(
+                app,
+                "curseforge",
+                &cf_id,
+                Some(&community::FileFilter {
+                    mc_version: Some(mc_version.to_string()),
+                    loader: Some(loader.to_string()),
+                    kind: Some("mod".into()),
+                }),
+            )?;
+            if let Some(file) = list
+                .into_iter()
+                .find(|f| compatible_migration_file(f, mc_version, loader))
+            {
                 entries[idx]["target"] = file.clone();
                 entries[idx]["status"] = json!("compatible");
-                let key = format!("{}:{}", file.get("source").and_then(|x| x.as_str()).unwrap_or(""), file.get("projectId").map(proj_id_str).unwrap_or_default());
+                let key = format!(
+                    "{}:{}",
+                    file.get("source").and_then(|x| x.as_str()).unwrap_or(""),
+                    file.get("projectId").map(proj_id_str).unwrap_or_default()
+                );
                 versions_map.insert(key, file);
             }
         }
@@ -3627,7 +5383,10 @@ pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str,
     for e in &entries {
         let sha1 = e.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
         if !sha1.is_empty() && is_mod_locked(app, &dir, sha1) {
-            warnings.push(format!("锁定模组 {} 将按目标游戏重新匹配；确认后目标文件仍锁定", e.get("fileName").and_then(|v| v.as_str()).unwrap_or("")));
+            warnings.push(format!(
+                "锁定模组 {} 将按目标游戏重新匹配；确认后目标文件仍锁定",
+                e.get("fileName").and_then(|v| v.as_str()).unwrap_or("")
+            ));
         }
     }
     let mut visited: HashSet<String> = HashSet::new();
@@ -3639,27 +5398,59 @@ pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str,
         let entry = entries[n].clone();
         n += 1;
         let has_target = entry.get("target").map(|t| t.is_object()).unwrap_or(false);
-        if !has_target || entry.get("disabled").and_then(|v| v.as_bool()).unwrap_or(false) {
+        if !has_target
+            || entry
+                .get("disabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        {
             continue;
         }
-        let deps = entry.pointer("/target/dependencies").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let deps = entry
+            .pointer("/target/dependencies")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
         for dep in deps {
-            if !dep.get("required").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if !dep
+                .get("required")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 continue;
             }
-            let source = entry.pointer("/target/source").and_then(|v| v.as_str()).unwrap_or("modrinth").to_string();
-            let dep_project = dep.get("projectId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let dep_file = dep.get("fileId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let source = entry
+                .pointer("/target/source")
+                .and_then(|v| v.as_str())
+                .unwrap_or("modrinth")
+                .to_string();
+            let dep_project = dep
+                .get("projectId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let dep_file = dep
+                .get("fileId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let key = format!("{}:{}:{}", source, dep_project, dep_file);
             if !visited.insert(key) {
                 continue;
             }
-            let existing = versions_map.get(&format!("{}:{}", source, dep_project)).cloned();
+            let existing = versions_map
+                .get(&format!("{}:{}", source, dep_project))
+                .cloned();
             if let Some(existing) = existing {
-                let all_disabled = entries.iter().filter(|x| {
-                    x.pointer("/target/source").and_then(|v| v.as_str()) == Some(source.as_str())
-                        && x.pointer("/target/projectId").and_then(|v| v.as_str()) == Some(dep_project.as_str())
-                }).all(|x| x.get("disabled").and_then(|v| v.as_bool()).unwrap_or(false));
+                let all_disabled = entries
+                    .iter()
+                    .filter(|x| {
+                        x.pointer("/target/source").and_then(|v| v.as_str())
+                            == Some(source.as_str())
+                            && x.pointer("/target/projectId").and_then(|v| v.as_str())
+                                == Some(dep_project.as_str())
+                    })
+                    .all(|x| x.get("disabled").and_then(|v| v.as_bool()).unwrap_or(false));
                 if all_disabled {
                     entries.push(json!({
                         "fileName": "",
@@ -3671,24 +5462,47 @@ pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str,
                         "target": existing.clone(),
                     }));
                 }
-                if !dep_file.is_empty() && existing.get("fileId").and_then(|v| v.as_str()) != Some(dep_file.as_str()) {
+                if !dep_file.is_empty()
+                    && existing.get("fileId").and_then(|v| v.as_str()) != Some(dep_file.as_str())
+                {
                     warnings.push(format!(
                         "{} 需要特定前置版本 {}，当前目标版本为 {}，请确认兼容性",
                         entry.get("fileName").and_then(|v| v.as_str()).unwrap_or(""),
                         dep_file,
-                        existing.get("fileName").and_then(|v| v.as_str()).unwrap_or("")
+                        existing
+                            .get("fileName")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
                     ));
                 }
                 continue;
             }
             let outcome: Result<Value, String> = (|| {
                 let file = if !dep_file.is_empty() {
-                    community_exact_file(app, &source, if dep_project.is_empty() { None } else { Some(&dep_project) }, &dep_file)?
+                    community_exact_file(
+                        app,
+                        &source,
+                        if dep_project.is_empty() {
+                            None
+                        } else {
+                            Some(&dep_project)
+                        },
+                        &dep_file,
+                    )?
                 } else {
-                    community_files(app, &source, &dep_project, Some(&community::FileFilter { mc_version: Some(mc_version.to_string()), loader: Some(loader.to_string()), kind: Some("mod".into()) }))?
-                        .into_iter()
-                        .find(|f| compatible_migration_file(f, mc_version, loader))
-                        .ok_or_else(|| "无兼容可下载版本".to_string())?
+                    community_files(
+                        app,
+                        &source,
+                        &dep_project,
+                        Some(&community::FileFilter {
+                            mc_version: Some(mc_version.to_string()),
+                            loader: Some(loader.to_string()),
+                            kind: Some("mod".into()),
+                        }),
+                    )?
+                    .into_iter()
+                    .find(|f| compatible_migration_file(f, mc_version, loader))
+                    .ok_or_else(|| "无兼容可下载版本".to_string())?
                 };
                 if !compatible_migration_file(&file, mc_version, loader) {
                     return Err("无兼容可下载版本".into());
@@ -3697,7 +5511,14 @@ pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str,
             })();
             match outcome {
                 Ok(file) => {
-                    versions_map.insert(format!("{}:{}", source, file.get("projectId").and_then(|v| v.as_str()).unwrap_or("")), file.clone());
+                    versions_map.insert(
+                        format!(
+                            "{}:{}",
+                            source,
+                            file.get("projectId").and_then(|v| v.as_str()).unwrap_or("")
+                        ),
+                        file.clone(),
+                    );
                     entries.push(json!({
                         "fileName": "",
                         "name": file.get("fileName").cloned().unwrap_or(json!("")),
@@ -3710,8 +5531,19 @@ pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str,
                 }
                 Err(e) => warnings.push(format!(
                     "{} 的必要前置 {} 未能匹配：Error: {}",
-                    entry.get("fileName").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or_else(|| entry.get("name").and_then(|v| v.as_str()).unwrap_or("")),
-                    if dep_project.is_empty() { dep_file.as_str() } else { dep_project.as_str() },
+                    entry
+                        .get("fileName")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| entry
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")),
+                    if dep_project.is_empty() {
+                        dep_file.as_str()
+                    } else {
+                        dep_project.as_str()
+                    },
                     e
                 )),
             }
@@ -3731,7 +5563,9 @@ pub fn plan_mod_migration(app: &tauri::AppHandle, source_id: &str, folder: &str,
     });
     {
         let mut store = migration_plans().lock().unwrap();
-        store.retain(|_, p| now_ms() - p.get("createdAt").and_then(|v| v.as_u64()).unwrap_or(0) <= 1_800_000);
+        store.retain(|_, p| {
+            now_ms() - p.get("createdAt").and_then(|v| v.as_u64()).unwrap_or(0) <= 1_800_000
+        });
         store.insert(plan_id, plan.clone());
     }
     Ok(plan)
@@ -3744,22 +5578,53 @@ fn validate_migration_source(plan: &Value, dir: &Path) -> Result<(), String> {
         .flatten()
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
         .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| regex::Regex::new(r"(?i)\.jar(?:\.disabled)?$").unwrap().is_match(n))
+        .filter(|n| {
+            regex::Regex::new(r"(?i)\.jar(?:\.disabled)?$")
+                .unwrap()
+                .is_match(n)
+        })
         .collect();
     names.sort();
     let mut expected: Vec<String> = plan
         .get("entries")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter(|e| e.get("fileName").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false)).map(|e| e.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string()).collect())
+        .map(|a| {
+            a.iter()
+                .filter(|e| {
+                    e.get("fileName")
+                        .and_then(|v| v.as_str())
+                        .map(|s| !s.is_empty())
+                        .unwrap_or(false)
+                })
+                .map(|e| {
+                    e.get("fileName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                })
+                .collect()
+        })
         .unwrap_or_default();
     expected.sort();
     if names != expected {
         return Err("检查后模组列表发生变化，请重新检查".into());
     }
-    for e in plan.get("entries").and_then(|v| v.as_array()).unwrap_or(&Vec::new()) {
-        if let Some(name) = e.get("fileName").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+    for e in plan
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&Vec::new())
+    {
+        if let Some(name) = e
+            .get("fileName")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
             let stat = std::fs::symlink_metadata(dir.join(name)).map_err(|e| e.to_string())?;
-            if !stat.is_file() || stat.file_type().is_symlink() || installer::sha1_file_hex(&dir.join(name))? != e.get("sha1").and_then(|v| v.as_str()).unwrap_or("") {
+            if !stat.is_file()
+                || stat.file_type().is_symlink()
+                || installer::sha1_file_hex(&dir.join(name))?
+                    != e.get("sha1").and_then(|v| v.as_str()).unwrap_or("")
+            {
                 return Err(format!("检查后模组文件已变化，请重新检查：{name}"));
             }
         }
@@ -3772,14 +5637,29 @@ pub fn migration_instance_id(source: &str, mc: &str, id: &str) -> String {
     let budget = 50usize.saturating_sub(mc.len());
     let mut prefix: String = source.chars().take(budget).collect();
     // 去掉被截断的半截代理对
-    if prefix.chars().next_back().is_some_and(|c| (char::from_u32(0xD800).unwrap()..=char::from_u32(0xDBFF).unwrap()).contains(&c)) {
+    if prefix.chars().next_back().is_some_and(|c| {
+        (char::from_u32(0xD800).unwrap()..=char::from_u32(0xDBFF).unwrap()).contains(&c)
+    }) {
         prefix.pop();
     }
     format!("{prefix} - {mc} - {}", &id[..id.len().min(8)])
 }
 
 /// 目标实例安装接线点（modMigration → versions.installVersion 完整流程）
-pub type MigrationInstallHook = Arc<dyn Fn(&tauri::AppHandle, &Arc<TaskRecord>, &(dyn Fn(&Value) + Send + Sync), &str, &str, &str, &str, &str) -> Result<(), String> + Send + Sync>;
+pub type MigrationInstallHook = Arc<
+    dyn Fn(
+            &tauri::AppHandle,
+            &Arc<TaskRecord>,
+            &(dyn Fn(&Value) + Send + Sync),
+            &str,
+            &str,
+            &str,
+            &str,
+            &str,
+        ) -> Result<(), String>
+        + Send
+        + Sync,
+>;
 static MIGRATION_HOOK: Mutex<Option<MigrationInstallHook>> = Mutex::new(None);
 
 pub fn set_migration_install_hook(hook: MigrationInstallHook) {
@@ -3799,7 +5679,16 @@ fn run_migration_install(
 ) -> Result<(), String> {
     let hook = MIGRATION_HOOK.lock().unwrap().clone();
     match hook {
-        Some(hook) => hook(app, rec, emit, folder, mc_version, loader, loader_version, instance_name),
+        Some(hook) => hook(
+            app,
+            rec,
+            emit,
+            folder,
+            mc_version,
+            loader,
+            loader_version,
+            instance_name,
+        ),
         None => Err("版本安装模块尚未接入迁移流程，请更新启动器后重试".into()),
     }
 }
@@ -3814,35 +5703,77 @@ pub fn apply_mod_migration(
 ) -> Result<Value, String> {
     let plan = {
         let store = migration_plans().lock().unwrap();
-        store.get(id).cloned().filter(|p| now_ms() - p.get("createdAt").and_then(|v| v.as_u64()).unwrap_or(0) <= 1_800_000)
+        store.get(id).cloned().filter(|p| {
+            now_ms() - p.get("createdAt").and_then(|v| v.as_u64()).unwrap_or(0) <= 1_800_000
+        })
     };
-    let Some(plan) = plan else { return Err("迁移预览已过期，请重新检查".into()) };
+    let Some(plan) = plan else {
+        return Err("迁移预览已过期，请重新检查".into());
+    };
     let has_unavailable = plan
         .get("entries")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().any(|e| e.get("status").and_then(|x| x.as_str()) == Some("unavailable")))
+        .map(|a| {
+            a.iter()
+                .any(|e| e.get("status").and_then(|x| x.as_str()) == Some("unavailable"))
+        })
         .unwrap_or(false);
-    let warnings = plan.get("warnings").and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false);
+    let warnings = plan
+        .get("warnings")
+        .and_then(|v| v.as_array())
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
     if (has_unavailable || warnings) && !confirm_missing {
         return Err("请先确认未匹配模组与依赖提醒".into());
     }
     if !migration_running().lock().unwrap().insert(id.to_string()) {
         return Err("该迁移正在进行".into());
     }
-    let folder = plan.get("folder").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let source_id = plan.get("sourceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let mc_version = plan.get("mcVersion").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let loader = plan.get("loader").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let loader_version = plan.get("loaderVersion").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let entries = plan.get("entries").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let folder = plan
+        .get("folder")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let source_id = plan
+        .get("sourceId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let mc_version = plan
+        .get("mcVersion")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let loader = plan
+        .get("loader")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let loader_version = plan
+        .get("loaderVersion")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let entries = plan
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     let mut stage: Option<PathBuf> = None;
     let result = (|| -> Result<Value, String> {
         let dir = resolve_resource_directory(app, &folder, &source_id, "mods")?;
-        emit(&json!({ "stage": "download", "progress": 0, "overall": 0, "text": "正在校验迁移源文件" }));
+        emit(
+            &json!({ "stage": "download", "progress": 0, "overall": 0, "text": "正在校验迁移源文件" }),
+        );
         validate_migration_source(&plan, &dir)?;
         if !confirm_missing {
             for e in &entries {
-                if let (Some(_name), Some(sha1)) = (e.get("fileName").and_then(|v| v.as_str()).filter(|s| !s.is_empty()), e.get("sha1").and_then(|v| v.as_str())) {
+                if let (Some(_name), Some(sha1)) = (
+                    e.get("fileName")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty()),
+                    e.get("sha1").and_then(|v| v.as_str()),
+                ) {
                     if is_mod_locked(app, &dir, sha1) {
                         return Err("模组已锁定，请重新检查并确认迁移".into());
                     }
@@ -3853,7 +5784,8 @@ pub fn apply_mod_migration(
         let stage_dir = {
             let mut created: Option<PathBuf> = None;
             for _ in 0..100 {
-                let candidate = Path::new(&folder).join(format!(".kamucl-migration-{}", crate::accounts::uuid_v4()));
+                let candidate = Path::new(&folder)
+                    .join(format!(".kamucl-migration-{}", crate::accounts::uuid_v4()));
                 if std::fs::create_dir(&candidate).is_ok() {
                     created = Some(candidate);
                     break;
@@ -3866,16 +5798,30 @@ pub fn apply_mod_migration(
         for (i, e) in entries.iter().enumerate() {
             check_cancel(rec)?;
             let file_name = e.get("fileName").and_then(|v| v.as_str()).unwrap_or("");
-            let target_name = e.pointer("/target/fileName").and_then(|v| v.as_str()).unwrap_or("");
+            let target_name = e
+                .pointer("/target/fileName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let base = if target_name.is_empty() {
-                regex::Regex::new(r"(?i)\.disabled$").unwrap().replace(file_name, "").to_string()
+                regex::Regex::new(r"(?i)\.disabled$")
+                    .unwrap()
+                    .replace(file_name, "")
+                    .to_string()
             } else {
                 target_name.to_string()
             };
             let disabled = e.get("disabled").and_then(|v| v.as_bool()).unwrap_or(false);
             let no_target = !e.get("target").map(|t| t.is_object()).unwrap_or(false);
-            let name = if disabled || no_target { format!("{base}.disabled") } else { base };
-            let digest = e.pointer("/target/sha1").and_then(|v| v.as_str()).unwrap_or_else(|| e.get("sha1").and_then(|v| v.as_str()).unwrap_or("")).to_string();
+            let name = if disabled || no_target {
+                format!("{base}.disabled")
+            } else {
+                base
+            };
+            let digest = e
+                .pointer("/target/sha1")
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| e.get("sha1").and_then(|v| v.as_str()).unwrap_or(""))
+                .to_string();
             if let Some(prev) = used.get(&name.to_lowercase()) {
                 if prev != &digest {
                     return Err(format!("迁移文件名冲突：{name}"));
@@ -3888,11 +5834,20 @@ pub fn apply_mod_migration(
                 let total = e.pointer("/target/size").and_then(|v| v.as_u64());
                 let mirror = download::mirror_from_settings(app);
                 let bytes = std::sync::atomic::AtomicU64::new(0);
-                let display = e.get("fileName").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or_else(|| e.get("name").and_then(|v| v.as_str()).unwrap_or("")).to_string();
+                let display = e
+                    .get("fileName")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| e.get("name").and_then(|v| v.as_str()).unwrap_or(""))
+                    .to_string();
                 let entries_len = entries.len();
                 let progress = move |done: u64, total_cb: u64, wire: u64| {
                     bytes.fetch_add(wire, Ordering::SeqCst);
-                    let frac = if total_cb > 0 { done as f64 / total_cb as f64 } else { 0.0 };
+                    let frac = if total_cb > 0 {
+                        done as f64 / total_cb as f64
+                    } else {
+                        0.0
+                    };
                     let overall = 0.65 * ((i as f64 + frac) / entries_len as f64);
                     let mut ev = json!({
                         "stage": "download",
@@ -3920,7 +5875,15 @@ pub fn apply_mod_migration(
                     progress: Some(&progress),
                     on_wait: None,
                 };
-                download::download_file(app, rec, e.pointer("/target/url").and_then(|v| v.as_str()).unwrap_or(""), &dest, &opts)?;
+                download::download_file(
+                    app,
+                    rec,
+                    e.pointer("/target/url")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    &dest,
+                    &opts,
+                )?;
             } else {
                 std::fs::copy(dir.join(file_name), &dest).map_err(|e| e.to_string())?;
             }
@@ -3938,16 +5901,33 @@ pub fn apply_mod_migration(
             let install_emit = move |event: &Value| {
                 let mut mapped = event.clone();
                 if let Some(obj) = mapped.as_object_mut() {
-                    let base = obj.get("overall").and_then(|v| v.as_f64()).or_else(|| obj.get("progress").and_then(|v| v.as_f64())).unwrap_or(0.0);
+                    let base = obj
+                        .get("overall")
+                        .and_then(|v| v.as_f64())
+                        .or_else(|| obj.get("progress").and_then(|v| v.as_f64()))
+                        .unwrap_or(0.0);
                     obj.insert("overall".into(), json!(0.65 + 0.3 * base));
                 }
                 if let Some(obj) = mapped.as_object_mut() {
-                    let text = obj.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let text = obj
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     obj.insert("text".into(), json!(format!("准备目标游戏：{text}")));
                 }
                 emit(&mapped);
             };
-            run_migration_install(app, rec, &install_emit, &folder, &mc_version, &loader, &loader_version, &target_id)?;
+            run_migration_install(
+                app,
+                rec,
+                &install_emit,
+                &folder,
+                &mc_version,
+                &loader,
+                &loader_version,
+                &target_id,
+            )?;
             installer::set_new_instance_isolation(&folder, &target_id, true)?;
             let marker = installer::install_mark_path_in(&folder, &target_id);
             std::fs::write(&marker, "版本迁移尚未完成").map_err(|e| e.to_string())?;
@@ -3957,31 +5937,54 @@ pub fn apply_mod_migration(
                 return Err("目标模组目录已存在，未覆盖，请重新迁移".into());
             }
             for e in &entries {
-                if let Some(sha1) = e.get("sha1").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-                    if e.get("fileName").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false) && is_mod_locked(app, &dir, sha1) {
+                if let Some(sha1) = e
+                    .get("sha1")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    if e.get("fileName")
+                        .and_then(|v| v.as_str())
+                        .map(|s| !s.is_empty())
+                        .unwrap_or(false)
+                        && is_mod_locked(app, &dir, sha1)
+                    {
                         if !confirm_missing {
                             return Err("模组已锁定，请重新确认后迁移".into());
                         }
-                        let target_sha = e.pointer("/target/sha1").and_then(|v| v.as_str()).unwrap_or(sha1).to_string();
+                        let target_sha = e
+                            .pointer("/target/sha1")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(sha1)
+                            .to_string();
                         set_mod_locked(app, &mods_dir, &target_sha, true);
                     }
                 }
             }
             std::fs::rename(&stage_dir, &mods_dir).map_err(|e| e.to_string())?;
             stage = None;
-            let report_path = installer::version_dir_in(&folder, &target_id).join("migration-report.json");
-            let _ = std::fs::write(&report_path, serde_json::to_string_pretty(&plan).unwrap_or_default());
+            let report_path =
+                installer::version_dir_in(&folder, &target_id).join("migration-report.json");
+            let _ = std::fs::write(
+                &report_path,
+                serde_json::to_string_pretty(&plan).unwrap_or_default(),
+            );
             let _ = std::fs::remove_file(&marker);
         }
         migration_plans().lock().unwrap().remove(id);
-        emit(&json!({ "stage": "done", "progress": 1, "overall": 1, "text": format!("版本迁移完成：{target_id}") }));
+        emit(
+            &json!({ "stage": "done", "progress": 1, "overall": 1, "text": format!("版本迁移完成：{target_id}") }),
+        );
         Ok(json!({ "versionId": target_id, "folder": folder }))
     })();
     migration_running().lock().unwrap().remove(id);
     if let Some(stage_dir) = stage {
         let root = std::path::absolute(&folder).unwrap_or_else(|_| PathBuf::from(&folder));
         let resolved = std::path::absolute(&stage_dir).unwrap_or(stage_dir);
-        let ok = resolved.starts_with(&root) && resolved.file_name().map(|n| n.to_string_lossy().starts_with(".kamucl-migration-")).unwrap_or(false);
+        let ok = resolved.starts_with(&root)
+            && resolved
+                .file_name()
+                .map(|n| n.to_string_lossy().starts_with(".kamucl-migration-"))
+                .unwrap_or(false);
         if !ok {
             return Err("迁移临时目录校验失败".into());
         }
@@ -3993,15 +5996,26 @@ pub fn apply_mod_migration(
 // ---------------- IPC 入口 ----------------
 
 fn with_game_folder_of(app: &tauri::AppHandle, version_id: &str, folder: Option<&str>) -> String {
-    folder.filter(|f| !f.is_empty()).map(str::to_string).unwrap_or_else(|| installer::folder_of_version(app, version_id))
+    folder
+        .filter(|f| !f.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| installer::folder_of_version(app, version_id))
 }
 
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         "mods:parse" => Some(
             arg(args, 0)
                 .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<String>>())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect::<Vec<String>>()
+                })
                 .unwrap_or_default(),
         )
         .map(|paths| {
@@ -4047,7 +6061,11 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             let mut out: Vec<Value> = Vec::new();
             for key in order {
                 let g = groups.get(&key).cloned().unwrap();
-                let files = g.get("files").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+                let files = g
+                    .get("files")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
                 if files.len() < 2 {
                     continue;
                 }
@@ -4058,10 +6076,14 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
                     compare_mod_version(bv, av)
                 });
                 let mut g = g;
-                let arr: Vec<Value> = sorted.into_iter().enumerate().map(|(i, mut f)| {
-                    f["latest"] = json!(i == 0);
-                    f
-                }).collect();
+                let arr: Vec<Value> = sorted
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, mut f)| {
+                        f["latest"] = json!(i == 0);
+                        f
+                    })
+                    .collect();
                 g["files"] = json!(arr);
                 out.push(g);
             }
@@ -4075,7 +6097,11 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         "mods:crossDuplicates" => Some((|| -> Result<Value, String> {
             let version_ids: Vec<String> = arg(args, 0)
                 .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             let mut map: HashMap<String, Value> = HashMap::new();
             let mut order: Vec<String> = Vec::new();
@@ -4096,26 +6122,48 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
                         json!({ "modId": id, "name": info.get("name").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or(id), "presentIn": [] })
                     });
                     let present_in = entry["presentIn"].as_array_mut().unwrap();
-                    if !present_in.iter().any(|p| p.get("versionId").and_then(|v| v.as_str()) == Some(vid.as_str())) {
+                    if !present_in
+                        .iter()
+                        .any(|p| p.get("versionId").and_then(|v| v.as_str()) == Some(vid.as_str()))
+                    {
                         present_in.push(json!({ "versionId": vid, "fileName": info.get("fileName").cloned().unwrap_or(json!("")) }));
                     }
                 }
             }
             let mut out: Vec<Value> = order.iter().map(|k| map[k].clone()).collect();
-            out.retain(|g| g.get("presentIn").and_then(|v| v.as_array()).map(|a| a.len() >= 2).unwrap_or(false));
-            out.sort_by_key(|g| std::cmp::Reverse(g.get("presentIn").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0)));
+            out.retain(|g| {
+                g.get("presentIn")
+                    .and_then(|v| v.as_array())
+                    .map(|a| a.len() >= 2)
+                    .unwrap_or(false)
+            });
+            out.sort_by_key(|g| {
+                std::cmp::Reverse(
+                    g.get("presentIn")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len())
+                        .unwrap_or(0),
+                )
+            });
             Ok(json!(out))
         })()),
-        "mods:icons" => Some({
-            let version_id = arg_str(args, 0).unwrap_or("").to_string();
-            let folder = with_game_folder_of(app, &version_id, arg_str(args, 2));
-            let names: Vec<String> = arg(args, 1)
-                .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-                .unwrap_or_default();
-            let kind = arg_str(args, 3).unwrap_or("mods").to_string();
-            Ok::<Value, String>(get_mod_icons(app, &version_id, &folder, &names, &kind))
-        }.map_err(|e| e)),
+        "mods:icons" => Some(
+            {
+                let version_id = arg_str(args, 0).unwrap_or("").to_string();
+                let folder = with_game_folder_of(app, &version_id, arg_str(args, 2));
+                let names: Vec<String> = arg(args, 1)
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let kind = arg_str(args, 3).unwrap_or("mods").to_string();
+                Ok::<Value, String>(get_mod_icons(app, &version_id, &folder, &names, &kind))
+            }
+            .map_err(|e| e),
+        ),
         "mods:migrationPlan" => Some(installer::run_blocking(|| {
             let source_id = arg_str(args, 0).unwrap_or("").to_string();
             let folder = arg_str(args, 1).unwrap_or("").to_string();
@@ -4133,21 +6181,35 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             std::thread::spawn(move || {
                 let emit = TaskEmit::new(&app2, &task_id, "版本迁移", None);
                 let emit_ref = &emit;
-                let result = apply_mod_migration(&app2, &rec, &plan_id, confirmed, &|event: &Value| emit_ref.emit(event));
+                let result =
+                    apply_mod_migration(&app2, &rec, &plan_id, confirmed, &|event: &Value| {
+                        emit_ref.emit(event)
+                    });
                 match result {
                     Ok(r) => {
                         let version_id = r.get("versionId").cloned().unwrap_or(json!(""));
                         tasks::task_done(&app2, &task_id, true, None, false, None);
-                        installer::emit_event(&app2, "event:installDone", &json!({
-                            "taskId": task_id,
-                            "versionId": version_id,
-                            "installedId": version_id,
-                            "ok": true,
-                        }));
+                        installer::emit_event(
+                            &app2,
+                            "event:installDone",
+                            &json!({
+                                "taskId": task_id,
+                                "versionId": version_id,
+                                "installedId": version_id,
+                                "ok": true,
+                            }),
+                        );
                     }
                     Err(e) => {
                         let cancelled = is_cancel(&e);
-                        tasks::task_done(&app2, &task_id, false, Some(e.clone()), cancelled, Some(emit.last_stage()));
+                        tasks::task_done(
+                            &app2,
+                            &task_id,
+                            false,
+                            Some(e.clone()),
+                            cancelled,
+                            Some(emit.last_stage()),
+                        );
                     }
                 }
             });
@@ -4163,7 +6225,10 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             let version_id = arg_str(args, 0).unwrap_or("").to_string();
             let folder = with_game_folder_of(app, &version_id, arg_str(args, 2));
             let dir = resolve_resource_directory(app, &folder, &version_id, "mods")?;
-            let items: Vec<Value> = arg(args, 1).and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let items: Vec<Value> = arg(args, 1)
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
             apply_mod_updates(app, &dir, &items)
         })),
         "mods:catalog" => Some((|| -> Result<Value, String> {
@@ -4175,14 +6240,28 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         "mods:setEnabled" => Some(installer::run_blocking(|| {
             let id = arg_str(args, 0).unwrap_or("").to_string();
             let folder = arg_str(args, 1).unwrap_or("").to_string();
-            let names: Vec<String> = arg(args, 2).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+            let names: Vec<String> = arg(args, 2)
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
             let enabled = arg(args, 3).and_then(|v| v.as_bool()).unwrap_or(false);
             set_mods_enabled(app, &id, &folder, &names, enabled)
         })),
         "mods:setLocked" => Some(installer::run_blocking(|| {
             let id = arg_str(args, 0).unwrap_or("").to_string();
             let folder = arg_str(args, 1).unwrap_or("").to_string();
-            let names: Vec<String> = arg(args, 2).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+            let names: Vec<String> = arg(args, 2)
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
             let locked = arg(args, 3).and_then(|v| v.as_bool()).unwrap_or(false);
             lock_mods(app, &id, &folder, &names, locked)
         })),
@@ -4214,12 +6293,33 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             let input = arg(args, 1).cloned().unwrap_or(json!({}));
             let operation_id = arg(args, 2)
                 .and_then(|v| v.as_str())
-                .filter(|s| regex::Regex::new(r"^[a-zA-Z0-9:_-]{1,96}$").unwrap().is_match(s))
+                .filter(|s| {
+                    regex::Regex::new(r"^[a-zA-Z0-9:_-]{1,96}$")
+                        .unwrap()
+                        .is_match(s)
+                })
                 .map(str::to_string);
             let targets = scan_mod_targets(app);
-            let versions = targets.get("versions").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-            let target = select_mod_target(&versions, target_ref.get("id").and_then(|v| v.as_str()).unwrap_or(""), target_ref.get("folder").and_then(|v| v.as_str()).unwrap_or(""))?;
-            let title = format!("准备 MOD {}（尚未安装）", input.pointer("/file/fileName").and_then(|v| v.as_str()).unwrap_or("本地文件"));
+            let versions = targets
+                .get("versions")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let target = select_mod_target(
+                &versions,
+                target_ref.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                target_ref
+                    .get("folder")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(""),
+            )?;
+            let title = format!(
+                "准备 MOD {}（尚未安装）",
+                input
+                    .pointer("/file/fileName")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("本地文件")
+            );
             let rec = tasks::register_task(&title, "download");
             let task_id = rec.id.clone();
             let task_title = rec.title.clone();
@@ -4239,7 +6339,14 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
                         if !cancelled {
                             emit.emit(&json!({ "stage": "error", "progress": 0, "text": format!("MOD 准备失败：{e}") }));
                         }
-                        tasks::task_done(&app2, &task_id, false, Some(e.clone()), cancelled, Some(emit.last_stage()));
+                        tasks::task_done(
+                            &app2,
+                            &task_id,
+                            false,
+                            Some(e.clone()),
+                            cancelled,
+                            Some(emit.last_stage()),
+                        );
                         let _ = tx.send(Err(e));
                     }
                 }
@@ -4257,7 +6364,11 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             let include_dependencies = arg(args, 1).and_then(|v| v.as_bool()).unwrap_or(false);
             let operation_id = arg(args, 2)
                 .and_then(|v| v.as_str())
-                .filter(|s| regex::Regex::new(r"^[a-zA-Z0-9:_-]{1,96}$").unwrap().is_match(s))
+                .filter(|s| {
+                    regex::Regex::new(r"^[a-zA-Z0-9:_-]{1,96}$")
+                        .unwrap()
+                        .is_match(s)
+                })
                 .map(str::to_string);
             let rec = tasks::register_task("安装 MOD 与前置依赖", "download");
             let task_id = rec.id.clone();
@@ -4273,10 +6384,19 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
                         return Err("目标实例正在运行，未安装任何 MOD；请退出该游戏后重试".into());
                     }
                     let targets = scan_mod_targets(&app2);
-                    let versions = targets.get("versions").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-                    select_mod_target(&versions, target_id, target.get("folder").and_then(|v| v.as_str()).unwrap_or(""))
+                    let versions = targets
+                        .get("versions")
+                        .and_then(|v| v.as_array())
+                        .cloned()
+                        .unwrap_or_default();
+                    select_mod_target(
+                        &versions,
+                        target_id,
+                        target.get("folder").and_then(|v| v.as_str()).unwrap_or(""),
+                    )
                 };
-                let result = execute_mod_plan(&app2, &rec, &id, include_dependencies, &revalidate, &emit);
+                let result =
+                    execute_mod_plan(&app2, &rec, &id, include_dependencies, &revalidate, &emit);
                 match result {
                     Ok(message) => {
                         tasks::task_done(&app2, &task_id, true, None, false, None);
@@ -4287,23 +6407,49 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
                         if !cancelled {
                             emit.emit(&json!({ "stage": "error", "progress": 0, "text": format!("MOD 安装失败：{e}") }));
                         }
-                        tasks::task_done(&app2, &task_id, false, Some(e.clone()), cancelled, Some(emit.last_stage()));
+                        tasks::task_done(
+                            &app2,
+                            &task_id,
+                            false,
+                            Some(e.clone()),
+                            cancelled,
+                            Some(emit.last_stage()),
+                        );
                         let _ = tx.send(Err(e));
                     }
                 }
             });
-            rx.recv().map_err(|_| "后台任务异常退出".to_string())?
+            rx.recv()
+                .map_err(|_| "后台任务异常退出".to_string())?
                 .map(|msg| json!(msg))
         })()),
         "mods:install" => Some((|| -> Result<Value, String> {
             let files: Vec<String> = arg(args, 0)
                 .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
-            let target_version_id = arg(args, 1).map(|v| v.as_str().map(String::from).unwrap_or_else(|| v.to_string())).unwrap_or_default();
-            let folder = arg(args, 2).and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(String::from).unwrap_or_else(|| installer::folder_of_version(app, &target_version_id));
+            let target_version_id = arg(args, 1)
+                .map(|v| {
+                    v.as_str()
+                        .map(String::from)
+                        .unwrap_or_else(|| v.to_string())
+                })
+                .unwrap_or_default();
+            let folder = arg(args, 2)
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| installer::folder_of_version(app, &target_version_id));
             let targets = scan_mod_targets(app);
-            let versions = targets.get("versions").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let versions = targets
+                .get("versions")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
             let target = select_mod_target(&versions, &target_version_id, &folder)?;
             Ok(json!(copy_compatible_mods(&files, &target)))
         })()),
@@ -4316,7 +6462,11 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         "mods:favoriteRemove" => Some((|| -> Result<Value, String> {
             let keys: Vec<String> = arg(args, 0)
                 .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             let list = mod_favorites(app)?;
             let remaining = remove_favorite_records(&list, &keys)?;
@@ -4325,8 +6475,17 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         "mods:favoriteLink" => Some(installer::run_blocking(|| {
             let key = arg_str(args, 0).unwrap_or("").to_string();
             let source = arg_str(args, 1).unwrap_or("").to_string();
-            let project_id = arg(args, 2).map(|v| v.as_str().map(String::from).unwrap_or_else(|| v.to_string())).unwrap_or_default();
-            if !mod_favorites(app)?.iter().any(|f| f.get("key").and_then(|v| v.as_str()) == Some(key.as_str())) {
+            let project_id = arg(args, 2)
+                .map(|v| {
+                    v.as_str()
+                        .map(String::from)
+                        .unwrap_or_else(|| v.to_string())
+                })
+                .unwrap_or_default();
+            if !mod_favorites(app)?
+                .iter()
+                .any(|f| f.get("key").and_then(|v| v.as_str()) == Some(key.as_str()))
+            {
                 return Err("该收藏已被取消，请刷新列表".into());
             }
             let project = community::community_mod_project(app, &source, &project_id)?;
@@ -4336,14 +6495,30 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         })),
         "mods:favoriteVersions" => Some((|| -> Result<Value, String> {
             let source = arg_str(args, 0).unwrap_or("").to_string();
-            let project = arg(args, 1).map(|v| v.as_str().map(String::from).unwrap_or_else(|| v.to_string())).unwrap_or_default();
+            let project = arg(args, 1)
+                .map(|v| {
+                    v.as_str()
+                        .map(String::from)
+                        .unwrap_or_else(|| v.to_string())
+                })
+                .unwrap_or_default();
             let mc = arg_str(args, 2).unwrap_or("").to_string();
             let loader = arg_str(args, 3).unwrap_or("").to_string();
             let ticket = arg(args, 4).and_then(|v| v.as_str()).map(str::to_string);
             match ticket {
-                None => favorite_version_result(app, &source, &project, &mc, &loader, Arc::new(AtomicBool::new(false))),
+                None => favorite_version_result(
+                    app,
+                    &source,
+                    &project,
+                    &mc,
+                    &loader,
+                    Arc::new(AtomicBool::new(false)),
+                ),
                 Some(ticket) => {
-                    if !regex::Regex::new(r"^[a-zA-Z0-9_-]{1,100}$").unwrap().is_match(&ticket) {
+                    if !regex::Regex::new(r"^[a-zA-Z0-9_-]{1,100}$")
+                        .unwrap()
+                        .is_match(&ticket)
+                    {
                         return Err("收藏查询订阅无效".into());
                     }
                     let cancel = Arc::new(AtomicBool::new(false));
@@ -4354,7 +6529,14 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
                         }
                         map.insert(ticket.clone(), cancel.clone());
                     }
-                    let result = favorite_version_result(app, &source, &project, &mc, &loader, cancel.clone());
+                    let result = favorite_version_result(
+                        app,
+                        &source,
+                        &project,
+                        &mc,
+                        &loader,
+                        cancel.clone(),
+                    );
                     FAV_TICKETS.lock().unwrap().remove(&ticket);
                     result
                 }
@@ -4380,7 +6562,11 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
                 .find(|m| m.get("fileName").and_then(|v| v.as_str()) == Some(name.as_str()))
                 .cloned()
                 .ok_or_else(|| "无法校验该模组".to_string())?;
-            let sha1 = mod_item.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let sha1 = mod_item
+                .get("sha1")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             if sha1.is_empty() {
                 return Err("无法校验该模组".into());
             }
@@ -4392,14 +6578,23 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
                 }
                 let source = link.get("source").and_then(|v| v.as_str()).unwrap_or("");
                 let project = link.get("projectId").and_then(|v| v.as_str()).unwrap_or("");
-                community_files(app, source, project, Some(&community::FileFilter { kind: Some("mod".into()), ..Default::default() }))?;
+                community_files(
+                    app,
+                    source,
+                    project,
+                    Some(&community::FileFilter {
+                        kind: Some("mod".into()),
+                        ..Default::default()
+                    }),
+                )?;
                 remember_mod_identity(app, &dir, &sha1, &key);
             } else {
                 let _ = identify(app, &dir, std::slice::from_ref(&mod_item));
             }
             let identity = mod_identity(app, &dir, &sha1);
             let (source, project_id) = identity.split_once(':').unwrap_or(("sha1", ""));
-            let mut value = json!({ "name": mod_item.get("name").cloned().unwrap_or(json!("")), "sha1": sha1 });
+            let mut value =
+                json!({ "name": mod_item.get("name").cloned().unwrap_or(json!("")), "sha1": sha1 });
             if source != "sha1" {
                 value["source"] = json!(source);
                 value["projectId"] = json!(project_id);
@@ -4407,20 +6602,35 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             let unknown = format!("sha1:{sha1}");
             if link.is_some() {
                 let list = mod_favorites(app)?;
-                if list.iter().any(|f| f.get("key").and_then(|v| v.as_str()) == Some(unknown.as_str())) {
-                    write_favorites(app, list.into_iter().filter(|f| f.get("key").and_then(|v| v.as_str()) != Some(unknown.as_str())).collect())?;
+                if list
+                    .iter()
+                    .any(|f| f.get("key").and_then(|v| v.as_str()) == Some(unknown.as_str()))
+                {
+                    write_favorites(
+                        app,
+                        list.into_iter()
+                            .filter(|f| {
+                                f.get("key").and_then(|v| v.as_str()) != Some(unknown.as_str())
+                            })
+                            .collect(),
+                    )?;
                 }
             }
             set_favorite(app, &value, on).map(|list| json!(list))
         })),
-        "mods:supplementalList" => Some(supplemental_rows(app).map(|rows| json!(supplemental_visible(rows)))),
+        "mods:supplementalList" => {
+            Some(supplemental_rows(app).map(|rows| json!(supplemental_visible(rows))))
+        }
         "mods:supplementalKeep" => Some((|| -> Result<Value, String> {
             let id = arg_str(args, 0).unwrap_or("").to_string();
             if supplemental_running().lock().unwrap().contains(&id) {
                 return Err("正在重试，请等待任务结束".into());
             }
             let rows = supplemental_rows(app)?;
-            let remaining: Vec<Value> = rows.into_iter().filter(|r| r.get("id").and_then(|v| v.as_str()) != Some(id.as_str())).collect();
+            let remaining: Vec<Value> = rows
+                .into_iter()
+                .filter(|r| r.get("id").and_then(|v| v.as_str()) != Some(id.as_str()))
+                .collect();
             supplemental_save(app, remaining).map(Value::Array)
         })()),
         "mods:supplementalRetry" => Some((|| -> Result<Value, String> {
@@ -4433,47 +6643,102 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             if !supplemental_running().lock().unwrap().insert(id.clone()) {
                 return Err("该模组任务正在重试".into());
             }
-            let rec = tasks::register_task(&format!("重试附加模组 · {}", entry.pointer("/target/id").and_then(|v| v.as_str()).unwrap_or("")), "download");
+            let rec = tasks::register_task(
+                &format!(
+                    "重试附加模组 · {}",
+                    entry
+                        .pointer("/target/id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                ),
+                "download",
+            );
             let task_id = rec.id.clone();
             let task_title = rec.title.clone();
             let app2 = app.clone();
             let (tx, rx) = std::sync::mpsc::channel::<Result<Value, String>>();
             std::thread::spawn(move || {
                 let outcome = (|| -> Result<Value, String> {
-                    let target_folder = entry.pointer("/target/folder").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let target_id = entry.pointer("/target/id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let version_id = entry.get("versionId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let options = entry.get("options").cloned().unwrap_or(json!({}));
-                    let version_json = installer::read_version_json(&app2, &target_folder, &target_id)?;
-                    let dir = installer::instance_directory_state(&app2, &target_folder, &target_id, &version_json)
-                        .get("path")
+                    let target_folder = entry
+                        .pointer("/target/folder")
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string();
+                    let target_id = entry
+                        .pointer("/target/id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let version_id = entry
+                        .get("versionId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let options = entry.get("options").cloned().unwrap_or(json!({}));
+                    let version_json =
+                        installer::read_version_json(&app2, &target_folder, &target_id)?;
+                    let dir = installer::instance_directory_state(
+                        &app2,
+                        &target_folder,
+                        &target_id,
+                        &version_json,
+                    )
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                     assert_instance_idle(&app2, Path::new(&dir))?;
-                    let meta = installer::resolve_instance_metadata(&version_json, &|pid: &str| installer::read_version_json(&app2, &installer::folder_of_version(&app2, pid), pid).ok());
+                    let meta = installer::resolve_instance_metadata(&version_json, &|pid: &str| {
+                        installer::read_version_json(
+                            &app2,
+                            &installer::folder_of_version(&app2, pid),
+                            pid,
+                        )
+                        .ok()
+                    });
                     let broken = meta.mc_version.is_empty();
-                    let loader_opt = entry.pointer("/options/loader").and_then(|v| v.as_str()).map(str::to_string);
-                    if broken || meta.mc_version != version_id || meta.loader.map(str::to_string) != loader_opt {
+                    let loader_opt = entry
+                        .pointer("/options/loader")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
+                    if broken
+                        || meta.mc_version != version_id
+                        || meta.loader.map(str::to_string) != loader_opt
+                    {
                         return Err("实例版本或加载器已变化，请重新选择兼容模组".into());
                     }
                     let files = prepare_install_mods(&app2, &version_id, &options, &rec)?;
                     let mods_dir = Path::new(&dir).join("mods");
                     {
                         let emit_ref = |fraction: f64| {
-                            installer::emit_event(&app2, "event:progress", &json!({
-                                "taskId": task_id,
-                                "taskTitle": task_title,
-                                "stage": "download",
-                                "progress": fraction,
-                                "text": "下载并校验所选模组与必要前置",
-                            }));
+                            installer::emit_event(
+                                &app2,
+                                "event:progress",
+                                &json!({
+                                    "taskId": task_id,
+                                    "taskTitle": task_title,
+                                    "stage": "download",
+                                    "progress": fraction,
+                                    "text": "下载并校验所选模组与必要前置",
+                                }),
+                            );
                         };
                         install_recording_mods(&app2, &mods_dir, &files, &rec, Some(&emit_ref))?;
                     }
-                    let result = favorite_install_result(&app2, &options, &files, &mods_dir.to_string_lossy(), &target_folder, &target_id, &rec)?;
+                    let result = favorite_install_result(
+                        &app2,
+                        &options,
+                        &files,
+                        &mods_dir.to_string_lossy(),
+                        &target_folder,
+                        &target_id,
+                        &rec,
+                    )?;
                     let rows = supplemental_rows(&app2)?;
-                    let remaining: Vec<Value> = rows.into_iter().filter(|r| r.get("id").and_then(|v| v.as_str()) != Some(id.as_str())).collect();
+                    let remaining: Vec<Value> = rows
+                        .into_iter()
+                        .filter(|r| r.get("id").and_then(|v| v.as_str()) != Some(id.as_str()))
+                        .collect();
                     let pending = supplemental_save(&app2, remaining)?;
                     Ok(if with_result {
                         json!({ "pending": pending, "result": result })
@@ -4496,11 +6761,15 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
                         let _ = supplemental_save(&app2, updated);
                     }
                 }
-                installer::emit_event(&app2, "event:taskDone", &json!({
-                    "taskId": task_id,
-                    "ok": ok,
-                    "cancelled": rec.cancelled.load(Ordering::SeqCst),
-                }));
+                installer::emit_event(
+                    &app2,
+                    "event:taskDone",
+                    &json!({
+                        "taskId": task_id,
+                        "ok": ok,
+                        "cancelled": rec.cancelled.load(Ordering::SeqCst),
+                    }),
+                );
                 tasks::finish_task(&task_id);
                 supplemental_running().lock().unwrap().remove(&id);
                 let _ = tx.send(outcome);
@@ -4509,24 +6778,4 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         })()),
         _ => None,
     }
-}
-
-/// compareModVersion()：MOD 版本号比较（去 +/_ 后缀，按 .- 分段数值比较）
-fn compare_mod_version(a: &str, b: &str) -> std::cmp::Ordering {
-    let norm = |s: &str| -> Vec<i64> {
-        let stripped = regex::Regex::new(r"[+_].*$").unwrap().replace(s, "").to_string();
-        stripped
-            .split(['.', '-'])
-            .map(|x| x.trim().parse::<i64>().unwrap_or(0))
-            .collect()
-    };
-    let pa = norm(a);
-    let pb = norm(b);
-    for i in 0..pa.len().max(pb.len()) {
-        let d = pa.get(i).copied().unwrap_or(0) - pb.get(i).copied().unwrap_or(0);
-        if d != 0 {
-            return d.cmp(&0);
-        }
-    }
-    std::cmp::Ordering::Equal
 }
