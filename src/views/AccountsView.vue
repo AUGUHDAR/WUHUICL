@@ -22,6 +22,7 @@ import {
 } from '../api';
 import { refreshAccounts, store, toast } from '../store';
 import Avatar from '../components/Avatar.vue';
+import { skinSiteIconUrl } from '../skinSiteIcons';
 const credentialNotice = ref('');
 const credentialsPersistent = ref<boolean | null>(null);
 const securityNote = computed(() => {
@@ -178,6 +179,10 @@ const selectedProviderHomepage = computed(() => {
 function openExternal(url: string) {
     if (!url) return;
     window.open(url);
+}
+
+function providerIconUrl(provider: YggdrasilProvider): string | null {
+    return skinSiteIconUrl(provider.apiRoot, provider.name);
 }
 
 function openProviderImport(input?: YggdrasilProviderInput) {
@@ -527,6 +532,12 @@ async function onRemove(acc: Account) {
                 </div>
                 <div v-if="providers.length" class="provider-list">
                     <div v-for="provider in providers" :key="provider.id" class="provider-item">
+                        <img
+                            v-if="providerIconUrl(provider)"
+                            :src="providerIconUrl(provider)"
+                            class="provider-logo"
+                            :alt="provider.name"
+                        />
                         <div>
                             <strong>{{ provider.name }}</strong>
                             <span v-if="provider.insecure" class="tag tag-danger">HTTP 不安全</span>
@@ -744,8 +755,15 @@ async function onRemove(acc: Account) {
                         {{ providerModal.error }}
                     </p>
                     <div v-if="providerModal.candidate" class="provider-preview">
-                        <div>
-                            <span>名称</span><strong>{{ providerModal.candidate.name }}</strong>
+                        <div class="preview-name">
+                            <span>名称</span>
+                            <img
+                                v-if="providerIconUrl(providerModal.candidate)"
+                                :src="providerIconUrl(providerModal.candidate)"
+                                class="provider-logo"
+                                :alt="providerModal.candidate.name"
+                            />
+                            <strong>{{ providerModal.candidate.name }}</strong>
                         </div>
                         <div>
                             <span>API Root</span><code>{{ providerModal.candidate.apiRoot }}</code>
@@ -956,6 +974,19 @@ async function onRemove(acc: Account) {
     justify-content: space-between;
     align-items: center;
     gap: var(--space-3);
+}
+.provider-item > div:first-of-type {
+    flex: 1;
+    min-width: 0;
+}
+.provider-logo {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    object-fit: cover;
+    background: #fff;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.15);
 }
 .provider-head-actions {
     display: flex;
@@ -1226,6 +1257,23 @@ async function onRemove(acc: Account) {
     grid-template-columns: 108px minmax(0, 1fr);
     gap: var(--space-2);
     font-size: var(--text-xs);
+}
+.provider-preview > div:not(.preview-name) {
+    align-items: center;
+}
+.provider-preview .preview-name {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+}
+.provider-preview .preview-name .provider-logo {
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+}
+.provider-preview .preview-name strong {
+    font-size: var(--text-sm);
 }
 .provider-preview span {
     color: var(--text-dim);

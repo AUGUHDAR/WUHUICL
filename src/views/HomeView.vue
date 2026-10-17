@@ -38,6 +38,7 @@ import {
     versionIconUrl
 } from '../store';
 import Avatar from '../components/Avatar.vue';
+import { skinSiteIconUrl } from '../skinSiteIcons';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import SkinViewer3D from '../components/SkinViewer3D.vue';
 import CreatorCard from '../components/CreatorCard.vue';
@@ -449,6 +450,12 @@ const accountTypeLabel = computed(() => {
     if (account.type === 'yggdrasil') return account.providerName ?? '外置 Yggdrasil';
     return '离线账户';
 });
+/** 外置登录卡的真实皮肤站图标（按 apiRoot/站名匹配官方 favicon，未收录回退字母） */
+const providerIcon = computed(() =>
+    store.selectedAccount?.type === 'yggdrasil'
+        ? skinSiteIconUrl(store.selectedAccount.apiRoot, store.selectedAccount.providerName)
+        : null
+);
 
 const skinProfile = ref<ProfileSkins | null>(null);
 const skinLoading = ref(false);
@@ -1026,7 +1033,12 @@ onUnmounted(() => {
                                 <path fill="#7fba00" d="M12 0h10v10H12z" />
                                 <path fill="#00a4ef" d="M0 12h10v10H0z" />
                                 <path fill="#ffb900" d="M12 12h10v10H12z" /></svg
-                            ><template v-else>{{
+                            ><img
+                                v-else-if="providerIcon"
+                                :src="providerIcon"
+                                class="provider-logo"
+                                :alt="accountTypeLabel"
+                            /><template v-else>{{
                                 store.selectedAccount.type === 'yggdrasil' ? 'Y' : 'O'
                             }}</template></span
                         >
@@ -2397,6 +2409,14 @@ onUnmounted(() => {
 }
 .provider-mark.yggdrasil {
     background: linear-gradient(135deg, #65bd78, #268e54);
+}
+.provider-mark .provider-logo {
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    object-fit: cover;
+    image-rendering: auto;
+    background: #fff;
 }
 .provider-mark.offline {
     background: var(--card);
