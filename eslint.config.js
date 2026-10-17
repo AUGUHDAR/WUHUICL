@@ -1,31 +1,30 @@
 import pluginVue from 'eslint-plugin-vue';
+import { readFileSync } from 'node:fs';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
-const vueRules = {
-    'vue/html-end-tags': 'off',
-    'vue/attributes-order': 'off',
+const legacyExemptions = JSON.parse(
+    readFileSync(new URL('./eslint.legacy-exemptions.json', import.meta.url), 'utf8')
+);
+
+const legacyRuleOverrides = legacyExemptions.legacyFiles.map((file) => ({
+    files: [file],
+    rules: legacyExemptions.rules.reduce(
+        (rules, rule) => ({ ...rules, [rule]: legacyExemptions.defaultSeverity }),
+        {}
+    )
+}));
+
+const formattingRules = {
     'vue/attribute-hyphenation': 'off',
-    'vue/block-order': 'off',
+    'vue/attributes-order': 'off',
     'vue/html-closing-bracket-newline': 'off',
     'vue/html-indent': 'off',
     'vue/html-self-closing': 'off',
     'vue/max-attributes-per-line': 'off',
     'vue/multiline-html-element-content-newline': 'off',
     'vue/mustache-interpolation-spacing': 'off',
-    'vue/multi-word-component-names': 'off',
-    'vue/no-reserved-component-names': 'off',
-    'vue/no-mutating-props': 'off',
-    'vue/no-parsing-error': 'off',
-    'vue/no-unused-components': 'off',
-    'vue/no-v-html': 'off',
-    'vue/one-component-per-file': 'off',
     'vue/order-in-components': 'off',
-    'vue/require-default-prop': 'off',
-    'vue/require-explicit-emits': 'off',
-    'vue/require-prop-types': 'off',
-    'vue/require-v-for-key': 'off',
-    'vue/valid-v-else-if': 'off',
     'vue/singleline-html-element-content-newline': 'off'
 };
 
@@ -46,17 +45,11 @@ export default tseslint.config(
             }
         },
         rules: {
-            '@typescript-eslint/no-explicit-any': 'off',
-            '@typescript-eslint/no-unused-vars': 'off',
-            'no-control-regex': 'off',
-            'no-empty': 'off',
-            'no-undef': 'off',
-            'no-unused-expressions': 'off',
-            'no-unused-vars': 'off',
-            'prefer-const': 'off'
+            'no-control-regex': 'error',
+            'no-empty': 'error'
         }
     },
-    ...pluginVue.configs['flat/recommended'],
+    ...pluginVue.configs['flat/recommended-error'],
     {
         files: ['**/*.vue'],
         languageOptions: {
@@ -71,12 +64,15 @@ export default tseslint.config(
             }
         },
         rules: {
-            ...vueRules,
-            '@typescript-eslint/no-explicit-any': 'off',
-            '@typescript-eslint/no-unused-vars': 'off',
-            '@typescript-eslint/no-unused-expressions': 'off',
-            'no-unused-expressions': 'off',
-            'vue/no-dupe-keys': 'off'
+            ...formattingRules,
+            'vue/multi-word-component-names': 'off',
+            'vue/one-component-per-file': 'off',
+            'vue/require-default-prop': 'off',
+            'vue/no-unused-components': 'error',
+            'vue/no-v-html': 'error',
+            'vue/require-explicit-emits': 'error',
+            'vue/require-prop-types': 'error'
         }
-    }
+    },
+    ...legacyRuleOverrides
 );

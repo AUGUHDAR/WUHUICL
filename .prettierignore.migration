@@ -1,0 +1,30 @@
+# Temporary file-level migration exemptions.
+# Remove each entry when that file passes Prettier; the quality tests fail on stale entries.
+src/app/overlays/AppOverlays.vue
+src/app/shell/AppShell.vue
+src/app/shell/useAppShell.ts
+src/bootTasks.ts
+src/components/connection/voxlink/useVoxlink.ts
+src/components/connection/voxlink/VlCreate.vue
+src/components/connection/voxlink/VlJoin.vue
+src/components/connection/voxlink/VlLobby.vue
+src/components/connection/voxlink/VlRoom.vue
+src/components/connection/voxlink/VlSettings.vue
+src/components/connection/voxlink/VlTickets.vue
+src/core/runtime/index.ts
+src/features/appearance/ui/ThemeEditor.vue
+src/features/community/ui/CommunityDownloadModal.vue
+src/features/community/ui/CommunityResultCard.vue
+src/features/community/ui/CommunityResultList.vue
+src/features/community/ui/CommunitySearchCard.vue
+src/features/community/ui/CommunitySectionTabs.vue
+src/features/community/ui/CommunityView.vue
+src/features/game-versions/data/index.ts
+src/features/settings/ui/SettingsDisplaySection.vue
+src/features/settings/ui/SettingsDownloadsSection.vue
+src/features/settings/ui/SettingsFeaturesSection.vue
+src/features/settings/ui/SettingsPluginsSection.vue
+src/features/settings/ui/SettingsRuntimeSection.vue
+src/features/settings/ui/SettingsUpdateDialogs.vue
+src/features/settings/ui/SettingsUpdatesSection.vue
+src/features/settings/ui/SettingsView.vue

@@ -41,6 +41,8 @@ npm run format          # 需要时统一格式
 
 前端新代码放在 `src/app/`、`src/core/`、`src/features/<功能>/` 或 `src/shared/`。功能之间只从对方的 `index.ts` 公共入口导入，不直接引 `ui/` 或 `data/` 内部文件。`core` 和 `shared` 不反向依赖功能或应用壳；Tauri 桥接调用统一走 `src/core/ipc/`。迁移期间的临时例外记录在 `scripts/legacy-source-allowlist.json`，迁移完成或调用改走 IPC 后应立即删除对应条目。
 
+格式临时例外只记录在 `.prettierignore.migration`，ESLint 临时例外只记录在 `eslint.legacy-exemptions.json`；两者都按具体文件列出，不允许整目录豁免，也不降低 Vue 模板解析规则。文件修好后应删除对应条目，测试会拒绝失效的格式例外。
+
 质量工作流位于 `.github/workflows/quality.yml`，在 Windows 上运行前端检查、`cargo fmt --all -- --check` 和 `cargo test --lib`，不构建安装包。
 
 ## 出包

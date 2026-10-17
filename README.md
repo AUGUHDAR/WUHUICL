@@ -193,3 +193,5 @@ npm run build:web
 `npm run quality` runs typechecking, frontend unit tests, the architecture checker, and formatting. CI additionally runs lint, the web build, Rust formatting, and Rust library tests.
 
 Source follows the feature-first layout under `src/`: `app/` composes the shell, `core/` owns IPC and cross-cutting primitives, `features/<name>/` owns feature `ui/` and `data/`, and `shared/` holds framework-light domain utilities. Cross-feature imports go through `features/<name>/index.ts`; `core/` and `shared/` must not import features or the app shell. The architecture guardrail tracks existing migration debt in `scripts/legacy-source-allowlist.json`; new violations fail immediately.
+
+Temporary formatting and lint debt is tracked only in `.prettierignore.migration` and `eslint.legacy-exemptions.json`, respectively. Both use explicit file-level entries with removal conditions rather than directory-wide exclusions.
