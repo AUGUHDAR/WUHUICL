@@ -17,6 +17,18 @@ type Handler = fn(&AppHandle, &str, &[Value]) -> Option<Result<Value, String>>;
 
 type DispatchStage = (&'static str, Handler);
 
+fn deferred_settings_channel(channel: &str) -> Option<&'static str> {
+    (channel == "settings:set").then_some("settings:set")
+}
+
+fn settings_stage(app: &AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+    if deferred_settings_channel(channel).is_some() {
+        None
+    } else {
+        crate::features::settings::invoke(app, channel, args)
+    }
+}
+
 const DOCUMENTED_SUBSYSTEM_ORDER: &[&str] = &[
     "gamefolders",
     "installer",
@@ -82,11 +94,7 @@ fn composed_handlers() -> impl Iterator<Item = DispatchStage> {
             crate::features::accounts::invoke
                 as fn(&AppHandle, &str, &[Value]) -> Option<Result<Value, String>>,
         ),
-        (
-            "settings",
-            crate::features::settings::invoke
-                as fn(&AppHandle, &str, &[Value]) -> Option<Result<Value, String>>,
-        ),
+        ("settings", settings_stage),
     ])
 }
 
@@ -507,5 +515,14 @@ mod tests {
         assert_eq!(composed, expected);
         assert!(composed.contains(&"accounts"));
         assert!(composed.contains(&"settings"));
+    }
+
+    #[test]
+    fn settings_set_is_deferred_to_the_fallbacks_with_window_side_effects() {
+        assert!(!composed_handlers().any(|(name, _)| name == "settings-set-side-effects"));
+        assert_eq!(
+            deferred_settings_channel("settings:set"),
+            Some("settings:set")
+        );
     }
 }

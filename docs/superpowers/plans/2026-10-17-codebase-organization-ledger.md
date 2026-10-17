@@ -77,6 +77,10 @@
   --lib` and `cargo fmt --all -- --check` pass in the Visual Studio 2026 developer
   environment. `cargo test --lib` still links the test binary and then fails before the
   harness with host `0xc0000139`.
+- Final Rust review fix: settings composition now defers `settings:set` to the legacy
+  fallback so native appearance and auto-fit side effects remain reachable; a regression
+  test was added. Rust checks and test-binary compilation pass, while test execution remains
+  blocked by the host loader failure described above.
 
 ## Rulings
 
