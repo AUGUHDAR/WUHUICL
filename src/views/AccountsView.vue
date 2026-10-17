@@ -36,7 +36,6 @@ import type {
     MsDeviceCodeInfo,
     YggdrasilLoginResult,
     YggdrasilProvider,
-    YggdrasilProviderCandidate,
     YggdrasilProviderInput
 } from '@shared/types';
 
@@ -124,17 +123,6 @@ let offMsDone: (() => void) | null = null;
 
 // ---------------- 外置 Yggdrasil ----------------
 const providers = ref<YggdrasilProvider[]>([]);
-const providerModal = reactive({
-    open: false,
-    source: '' as string,
-    input: null as YggdrasilProviderInput | null,
-    probing: false,
-    saving: false,
-    error: '',
-    requireInsecure: false,
-    allowInsecure: false,
-    candidate: null as YggdrasilProviderCandidate | null
-});
 const yggLogin = reactive({
     providerId: '',
     identifier: '',
@@ -228,86 +216,60 @@ async function onDragLogin() {
     }
 }
 
-function openProviderImport(input?: YggdrasilProviderInput) {
-    Object.assign(providerModal, {
-        open: true,
-        source: input?.value ?? '',
-        input: input ?? null,
-        probing: false,
-        saving: false,
-        error: '',
-        requireInsecure: false,
-        allowInsecure: false,
-        candidate: null
-    });
-    if (input) void probeProviderInput();
-}
-
-async function probeProviderInput() {
-    if (providerModal.probing) return;
-    const input = providerModal.input ?? { kind: 'text' as const, value: providerModal.source };
-    if (input.kind === 'text') input.value = providerModal.source;
-    providerModal.input = input;
-    providerModal.probing = true;
-    providerModal.error = '';
-    providerModal.candidate = null;
-    try {
-        providerModal.candidate = await probeYggdrasilProvider(input, providerModal.allowInsecure);
-        providerModal.requireInsecure = providerModal.candidate.insecure;
-    } catch (e) {
-        const message = errText(e).replace(/^Error invoking remote method '[^']+':\s*/, '');
-        providerModal.requireInsecure = message.includes('INSECURE_YGGDRASIL');
-        providerModal.error = message.replace('INSECURE_YGGDRASIL:', '');
-    } finally {
-        providerModal.probing = false;
-    }
-}
-
-async function confirmProvider() {
-    const candidate = providerModal.candidate;
-    if (!candidate || providerModal.saving) return;
-    if (candidate.insecure && !providerModal.allowInsecure) {
-        providerModal.error = '必须主动确认明文 HTTP 风险后才能保存';
-        return;
-    }
-    providerModal.saving = true;
-    try {
-        providers.value = await saveYggdrasilProvider(candidate, providerModal.allowInsecure);
-        yggLogin.providerId = candidate.id;
-        providerModal.open = false;
-        toast(`已保存外置登录提供商 ${candidate.name}`, 'success');
-    } catch (e) {
-        providerModal.error = errText(e);
-    } finally {
-        providerModal.saving = false;
-    }
-}
-
 /**
- * 拖入皮肤站卡片的入口（App.vue 拖拽链调用）：探测 → 静默保存 → 直登弹窗。
- * 与手动"添加提供商"（providerModal 确认框）分离：拖拽是玩家明确想登录的动作，
- * 不需要再按一次"确认保存"。
+ * 添加提供商的统一入口（拖入卡片 / 手动粘贴同一管道）：
+ * 探测 → 静默保存 → 直登"登录 <站名>"弹窗。失败只 toast，不开第二个界面。
  */
-async function handleDraggedProvider(input: YggdrasilProviderInput) {
+async function addProviderAndLogin(input: YggdrasilProviderInput) {
     try {
         const candidate = await probeYggdrasilProvider(input, false);
         let known = providers.value.find((p) => p.id === candidate.id);
         if (!known) {
-            if (candidate.insecure) {
-                // 明文 HTTP 风险必须显式确认，静默保存不合规
-                openProviderImport(input);
-                return;
-            }
             const list = await saveYggdrasilProvider(candidate, false);
             providers.value = list;
             known = list.find((p) => p.id === candidate.id);
         }
         if (known) openDragLogin(known);
     } catch (e) {
-        // 探测失败（无效地址/网络）：回落到手动确认弹窗展示错误，让玩家修正
-        openProviderImport(input);
-        toast('识别皮肤站卡片失败：' + errText(e), 'error');
+        const message = errText(e).replace(/^Error invoking remote method '[^']+':\s*/, '');
+        toast(
+            message.includes('INSECURE_YGGDRASIL')
+                ? '该皮肤站使用明文 HTTP，为保护账号密码未自动添加；如有需要请自行评估后使用其他启动器'
+                : `识别皮肤站失败：${message}`,
+            'error'
+        );
     }
+}
+
+/** 粗判剪贴板文本是否像皮肤站地址/配置（精确校验交给后端探测） */
+function looksLikeProviderSource(text: string): boolean {
+    const v = text.trim();
+    if (!v) return false;
+    return (
+        /^authlib-injector:yggdrasil-server:/i.test(v) ||
+        /^https?:\/\//i.test(v) ||
+        /^\{[\s\S]*\}$/i.test(v) ||
+        /^[\w.-]+\.[a-z]{2,}(?:[/:][^\s]*)?$/i.test(v)
+    );
+}
+
+/** 手动"添加提供商"：读剪贴板（玩家复制皮肤站地址后点按钮）走同一管道 */
+async function pasteToAddProvider() {
+    let text = '';
+    try {
+        text = await window.kamucl.invoke('app:readClipboard');
+    } catch {
+        toast('无法读取剪贴板，请先复制皮肤站地址或拖入卡片', 'error');
+        return;
+    }
+    if (!looksLikeProviderSource(text)) {
+        toast(
+            '剪贴板里没有皮肤站地址；请复制 API 地址（如 littleskin.cn/api/yggdrasil）后重试',
+            'error'
+        );
+        return;
+    }
+    await addProviderAndLogin({ kind: 'text', value: text });
 }
 
 async function onRemoveProvider(provider: YggdrasilProvider) {
@@ -429,11 +391,11 @@ onMounted(() => {
             credentialNotice.value = '无法获取当前系统的安全存储状态。';
         });
     void loadProviders();
-    store.yggdrasilImportHandler = handleDraggedProvider;
+    store.yggdrasilImportHandler = addProviderAndLogin;
     if (store.pendingYggdrasilImport) {
         const pending = store.pendingYggdrasilImport;
         store.pendingYggdrasilImport = null;
-        openProviderImport(pending);
+        void addProviderAndLogin(pending);
     }
     offMsDone = onMsLoginDone(async (result) => {
         if (!ms.open) return;
@@ -595,7 +557,7 @@ async function onRemove(acc: Account) {
                         >
                             {{ checkingRuntime ? '校验中…' : '检查运行组件' }}
                         </button>
-                        <button class="btn btn-ghost btn-sm" @click="openProviderImport()">
+                        <button class="btn btn-ghost btn-sm" @click="pasteToAddProvider">
                             添加提供商
                         </button>
                     </div>
@@ -794,93 +756,6 @@ async function onRemove(acc: Account) {
 
                     <div class="modal-actions">
                         <button class="btn btn-ghost" @click="cancelMsLogin">取消登录</button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 外置登录提供商探测与确认 -->
-            <div
-                v-if="providerModal.open"
-                class="modal-mask"
-                @pointerdown.self="providerModal.open = false"
-            >
-                <div class="modal provider-modal">
-                    <h3 class="modal-title">添加外置登录提供商</h3>
-                    <p class="muted ms-tip">
-                        支持 API Root、authlib-injector 拖拽 URI，以及 WUHUICL 提供商 JSON/TXT
-                        文件。
-                    </p>
-                    <label class="provider-input-label">
-                        <span>API Root 或配置内容</span>
-                        <textarea
-                            v-model="providerModal.source"
-                            class="input provider-source"
-                            :readonly="providerModal.input?.kind === 'file'"
-                            placeholder="例如：https://littleskin.cn/api/yggdrasil"
-                            spellcheck="false"
-                        ></textarea>
-                    </label>
-                    <label v-if="providerModal.requireInsecure" class="insecure-confirm">
-                        <input v-model="providerModal.allowInsecure" type="checkbox" />
-                        <span>我了解 HTTP 会以明文传输账号与密码，仍要连接该服务</span>
-                    </label>
-                    <p v-if="providerModal.error" class="provider-error">
-                        {{ providerModal.error }}
-                    </p>
-                    <div v-if="providerModal.candidate" class="provider-preview">
-                        <div class="preview-name">
-                            <span>名称</span>
-                            <img
-                                v-if="providerIconUrl(providerModal.candidate)"
-                                :src="providerIconUrl(providerModal.candidate)"
-                                class="provider-logo"
-                                :alt="providerModal.candidate.name"
-                            />
-                            <strong>{{ providerModal.candidate.name }}</strong>
-                        </div>
-                        <div>
-                            <span>API Root</span><code>{{ providerModal.candidate.apiRoot }}</code>
-                        </div>
-                        <div>
-                            <span>Auth Server</span
-                            ><code>{{ providerModal.candidate.authServer }}</code>
-                        </div>
-                        <div>
-                            <span>Account Server</span
-                            ><code>{{ providerModal.candidate.accountServer }}</code>
-                        </div>
-                        <div>
-                            <span>Session Server</span
-                            ><code>{{ providerModal.candidate.sessionServer }}</code>
-                        </div>
-                        <div>
-                            <span>Skin Domains</span
-                            ><code>{{
-                                providerModal.candidate.skinDomains.join(', ') || '未声明'
-                            }}</code>
-                        </div>
-                        <p v-if="providerModal.candidate.aliRedirected" class="ali-note">
-                            已按 ALI 标头解析到实际 API Root。
-                        </p>
-                    </div>
-                    <div class="modal-actions provider-actions">
-                        <button class="btn btn-ghost" @click="providerModal.open = false">
-                            取消
-                        </button>
-                        <button
-                            class="btn btn-ghost"
-                            :disabled="providerModal.probing"
-                            @click="probeProviderInput"
-                        >
-                            {{ providerModal.probing ? '正在获取元数据…' : '识别并校验' }}
-                        </button>
-                        <button
-                            class="btn btn-gold"
-                            :disabled="!providerModal.candidate || providerModal.saving"
-                            @click="confirmProvider"
-                        >
-                            {{ providerModal.saving ? '保存中…' : '确认保存' }}
-                        </button>
                     </div>
                 </div>
             </div>
@@ -1349,43 +1224,9 @@ async function onRemove(acc: Account) {
 .provider-modal {
     width: min(620px, calc(100vw - 40px));
 }
-.provider-input-label {
-    display: grid;
-    gap: var(--space-2);
-    margin-top: var(--space-4);
-    color: var(--text-dim);
-    font-size: var(--text-xs);
-}
-.provider-source {
-    min-height: 84px;
-    resize: vertical;
-    font:
-        var(--text-xs)/1.55 'Cascadia Code',
-        Consolas,
-        monospace;
-}
-.insecure-confirm {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-2);
-    margin-top: var(--space-3);
-    padding: var(--space-3);
-    border: 1px solid color-mix(in srgb, var(--danger) 50%, var(--border));
-    border-radius: var(--radius-sm);
-    color: var(--danger);
-    font-size: var(--text-xs);
-    line-height: 1.5;
-}
-.provider-error {
-    margin-top: var(--space-3);
-    color: var(--danger);
-    font-size: var(--text-xs);
-    line-height: 1.5;
-}
 .provider-preview {
     display: grid;
     gap: var(--space-2);
-    margin-top: var(--space-4);
     padding: var(--space-3);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -1394,25 +1235,9 @@ async function onRemove(acc: Account) {
 .provider-preview > div {
     display: grid;
     grid-template-columns: 108px minmax(0, 1fr);
+    align-items: center;
     gap: var(--space-2);
     font-size: var(--text-xs);
-}
-.provider-preview > div:not(.preview-name) {
-    align-items: center;
-}
-.provider-preview .preview-name {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    min-width: 0;
-}
-.provider-preview .preview-name .provider-logo {
-    width: 22px;
-    height: 22px;
-    border-radius: 4px;
-}
-.provider-preview .preview-name strong {
-    font-size: var(--text-sm);
 }
 .provider-preview span {
     color: var(--text-dim);
@@ -1425,13 +1250,6 @@ async function onRemove(acc: Account) {
         var(--text-xs) 'Cascadia Code',
         Consolas,
         monospace;
-}
-.ali-note {
-    color: var(--ok);
-    font-size: var(--text-xs);
-}
-.provider-actions {
-    justify-content: flex-end;
 }
 .profile-options {
     display: grid;

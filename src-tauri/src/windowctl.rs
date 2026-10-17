@@ -375,6 +375,41 @@ pub fn apply_native_appearance(win: &tauri::WebviewWindow, settings: &serde_json
         DwmSetWindowAttribute(h, 38, &acrylic, 4);
         DwmSetWindowAttribute(h, 20, &dark, 4);
         DwmSetWindowAttribute(h, 33, &round, 4);
+        strip_system_caption(h);
+    }
+}
+
+/// 清掉 WS_CAPTION/WS_SYSMENU 样式位（decoration(false) 只是不画，样式位还在：
+/// 最大化/系统拖拽时 DWM 会把系统标题栏按钮顶出来，出现"双标题栏"）。
+/// 原版 Electron titleBarStyle:'hidden' 在 Windows 上同样隐藏了这些样式位。
+fn strip_system_caption(hwnd: *mut std::ffi::c_void) {
+    extern "system" {
+        fn GetWindowLongPtrW(hwnd: *mut std::ffi::c_void, index: i32) -> isize;
+        fn SetWindowLongPtrW(hwnd: *mut std::ffi::c_void, index: i32, value: isize) -> isize;
+        fn SetWindowPos(
+            hwnd: *mut std::ffi::c_void,
+            after: *mut std::ffi::c_void,
+            x: i32,
+            y: i32,
+            w: i32,
+            h: i32,
+            flags: u32,
+        ) -> i32;
+    }
+    const GWL_STYLE: i32 = -16;
+    const WS_CAPTION: isize = 0x00C0_0000;
+    const WS_SYSMENU: isize = 0x0008_0000;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOZORDER: u32 = 0x0004;
+    const SWP_FRAMECHANGED: u32 = 0x0020;
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        let stripped = style & !(WS_CAPTION | WS_SYSMENU);
+        if stripped != style {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, stripped);
+            SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        }
     }
 }
 
