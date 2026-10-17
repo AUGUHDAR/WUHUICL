@@ -1142,10 +1142,10 @@ function onEditKeydown(e: KeyboardEvent) {
 // ---------------- 初始化与事件订阅 -
 
 const offs: Array<() => void> = [];
-offs.push(installAppearanceRuntime(() => appearancePreview.value));
 
 onMounted(async () => {
     void pollTickets();
+    offs.push(installAppearanceRuntime(() => appearancePreview.value));
     offs.push(installVisualDesign());
     void loadExitNotices();
     motionQuery.addEventListener('change', onMotionChange);
