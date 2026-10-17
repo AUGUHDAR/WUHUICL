@@ -28,10 +28,20 @@
 ```bash
 npm install
 npm run dev             # 开发模式，前端热更新
+npm run quality         # 类型检查 + 前端单测 + 架构边界 + 格式检查
+npm run lint            # ESLint（Vue 3 + TypeScript）
 npm run typecheck       # tsc --noEmit
+npm run test:unit       # Node 内置 test runner
+npm run check:architecture # 扫描导入方向与旧目录新增文件
 npm run format:check    # Prettier 检查（4 空格 + 分号，配置在 .prettierrc.json）
 npm run format          # 需要时统一格式
 ```
+
+## 代码结构
+
+前端新代码放在 `src/app/`、`src/core/`、`src/features/<功能>/` 或 `src/shared/`。功能之间只从对方的 `index.ts` 公共入口导入，不直接引 `ui/` 或 `data/` 内部文件。`core` 和 `shared` 不反向依赖功能或应用壳；Tauri 桥接调用统一走 `src/core/ipc/`。迁移期间的临时例外记录在 `scripts/legacy-source-allowlist.json`，迁移完成或调用改走 IPC 后应立即删除对应条目。
+
+质量工作流位于 `.github/workflows/quality.yml`，在 Windows 上运行前端检查、`cargo fmt --all -- --check` 和 `cargo test --lib`，不构建安装包。
 
 ## 出包
 

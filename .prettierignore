@@ -6,6 +6,13 @@ src-tauri/
 # 本地工程台账，仅存本地，不随仓库分发
 docs/
 
+# Migration allowlist is generated/updated with legacy line numbers; do not rewrite its layout.
+scripts/legacy-source-allowlist.json
+
+# Application source is formatted by the integrated migration pass, not the quality-tooling commit.
+src/
+shared/
+
 # 非代码文件：页面、样式与文档沿用既有排版，仅由 .editorconfig 约束缩进与行尾
 *.html
 *.css

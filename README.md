@@ -176,3 +176,20 @@ QQ group [1045554684](https://qm.qq.com/cgi-bin/qm/qr?k=DPtuiKA-iNNM41kEjsEZNxBW
 ## License
 
 GPL-3.0-or-later, see [LICENSE](LICENSE). Files adapted from KAMUCL and VoxLink keep their original `LGPL-3.0-only` headers and vendored snippets keep their MIT notices, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Fork this, change it, ship it, but the result stays open under the same license. Minecraft is a trademark of Mojang / Microsoft; this project was checked line by line against their usage guidelines and EULA, with nothing violated.
+
+## Development checks
+
+Use Node 24 and install dependencies with `npm ci`. The reproducibility commands are:
+
+```powershell
+npm run lint
+npm run typecheck
+npm run test:unit
+npm run check:architecture
+npm run format:check
+npm run build:web
+```
+
+`npm run quality` runs typechecking, frontend unit tests, the architecture checker, and formatting. CI additionally runs lint, the web build, Rust formatting, and Rust library tests.
+
+Source follows the feature-first layout under `src/`: `app/` composes the shell, `core/` owns IPC and cross-cutting primitives, `features/<name>/` owns feature `ui/` and `data/`, and `shared/` holds framework-light domain utilities. Cross-feature imports go through `features/<name>/index.ts`; `core/` and `shared/` must not import features or the app shell. The architecture guardrail tracks existing migration debt in `scripts/legacy-source-allowlist.json`; new violations fail immediately.

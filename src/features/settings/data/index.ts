@@ -1,0 +1,1 @@
+export { updateSettings } from './settingsRepository';

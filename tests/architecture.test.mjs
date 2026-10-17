@@ -1,0 +1,146 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const checkerPath = path.join(repositoryRoot, 'scripts', 'check-architecture.mjs');
+
+async function createFixture(t, files) {
+    const root = await mkdtemp(path.join(tmpdir(), 'wuhuicl-architecture-'));
+    t.after(() => rm(root, { force: true, recursive: true }));
+
+    for (const [relativePath, contents] of Object.entries(files)) {
+        const target = path.join(root, relativePath);
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, contents, 'utf8');
+    }
+
+    return root;
+}
+
+function runChecker(root) {
+    return spawnSync(process.execPath, [checkerPath, '--root', root], {
+        encoding: 'utf8',
+        timeout: 15000
+    });
+}
+
+function output(result) {
+    return `${result.stdout}${result.stderr}`;
+}
+
+test('allows feature barrels, own internals, core/shared imports, and IPC access', async (t) => {
+    const root = await createFixture(t, {
+        'scripts/legacy-source-allowlist.json': JSON.stringify({
+            legacySourceFiles: ['src/components/LegacyPanel.vue'],
+            legacyWindowKamuclAccesses: ['src/components/LegacyPanel.vue:2']
+        }),
+        'shared/platform.ts': 'export const platform = "test";\n',
+        'src/App.vue': '<template><main /></template>\n',
+        'src/api.ts': 'export const api = window.kamucl;\n',
+        'src/components/LegacyPanel.vue':
+            '<script setup lang="ts">\nconst bridge = window.kamucl;\n</script>\n',
+        'src/core/ipc/bridge.ts': 'export const bridge = window.kamucl;\n',
+        'src/core/ipc/index.ts':
+            "export { bridge } from './bridge';\nexport const platform = 'test';\n",
+        'src/features/accounts/data/state.ts': 'export const accountState = true;\n',
+        'src/features/accounts/index.ts': "export { accountState } from './data/state';\n",
+        'src/features/settings/data/state.ts':
+            "import { accountState } from '../../accounts';\n" +
+            "import { platform } from '@shared/platform';\n" +
+            'export const settingsState = [accountState, platform];\n',
+        'src/features/settings/index.ts': "export { settingsState } from './data/state';\n",
+        'src/features/settings/ui/SettingsPanel.vue': [
+            '<script setup lang="ts">',
+            "import { settingsState } from '../data/state';",
+            "import { accountState } from '../../accounts';",
+            "import { bridge } from '../../../core/ipc';",
+            "import { platform } from '@shared/platform';",
+            'void [settingsState, accountState, bridge, platform];',
+            '</script>',
+            '<template><section /></template>',
+            ''
+        ].join('\n')
+    });
+
+    const result = runChecker(root);
+
+    assert.equal(result.status, 0, output(result));
+    assert.match(result.stdout, /Architecture check passed/);
+    assert.match(result.stdout, /1 legacy source file\(s\)/);
+});
+
+test('reports forbidden directions, cross-feature internals, app imports, and IPC access', async (t) => {
+    const root = await createFixture(t, {
+        'src/App.vue': '<template><main /></template>\n',
+        'src/app/bootstrap/index.ts': 'export const bootstrap = true;\n',
+        'src/components/NewPanel.vue': '<template><section /></template>\n',
+        'src/core/feature.ts': "import '../features/accounts';\n",
+        'src/core/shell.ts': "import '../app/bootstrap';\n",
+        'src/features/accounts/index.ts': 'export const accounts = true;\n',
+        'src/features/accounts/ui/AppImport.vue':
+            '<script setup lang="ts">\nimport App from "../../../App.vue";\n</script>\n',
+        'src/features/accounts/ui/bootstrap.ts': "import '../../../app/bootstrap';\n",
+        'src/features/accounts/ui/direct.ts': 'const platform = window.kamucl.platform;\n',
+        'src/features/accounts/ui/Internal.ts': 'export const internal = true;\n',
+        'src/features/settings/index.ts': 'export const settings = true;\n',
+        'src/features/settings/ui/CrossImport.vue': [
+            '<script setup lang="ts">',
+            "import { internal } from '../../accounts/ui/Internal';",
+            "const state = import('../../accounts/data/state');",
+            'void [internal, state];',
+            '</script>',
+            ''
+        ].join('\n'),
+        'src/shared/feature.ts': "import '../features/settings';\n",
+        'src/shared/shell.ts': "import '../app/bootstrap';\n"
+    });
+
+    const result = runChecker(root);
+    const diagnostics = output(result);
+
+    assert.equal(result.status, 1, diagnostics);
+    assert.match(diagnostics, /features\/settings\/ui\/CrossImport\.vue:2:1 .*feature-boundary/);
+    assert.match(diagnostics, /features\/settings\/ui\/CrossImport\.vue:3:1 .*feature-boundary/);
+    assert.match(diagnostics, /src\/core\/feature\.ts:1:1 .*core-feature-boundary/);
+    assert.match(diagnostics, /src\/core\/shell\.ts:1:1 .*core-app-boundary/);
+    assert.match(diagnostics, /src\/shared\/feature\.ts:1:1 .*shared-feature-boundary/);
+    assert.match(diagnostics, /src\/shared\/shell\.ts:1:1 .*shared-app-boundary/);
+    assert.match(diagnostics, /features\/accounts\/ui\/AppImport\.vue:2:1 .*feature-app-boundary/);
+    assert.match(diagnostics, /features\/accounts\/ui\/bootstrap\.ts:1:1 .*feature-app-boundary/);
+    assert.match(diagnostics, /features\/accounts\/ui\/direct\.ts:1:1 .*direct-ipc-access/);
+    assert.match(diagnostics, /src\/components\/NewPanel\.vue:1:1 .*legacy-source/);
+    assert.match(diagnostics, /Architecture check failed with \d+ violation\(s\)/);
+});
+
+test('requires explicit allowlisting for source files in legacy directories', async (t) => {
+    const root = await createFixture(t, {
+        'scripts/legacy-source-allowlist.json': JSON.stringify({
+            legacySourceFiles: ['src/composables/legacy.ts'],
+            legacyWindowKamuclAccesses: []
+        }),
+        'src/composables/legacy.ts': 'export const legacy = true;\n',
+        'src/views/NewView.vue': '<template><main /></template>\n'
+    });
+
+    const result = runChecker(root);
+    const diagnostics = output(result);
+
+    assert.equal(result.status, 1, diagnostics);
+    assert.match(diagnostics, /src\/views\/NewView\.vue:1:1 .*legacy-source/);
+    assert.doesNotMatch(diagnostics, /src\/composables\/legacy\.ts:1 .*legacy-source/);
+});
+
+test('fails when the requested root does not exist', async (t) => {
+    const root = path.join(tmpdir(), `wuhuicl-missing-${process.pid}-${Date.now()}`);
+    t.after(() => rm(root, { force: true, recursive: true }));
+
+    const result = runChecker(root);
+
+    assert.equal(result.status, 2, output(result));
+    assert.match(result.stderr, /root directory does not exist/);
+});

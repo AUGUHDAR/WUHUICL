@@ -10,9 +10,13 @@
     "build:web": "vite build",
     "dev": "tauri dev",
     "build": "tauri build",
+    "check:architecture": "node scripts/check-architecture.mjs --root .",
+    "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "typecheck": "tsc --noEmit"
+    "format:check": "prettier --check . --ignore-path .prettierignore",
+    "test:unit": "node --test tests/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "quality": "npm run typecheck && npm run test:unit && npm run check:architecture && npm run format:check"
   },
   "dependencies": {
     "skinview-utils": "0.7.1",
@@ -20,14 +24,19 @@
     "vue": "^3.5.13"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/cli": "^2.9.0",
     "@types/node": "^24.19.2",
     "@types/three": "0.185.0",
     "@vitejs/plugin-vue": "^5.2.0",
+    "eslint": "^9.39.4",
+    "eslint-plugin-vue": "^10.11.1",
+    "globals": "^17.13.0",
     "prettier": "3.3.3",
     "prettier-plugin-vue": "1.1.6",
     "typescript": "^5.6.3",
+    "typescript-eslint": "^8.71.2",
     "vite": "^5.4.11"
   }
 }
