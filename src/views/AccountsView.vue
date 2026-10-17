@@ -185,6 +185,11 @@ function providerIconUrl(provider: YggdrasilProvider): string | null {
     return skinSiteIconUrl(provider.apiRoot, provider.name);
 }
 
+/** LittleSkin 预设（美西螈 useLittleSkinPreset 同款）：填入官方 API Root 并直接探测 */
+async function useLittleSkinPreset() {
+    openProviderImport({ kind: 'text', value: 'https://littleskin.cn/api/yggdrasil' });
+}
+
 function openProviderImport(input?: YggdrasilProviderInput) {
     Object.assign(providerModal, {
         open: true,
@@ -524,6 +529,9 @@ async function onRemove(acc: Account) {
                             @click="checkYggdrasilRuntime"
                         >
                             {{ checkingRuntime ? '校验中…' : '检查运行组件' }}
+                        </button>
+                        <button class="btn btn-ghost btn-sm" @click="useLittleSkinPreset">
+                            LittleSkin 一键添加
                         </button>
                         <button class="btn btn-ghost btn-sm" @click="openProviderImport()">
                             添加提供商

@@ -2753,20 +2753,12 @@ fn operate(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
     run(app, items, &action, destination.as_deref())
 }
 
-fn import(app: &tauri::AppHandle) -> Result<Value, String> {
+fn import_at(app: &tauri::AppHandle, paths: &[String]) -> Result<Value, String> {
     let root = active_root(app)?;
-    use tauri_plugin_dialog::DialogExt;
-    let picked = app
-        .dialog()
-        .file()
-        .set_title("导入投影到集中收藏")
-        .add_filter("Minecraft 投影", &["litematic", "schem", "schematic", "nbt"])
-        .blocking_pick_files();
-    let Some(picked) = picked else { return Ok(Value::Null) };
     let destination = library_dir(&root)?;
     let mut items: Vec<Stored> = Vec::new();
-    for raw in picked {
-        let file = raw.into_path().map_err(|e| e.to_string())?;
+    for raw in paths {
+        let file = PathBuf::from(raw);
         let meta = stat_of(&file)?;
         let rel = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let parent = file.parent().map(|p| p.to_path_buf()).unwrap_or_default();
@@ -2786,6 +2778,26 @@ fn import(app: &tauri::AppHandle) -> Result<Value, String> {
         items.push(Stored { entry: Value::Object(entry), source: Source { folder: None, root: parent, label: "导入".into(), library: false }, rel });
     }
     run(app, items, "collect", Some(&destination))
+}
+
+/// 对话框选择导入（projections:import 原口径）：挑完复用 import_at
+fn import_dialog(app: &tauri::AppHandle) -> Result<Value, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("导入投影到集中收藏")
+        .add_filter("Minecraft 投影", &["litematic", "schem", "schematic", "nbt"])
+        .blocking_pick_files();
+    let Some(picked) = picked else { return Ok(Value::Null) };
+    let paths: Vec<String> = picked
+        .into_iter()
+        .filter_map(|raw| raw.into_path().ok().map(|p| p.to_string_lossy().into_owned()))
+        .collect();
+    if paths.is_empty() {
+        return Ok(Value::Null);
+    }
+    import_at(app, &paths)
 }
 
 fn open_directory(dir: &Path) -> Result<(), String> {
@@ -3021,7 +3033,19 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
     match channel {
         "projections:list" => Some(list(app)),
         "projections:operate" => Some(operate(app, args)),
-        "projections:import" => Some(import(app)),
+        "projections:import" => Some(import_dialog(app)),
+        // 拖拽导入（projections:importAt）：带路径，跳过对话框
+        "projections:importAt" => Some(import_at(
+            app,
+            &args.first()
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect::<Vec<String>>()
+                })
+                .unwrap_or_default(),
+        )),
         "projections:open" => Some(open(app, args)),
         "projections:analyze" => Some(analyze(app, args)),
         "projections:convert" => Some(convert(app, args)),

@@ -54,6 +54,9 @@ import {
     startUpdateDownload
 } from './api';
 import type { ReleaseInfo } from '@shared/types';
+
+/** app:readClipboard 不在 api.ts 合同面里（原版无此通道，Tauri 文本拖拽等价物专用） */
+const readClipboardText = () => window.kamucl.invoke('app:readClipboard') as Promise<string>;
 import { QQ_GROUP_NUMBER } from '@shared/branding';
 import UpdateModal from './components/UpdateModal.vue';
 import {
@@ -493,7 +496,8 @@ const looksLikeYggdrasilProvider = (value: string): boolean => {
     );
 };
 
-const resourceDropPage = () => ['keys', 'mods', 'packs', 'shaders'].includes(store.currentView);
+const resourceDropPage = () =>
+    ['keys', 'mods', 'packs', 'shaders', 'projections'].includes(store.currentView);
 function onDragEnter(e: DragEvent) {
     if (store.editMode) {
         e.preventDefault();
@@ -575,6 +579,12 @@ function onDrop(e: DragEvent) {
     if (!dropped.length) {
         const text =
             e.dataTransfer?.getData('text/plain') || e.dataTransfer?.getData('text/uri-list') || '';
+        if (text === 'wuhuicl:text-drop' || !text) {
+            // Tauri 拖放事件不带文本（shim.ts 置的标记/纯空）：纯文本拖入拿不到 URI，
+            // 走剪贴板确认——用户从皮肤站复制链接后拖一下窗口即可触发。
+            void routeTextDropViaClipboard();
+            return;
+        }
         if (looksLikeYggdrasilProvider(text)) {
             routeYggdrasilImport({ kind: 'text', value: text });
         }
@@ -600,6 +610,24 @@ function onDrop(e: DragEvent) {
         return;
     }
     toast('压缩包请一次导入一个文件；混合文件请分开拖入', 'error');
+}
+
+/** 纯文本拖入（Tauri 拿不到文本）：读剪贴板当拖拽内容，命中提供商特征就直接开探测框。
+ * 走后端 Win32 直读——navigator.clipboard 在 WebView2 会弹系统权限框，拖拽流程里不能有。 */
+async function routeTextDropViaClipboard() {
+    let text = '';
+    try {
+        text = await readClipboardText();
+    } catch {
+        toast('无法读取剪贴板，请手动在账号页粘贴皮肤站链接', 'info');
+        return;
+    }
+    if (looksLikeYggdrasilProvider(text)) {
+        routeYggdrasilImport({ kind: 'text', value: text });
+        toast('已按剪贴板内容识别皮肤站链接', 'success');
+    } else {
+        toast('拖入的文本不像是皮肤站链接；可在账号页手动粘贴添加', 'info');
+    }
 }
 
 function routeYggdrasilImport(input: YggdrasilProviderInput) {

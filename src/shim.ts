@@ -39,7 +39,14 @@ function dispatchDrag(type: string, payload: DragPayload): void {
     const target = document.elementFromPoint(pt.x, pt.y) ?? document.body;
     const dt = new DataTransfer();
     if (type === 'drop') {
-        for (const p of payload.paths) dt.items.add(new File([], basename(p)));
+        if (payload.paths.length) {
+            for (const p of payload.paths) dt.items.add(new File([], basename(p)));
+        } else {
+            // Tauri 的 DragDropEvent 不携带文本：纯文本拖入（如 PCL 的 authlib-injector
+            // URI）到达时 paths 为空。置 text/plain 标记让 App.vue 的空 drop 分支走
+            // "剪贴板文本确认"流程（用户拖入前刚复制的即拖拽内容）。
+            dt.setData('text/plain', 'wuhuicl:text-drop');
+        }
     } else {
         // enter/over 也要让 e.dataTransfer.types 含 Files，acceptsImportDrag 才放行
         dt.items.add(new File([], 'wuhuicl-drag'));

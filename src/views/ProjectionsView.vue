@@ -165,11 +165,35 @@ async function execute(action: ProjectionRequest['action'] | 'import') {
 function escape(e: KeyboardEvent) {
     if (e.key === 'Escape') confirm.value = '';
 }
+/** 拖入投影文件一键导入集中收藏（projections:importAt，跳过对话框） */
+const dragActive = ref(false);
+async function dropProjections(event: DragEvent) {
+    dragActive.value = false;
+    if (busy.value) return;
+    const files = Array.from(event.dataTransfer?.files ?? [])
+        .map((f) => window.kamucl.getFilePath(f))
+        .filter(Boolean);
+    if (!files.length) return;
+    busy.value = true;
+    try {
+        const result = await invoke<ProjectionResult[] | null>('projections:importAt', files);
+        if (result) {
+            results.value = result;
+        }
+        toast(`已导入 ${files.length} 个投影文件`, 'success');
+        await refresh(true);
+    } catch (e) {
+        toast('导入失败：' + errText(e), 'error');
+    } finally {
+        busy.value = false;
+    }
+}
 onMounted(() => {
     void refresh();
     window.addEventListener('keydown', escape);
     window.addEventListener('focus', autoRefresh);
     refreshTimer = setInterval(autoRefresh, 15000);
+    store.resourceDropHandler = dropProjections;
 });
 onUnmounted(() => {
     disposed = true;
@@ -177,6 +201,7 @@ onUnmounted(() => {
     clearInterval(refreshTimer);
     window.removeEventListener('keydown', escape);
     window.removeEventListener('focus', autoRefresh);
+    if (store.resourceDropHandler === dropProjections) store.resourceDropHandler = null;
 });
 </script>
 

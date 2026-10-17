@@ -128,6 +128,8 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
             Ok(saved)
         }
         "app:systemInfo" => Ok(sysinfo::system_info()),
+        // 剪贴板读文本（Win32 直读，不走 navigator.clipboard——WebView2 读剪贴板会弹权限框）
+        "app:readClipboard" => Ok(json!(sysinfo::clipboard_text())),
         "app:selectDir" => Ok(pick(app, true, &["全部文件|*"])),
         "app:selectFile" => Ok(pick(app, false, &["整合包|*.mrpack;*.zip"])),
         "app:selectImage" => Ok(pick(app, false, &["图片|*.png;*.jpg;*.jpeg;*.webp"])),

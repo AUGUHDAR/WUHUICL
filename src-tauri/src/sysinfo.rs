@@ -57,3 +57,40 @@ pub fn cursor_pos() -> Option<(i32, i32)> {
         }
     }
 }
+
+/// 读剪贴板文本（app:readClipboard）。Win32 直读 CF_UNICODETEXT，
+/// 不走 navigator.clipboard——WebView2 对读剪贴板会弹系统权限框，拖拽确认流程里不能有这东西。
+pub fn clipboard_text() -> Option<String> {
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    };
+    use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+    const CF_UNICODETEXT: u32 = 13;
+    unsafe {
+        if IsClipboardFormatAvailable(CF_UNICODETEXT) == 0 {
+            return None;
+        }
+        if OpenClipboard(std::ptr::null_mut()) == 0 {
+            return None;
+        }
+        let result = (|| {
+            let handle = GetClipboardData(CF_UNICODETEXT);
+            if handle.is_null() {
+                return None;
+            }
+            let ptr = GlobalLock(handle) as *const u16;
+            if ptr.is_null() {
+                return None;
+            }
+            let mut len = 0usize;
+            while *ptr.add(len) != 0 {
+                len += 1;
+            }
+            let text = String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len));
+            GlobalUnlock(handle);
+            Some(text)
+        })();
+        CloseClipboard();
+        result
+    }
+}
