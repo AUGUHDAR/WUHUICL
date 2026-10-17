@@ -2,8 +2,9 @@
  * 渲染进程对 preload 桥接（window.kamucl）的类型化封装。
  * 所有 IPC 通道名一律取自 @shared/types 的 IPC / IPC_EVENT 常量。
  */
-import { refreshSkinAfter } from './skinRevision';
+import { refreshSkinAfter } from './core/ipc/skinRevision';
 import { IPC, IPC_EVENT } from '@shared/types';
+import { invokeIpc, subscribeIpc } from './core/ipc/bridge';
 import type {
     DefaultResourcePack,
     Account,
@@ -56,19 +57,7 @@ import type {
     YggdrasilRuntimeInfo
 } from '@shared/types';
 
-function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
-    // Vue 的 reactive proxy 无法通过 Electron IPC 结构化克隆（报 An object could not be cloned）。
-    // 所有参数统一 JSON 深净化（undefined 原样保留），根治各调用点。
-    const clean = args.map((a) => {
-        if (a === undefined || a === null) return a;
-        try {
-            return JSON.parse(JSON.stringify(a)) as unknown;
-        } catch {
-            return a;
-        }
-    });
-    return window.kamucl.invoke(channel, ...clean) as Promise<T>;
-}
+const invoke = invokeIpc;
 
 // ---------------- 设置 ----------------
 export const getSettings = () => invoke<Settings>(IPC.settingsGet);
@@ -500,7 +489,7 @@ export const toggleDisableFs = (rel: string, name: string, folder?: string) =>
 
 // ---------------- 事件订阅（返回取消函数） ----------------
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
-    return window.kamucl.on(channel, (payload) => cb(payload as T));
+    return subscribeIpc(channel, cb);
 }
 
 export const onProgress = (cb: (e: ProgressEvent) => void) =>

@@ -1,0 +1,1 @@
+export { managedImageUrl } from './managedAssets';

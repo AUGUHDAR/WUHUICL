@@ -1,4 +1,8 @@
-// Initial-render resources register before starting work. Requests created by watchers are drained too.
+/**
+ * Compatibility shim. Core runtime ownership now lives in
+ * `src/core/runtime/index.ts`; remove this re-export after root consumers migrate.
+ */
+export * from './core/runtime';
 const pending = new Set<Promise<void>>();
 let sealed = false;
 export function beginBootTask(): () => void {
