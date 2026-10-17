@@ -31,7 +31,7 @@
 //! 9. mods:favoriteVersions 的订阅按 ticket 全局登记（Electron 按 sender 隔离；Tauri 单主窗口
 //!    等价）；单飞共享队列（4 并发、无完成缓存）语义保留。
 
-use super::compare_mod_version;
+use super::planning::compare_mod_version;
 use super::version_installer::{self as installer, ProgressGuard};
 use crate::community::{
     self, community_exact_file, community_favorite_candidates, community_file_matches_instance,

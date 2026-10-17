@@ -11,14 +11,15 @@ import {
     resetOfflineSkin,
     uploadSkin,
     uploadSkinFromHistory
-} from '../api';
-import { store, toast } from '../store';
-import { renderCape, renderSkinFront } from '../skin-render';
-import SkinViewer3D from '../components/SkinViewer3D.vue';
-import SkinEditor from '../components/SkinEditor.vue';
-import type { SkinPreviewAnimation } from '../skinModel';
-import { resolveSkinPreview } from '../skinPreviewSelection';
-import { createFallbackSkin } from '../fallbackSkin';
+} from '../../../api';
+import { filePathFromDrop } from '../../../core/ipc';
+import { store, toast } from '../../../store';
+import { renderCape, renderSkinFront } from '../../../skin-render';
+import SkinViewer3D from '../../../components/SkinViewer3D.vue';
+import SkinEditor from '../../../components/SkinEditor.vue';
+import type { SkinPreviewAnimation } from '../../../skinModel';
+import { resolveSkinPreview } from '../../../skinPreviewSelection';
+import { createFallbackSkin } from '../../../fallbackSkin';
 const editorOpen = ref(false);
 import type { CapeInfo, ProfileSkins, SkinHistoryEntry, SkinVariant } from '@shared/types';
 
@@ -350,7 +351,7 @@ async function pickFile(f: File | undefined | null) {
         toast('请选择 PNG 格式的皮肤文件', 'error');
         return;
     }
-    const p = window.kamucl.getFilePath(f);
+    const p = filePathFromDrop(f);
     if (!p) {
         toast('无法获取文件路径', 'error');
         return;

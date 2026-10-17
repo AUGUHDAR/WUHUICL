@@ -22,7 +22,8 @@ import {
     type SettingsCategory
 } from '@shared/settingsCatalog';
 import { useMotion } from '../../../motion';
-import { usePlatformUpdate } from '../../updates/data';
+import { platform } from '../../../core/ipc';
+import { usePlatformUpdate } from '../../updates';
 import { AppearanceThemeCard, HomeLayoutEditor } from '../../appearance';
 import SettingsFeaturesSection from './SettingsFeaturesSection.vue';
 import SettingsDownloadsSection from './SettingsDownloadsSection.vue';
@@ -33,17 +34,21 @@ import SettingsUpdatesSection from './SettingsUpdatesSection.vue';
 import SettingsPluginsSection from './SettingsPluginsSection.vue';
 import SettingsUpdateDialogs from './SettingsUpdateDialogs.vue';
 import { useSettingsPersistence } from './useSettingsPersistence';
-const ThirdPartyNotices = defineAsyncComponent(() => import('../../updates/ui/ThirdPartyNotices.vue'));
+const ThirdPartyNotices = defineAsyncComponent(async () => {
+    const module = await import('../../updates');
+    return module.ThirdPartyNotices;
+});
 
 const page = ref<HTMLElement | null>(null);
 const { systemReduced } = useMotion();
 const { systemInstaller, installAction, updateReadyMessage } = usePlatformUpdate();
 const { save } = useSettingsPersistence();
 const appVersion = __APP_VERSION__;
+const hostPlatform = platform();
 const systemMotionHelp =
-    window.kamucl.platform === 'darwin'
+    hostPlatform === 'darwin'
         ? '若需要动画，请在系统设置 → 辅助功能 → 显示中关闭“减少动态效果”。'
-        : window.kamucl.platform === 'win32'
+        : hostPlatform === 'win32'
           ? '若需要动画，请在 Windows 设置 → 辅助功能 → 视觉效果开启动画效果。'
           : '若需要动画，请检查本机桌面的辅助功能或动画设置。';
 

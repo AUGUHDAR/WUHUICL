@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import UpdateDialogShell from '../../updates/ui/UpdateDialogShell.vue';
+import { UpdateDialogShell } from '../../updates';
 import type { LocalUpdateCheck, ReleaseInfo } from '@shared/types';
 
 defineProps<{

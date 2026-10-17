@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import GameView from '../../../views/GameView.impl.vue';
+import GameViewImpl from './GameViewImpl.vue';
 </script>
 
-<template><GameView /></template>
+<template><GameViewImpl /></template>

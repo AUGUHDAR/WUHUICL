@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { formatReleaseTime } from '@shared/releaseTime';
-import { openInstanceCenter } from '../instanceCenter';
-import ContentSkeleton from '../components/ContentSkeleton.vue';
-import { catalogSession } from '../catalogCache';
+import { openInstanceCenter } from '../../../instanceCenter';
+import ContentSkeleton from '../../../components/ContentSkeleton.vue';
+import { catalogSession } from '../../../catalogCache';
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import {
     cleanupPartialInstall,
@@ -33,12 +33,11 @@ import {
     setVersionJava,
     setVersionResolution,
     updateVersionCategories
-} from '../api';
+} from '../../../api';
 import {
     selectInstance,
     applyLaunchState,
     displayVersionName,
-    displayVersionSub,
     fmtLastPlayed,
     isFavorite,
     progressMono,
@@ -49,15 +48,16 @@ import {
     toast,
     toggleFavorite,
     versionIconUrl
-} from '../store';
+} from '../../../store';
 import { instanceLaunchBusy } from '@shared/launchTracking';
-import ConfirmModal from '../components/ConfirmModal.vue';
-import IconPickerModal from '../components/IconPickerModal.vue';
-import SelectMenu from '../components/SelectMenu.vue';
-import RecordingModPicker from '../components/RecordingModPicker.vue';
-import FavoriteModsPicker from '../components/FavoriteModsPicker.vue';
-import UiGlyph from '../components/UiGlyph.vue';
-import VersionCategoriesPanel from '../components/VersionCategoriesPanel.vue';
+import { platform } from '../../../core/ipc';
+import ConfirmModal from '../../../components/ConfirmModal.vue';
+import IconPickerModal from '../../../components/IconPickerModal.vue';
+import SelectMenu from '../../../components/SelectMenu.vue';
+import RecordingModPicker from '../../../components/RecordingModPicker.vue';
+import FavoriteModsPicker from '../../../components/FavoriteModsPicker.vue';
+import UiGlyph from '../../../components/UiGlyph.vue';
+import VersionCategoriesPanel from '../../../components/VersionCategoriesPanel.vue';
 import {
     VERSION_CATEGORY_ALL,
     VERSION_CATEGORY_FAVORITES,
@@ -66,7 +66,7 @@ import {
     versionMatchesCategory
 } from '@shared/versionCategories';
 const favoritesReady = ref(true);
-import ThumbnailPickerModal from '../components/ThumbnailPickerModal.vue';
+import ThumbnailPickerModal from '../../../components/ThumbnailPickerModal.vue';
 import type {
     FabricApiVersion,
     FolderScanResult,
@@ -95,7 +95,7 @@ const installedCategory = ref(VERSION_CATEGORY_ALL),
     categoryError = ref('');
 const categories = computed(() => store.settings?.versionCategories ?? []);
 const categoryOf = (v: InstalledVersion) =>
-    versionCategoryOf(store.settings, v.folder, v.id, window.kamucl.platform);
+    versionCategoryOf(store.settings, v.folder, v.id, platform());
 const categoryLabel = (v: InstalledVersion) =>
     categories.value.find((c) => c.id === categoryOf(v))?.name ?? '';
 const categoryCounts = computed(() =>
@@ -924,11 +924,6 @@ const categoryFilters = computed(() => [
         count: scopedInstalled.value.filter((v) => categoryOf(v) === c.id).length
     }))
 ]);
-/** 已收藏分组（不含残缺/失败版本） */
-const favoriteInstalled = computed(() =>
-    store.installed.filter((v) => isFavorite(v.id, v.folder) && !v.incomplete && !v.failed)
-);
-
 function openManageMenu(e: MouseEvent, id: string, folder: string) {
     if (manageMenu.id === id && manageMenu.folder === folder) {
         manageMenu.id = '';

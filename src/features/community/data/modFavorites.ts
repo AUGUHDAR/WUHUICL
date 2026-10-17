@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 import type { ModFavorite } from '@shared/modFavorites';
 import { errText } from '../../../api';
+import { invokeIpc } from '../../../core/ipc';
 import { toast } from '../../../store';
 export const favorites = ref<ModFavorite[]>([]);
 export const favoriteBusy = ref(new Set<string>());
@@ -22,7 +23,7 @@ export async function loadFavorites(propagateError = false): Promise<void> {
     const read = (async () => {
         await writeQueue;
         const writes = writeGeneration;
-        const list = (await window.kamucl.invoke('mods:favorites')) as ModFavorite[];
+        const list = await invokeIpc<ModFavorite[]>('mods:favorites');
         if (generation === readGeneration && writes === writeGeneration) favorites.value = list;
         return { list, writes };
     })();
@@ -79,14 +80,12 @@ export function toggleProject(
     iconUrl?: string
 ): Promise<boolean> {
     const key = source + ':' + projectId;
-    return mutateFavorite(
-        key,
-        () =>
-            window.kamucl.invoke(
-                'mods:favorite',
-                { source, projectId, name, iconUrl },
-                !favorites.value.some((f) => f.key === key)
-            ) as Promise<ModFavorite[]>
+    return mutateFavorite(key, () =>
+        invokeIpc<ModFavorite[]>(
+            'mods:favorite',
+            { source, projectId, name, iconUrl },
+            !favorites.value.some((f) => f.key === key)
+        )
     );
 }
 
@@ -99,17 +98,8 @@ export function setLocalFavorite(
     link?: { source: string; projectId: string }
 ): Promise<boolean> {
     const safeLink = link ? { source: link.source, projectId: link.projectId } : undefined;
-    return mutateFavorite(
-        key,
-        () =>
-            window.kamucl.invoke(
-                'mods:favoriteLocal',
-                version,
-                folder,
-                name,
-                enabled,
-                safeLink
-            ) as Promise<ModFavorite[]>
+    return mutateFavorite(key, () =>
+        invokeIpc<ModFavorite[]>('mods:favoriteLocal', version, folder, name, enabled, safeLink)
     );
 }
 
@@ -118,18 +108,13 @@ export function removeFavorites(keys: string[]): Promise<boolean> {
     // Snapshot plain primitive keys before enqueueing; later selection edits must
     // not alter either the busy guards or the request eventually sent to main.
     const safeKeys = [...new Set(keys)];
-    return mutateFavorite(
-        safeKeys,
-        () => window.kamucl.invoke('mods:favoriteRemove', safeKeys) as Promise<ModFavorite[]>
+    return mutateFavorite(safeKeys, () =>
+        invokeIpc<ModFavorite[]>('mods:favoriteRemove', safeKeys)
     );
 }
 
 export function linkFavorite(key: string, source: string, projectId: string): Promise<boolean> {
-    return mutateFavorite(
-        [key, source + ':' + projectId],
-        () =>
-            window.kamucl.invoke('mods:favoriteLink', key, source, projectId) as Promise<
-                ModFavorite[]
-            >
+    return mutateFavorite([key, source + ':' + projectId], () =>
+        invokeIpc<ModFavorite[]>('mods:favoriteLink', key, source, projectId)
     );
 }

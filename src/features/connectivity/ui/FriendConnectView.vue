@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import FriendConnectView from '../../../views/FriendConnectView.impl.vue';
+import FriendConnectViewImpl from './FriendConnectViewImpl.vue';
 </script>
 
-<template><FriendConnectView /></template>
+<template><FriendConnectViewImpl /></template>

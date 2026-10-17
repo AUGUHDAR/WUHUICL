@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { store } from '../../../store';
+import { platform } from '../../../core/ipc';
 import { useSettingsPersistence } from './useSettingsPersistence';
 
 defineProps<{ visible: boolean }>();
 const { save } = useSettingsPersistence();
 const resolutionError = ref('');
 const windowSizeBusy = ref(false);
-const canRememberWindow = window.kamucl.platform === 'win32';
+const canRememberWindow = platform() === 'win32';
 
 function saveResolution() {
     const settings = store.settings;

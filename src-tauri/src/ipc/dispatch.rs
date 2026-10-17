@@ -77,8 +77,16 @@ const DOCUMENTED_SUBSYSTEM_HANDLERS: &[DispatchStage] = &[
 
 fn composed_handlers() -> impl Iterator<Item = DispatchStage> {
     DOCUMENTED_SUBSYSTEM_HANDLERS.iter().copied().chain([
-        ("accounts", crate::features::accounts::invoke),
-        ("settings", crate::features::settings::invoke),
+        (
+            "accounts",
+            crate::features::accounts::invoke
+                as fn(&AppHandle, &str, &[Value]) -> Option<Result<Value, String>>,
+        ),
+        (
+            "settings",
+            crate::features::settings::invoke
+                as fn(&AppHandle, &str, &[Value]) -> Option<Result<Value, String>>,
+        ),
     ])
 }
 

@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { enterEditMode, store, toast } from '../../../store';
 import { DEFAULT_CUSTOM_THEME, THEME_PRESETS, type Settings, type ThemeName } from '@shared/types';
-import { updateSettings } from '../../settings/data';
+import { updateSettings } from '../../settings';
 import { errText } from '../../../api';
 async function save(patch: Partial<Settings>) {
     try {

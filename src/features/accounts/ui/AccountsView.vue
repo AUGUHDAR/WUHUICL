@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import AccountsView from '../../../views/AccountsView.impl.vue';
+import AccountsViewImpl from './AccountsViewImpl.vue';
 </script>
 
-<template><AccountsView /></template>
+<template><AccountsViewImpl /></template>

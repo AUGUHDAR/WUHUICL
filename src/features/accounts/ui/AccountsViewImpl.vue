@@ -19,9 +19,9 @@ import {
     saveYggdrasilProvider,
     selectYggdrasilProfile,
     selectAccount
-} from '../api';
-import { refreshAccounts, store, toast } from '../store';
-import Avatar from '../components/Avatar.vue';
+} from '../../../api';
+import { refreshAccounts, store, toast } from '../../../store';
+import Avatar from '../../../components/Avatar.vue';
 const credentialNotice = ref('');
 const credentialsPersistent = ref<boolean | null>(null);
 const securityNote = computed(() => {

@@ -11,7 +11,7 @@ import {
     carouselDuration,
     MAX_CAROUSEL_IMAGES
 } from '@shared/appearancePolicy';
-import { updateSettings } from '../../settings/data';
+import { updateSettings } from '../../settings';
 import {
     errText,
     getSystemInfo,
@@ -20,13 +20,14 @@ import {
     importLaunchThumbnail,
     resetBackground
 } from '../../../api';
+import { platform } from '../../../core/ipc';
 import { store, toast } from '../../../store';
 import { managedImageUrl } from '../../../managedAssets';
 import type { BackgroundSettings, ImageFit, Settings } from '@shared/types';
 
 const reducedTransparency = ref(false);
 function refreshNativeMaterial() {
-    if (window.kamucl.platform !== 'darwin') return;
+    if (platform() !== 'darwin') return;
     void getSystemInfo()
         .then((info) => {
             reducedTransparency.value = info.reducedTransparency === true;

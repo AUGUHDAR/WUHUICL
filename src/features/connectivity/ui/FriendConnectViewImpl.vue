@@ -1,14 +1,13 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref } from 'vue';
-import ConnectionStatus from '../components/connection/ConnectionStatus.vue';
-import '../components/connection/connection.css';
+import '../../../components/connection/connection.css';
 
-const FrpPanel = defineAsyncComponent(() => import('../components/connection/FrpPanel.vue'));
+const FrpPanel = defineAsyncComponent(() => import('../../../components/connection/FrpPanel.vue'));
 const VlConsole = defineAsyncComponent(
-    () => import('../components/connection/voxlink/VlConsole.vue')
+    () => import('../../../components/connection/voxlink/VlConsole.vue')
 );
 const TerracottaPanel = defineAsyncComponent(
-    () => import('../components/connection/TerracottaPanel.vue')
+    () => import('../../../components/connection/TerracottaPanel.vue')
 );
 
 /** 联机模块多页结构：landing=方式选择页，其余为各方式的独立页面 */

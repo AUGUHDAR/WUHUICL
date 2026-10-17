@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { openInstanceCenter } from '../instanceCenter';
-import { appearancePreview } from '../visualDesign';
+import { openInstanceCenter } from '../../../instanceCenter';
+import { appearancePreview } from '../../../visualDesign';
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { activeCarouselKeys, carouselDuration } from '@shared/appearancePolicy';
-import { useMotion } from '../motion';
+import { useMotion } from '../../../motion';
 import { CarouselPlayback } from '@shared/carouselPlayback';
 import {
     errText,
@@ -19,11 +19,10 @@ import {
     removeVersion,
     setActiveFolder,
     showFolderContextMenu
-} from '../api';
+} from '../../../api';
 import {
     selectedInstance,
     activeInstalled,
-    selectInstance,
     displayVersionName,
     displayVersionSub,
     fmtLastPlayed,
@@ -36,11 +35,11 @@ import {
     toast,
     toggleFavorite,
     versionIconUrl
-} from '../store';
-import Avatar from '../components/Avatar.vue';
-import ConfirmModal from '../components/ConfirmModal.vue';
-import SkinViewer3D from '../components/SkinViewer3D.vue';
-import CreatorCard from '../components/CreatorCard.vue';
+} from '../../../store';
+import Avatar from '../../../components/Avatar.vue';
+import ConfirmModal from '../../../components/ConfirmModal.vue';
+import SkinViewer3D from '../../../components/SkinViewer3D.vue';
+import CreatorCard from '../../../components/CreatorCard.vue';
 import type {
     ImageFit,
     InstalledVersion,
@@ -48,9 +47,9 @@ import type {
     ProfileSkins,
     SkinVariant
 } from '@shared/types';
-import { trackBootTask } from '../bootTasks';
-import { managedImageUrl } from '../managedAssets';
-import { builtInLaunchImages } from '../launchImages';
+import { trackBootTask } from '../../../bootTasks';
+import { managedImageUrl } from '../../../managedAssets';
+import { builtInLaunchImages } from '../../../launchImages';
 
 const LAST_VERSION_KEY = 'kamucl.lastVersion';
 

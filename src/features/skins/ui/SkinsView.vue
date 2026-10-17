@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import SkinsView from '../../../views/SkinsView.impl.vue';
+import SkinsViewImpl from './SkinsViewImpl.vue';
 </script>
 
-<template><SkinsView /></template>
+<template><SkinsViewImpl /></template>

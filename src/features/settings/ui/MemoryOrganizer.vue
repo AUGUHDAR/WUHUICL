@@ -1,19 +1,20 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { errText, saveSettings } from '../../../api';
+import { invokeIpc, platform } from '../../../core/ipc';
 import { store, toast } from '../../../store';
 import type { MemoryOrganizeResult } from '@shared/memoryOrganizer';
 
 const emit = defineEmits<{ refresh: [] }>();
 const busy = ref(false);
 const result = ref<MemoryOrganizeResult>();
-const windows = window.kamucl.platform === 'win32';
+const windows = platform() === 'win32';
 
 async function run() {
     if (busy.value) return;
     busy.value = true;
     try {
-        result.value = (await window.kamucl.invoke('memory:organize')) as MemoryOrganizeResult;
+        result.value = await invokeIpc<MemoryOrganizeResult>('memory:organize');
         emit('refresh');
     } catch (error) {
         toast(errText(error), 'error');

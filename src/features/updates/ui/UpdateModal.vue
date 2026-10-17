@@ -8,7 +8,7 @@ import UpdateDialogShell from './UpdateDialogShell.vue';
 import type { ReleaseInfo } from '@shared/types';
 import { QQ_GROUP_HINT } from '@shared/branding';
 import { renderMarkdownLite } from '../../../markdownLite';
-import { usePlatformUpdate } from '../../updates/data';
+import { usePlatformUpdate } from '../data';
 const { systemInstaller, installAction, installExplanation } = usePlatformUpdate();
 
 const props = defineProps<{
