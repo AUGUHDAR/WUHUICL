@@ -192,6 +192,8 @@ npm run build:web
 
 `npm run quality` bundles typechecking, frontend unit tests, the strict architecture check, and formatting. Run `npm run lint` and `npm run build:web` separately; CI also runs Rust formatting and Rust library tests.
 
+`npm run lint` runs ESLint through a warning budget: the 106 reviewed migration warnings in `eslint.warning-budget.json` are allowed, while any new warning fails. Refresh the budget only after reviewing a removed warning and shrinking the corresponding file exemption.
+
 Source follows the feature-first layout under `src/`: `app/` composes the shell, `core/` owns IPC and cross-cutting primitives, `features/<name>/` owns feature `ui/` and `data/`, and `shared/` holds framework-light domain utilities. Cross-feature imports go through `features/<name>/index.ts`; `core/` and `shared/` must not import features or the app shell. The architecture guardrail tracks existing migration debt in `scripts/legacy-source-allowlist.json`; new violations fail immediately.
 
 Temporary formatting and lint debt is tracked only in `.prettierignore.migration` and `eslint.legacy-exemptions.json`, respectively. Both use explicit file-level entries with removal conditions rather than directory-wide exclusions.

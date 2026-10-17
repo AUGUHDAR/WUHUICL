@@ -1,0 +1,638 @@
+[
+    {
+        "file": "scripts/visual-ids.ts",
+        "rule": "@typescript-eslint/no-explicit-any",
+        "messageId": "unexpectedAny",
+        "line": 15
+    },
+    {
+        "file": "scripts/visual-ids.ts",
+        "rule": "@typescript-eslint/no-explicit-any",
+        "messageId": "unexpectedAny",
+        "line": 20
+    },
+    {
+        "file": "scripts/visual-ids.ts",
+        "rule": "@typescript-eslint/no-explicit-any",
+        "messageId": "unexpectedAny",
+        "line": 30
+    },
+    {
+        "file": "shared/modFavorites.ts",
+        "rule": "no-empty",
+        "messageId": "unexpected",
+        "line": 18
+    },
+    {
+        "file": "shared/versionCategories.ts",
+        "rule": "no-control-regex",
+        "messageId": "unexpected",
+        "line": 22
+    },
+    {
+        "file": "shared/visualDesign.ts",
+        "rule": "@typescript-eslint/no-explicit-any",
+        "messageId": "unexpectedAny",
+        "line": 64
+    },
+    {
+        "file": "shared/visualDesign.ts",
+        "rule": "@typescript-eslint/no-explicit-any",
+        "messageId": "unexpectedAny",
+        "line": 67
+    },
+    {
+        "file": "shared/visualDesign.ts",
+        "rule": "@typescript-eslint/no-explicit-any",
+        "messageId": "unexpectedAny",
+        "line": 72
+    },
+    {
+        "file": "shared/visualDesign.ts",
+        "rule": "@typescript-eslint/no-explicit-any",
+        "messageId": "unexpectedAny",
+        "line": 76
+    },
+    {
+        "file": "src/app/overlays/AppOverlays.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 31
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 44
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 45
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 46
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 47
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 48
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 49
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 50
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 51
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 52
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 53
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 54
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 55
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 56
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 57
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 58
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 59
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 60
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "vue/no-v-html",
+        "messageId": "unexpected",
+        "line": 161
+    },
+    {
+        "file": "src/app/shell/AppShell.vue",
+        "rule": "vue/no-v-html",
+        "messageId": "unexpected",
+        "line": 232
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 2
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 4
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 8
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 9
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 26
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 63
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 65
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 80
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 87
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 91
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 91
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 94
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 95
+    },
+    {
+        "file": "src/app/shell/useAppShell.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 692
+    },
+    {
+        "file": "src/communityDownloadQueue.ts",
+        "rule": "@typescript-eslint/no-explicit-any",
+        "messageId": "unexpectedAny",
+        "line": 72
+    },
+    {
+        "file": "src/communityDownloadQueue.ts",
+        "rule": "@typescript-eslint/no-explicit-any",
+        "messageId": "unexpectedAny",
+        "line": 72
+    },
+    {
+        "file": "src/components/EditPanel.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 14
+    },
+    {
+        "file": "src/components/EditPanel.vue",
+        "rule": "@typescript-eslint/no-unused-expressions",
+        "messageId": "unusedExpression",
+        "line": 177
+    },
+    {
+        "file": "src/components/EditPanel.vue",
+        "rule": "vue/require-v-for-key",
+        "messageId": "requireKey",
+        "line": 272
+    },
+    {
+        "file": "src/components/EditPanel.vue",
+        "rule": "vue/require-v-for-key",
+        "messageId": "requireKey",
+        "line": 351
+    },
+    {
+        "file": "src/components/EditPanel.vue",
+        "rule": "vue/require-v-for-key",
+        "messageId": "requireKey",
+        "line": 378
+    },
+    {
+        "file": "src/components/EditPanel.vue",
+        "rule": "vue/require-v-for-key",
+        "messageId": "requireKey",
+        "line": 460
+    },
+    {
+        "file": "src/components/FileManager.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 23
+    },
+    {
+        "file": "src/components/FileManager.vue",
+        "rule": "@typescript-eslint/no-unused-expressions",
+        "messageId": "unusedExpression",
+        "line": 202
+    },
+    {
+        "file": "src/components/FileManager.vue",
+        "rule": "@typescript-eslint/no-unused-expressions",
+        "messageId": "unusedExpression",
+        "line": 277
+    },
+    {
+        "file": "src/components/FileManager.vue",
+        "rule": "@typescript-eslint/no-unused-expressions",
+        "messageId": "unusedExpression",
+        "line": 313
+    },
+    {
+        "file": "src/components/FileManager.vue",
+        "rule": "vue/no-v-html",
+        "messageId": "unexpected",
+        "line": 1023
+    },
+    {
+        "file": "src/components/MascotStage.vue",
+        "rule": "prefer-const",
+        "messageId": "useConst",
+        "line": 273
+    },
+    {
+        "file": "src/components/MascotStage.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 330
+    },
+    {
+        "file": "src/components/MinecraftVersionPicker.vue",
+        "rule": "vue/require-v-for-key",
+        "messageId": "requireKey",
+        "line": 175
+    },
+    {
+        "file": "src/components/ModDropModal.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 141
+    },
+    {
+        "file": "src/components/ModMigrationModal.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 2
+    },
+    {
+        "file": "src/components/ModMigrationModal.vue",
+        "rule": "vue/require-v-for-key",
+        "messageId": "requireKey",
+        "line": 213
+    },
+    {
+        "file": "src/components/ModVersionModal.vue",
+        "rule": "vue/require-v-for-key",
+        "messageId": "requireKey",
+        "line": 146
+    },
+    {
+        "file": "src/components/ModVersionModal.vue",
+        "rule": "vue/require-v-for-key",
+        "messageId": "requireKey",
+        "line": 153
+    },
+    {
+        "file": "src/components/SkinColorPalette.vue",
+        "rule": "vue/no-dupe-keys",
+        "messageId": "duplicateKey",
+        "line": 96
+    },
+    {
+        "file": "src/components/SkinColorPalette.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 101
+    },
+    {
+        "file": "src/components/SkinEditor.vue",
+        "rule": "@typescript-eslint/no-explicit-any",
+        "messageId": "unexpectedAny",
+        "line": 547
+    },
+    {
+        "file": "src/components/SkinViewer3D.vue",
+        "rule": "vue/no-dupe-keys",
+        "messageId": "duplicateKey",
+        "line": 85
+    },
+    {
+        "file": "src/components/connection/VoxLinkPanel.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 335
+    },
+    {
+        "file": "src/components/connection/VoxLinkPanel.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 588
+    },
+    {
+        "file": "src/components/connection/VoxLinkPanel.vue",
+        "rule": "no-empty",
+        "messageId": "unexpected",
+        "line": 614
+    },
+    {
+        "file": "src/components/connection/voxlink/VlTickets.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 5
+    },
+    {
+        "file": "src/composables/useDesignCanvas.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 6
+    },
+    {
+        "file": "src/composables/useDesignSession.ts",
+        "rule": "@typescript-eslint/no-explicit-any",
+        "messageId": "unexpectedAny",
+        "line": 93
+    },
+    {
+        "file": "src/features/appearance/ui/HomeLayoutEditor.vue",
+        "rule": "@typescript-eslint/no-unused-expressions",
+        "messageId": "unusedExpression",
+        "line": 83
+    },
+    {
+        "file": "src/features/community/data/communityDownloadQueue.ts",
+        "rule": "@typescript-eslint/no-explicit-any",
+        "messageId": "unexpectedAny",
+        "line": 72
+    },
+    {
+        "file": "src/features/community/data/communityDownloadQueue.ts",
+        "rule": "@typescript-eslint/no-explicit-any",
+        "messageId": "unexpectedAny",
+        "line": 72
+    },
+    {
+        "file": "src/features/community/ui/CommunityFavorites.vue",
+        "rule": "@typescript-eslint/no-unused-expressions",
+        "messageId": "unusedExpression",
+        "line": 111
+    },
+    {
+        "file": "src/features/community/ui/CommunityFavorites.vue",
+        "rule": "@typescript-eslint/no-unused-expressions",
+        "messageId": "unusedExpression",
+        "line": 116
+    },
+    {
+        "file": "src/features/community/ui/CommunityResultList.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 5
+    },
+    {
+        "file": "src/features/community/ui/CommunitySearchCard.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 15
+    },
+    {
+        "file": "src/features/community/ui/CommunitySearchCard.vue",
+        "rule": "vue/no-mutating-props",
+        "messageId": "unexpectedMutation",
+        "line": 108
+    },
+    {
+        "file": "src/features/community/ui/CommunitySearchCard.vue",
+        "rule": "vue/no-mutating-props",
+        "messageId": "unexpectedMutation",
+        "line": 210
+    },
+    {
+        "file": "src/features/community/ui/CommunitySearchCard.vue",
+        "rule": "vue/no-mutating-props",
+        "messageId": "unexpectedMutation",
+        "line": 234
+    },
+    {
+        "file": "src/features/community/ui/CommunitySearchCard.vue",
+        "rule": "vue/no-mutating-props",
+        "messageId": "unexpectedMutation",
+        "line": 278
+    },
+    {
+        "file": "src/features/community/ui/CommunitySearchCard.vue",
+        "rule": "vue/no-mutating-props",
+        "messageId": "unexpectedMutation",
+        "line": 286
+    },
+    {
+        "file": "src/features/community/ui/CommunitySearchCard.vue",
+        "rule": "vue/no-mutating-props",
+        "messageId": "unexpectedMutation",
+        "line": 293
+    },
+    {
+        "file": "src/features/community/ui/CommunityView.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 57
+    },
+    {
+        "file": "src/features/connectivity/ui/FriendConnectViewImpl.vue",
+        "rule": "vue/no-v-html",
+        "messageId": "unexpected",
+        "line": 97
+    },
+    {
+        "file": "src/features/settings/ui/SettingsRuntimeSection.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 171
+    },
+    {
+        "file": "src/features/settings/ui/SettingsUpdateDialogs.vue",
+        "rule": "vue/no-mutating-props",
+        "messageId": "unexpectedMutation",
+        "line": 62
+    },
+    {
+        "file": "src/features/updates/ui/ThirdPartyNotices.vue",
+        "rule": "vue/no-v-html",
+        "messageId": "unexpected",
+        "line": 17
+    },
+    {
+        "file": "src/features/updates/ui/UpdateModal.vue",
+        "rule": "vue/no-v-html",
+        "messageId": "unexpected",
+        "line": 126
+    },
+    {
+        "file": "src/mascotAudio.ts",
+        "rule": "no-empty",
+        "messageId": "unexpected",
+        "line": 70
+    },
+    {
+        "file": "src/mascotAudio.ts",
+        "rule": "prefer-const",
+        "messageId": "useConst",
+        "line": 114
+    },
+    {
+        "file": "src/mascotAudio.ts",
+        "rule": "no-empty",
+        "messageId": "unexpected",
+        "line": 123
+    },
+    {
+        "file": "src/mascotAudio.ts",
+        "rule": "no-empty",
+        "messageId": "unexpected",
+        "line": 246
+    },
+    {
+        "file": "src/mascotAudio.ts",
+        "rule": "no-empty",
+        "messageId": "unexpected",
+        "line": 280
+    },
+    {
+        "file": "src/mascotSoftware.ts",
+        "rule": "prefer-const",
+        "messageId": "useConst",
+        "line": 170
+    },
+    {
+        "file": "src/mascotSoftware.ts",
+        "rule": "prefer-const",
+        "messageId": "useConst",
+        "line": 176
+    },
+    {
+        "file": "src/mascotSoftware.ts",
+        "rule": "prefer-const",
+        "messageId": "useConst",
+        "line": 177
+    },
+    {
+        "file": "src/views/ServersView.vue",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 21
+    },
+    {
+        "file": "src/visualDesign.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 2
+    },
+    {
+        "file": "src/visualDesign.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 265
+    },
+    {
+        "file": "src/visualDesign.ts",
+        "rule": "@typescript-eslint/no-unused-vars",
+        "messageId": "unusedVar",
+        "line": 277
+    },
+    {
+        "file": "src/voxlinkTickets.ts",
+        "rule": "no-empty",
+        "messageId": "unexpected",
+        "line": 20
+    }
+]

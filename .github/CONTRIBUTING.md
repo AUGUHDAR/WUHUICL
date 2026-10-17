@@ -64,7 +64,7 @@ npx tauri build --no-bundle     # 产物：src-tauri/target/release/wuhuicl.exe
 
 ## 后端测试
 
-`src-tauri/src/vl/` 是 VoxLink P2P 引擎的移植，模块自带测试。但主 crate 直接 `cargo test` 会被 `vswhom-sys` 的构建脚本卡住，所以做法是：建一个空的独立 crate，用 `#[path]` 把 `src-tauri/src/vl/mod.rs` 挂进去跑 `cargo test`，只测引擎，不测整个启动器。逐套件带 timeout 跑，别一把梭全量。
+质量工作流会在 Windows 上运行 `cargo test --lib`，本地也用同一命令验证。`vswhom-sys` 和主 crate 当前都能编译链接；如果测试程序在 harness 启动前异常退出，先记录 Windows 错误码和 ApiSet/系统更新状态，不要把环境故障误判为测试断言失败。
 
 网络类模块的测试不碰真实服务器：TURN / 打洞 / 模组同步都用本地回环与内存桩，测试里会校验 HMAC 与指纹，不会往任何公网服务上打流量。
 

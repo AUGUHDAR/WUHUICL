@@ -135,6 +135,7 @@ function moduleSpecifier(specifier) {
 function inspectTree(sourceFile, block) {
     const imports = [];
     const ipcAccesses = [];
+    const windowAliases = new Set();
     const unwrapExpression = (node) => {
         let current = node;
         while (
@@ -147,6 +148,15 @@ function inspectTree(sourceFile, block) {
             current = current.expression;
         }
         return current;
+    };
+    const globalWindowExpression = (node) => {
+        const current = unwrapExpression(node);
+        if (!current) return false;
+        if (current.kind === ts.SyntaxKind.Identifier) {
+            const name = current.getText(sourceFile);
+            return name === 'window' || name === 'globalThis' || windowAliases.has(name);
+        }
+        return false;
     };
     const literalSpecifier = (node) => {
         if (ts.isStringLiteralLike(node)) return node;
@@ -164,6 +174,12 @@ function inspectTree(sourceFile, block) {
     };
 
     const visit = (node) => {
+        if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+            const initializer = node.initializer && unwrapExpression(node.initializer);
+            if (initializer && globalWindowExpression(initializer)) {
+                windowAliases.add(node.name.text);
+            }
+        }
         if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
             addImport(node.moduleSpecifier);
         } else if (
@@ -174,20 +190,14 @@ function inspectTree(sourceFile, block) {
         } else if (
             ts.isPropertyAccessExpression(node) &&
             node.name.text === 'kamucl' &&
-            (unwrapExpression(node.expression)?.kind === ts.SyntaxKind.Identifier ||
-                ts.isPropertyAccessExpression(unwrapExpression(node.expression)))
+            globalWindowExpression(node.expression)
         ) {
-            const target = unwrapExpression(node.expression)?.getText(sourceFile);
-            if (target === 'window' || target === 'globalThis') {
-                ipcAccesses.push({
-                    line:
-                        sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
-                });
-            }
+            ipcAccesses.push({
+                line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
+            });
         } else if (ts.isElementAccessExpression(node)) {
-            const target = unwrapExpression(node.expression)?.getText(sourceFile);
             const key = literalSpecifier(node.argumentExpression)?.text;
-            if (key === 'kamucl' && (target === 'window' || target === 'globalThis')) {
+            if (key === 'kamucl' && globalWindowExpression(node.expression)) {
                 ipcAccesses.push({
                     line:
                         sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
@@ -339,7 +349,7 @@ function inspectImport(file, importerFeature, targetPath, specifier, line, viola
         }
     }
 
-    if (file.startsWith('src/shared/')) {
+    if (file.startsWith('src/shared/') || file.startsWith('shared/')) {
         if (targetFeature) {
             addViolation(
                 violations,
@@ -371,17 +381,22 @@ function inspectImport(file, importerFeature, targetPath, specifier, line, viola
 }
 
 async function checkArchitecture(root, { allowlistPath = null, strictAllowlist = false } = {}) {
-    const sourceRoot = path.join(root, 'src');
-    try {
-        if (!(await stat(sourceRoot)).isDirectory()) throw new Error();
-    } catch {
-        throw new Error(`source directory does not exist: ${sourceRoot}`);
+    const sourceRoots = [path.join(root, 'src'), path.join(root, 'shared')];
+    const existingSourceRoots = [];
+    for (const sourceRoot of sourceRoots) {
+        try {
+            if ((await stat(sourceRoot)).isDirectory()) existingSourceRoots.push(sourceRoot);
+        } catch {
+            if (sourceRoot === sourceRoots[0]) {
+                throw new Error(`source directory does not exist: ${sourceRoot}`);
+            }
+        }
     }
 
     const allowlist = await loadAllowlist(root, allowlistPath);
-    const files = (await walk(sourceRoot)).filter((file) =>
-        SOURCE_EXTENSIONS.has(path.extname(file).toLowerCase())
-    );
+    const files = (await Promise.all(existingSourceRoots.map((rootPath) => walk(rootPath))))
+        .flat()
+        .filter((file) => SOURCE_EXTENSIONS.has(path.extname(file).toLowerCase()));
     const sourceFiles = new Set(files.map((file) => relativePath(root, file)));
     const violations = [];
     const inspectedAccesses = new Map();

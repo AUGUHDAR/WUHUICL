@@ -208,6 +208,32 @@ test('idle trimming uses the public IPC facade', () => {
     assert.match(source, /subscribeIpc/);
 });
 
+test('scans root shared sources for architecture violations', async (t) => {
+    const root = await createFixture(t, {
+        'shared/bad.ts': "export { default } from '../src/app/shell/AppShell.vue';\n",
+        'src/App.vue': '<template><main /></template>\n'
+    });
+
+    const result = runChecker(root);
+    const diagnostics = output(result);
+
+    assert.equal(result.status, 1, diagnostics);
+    assert.match(diagnostics, /shared\/bad\.ts:1:1 .*shared-app-boundary/);
+});
+
+test('reports indirect window aliases before IPC access', async (t) => {
+    const root = await createFixture(t, {
+        'src/features/accounts/ui/Alias.ts':
+            'const windowRef = window;\nconst bridge = windowRef.kamucl;\n'
+    });
+
+    const result = runChecker(root);
+    const diagnostics = output(result);
+
+    assert.equal(result.status, 1, diagnostics);
+    assert.match(diagnostics, /features\/accounts\/ui\/Alias\.ts:2:1 .*direct-ipc-access/);
+});
+
 test('package architecture command rejects stale migration entries', () => {
     const packageJson = JSON.parse(readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'));
     const command = packageJson.scripts['check:architecture'];

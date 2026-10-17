@@ -81,6 +81,14 @@
   fallback so native appearance and auto-fit side effects remain reachable; a regression
   test was added. Rust checks and test-binary compilation pass, while test execution remains
   blocked by the host loader failure described above.
+- Final guardrail review fixes: the architecture scanner now covers the repository-root
+  `shared/` tree and recognizes simple aliases of `window`/`globalThis`; the strict scan
+  covers 285 files. ESLint now runs through `eslint.warning-budget.json`, allowing only the
+  106 reviewed migration warnings and failing on new or stale warning identities. README and
+  CONTRIBUTING now describe the actual lint and Rust test gates.
+- Post-reboot retry: Windows and Rust toolchain state were unchanged, and `cargo test --lib`
+  still exited before the harness with host `0xc0000139`. The issue is not caused by the
+  earlier VS installation requiring a reboot.
 
 ## Rulings
 

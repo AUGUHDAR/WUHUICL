@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -306,4 +306,41 @@ test('community MOD targets retain file-instance compatibility filtering', () =>
         source,
         /modal\.kind !== 'mod'[\s\S]{0,180}communityFileMatchesInstance\(selectedFile\.value,\s*v\)/
     );
+});
+
+test('lint command treats warnings as a failing quality gate', () => {
+    const packageJson = JSON.parse(readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'));
+    const workflow = readFileSync(
+        path.join(repositoryRoot, '.github', 'workflows', 'quality.yml'),
+        'utf8'
+    );
+
+    assert.equal(packageJson.scripts.lint, 'node scripts/check-eslint-warning-budget.mjs');
+    assert.match(workflow, /run:\s+npm run lint/);
+    assert.equal(
+        existsSync(path.join(repositoryRoot, 'scripts', 'check-eslint-warning-budget.mjs')),
+        true
+    );
+});
+
+test('warning budget rejects new and stale warning identities', async () => {
+    const { compareWarnings } = await import(
+        pathToFileURL(path.join(repositoryRoot, 'scripts', 'check-eslint-warning-budget.mjs'))
+    );
+    const baseline = [
+        { file: 'src/A.vue', rule: 'vue/no-v-html', messageId: 'noVHtml', line: 1 },
+        { file: 'src/B.vue', rule: 'no-empty', messageId: 'unexpected', line: 2 }
+    ];
+
+    assert.deepEqual(
+        compareWarnings(baseline, [
+            ...baseline,
+            { file: 'src/A.vue', rule: 'vue/no-v-html', messageId: 'noVHtml', line: 9 }
+        ]),
+        {
+            added: [{ file: 'src/A.vue', rule: 'vue/no-v-html', messageId: 'noVHtml', line: 9 }],
+            removed: []
+        }
+    );
+    assert.deepEqual(compareWarnings(baseline, baseline.slice(0, 1)).removed, [baseline[1]]);
 });
