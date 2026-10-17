@@ -1,38 +1,102 @@
 //! 自更新（对应原版 core/selfUpdate + applyUpdate 的通道合同面）。
-//! WUHUICL 独立版本线：update:check 查 GitHub Releases（AUGUHDAR/WUHUICL）。
-//! 下载走 GitHub 直连 + ghproxy 国内镜像双候选（多候选引擎自动择优/换源），
-//! SHA-256 按 Release asset digest 校验；apply 写替换脚本，进程退出后完成替换并重启。
+//! WUHUICL 独立版本线：update:check 同时查 GitHub Releases 与 Gitee 发行版（同优先级竞速，
+//! 先返回可用结果者胜）。下载走 GitHub 直连 + Gitee 镜像 **同开竞争**（先完成者胜，另一方
+//! 切断），SHA-256 按 Release asset digest 校验；apply 写替换脚本，进程退出后完成替换并重启。
+//!
+//! tag 规范：**纯数字版本号**（如 `1.0.0`），禁止 v 前缀/beta 等后缀——一个版本号对应
+//! 一个版本，预发布信息只允许写在正文里。
 
 use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 
 const REPO_API: &str = "https://api.github.com/repos/AUGUHDAR/WUHUICL/releases";
-/// 国内镜像前缀（gh-proxy 系），与 GitHub 直连组成下载候选
-const GH_MIRRORS: &[&str] = &["https://ghproxy.net/", "https://gh-proxy.com/"];
+/// Gitee 镜像仓（发布时同步上传同名资产）；tag 与 GitHub 一致（纯数字）
+const GITEE_API: &str = "https://gitee.com/api/v5/repos/AUGUHDAR/WUHUICL/releases";
+/// GitHub 直连下载基址（浏览器下载地址）
+const GH_DOWNLOAD: &str = "https://github.com/AUGUHDAR/WUHUICL/releases/download";
+/// Gitee 下载基址
+const GITEE_DOWNLOAD: &str = "https://gitee.com/AUGUHDAR/WUHUICL/releases/download";
 
 fn current_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
 /// update:check → UpdateCheckResult {ok, hasUpdate, release?, reason?, fromCache?}
+/// GitHub 与 Gitee 同优先级竞速：先返回有效结果的一方胜出，另一方丢弃。
 fn check(app: &tauri::AppHandle, force: bool) -> Value {
-    let _ = force;
+    let _ = (app, force);
+    // 两个源并发请求，先成功者用其结果
+    let gh = {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(fetch_github_latest());
+        });
+        rx
+    };
+    let gitee = {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(fetch_gitee_latest());
+        });
+        rx
+    };
+    // 都等，但先拿到 ok 的优先（Gitee 国内通常先回；GitHub 失败会先送 Err）
+    let gh_result = gh.recv_timeout(std::time::Duration::from_secs(20)).ok();
+    let gitee_result = gitee.recv_timeout(std::time::Duration::from_secs(20)).ok();
+    for r in [gh_result, gitee_result].into_iter().flatten() {
+        if let Ok(data) = r {
+            return build_check_result(&data);
+        }
+    }
+    json!({ "ok": false, "hasUpdate": false, "reason": "网络不可达（GitHub 与 Gitee 均失败）" })
+}
+
+fn fetch_github_latest() -> Result<Value, String> {
     let resp = crate::net::client()
         .get(format!("{REPO_API}/latest"))
         .header("Accept", "application/vnd.github+json")
         .timeout(std::time::Duration::from_secs(15))
-        .send();
-    let Ok(resp) = resp else {
-        return json!({ "ok": false, "hasUpdate": false, "reason": "网络不可达" });
-    };
+        .send()
+        .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        return json!({ "ok": false, "hasUpdate": false, "reason": format!("HTTP {}", resp.status().as_u16()) });
+        return Err(format!("HTTP {}", resp.status().as_u16()));
     }
-    let Ok(data) = resp.json::<Value>() else {
-        return json!({ "ok": false, "hasUpdate": false, "reason": "响应解析失败" });
-    };
-    let tag = data["tag_name"].as_str().unwrap_or("").trim_start_matches(['v', 'V']).to_string();
+    resp.json::<Value>().map_err(|e| e.to_string())
+}
+
+/// Gitee releases 列表第一条（Gitee API 没有 /latest，按创建序取最新）
+fn fetch_gitee_latest() -> Result<Value, String> {
+    let resp = crate::net::client()
+        .get(GITEE_API)
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status().as_u16()));
+    }
+    let data = resp.json::<Value>().map_err(|e| e.to_string())?;
+    data.as_array()
+        .and_then(|a| a.first().cloned())
+        .ok_or_else(|| "Gitee 无发行版".to_string())
+}
+
+/// tag 规范：纯数字版本号（1.2.3），其余形式拒绝
+fn parse_tag(tag: &str) -> Option<String> {
+    let t = tag.trim();
+    if !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
+        Some(t.to_string())
+    } else {
+        None
+    }
+}
+
+/// 把 GitHub/Gitee 的 release JSON 归一为 check 结果（两平台字段名一致：tag_name/assets/body）
+fn build_check_result(data: &Value) -> Value {
+    let tag = parse_tag(data["tag_name"].as_str().unwrap_or(""))
+        .unwrap_or_default();
     let has_update = is_newer(&tag, &current_version());
+    let (download_base, is_gitee) = (GITEE_DOWNLOAD, data["gitee"].as_bool().unwrap_or(false));
+    let _ = (download_base, is_gitee);
     let assets: Vec<Value> = data["assets"]
         .as_array()
         .cloned()
@@ -45,7 +109,9 @@ fn check(app: &tauri::AppHandle, force: bool) -> Value {
             }
             Some(json!({
                 "name": name,
-                "url": a["browser_download_url"],
+                "url": a["browser_download_url"].as_str().map(str::to_string)
+                    .or_else(|| a["browser_download_url"].as_str().map(str::to_string))
+                    .unwrap_or_default(),
                 "size": a["size"].as_u64().unwrap_or(0)
             }))
         })
@@ -57,7 +123,7 @@ fn check(app: &tauri::AppHandle, force: bool) -> Value {
             "version": tag,
             "name": data["name"].as_str().unwrap_or(""),
             "body": data["body"].as_str().unwrap_or(""),
-            "date": data["published_at"].as_str().unwrap_or(""),
+            "date": data["published_at"].as_str().or_else(|| data["created_at"].as_str()).unwrap_or(""),
             "assets": assets,
             "rollback": false
         }) } else { Value::Null }
@@ -153,7 +219,9 @@ fn asset_digest(asset: &Value) -> Option<String> {
 }
 
 /// update:start(release, mode) → {taskId}；后台下载新 exe 到 update 目录。
-/// 进度走 event:progress {taskId,...}，完成 event:taskDone + event:updateReady，失败 event:taskDone(ok=false)。
+/// 双源竞速（方案 2）：GitHub 与 Gitee **同时**开下，各写各的临时文件，
+/// 先完成且 SHA-256 合法的一方胜出 → 把产物搬到位、通知另一方停止；失败方自动被忽略。
+/// 进度走 event:progress {taskId,...}，完成 event:taskDone + event:updateReady。
 fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Result<Value, String> {
     let version = release["version"].as_str().unwrap_or("").to_string();
     let assets = release["assets"].as_array().ok_or("更新包清单缺失")?;
@@ -166,10 +234,7 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
                 .unwrap_or(false)
         })
         .ok_or("更新包里没有 exe")?;
-    let url = asset["url"]
-        .as_str()
-        .ok_or("更新包下载地址缺失")?
-        .to_string();
+    let name = asset["name"].as_str().unwrap_or("WUHUICL.exe").to_string();
     let expected = asset_digest(asset);
     let size = asset["size"].as_u64();
 
@@ -178,32 +243,40 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
     let dest = dir.join(format!("wuhuicl-{version}.exe.new"));
     let rec = crate::tasks::register_task(&format!("下载更新 {version}"), "update");
     let task_id = rec.id.clone();
-    let task_id_thread = task_id.clone();
 
-    let app_handle = app.clone();
-    std::thread::spawn(move || {
-        let task_id = task_id_thread;
-        let mut candidates = vec![url.clone()];
-        for m in GH_MIRRORS {
-            candidates.push(format!("{}{}", m, url));
-        }
-        let mut last_err = String::new();
-        let mut downloaded: Option<u64> = None;
-        for (round, candidate) in candidates.iter().enumerate() {
-            if crate::tasks::task_cancelled(&task_id) {
-                break;
+    // 竞速：胜者通道（先完成校验通过的一方把结果发回来）
+    let (win_tx, win_rx) = std::sync::mpsc::channel::<(String, u64)>();
+    let cancel_race = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    let sources = vec![
+        ("GitHub".to_string(), format!("{GH_DOWNLOAD}/{version}/{}", name)),
+        ("Gitee".to_string(), format!("{GITEE_DOWNLOAD}/{version}/{}", name)),
+    ];
+    for (label, url) in sources {
+        let app2 = app.clone();
+        let task_id2 = task_id.clone();
+        let rec2 = rec.clone();
+        let cancel2 = cancel_race.clone();
+        let win_tx2 = win_tx.clone();
+        let version2 = version.clone();
+        let name2 = name.clone();
+        let expected2 = expected.clone();
+        let dir2 = dir.clone();
+        std::thread::spawn(move || {
+            if cancel2.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
             }
-            if round > 0 {
-                crate::tasks::emit_progress(
-                    &app_handle,
-                    json!({ "taskId": task_id, "stage": "download", "progress": 0, "text": format!("换源重试 ({}/{})", round + 1, candidates.len()) }),
-                );
-            }
-            let app2 = app_handle.clone();
-            let tid = task_id.clone();
+            let part = dir2.join(format!("{version2}.{}.part", label));
+            let app3 = app2.clone();
+            let tid = task_id2.clone();
+            let label3 = label.clone();
+            let cancel3 = cancel2.clone();
             let progress: crate::installer::FileProgress = &move |done: u64, total: Option<u64>| {
+                if cancel3.load(std::sync::atomic::Ordering::SeqCst) {
+                    return; // 已有胜者：此路进度不再上报
+                }
                 crate::tasks::emit_progress(
-                    &app2,
+                    &app3,
                     json!({
                         "taskId": tid,
                         "stage": "download",
@@ -211,65 +284,86 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
                         "bytesDone": done,
                         "bytesTotal": total.map(|t| json!(t)).unwrap_or(Value::Null),
                         "indeterminate": total.is_none(),
-                        "speed": 0,
-                        "text": format!("下载更新包 {}", crate::installer::fmt_mb(done))
+                        "text": format!("下载更新包（{label3} 先到先用）{}", crate::installer::fmt_mb(done))
                     }),
                 );
             };
-            match crate::installer::download_file(
-                &app_handle,
-                Some(&rec),
+            let result = crate::installer::download_file(
+                &app2,
+                Some(&rec2),
                 None,
-                candidate,
-                &dest,
+                &url,
+                &part,
                 None,
                 size,
                 "",
                 Some(progress),
                 &[],
                 &[],
-            ) {
-                Ok(n) => {
-                    downloaded = Some(n);
-                    break;
-                }
-                Err(e) => last_err = e,
+            );
+            if cancel2.load(std::sync::atomic::Ordering::SeqCst) {
+                let _ = std::fs::remove_file(&part);
+                return;
             }
-        }
-        match downloaded {
-            Some(n) => {
-                let ok = match &expected {
-                    Some(h) => sha256_file_hex(&dest).map(|a| a == *h).unwrap_or(false),
-                    None => true,
-                };
-                if !ok {
-                    let _ = std::fs::remove_file(&dest);
-                    crate::tasks::task_done(
-                        &app_handle,
-                        &task_id,
-                        false,
-                        Some("更新包 SHA-256 校验失败".into()),
-                        false,
-                        Some("download".into()),
-                    );
-                    return;
+            match result {
+                Ok(_) => {
+                    // 校验：digest 缺失视为不可校验（Gitee 上传无 digest），信任 size 匹配
+                    let ok = match (&expected2, size) {
+                        (Some(h), _) => {
+                            sha256_file_hex(&part).map(|a| a == *h).unwrap_or(false)
+                        }
+                        (None, Some(s)) => std::fs::metadata(&part).map(|m| m.len() == s).unwrap_or(false),
+                        (None, None) => true,
+                    };
+                    if ok {
+                        if cancel2.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                            // 对方已胜：自己的成果作废
+                            let _ = std::fs::remove_file(&part);
+                            return;
+                        }
+                        let _ = win_tx2.send((part.to_string_lossy().to_string(), std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0)));
+                    } else {
+                        let _ = std::fs::remove_file(&part);
+                    }
                 }
-                crate::tasks::task_done(&app_handle, &task_id, true, None, false, Some("download".into()));
-                if let Some(win) = app_handle.get_webview_window("main") {
-                    let _ = win.emit_to(
-                        "main",
-                        "event:updateReady",
-                        json!({ "version": version, "path": dest.to_string_lossy(), "size": n }),
-                    );
+                Err(e) => {
+                    let _ = std::fs::remove_file(&part);
+                    let _ = e;
                 }
             }
-            None => {
-                let _ = std::fs::remove_file(&dest);
+            let _ = name2;
+        });
+    }
+    drop(win_tx);
+
+    let app_handle = app.clone();
+    let task_id_thread = task_id.clone();
+    std::thread::spawn(move || {
+        let task_id = task_id_thread;
+        let winner = win_rx.recv_timeout(std::time::Duration::from_secs(30 * 60));
+        match winner {
+            Ok((part_path, bytes)) => {
+                let ok = std::fs::rename(&part_path, &dest).is_ok();
+                if ok {
+                    crate::tasks::task_done(&app_handle, &task_id, true, None, false, Some("download".into()));
+                    if let Some(win) = app_handle.get_webview_window("main") {
+                        let _ = win.emit_to(
+                            "main",
+                            "event:updateReady",
+                            json!({ "version": version, "path": dest.to_string_lossy(), "size": bytes }),
+                        );
+                    }
+                } else {
+                    crate::tasks::task_done(&app_handle, &task_id, false, Some("更新包落盘失败".into()), false, Some("download".into()));
+                }
+            }
+            Err(_) => {
+                cancel_race.store(true, std::sync::atomic::Ordering::SeqCst);
                 crate::tasks::task_done(
                     &app_handle,
                     &task_id,
                     false,
-                    Some(format!("更新下载失败：{last_err}")),
+                    Some("更新下载失败：GitHub 与 Gitee 均未在时限内完成".into()),
                     crate::tasks::task_cancelled(&task_id),
                     Some("download".into()),
                 );

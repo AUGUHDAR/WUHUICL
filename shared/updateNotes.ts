@@ -12,7 +12,7 @@ export interface UpdateNote {
  */
 export const updateNotes: UpdateNote[] = [
     {
-        version: '0.1.0',
+        version: '1.0.0',
         date: '2026-10-17 20:00',
         changes: [
             '基础：版本安装/启动/资源补全全链路可用；PCL 口径目录（exe 旁 .minecraft 与 WUHUICL 数据目录）；多候选下载引擎带分片并行、慢速换源与流式校验',
