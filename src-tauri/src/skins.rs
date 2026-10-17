@@ -134,6 +134,11 @@ fn to_data_url(bytes: &[u8]) -> String {
 }
 
 /// 纹理下载转 dataURL（对应 downloadTexture：8MB 上限 + PNG 校验）
+/// mslogin.rs 外置皮肤通道共用：URL → { dataUrl } | null
+pub fn fetch_texture_public(url: &str) -> Value {
+    fetch_texture(url).unwrap_or(Value::Null)
+}
+
 fn fetch_texture(url: &str) -> Option<Value> {
     let resp = crate::net::client().get(url).timeout(std::time::Duration::from_secs(30)).send().ok()?;
     if !resp.status().is_success() {
@@ -179,8 +184,9 @@ fn fetch_profile(app: &tauri::AppHandle, account: &Value, _refresh: bool) -> Res
             }))
         }
         Some("yggdrasil") => {
-            let valid = crate::mslogin::get_valid_account(app, account.clone())?;
-            crate::mslogin::external_profile_public(app, &valid)
+            // 皮肤档案取自 sessionserver，无需有效令牌（PCL SkinAuthLoad 同口径）；
+            // 令牌校验/刷新留给启动前的 get_valid_account，避免令牌过期连头像都看不到
+            crate::mslogin::external_profile_public(app, account)
         }
         _ => {
             let token = require_mc_token(app)?;

@@ -48,6 +48,10 @@ export interface YggdrasilProvider {
     sessionServer: string;
     servicesUrl?: string;
     skinDomains: string[];
+    /** 皮肤站注册页（元数据 meta.links.register），用于"注册账号"入口 */
+    registerUrl?: string;
+    /** 皮肤站主页（元数据 meta.links.homepage） */
+    homepageUrl?: string;
     insecure: boolean;
     metadataFetchedAt: string;
 }

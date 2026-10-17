@@ -797,6 +797,10 @@ struct ProviderDescriptor {
     session_server: String,
     services_url: String,
     skin_domains: Vec<String>,
+    /// 元数据 meta.links.register（皮肤站注册页，PCL Skin_Click 同款入口）
+    register_url: String,
+    /// 元数据 meta.links.homepage（皮肤站主页）
+    homepage_url: String,
 }
 
 /// 手写 URL 归一化（协议校验 + 尾斜杠），等价 normalizeYggdrasilUrl 的实现口径
@@ -835,6 +839,12 @@ fn resolve_provider_endpoints(descriptor: &ProviderDescriptor, resolved_api_root
     });
     if !descriptor.services_url.is_empty() {
         result["servicesUrl"] = json!(resolve(&descriptor.services_url, "")?);
+    }
+    if !descriptor.register_url.is_empty() {
+        result["registerUrl"] = json!(descriptor.register_url);
+    }
+    if !descriptor.homepage_url.is_empty() {
+        result["homepageUrl"] = json!(descriptor.homepage_url);
     }
     Ok(result)
 }
@@ -968,6 +978,8 @@ fn descriptor_from_text(text: &str, source_label: &str) -> Result<ProviderDescri
             session_server: find_string(&data, &["sessionServer"]).unwrap_or_default(),
             services_url: find_string(&data, &["services", "servicesUrl", "metadataUrl"]).unwrap_or_default(),
             skin_domains: normalize_skin_domains(find_strings(&data, &["skinDomains", "textureDomains"])),
+            register_url: find_string(&data, &["register", "registerUrl", "registerPage"]).unwrap_or_default(),
+            homepage_url: find_string(&data, &["homepage", "homepageUrl", "homePage"]).unwrap_or_default(),
         });
     }
     let shortcut = regex::Regex::new(r"(?im)^URL\s*=\s*(.+)$")
@@ -1032,6 +1044,8 @@ fn clean_provider(value: &Value) -> Option<Value> {
         skin_domains: normalize_skin_domains(
             value["skinDomains"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default(),
         ),
+        register_url: value["registerUrl"].as_str().unwrap_or("").to_string(),
+        homepage_url: value["homepageUrl"].as_str().unwrap_or("").to_string(),
         name: String::new(),
     };
     descriptor.name = value["name"].as_str().unwrap_or("").trim().to_string();
@@ -1045,6 +1059,8 @@ fn clean_provider(value: &Value) -> Option<Value> {
     out["id"] = json!(provider_id(&api_root).ok()?);
     out["name"] = json!(name);
     out["skinDomains"] = json!(descriptor.skin_domains);
+    out["registerUrl"] = json!(value["registerUrl"].as_str().unwrap_or(""));
+    out["homepageUrl"] = json!(value["homepageUrl"].as_str().unwrap_or(""));
     out["metadataFetchedAt"] = json!(value["metadataFetchedAt"].as_str().map(str::to_string).unwrap_or_else(|| "1970-01-01T00:00:00Z".into()));
     Some(out)
 }
@@ -1230,6 +1246,25 @@ fn probe_provider(app: &AppHandle, input: &Value, allow_insecure: bool) -> Resul
         descriptor.name.clone()
     });
     candidate["skinDomains"] = json!(skin_domains);
+    // 皮肤站注册页与主页（元数据 meta.links，供前端"注册账号/主页"入口）
+    let register_url = if descriptor.register_url.is_empty() {
+        data["meta"]["links"]["register"]
+            .as_str()
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    } else {
+        descriptor.register_url.clone()
+    };
+    candidate["registerUrl"] = json!(register_url);
+    let homepage_url = if descriptor.homepage_url.is_empty() {
+        data["meta"]["links"]["homepage"]
+            .as_str()
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    } else {
+        descriptor.homepage_url.clone()
+    };
+    candidate["homepageUrl"] = json!(homepage_url);
     candidate["metadataFetchedAt"] = json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
     candidate["sourceLabel"] = json!(descriptor.source_label);
     candidate["aliRedirected"] = json!(ali_redirected);
@@ -1859,6 +1894,10 @@ fn build_authlib_injector_arguments(jar_path: &str, api_root: &str, metadata: &s
     }
     Ok(vec![
         format!("-javaagent:{}={}", jar_path, root),
+        // 客户端侧注入（PCL ModLaunch.vb 同款）
+        "-Dauthlibinjector.side=client".to_string(),
+        // 信任 Windows 系统根证书：部分皮肤站证书链不在 Java 仓库里（PCL #5252）
+        "-Djavax.net.ssl.trustStoreType=WINDOWS-ROOT".to_string(),
         format!(
             "-Dauthlibinjector.yggdrasil.prefetched={}",
             base64::engine::general_purpose::STANDARD.encode(metadata.as_bytes())
@@ -1938,17 +1977,84 @@ pub fn external_profile_public(app: &tauri::AppHandle, account: &Value) -> Resul
     let skin_url = payload["textures"]["SKIN"]["url"].as_str().map(str::to_string);
     let cape_url = payload["textures"]["CAPE"]["url"].as_str().map(str::to_string);
     let skins = skin_url.map(|u| {
+        // 方块头像走 skin:avatar → skins[0].dataUrl（微软通道同款口径：字符串 dataURL 或 null），
+        // 下载失败保留 url 让 3D 预览仍可加载
+        let texture = crate::skins::fetch_texture_public(&u);
+        let data_url = texture["dataUrl"].as_str().map(str::to_string).unwrap_or_default();
         json!([{
             "url": u,
+            "dataUrl": data_url,
             "variant": if payload["textures"]["SKIN"]["metadata"]["model"].as_str() == Some("slim") { "slim" } else { "classic" },
             "state": "ACTIVE"
         }])
     }).unwrap_or(json!([]));
-    let capes = cape_url.map(|u| json!([{ "id": "cape", "alias": "披风", "active": true, "url": u }])).unwrap_or(json!([]));
+    let capes = cape_url.map(|u| {
+        let texture = crate::skins::fetch_texture_public(&u);
+        let data_url = texture["dataUrl"].as_str().map(str::to_string).unwrap_or_default();
+        json!([{ "id": "cape", "alias": "披风", "active": true, "url": u, "dataUrl": data_url }])
+    }).unwrap_or(json!([]));
     Ok(json!({
         "username": data["name"].as_str().unwrap_or_else(|| account["username"].as_str().unwrap_or("")),
         "skins": skins,
         "capes": capes
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_jar_args(metadata: &str) -> Vec<String> {
+        build_authlib_injector_arguments("C:/injector.jar", "https://littleskin.cn/api/yggdrasil", metadata).unwrap()
+    }
+
+    #[test]
+    fn injector_args_match_pcl_shape() {
+        let meta = r#"{"meta":{"serverName":"LittleSkin"}}"#;
+        let args = test_jar_args(meta);
+        assert_eq!(args[0], "-javaagent:C:/injector.jar=https://littleskin.cn/api/yggdrasil/");
+        // PCL 同款：side=client + 信任 Windows 根证书 + prefetch base64
+        assert_eq!(args[1], "-Dauthlibinjector.side=client");
+        assert_eq!(args[2], "-Djavax.net.ssl.trustStoreType=WINDOWS-ROOT");
+        assert!(args[3].starts_with("-Dauthlibinjector.yggdrasil.prefetched="));
+        use base64::Engine;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(args[3].trim_start_matches("-Dauthlibinjector.yggdrasil.prefetched="))
+            .unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), meta);
+    }
+
+    #[test]
+    fn injector_args_reject_bad_metadata() {
+        assert!(build_authlib_injector_arguments("C:/i.jar", "https://x.cn/", "not-json").is_err());
+        assert!(build_authlib_injector_arguments("", "https://x.cn/", "{}").is_err());
+    }
+
+    #[test]
+    fn metadata_links_landed_in_candidate() {
+        // probe_provider 对元数据 meta.links 的捕获（register/homepage）
+        let data: Value = serde_json::from_str(
+            r#"{"meta":{"links":{"register":"https://littleskin.cn/auth/register","homepage":"https://littleskin.cn"}}}"#,
+        )
+        .unwrap();
+        let descriptor = ProviderDescriptor::default();
+        let register_url = if descriptor.register_url.is_empty() {
+            data["meta"]["links"]["register"].as_str().unwrap_or_default().to_string()
+        } else {
+            descriptor.register_url.clone()
+        };
+        assert_eq!(register_url, "https://littleskin.cn/auth/register");
+    }
+
+    #[test]
+    fn profile_texture_data_url_is_unwrapped_to_string() {
+        // external_profile_public 的 dataUrl 必须是字符串（skin:avatar 按字符串取）
+        let texture = json!({ "dataUrl": "data:image/png;base64,AAA" });
+        let data_url = texture["dataUrl"].as_str().map(str::to_string).unwrap_or_default();
+        assert_eq!(data_url, "data:image/png;base64,AAA");
+        // 下载失败 → 空串（不是嵌套对象/null），3D 预览仍可用 url
+        let failed = crate::skins::fetch_texture_public("http://127.0.0.1:1/nope.png");
+        assert!(failed["dataUrl"].as_str().is_none());
+    }
 }
 

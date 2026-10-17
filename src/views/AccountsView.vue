@@ -163,6 +163,23 @@ async function loadProviders() {
     }
 }
 
+const selectedProvider = computed(
+    () => providers.value.find((p) => p.id === yggLogin.providerId) ?? null
+);
+const selectedProviderRegisterUrl = computed(() => selectedProvider.value?.registerUrl ?? '');
+const selectedProviderHomepage = computed(() => {
+    // 元数据 homepage 优先；老配置没有时退回 apiRoot 去掉 /api/yggdrasil 尾巴
+    const meta = selectedProvider.value?.homepageUrl ?? '';
+    if (meta) return meta;
+    const root = selectedProvider.value?.apiRoot ?? '';
+    return root.replace(/\/api\/yggdrasil\/?$/, '') || '';
+});
+
+function openExternal(url: string) {
+    if (!url) return;
+    window.open(url);
+}
+
 function openProviderImport(input?: YggdrasilProviderInput) {
     Object.assign(providerModal, {
         open: true,
@@ -569,6 +586,28 @@ async function onRemove(acc: Account) {
                     >
                         {{ yggLogin.busy ? '正在认证…' : '登录' }}
                     </button>
+                </div>
+                <div class="ygg-links">
+                    <a
+                        v-if="selectedProviderRegisterUrl"
+                        :href="selectedProviderRegisterUrl"
+                        target="_blank"
+                        rel="noopener"
+                        class="ygg-link"
+                        @click.prevent="openExternal(selectedProviderRegisterUrl)"
+                    >
+                        在 {{ selectedProvider?.name ?? '皮肤站' }} 注册账号
+                    </a>
+                    <a
+                        v-if="selectedProviderHomepage"
+                        :href="selectedProviderHomepage"
+                        target="_blank"
+                        rel="noopener"
+                        class="ygg-link"
+                        @click.prevent="openExternal(selectedProviderHomepage)"
+                    >
+                        打开皮肤站主页
+                    </a>
                 </div>
                 <p class="security-note">{{ securityNote }}</p>
             </div>
@@ -982,6 +1021,19 @@ async function onRemove(acc: Account) {
 .security-note {
     color: var(--ok);
     font-size: var(--text-xs);
+}
+.ygg-links {
+    display: flex;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+}
+.ygg-link {
+    color: var(--accent-2);
+    font-size: var(--text-xs);
+    text-decoration: none;
+}
+.ygg-link:hover {
+    text-decoration: underline;
 }
 
 /* 账号列表 */
