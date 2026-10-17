@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import {
     addOfflineAccount,
     copyText,
@@ -164,6 +164,7 @@ async function loadProviders() {
     }
 }
 
+const identifierInput = ref<HTMLInputElement | null>(null);
 const selectedProvider = computed(
     () => providers.value.find((p) => p.id === yggLogin.providerId) ?? null
 );
@@ -181,13 +182,50 @@ function openExternal(url: string) {
     window.open(url);
 }
 
+/** LittleSkin 内置预设辅助（保留给文档注释：无需手动添加，列表自带） */
+
 function providerIconUrl(provider: YggdrasilProvider): string | null {
     return skinSiteIconUrl(provider.apiRoot, provider.name);
 }
 
-/** LittleSkin 预设（美西螈 useLittleSkinPreset 同款）：填入官方 API Root 并直接探测 */
-async function useLittleSkinPreset() {
-    openProviderImport({ kind: 'text', value: 'https://littleskin.cn/api/yggdrasil' });
+// ---------------- 拖拽卡片直登弹窗（拖入 → 填账号密码 → 登录入库一步完成） ----------------
+const dragLogin = reactive({
+    open: false,
+    busy: false,
+    identifier: '',
+    password: '',
+    provider: null as YggdrasilProvider | null
+});
+const dragIdentifierInput = ref<HTMLInputElement | null>(null);
+
+/** 拖入皮肤站卡片后由 App.vue 调用：已保存的提供商直接弹登录，新的先探测保存再弹登录 */
+function openDragLogin(provider: YggdrasilProvider) {
+    Object.assign(dragLogin, {
+        open: true,
+        busy: false,
+        identifier: '',
+        password: '',
+        provider
+    });
+    yggLogin.providerId = provider.id;
+    void nextTick(() => dragIdentifierInput.value?.focus());
+}
+
+async function onDragLogin() {
+    if (dragLogin.busy || !dragLogin.provider) return;
+    if (!dragLogin.identifier.trim() || !dragLogin.password) return;
+    dragLogin.busy = true;
+    try {
+        await finishYggLogin(
+            await loginYggdrasil(dragLogin.provider.id, dragLogin.identifier, dragLogin.password)
+        );
+        dragLogin.open = false;
+        dragLogin.password = '';
+    } catch (e) {
+        toast(`登录失败：${errText(e)}`, 'error');
+    } finally {
+        dragLogin.busy = false;
+    }
 }
 
 function openProviderImport(input?: YggdrasilProviderInput) {
@@ -242,6 +280,33 @@ async function confirmProvider() {
         providerModal.error = errText(e);
     } finally {
         providerModal.saving = false;
+    }
+}
+
+/**
+ * 拖入皮肤站卡片的入口（App.vue 拖拽链调用）：探测 → 静默保存 → 直登弹窗。
+ * 与手动"添加提供商"（providerModal 确认框）分离：拖拽是玩家明确想登录的动作，
+ * 不需要再按一次"确认保存"。
+ */
+async function handleDraggedProvider(input: YggdrasilProviderInput) {
+    try {
+        const candidate = await probeYggdrasilProvider(input, false);
+        let known = providers.value.find((p) => p.id === candidate.id);
+        if (!known) {
+            if (candidate.insecure) {
+                // 明文 HTTP 风险必须显式确认，静默保存不合规
+                openProviderImport(input);
+                return;
+            }
+            const list = await saveYggdrasilProvider(candidate, false);
+            providers.value = list;
+            known = list.find((p) => p.id === candidate.id);
+        }
+        if (known) openDragLogin(known);
+    } catch (e) {
+        // 探测失败（无效地址/网络）：回落到手动确认弹窗展示错误，让玩家修正
+        openProviderImport(input);
+        toast('识别皮肤站卡片失败：' + errText(e), 'error');
     }
 }
 
@@ -364,7 +429,7 @@ onMounted(() => {
             credentialNotice.value = '无法获取当前系统的安全存储状态。';
         });
     void loadProviders();
-    store.yggdrasilImportHandler = openProviderImport;
+    store.yggdrasilImportHandler = handleDraggedProvider;
     if (store.pendingYggdrasilImport) {
         const pending = store.pendingYggdrasilImport;
         store.pendingYggdrasilImport = null;
@@ -530,9 +595,6 @@ async function onRemove(acc: Account) {
                         >
                             {{ checkingRuntime ? '校验中…' : '检查运行组件' }}
                         </button>
-                        <button class="btn btn-ghost btn-sm" @click="useLittleSkinPreset">
-                            LittleSkin 一键添加
-                        </button>
                         <button class="btn btn-ghost btn-sm" @click="openProviderImport()">
                             添加提供商
                         </button>
@@ -554,6 +616,7 @@ async function onRemove(acc: Account) {
                             </p>
                         </div>
                         <button
+                            v-if="!provider.builtin"
                             class="btn btn-danger btn-sm"
                             :disabled="removingProviderId === provider.id"
                             @click="onRemoveProvider(provider)"
@@ -563,7 +626,8 @@ async function onRemove(acc: Account) {
                     </div>
                 </div>
                 <div v-else class="provider-empty">
-                    尚未添加提供商。可直接输入 <code>littleskin.cn</code> 后探测。
+                    LittleSkin 已内置，直接在下方输入账号密码登录；其他皮肤站可把卡片或 API
+                    地址拖到窗口，或点"添加提供商"。
                 </div>
 
                 <div class="ygg-login-grid">
@@ -583,6 +647,7 @@ async function onRemove(acc: Account) {
                     <label>
                         <span>账号或邮箱</span>
                         <input
+                            ref="identifierInput"
                             v-model="yggLogin.identifier"
                             class="input"
                             autocomplete="username"
@@ -854,6 +919,59 @@ async function onRemove(acc: Account) {
                     </div>
                 </div>
             </div>
+
+            <!-- 拖入皮肤站卡片直登 -->
+            <div
+                v-if="dragLogin.open && dragLogin.provider"
+                class="modal-mask"
+                @pointerdown.self="dragLogin.open = false"
+            >
+                <div class="modal provider-modal">
+                    <h3 class="modal-title">登录 {{ dragLogin.provider.name }}</h3>
+                    <div class="provider-preview drag-provider-info">
+                        <div>
+                            <span>皮肤站</span>
+                            <strong>{{ dragLogin.provider.name }}</strong>
+                        </div>
+                        <div>
+                            <span>API Root</span>
+                            <code>{{ dragLogin.provider.apiRoot }}</code>
+                        </div>
+                    </div>
+                    <form class="drag-login-form" @submit.prevent="onDragLogin">
+                        <label>
+                            <span>账号或邮箱</span>
+                            <input
+                                ref="dragIdentifierInput"
+                                v-model="dragLogin.identifier"
+                                class="input"
+                                autocomplete="username"
+                            />
+                        </label>
+                        <label>
+                            <span>密码</span>
+                            <input
+                                v-model="dragLogin.password"
+                                class="input"
+                                type="password"
+                                autocomplete="current-password"
+                            />
+                        </label>
+                        <div class="modal-actions">
+                            <button
+                                type="button"
+                                class="btn btn-ghost"
+                                @click="dragLogin.open = false"
+                            >
+                                取消
+                            </button>
+                            <button type="submit" class="btn btn-gold" :disabled="dragLogin.busy">
+                                {{ dragLogin.busy ? '正在登录…' : '登录' }}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
         </Teleport>
     </div>
 </template>
@@ -1060,6 +1178,19 @@ async function onRemove(acc: Account) {
 .security-note {
     color: var(--ok);
     font-size: var(--text-xs);
+}
+.drag-provider-info {
+    margin: 0 0 var(--space-3);
+}
+.drag-login-form {
+    display: grid;
+    gap: var(--space-3);
+}
+.drag-login-form label {
+    display: grid;
+    gap: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--text-dim);
 }
 .ygg-links {
     display: flex;

@@ -33,23 +33,38 @@ function pointFrom(payload: DragPayload): { x: number; y: number } {
     return { x: payload.position.x / dpr, y: payload.position.y / dpr };
 }
 
-/** 构造带 File 列表的合成拖放事件并派发到指针下的元素（冒泡到 window 监听器） */
+/**
+ * 构造带 File 列表的合成拖放事件并派发到指针下的元素（冒泡到 window 监听器）。
+ * wry 补丁（vendor/wry）会把 OS 文本拖拽以 `wuhuicl-text:<内容>` 伪路径送进 paths，
+ * 这里解码后放回 dataTransfer 的 text/plain —— 前端按 HTML5 标准口径消费。
+ */
+const TEXT_PATH_PREFIX = 'wuhuicl-text:';
+
+function pathsToText(paths: string[]): string | null {
+    const textItems = paths.filter((p) => p.startsWith(TEXT_PATH_PREFIX));
+    if (!textItems.length) return null;
+    return textItems.map((p) => p.slice(TEXT_PATH_PREFIX.length)).join('\n');
+}
+
 function dispatchDrag(type: string, payload: DragPayload): void {
     const pt = pointFrom(payload);
     const target = document.elementFromPoint(pt.x, pt.y) ?? document.body;
     const dt = new DataTransfer();
+    const dragText = type === 'drop' ? pathsToText(payload.paths) : null;
     if (type === 'drop') {
-        if (payload.paths.length) {
+        if (dragText !== null) {
+            // 文本拖拽（皮肤站卡片 / authlib URI）：text/plain 承载真实拖拽内容
+            dt.setData('text/plain', dragText);
+        } else if (payload.paths.length) {
             for (const p of payload.paths) dt.items.add(new File([], basename(p)));
         } else {
-            // Tauri 的 DragDropEvent 不携带文本：纯文本拖入（如 PCL 的 authlib-injector
-            // URI）到达时 paths 为空。置 text/plain 标记让 App.vue 的空 drop 分支走
-            // "剪贴板文本确认"流程（用户拖入前刚复制的即拖拽内容）。
+            // 极老路径：空 drop 兜底标记
             dt.setData('text/plain', 'wuhuicl:text-drop');
         }
     } else {
         // enter/over 也要让 e.dataTransfer.types 含 Files，acceptsImportDrag 才放行
         dt.items.add(new File([], 'wuhuicl-drag'));
+        if (dragText !== null) dt.setData('text/plain', dragText);
     }
     const event = new DragEvent(type, {
         bubbles: true,

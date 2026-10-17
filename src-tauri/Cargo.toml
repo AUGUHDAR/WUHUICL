@@ -5,6 +5,12 @@ description = "WUHUICL - 简约美观的一键式 Minecraft 启动器"
 edition = "2021"
 rust-version = "1.82"
 
+# 本地 wry 补丁：Windows 上 OS 文本拖拽（authlib-injector 皮肤站卡片拖入）被上游
+# 只认 CF_HDROP 的 IDropTarget 静默丢弃。vendor/wry 里加 CF_UNICODETEXT 分支，
+# 文本以 `wuhuicl-text:<内容>` 伪路径进入既有 DragDropEvent.paths，协议不变。
+[patch.crates-io]
+wry = { path = "vendor/wry" }
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

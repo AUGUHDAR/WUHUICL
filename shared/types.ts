@@ -52,6 +52,8 @@ export interface YggdrasilProvider {
     registerUrl?: string;
     /** 皮肤站主页（元数据 meta.links.homepage） */
     homepageUrl?: string;
+    /** 内置提供商（LittleSkin），不可删除 */
+    builtin?: boolean;
     insecure: boolean;
     metadataFetchedAt: string;
 }

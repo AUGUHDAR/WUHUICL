@@ -577,17 +577,15 @@ function onDrop(e: DragEvent) {
     noticeOpen.value = false;
     const dropped = Array.from(e.dataTransfer?.files ?? []);
     if (!dropped.length) {
+        // 文本拖拽：wry 补丁把 OS 文本（皮肤站卡片 authlib URI 等）放进 text/plain。
+        // 读不到再回退剪贴板（老版本 / 非文本的空 drop）。
         const text =
             e.dataTransfer?.getData('text/plain') || e.dataTransfer?.getData('text/uri-list') || '';
-        if (text === 'wuhuicl:text-drop' || !text) {
-            // Tauri 拖放事件不带文本（shim.ts 置的标记/纯空）：纯文本拖入拿不到 URI，
-            // 走剪贴板确认——用户从皮肤站复制链接后拖一下窗口即可触发。
-            void routeTextDropViaClipboard();
+        if (text && text !== 'wuhuicl:text-drop' && looksLikeYggdrasilProvider(text)) {
+            routeYggdrasilImport({ kind: 'text', value: text });
             return;
         }
-        if (looksLikeYggdrasilProvider(text)) {
-            routeYggdrasilImport({ kind: 'text', value: text });
-        }
+        void routeTextDropViaClipboard();
         return;
     }
     const paths = dropped.map((f) => window.kamucl.getFilePath(f));

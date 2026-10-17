@@ -1278,6 +1278,26 @@ fn with_probed_metadata<T>(f: impl FnOnce(&mut HashMap<String, String>) -> T) ->
     f(guard.get_or_insert_with(HashMap::new))
 }
 
+/// LittleSkin 内置提供商（HMCL 同款：国内最常用皮肤站开箱即用，无需手动添加）。
+/// 登录/刷新/皮肤/注入全链路对它与其他提供商一视同仁；不可删除。
+pub fn builtin_provider() -> Value {
+    let id = provider_id("https://littleskin.cn/api/yggdrasil/").unwrap_or_else(|_| "ygg-builtin-littleskin".into());
+    json!({
+        "id": id,
+        "name": "LittleSkin",
+        "apiRoot": "https://littleskin.cn/api/yggdrasil/",
+        "authServer": "https://littleskin.cn/api/yggdrasil/authserver/",
+        "accountServer": "https://littleskin.cn/api/yggdrasil/api/",
+        "sessionServer": "https://littleskin.cn/api/yggdrasil/sessionserver/",
+        "skinDomains": ["littleskin.cn"],
+        "registerUrl": "https://littleskin.cn/auth/register",
+        "homepageUrl": "https://littleskin.cn",
+        "builtin": true,
+        "insecure": false,
+        "metadataFetchedAt": "1970-01-01T00:00:00Z"
+    })
+}
+
 /// yggdrasil.ts listProviders
 pub fn list_providers(app: &AppHandle) -> Vec<Value> {
     {
@@ -1292,8 +1312,11 @@ pub fn list_providers(app: &AppHandle) -> Vec<Value> {
         .and_then(|raw| raw.as_array().cloned())
         .map(|arr| arr.iter().filter_map(clean_provider).collect())
         .unwrap_or_default();
-    *PROVIDERS_CACHE.lock().unwrap() = Some(list.clone());
-    list
+    let builtin = builtin_provider();
+    let mut full = vec![builtin.clone()];
+    full.extend(list.into_iter().filter(|p| p["id"] != builtin["id"]));
+    *PROVIDERS_CACHE.lock().unwrap() = Some(full.clone());
+    full
 }
 
 fn persist_providers(app: &AppHandle, providers: &[Value]) {
@@ -1345,6 +1368,9 @@ fn save_provider(app: &AppHandle, candidate: &Value, allow_insecure: bool) -> Re
 
 /// yggdrasil.ts removeProvider
 fn remove_provider(app: &AppHandle, id: &str) -> Result<Value, String> {
+    if id == builtin_provider()["id"] {
+        return Err("LittleSkin 是内置提供商，无法删除".into());
+    }
     if has_provider_accounts(app, id) {
         return Err("该提供商仍有关联账号，请先退出并删除这些账号".into());
     }
@@ -1352,7 +1378,10 @@ fn remove_provider(app: &AppHandle, id: &str) -> Result<Value, String> {
     if !list.iter().any(|p| p["id"].as_str() == Some(id)) {
         return Err("提供商不存在".into());
     }
-    let remaining: Vec<Value> = list.into_iter().filter(|p| p["id"].as_str() != Some(id)).collect();
+    let remaining: Vec<Value> = list
+        .into_iter()
+        .filter(|p| p["id"].as_str() != Some(id) && p != &builtin_provider())
+        .collect();
     persist_providers(app, &remaining);
     let _ = std::fs::remove_file(metadata_directory(app).join(format!("{}.json", id)));
     Ok(json!(list_providers(app)))
