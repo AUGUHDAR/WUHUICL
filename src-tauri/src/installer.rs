@@ -1803,7 +1803,7 @@ pub fn get_version_json(app: &AppHandle, rec: Option<&TaskRecord>, dest: &Path, 
 
 // ---------------- 安装：原版（对应原版 installVanilla / installVanillaUnlocked） ----------------
 
-fn fmt_mb(bytes: u64) -> String {
+pub fn fmt_mb(bytes: u64) -> String {
     format!("{:.1}MB", bytes as f64 / 1024.0 / 1024.0)
 }
 
