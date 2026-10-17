@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -249,4 +250,18 @@ test('formatting exemptions remain active and are documented for removal', async
             `${file} is formatted; remove its migration exemption`
         );
     }
+});
+
+test('documented quality command matches its actual scope', () => {
+    const packageJson = JSON.parse(
+        readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8')
+    );
+    const quality = packageJson.scripts.quality;
+    const readme = readFileSync(path.join(repositoryRoot, 'README.md'), 'utf8');
+
+    assert.match(quality, /npm run typecheck/);
+    assert.match(quality, /npm run test:unit/);
+    assert.match(quality, /npm run check:architecture/);
+    assert.match(quality, /npm run format:check/);
+    assert.doesNotMatch(readme, /`npm run quality` runs typechecking, frontend unit tests, the architecture checker, and formatting\./);
 });

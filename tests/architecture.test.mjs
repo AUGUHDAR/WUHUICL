@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { copyFile } from 'node:fs/promises';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -175,6 +176,24 @@ test('strict allowlist mode reports stale migration entries', async (t) => {
     assert.equal(result.status, 1, diagnostics);
     assert.match(diagnostics, /allowlist-entry.*src\/components\/MovedPanel\.vue/);
     assert.match(diagnostics, /allowlist-entry.*src\/features\/settings\/ui\/View\.vue:10/);
+});
+
+test('package architecture command rejects stale migration entries', () => {
+    const packageJson = JSON.parse(
+        readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8')
+    );
+    const command = packageJson.scripts['check:architecture'];
+
+    assert.match(command, /--strict-allowlist/);
+});
+
+test('quality workflow runs the package architecture command', () => {
+    const workflow = readFileSync(
+        path.join(repositoryRoot, '.github', 'workflows', 'quality.yml'),
+        'utf8'
+    );
+
+    assert.match(workflow, /run:\s+npm run check:architecture/);
 });
 
 test('supports an external allowlist path for a fixture root', async (t) => {

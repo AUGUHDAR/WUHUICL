@@ -10,7 +10,7 @@
     "build:web": "vite build",
     "dev": "tauri dev",
     "build": "tauri build",
-    "check:architecture": "node scripts/check-architecture.mjs --root .",
+    "check:architecture": "node scripts/check-architecture.mjs --root . --strict-allowlist",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check . --ignore-path .prettierignore --ignore-path .prettierignore.migration",

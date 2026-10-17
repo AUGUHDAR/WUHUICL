@@ -190,7 +190,7 @@ npm run format:check
 npm run build:web
 ```
 
-`npm run quality` runs typechecking, frontend unit tests, the architecture checker, and formatting. CI additionally runs lint, the web build, Rust formatting, and Rust library tests.
+`npm run quality` bundles typechecking, frontend unit tests, the strict architecture check, and formatting. Run `npm run lint` and `npm run build:web` separately; CI also runs Rust formatting and Rust library tests.
 
 Source follows the feature-first layout under `src/`: `app/` composes the shell, `core/` owns IPC and cross-cutting primitives, `features/<name>/` owns feature `ui/` and `data/`, and `shared/` holds framework-light domain utilities. Cross-feature imports go through `features/<name>/index.ts`; `core/` and `shared/` must not import features or the app shell. The architecture guardrail tracks existing migration debt in `scripts/legacy-source-allowlist.json`; new violations fail immediately.
 
