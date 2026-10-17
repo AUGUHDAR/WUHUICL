@@ -76,12 +76,19 @@ fn validate_skin_png(file_path: &str) -> Result<Vec<u8>, String> {
 }
 
 fn to_data_url(bytes: &[u8]) -> String {
-    format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))
+    format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
 }
 
 /// 纹理下载转 dataURL（对应 downloadTexture：8MB 上限 + PNG 校验）
 fn fetch_texture(url: &str) -> Option<Value> {
-    let resp = crate::net::client().get(url).timeout(std::time::Duration::from_secs(30)).send().ok()?;
+    let resp = crate::net::client()
+        .get(url)
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .ok()?;
     if !resp.status().is_success() {
         return None;
     }
@@ -95,7 +102,11 @@ fn fetch_texture(url: &str) -> Option<Value> {
 // ---------------- 档案 ----------------
 
 /// skin:profile → ProfileSkins（微软/Yggdrasil/离线三通道）
-pub fn get_profile(app: &tauri::AppHandle, refresh: bool, account_id: Option<&str>) -> Result<Value, String> {
+pub fn get_profile(
+    app: &tauri::AppHandle,
+    refresh: bool,
+    account_id: Option<&str>,
+) -> Result<Value, String> {
     let account = match account_id {
         Some(id) if !id.is_empty() => crate::mslogin::all_accounts_full(app)
             .into_iter()
@@ -144,7 +155,11 @@ fn fetch_profile(app: &tauri::AppHandle, account: &Value, _refresh: bool) -> Res
                 .into_iter()
                 .filter(|s| s["url"].as_str().map(|u| !u.is_empty()).unwrap_or(false))
                 .map(|mut s| {
-                    let variant = if s["variant"].as_str().unwrap_or("").eq_ignore_ascii_case("SLIM") {
+                    let variant = if s["variant"]
+                        .as_str()
+                        .unwrap_or("")
+                        .eq_ignore_ascii_case("SLIM")
+                    {
                         "slim"
                     } else {
                         "classic"
@@ -161,7 +176,10 @@ fn fetch_profile(app: &tauri::AppHandle, account: &Value, _refresh: bool) -> Res
                 .unwrap_or_default()
                 .into_iter()
                 .map(|mut c| {
-                    c["alias"] = json!(c["alias"].as_str().filter(|s| !s.is_empty()).unwrap_or("披风"));
+                    c["alias"] = json!(c["alias"]
+                        .as_str()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or("披风"));
                     c["active"] = json!(c["state"].as_str() == Some("ACTIVE"));
                     c
                 })
@@ -208,7 +226,12 @@ fn api_error(status: u16, fallback: &str) -> String {
 // ---------------- 上传 / 披风 ----------------
 
 /// skin:upload：multipart 上传 + 历史记录
-pub fn upload_skin(app: &tauri::AppHandle, file_path: &str, variant: &str, account_id: Option<&str>) -> Result<Value, String> {
+pub fn upload_skin(
+    app: &tauri::AppHandle,
+    file_path: &str,
+    variant: &str,
+    account_id: Option<&str>,
+) -> Result<Value, String> {
     if variant != "classic" && variant != "slim" {
         return Err("无效的皮肤模型".into());
     }
@@ -223,7 +246,12 @@ pub fn upload_skin(app: &tauri::AppHandle, file_path: &str, variant: &str, accou
     let token = require_mc_token(app)?;
     let boundary = format!("----wuhuicl{}", crate::accounts::uuid_v4().replace('-', ""));
     let mut body: Vec<u8> = Vec::new();
-    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"variant\"\r\n\r\n{variant}\r\n").as_bytes());
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"variant\"\r\n\r\n{variant}\r\n"
+        )
+        .as_bytes(),
+    );
     let file_name = PathBuf::from(file_path)
         .file_name()
         .map(|n| n.to_string_lossy())
@@ -237,7 +265,10 @@ pub fn upload_skin(app: &tauri::AppHandle, file_path: &str, variant: &str, accou
     let resp = crate::net::client()
         .post(format!("{API}/minecraft/profile/skins"))
         .header("Authorization", format!("Bearer {token}"))
-        .header("Content-Type", format!("multipart/form-data; boundary={boundary}"))
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
         .timeout(std::time::Duration::from_secs(60))
         .body(body)
         .send()
@@ -281,7 +312,10 @@ fn sha1_hex(bytes: &[u8]) -> String {
 fn save_history(app: &tauri::AppHandle, buf: &[u8], variant: &str, source_name: &str) {
     let hash = sha1_hex(buf);
     let mut list = load_history(app);
-    if let Some(existing_pos) = list.iter().position(|i| i["hash"].as_str() == Some(hash.as_str())) {
+    if let Some(existing_pos) = list
+        .iter()
+        .position(|i| i["hash"].as_str() == Some(hash.as_str()))
+    {
         let mut item = list.remove(existing_pos);
         item["time"] = json!(chrono::Utc::now().timestamp_millis());
         list.insert(0, item);
@@ -343,13 +377,23 @@ pub fn upload_history(app: &tauri::AppHandle, id: &str) -> Result<Value, String>
         .find(|i| i["id"].as_str() == Some(id))
         .ok_or("历史记录不存在")?;
     let path = skins_dir(app).join(format!("{id}.png"));
-    upload_skin(app, &path.to_string_lossy(), item["variant"].as_str().unwrap_or("classic"), None)
+    upload_skin(
+        app,
+        &path.to_string_lossy(),
+        item["variant"].as_str().unwrap_or("classic"),
+        None,
+    )
 }
 
 // ---------------- 离线账号本地皮肤 ----------------
 
 /// skin:offlineApply：本地 PNG 应用到离线账号（不联网，游戏启动时经 offlineSkinLaunch 注入）
-pub fn apply_offline_skin(app: &tauri::AppHandle, file_path: &str, variant: &str, account_id: &str) -> Result<Value, String> {
+pub fn apply_offline_skin(
+    app: &tauri::AppHandle,
+    file_path: &str,
+    variant: &str,
+    account_id: &str,
+) -> Result<Value, String> {
     if account_id.is_empty() {
         return Err("请重新选择离线账号并确认应用".into());
     }
@@ -370,8 +414,11 @@ pub fn apply_offline_skin(app: &tauri::AppHandle, file_path: &str, variant: &str
         "name": PathBuf::from(file_path).file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
         "appliedAt": chrono::Utc::now().timestamp_millis()
     });
-    std::fs::write(store.join(format!("{account_id}.json")), serde_json::to_vec(&snapshot).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    std::fs::write(
+        store.join(format!("{account_id}.json")),
+        serde_json::to_vec(&snapshot).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     fetch_profile(app, account, true)
 }
 
@@ -405,7 +452,9 @@ pub fn get_avatar(app: &tauri::AppHandle, account_id: Option<&str>) -> Value {
 
 /// skin:editorSave / editorUpload：64×64 dataURL 校验（编辑器导出）
 fn validate_data_url_png(value: &str) -> Result<Vec<u8>, String> {
-    let raw = value.strip_prefix("data:image/png;base64,").ok_or("皮肤数据无效")?;
+    let raw = value
+        .strip_prefix("data:image/png;base64,")
+        .ok_or("皮肤数据无效")?;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(raw)
         .map_err(|_| "皮肤数据无效".to_string())?;
@@ -429,12 +478,19 @@ pub fn editor_save(app: &tauri::AppHandle, value: &str) -> Result<Value, String>
         .add_filter("PNG 图片", &["png"])
         .set_file_name("skin.png")
         .blocking_save_file();
-    let Some(path) = picked else { return Ok(json!(false)) };
+    let Some(path) = picked else {
+        return Ok(json!(false));
+    };
     std::fs::write(path.to_string(), bytes).map_err(|e| e.to_string())?;
     Ok(json!(true))
 }
 
-pub fn editor_upload(app: &tauri::AppHandle, value: &str, variant: &str, account_id: &str) -> Result<Value, String> {
+pub fn editor_upload(
+    app: &tauri::AppHandle,
+    value: &str,
+    variant: &str,
+    account_id: &str,
+) -> Result<Value, String> {
     let bytes = validate_data_url_png(value)?;
     let tmp = std::env::temp_dir().join(format!("wuhuicl-skin-{}.png", crate::accounts::uuid_v4()));
     std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
@@ -442,8 +498,14 @@ pub fn editor_upload(app: &tauri::AppHandle, value: &str, variant: &str, account
         Err("请先选择账号".into())
     } else {
         let accounts = crate::mslogin::all_accounts_full(app);
-        match accounts.iter().find(|a| a["id"].as_str() == Some(account_id)).map(|a| a["type"].as_str().unwrap_or("").to_string()) {
-            Some(t) if t == "offline" => apply_offline_skin(app, &tmp.to_string_lossy(), variant, account_id),
+        match accounts
+            .iter()
+            .find(|a| a["id"].as_str() == Some(account_id))
+            .map(|a| a["type"].as_str().unwrap_or("").to_string())
+        {
+            Some(t) if t == "offline" => {
+                apply_offline_skin(app, &tmp.to_string_lossy(), variant, account_id)
+            }
             Some(t) if t == "microsoft" => {
                 let _ = account_id;
                 upload_skin(app, &tmp.to_string_lossy(), variant, None)
@@ -456,7 +518,11 @@ pub fn editor_upload(app: &tauri::AppHandle, value: &str, variant: &str, account
 }
 
 /// 统一入口
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         "skin:profile" => Some(get_profile(
             app,
@@ -495,7 +561,10 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             args.first().and_then(|v| v.as_str()).unwrap_or(""),
         )),
         "skin:avatar" => Some(Ok(get_avatar(app, args.first().and_then(|v| v.as_str())))),
-        "skin:editorSave" => Some(editor_save(app, args.first().and_then(|v| v.as_str()).unwrap_or(""))),
+        "skin:editorSave" => Some(editor_save(
+            app,
+            args.first().and_then(|v| v.as_str()).unwrap_or(""),
+        )),
         "skin:editorUpload" => Some(editor_upload(
             app,
             args.first().and_then(|v| v.as_str()).unwrap_or(""),

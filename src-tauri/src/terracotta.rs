@@ -188,7 +188,11 @@ fn installing() -> bool {
 }
 
 fn proc_alive() -> bool {
-    PROC.lock().unwrap().as_ref().map(|p| !p.exited.load(Ordering::SeqCst)).unwrap_or(false)
+    PROC.lock()
+        .unwrap()
+        .as_ref()
+        .map(|p| !p.exited.load(Ordering::SeqCst))
+        .unwrap_or(false)
 }
 
 fn verify_sha256(file: &Path, expected: &str) -> bool {
@@ -250,7 +254,13 @@ fn tc_get(path_name: &str) -> Result<String, String> {
         .get(&url)
         .timeout(Duration::from_millis(HTTP_TIMEOUT_MS))
         .send()
-        .map_err(|e| if e.is_timeout() { "请求超时".to_string() } else { e.to_string() })?;
+        .map_err(|e| {
+            if e.is_timeout() {
+                "请求超时".to_string()
+            } else {
+                e.to_string()
+            }
+        })?;
     let status = resp.status().as_u16();
     let body = resp.text().map_err(|e| e.to_string())?;
     if status == 200 {
@@ -261,17 +271,26 @@ fn tc_get(path_name: &str) -> Result<String, String> {
 }
 
 // 对应原版 terracotta.ts download()：手动跟随重定向（≤5）、20s 超时、200ms 进度节流、可取消
-fn download(app: &AppHandle, url: &str, file: &Path, cancel: &AtomicBool, redirects: u32) -> Result<(), String> {
+fn download(
+    app: &AppHandle,
+    url: &str,
+    file: &Path,
+    cancel: &AtomicBool,
+    redirects: u32,
+) -> Result<(), String> {
     if cancel.load(Ordering::SeqCst) {
         return Err("下载已取消".to_string());
     }
     if redirects > MAX_REDIRECTS {
         return Err("下载重定向过多".to_string());
     }
-    let resp = terracotta_client()
-        .get(url)
-        .send()
-        .map_err(|e| if e.is_timeout() { "下载连接超时，请重试".to_string() } else { e.to_string() })?;
+    let resp = terracotta_client().get(url).send().map_err(|e| {
+        if e.is_timeout() {
+            "下载连接超时，请重试".to_string()
+        } else {
+            e.to_string()
+        }
+    })?;
     let status = resp.status().as_u16();
     let total = resp.content_length().unwrap_or(0);
     if (300..400).contains(&status) {
@@ -306,7 +325,11 @@ fn download(app: &AppHandle, url: &str, file: &Path, cancel: &AtomicBool, redire
                     }
                 }
                 Err(e) => {
-                    let _ = tx.send(Err(if e.kind() == std::io::ErrorKind::TimedOut { "下载连接超时，请重试".to_string() } else { e.to_string() }));
+                    let _ = tx.send(Err(if e.kind() == std::io::ErrorKind::TimedOut {
+                        "下载连接超时，请重试".to_string()
+                    } else {
+                        e.to_string()
+                    }));
                     break;
                 }
             }
@@ -414,7 +437,8 @@ fn extract_tar_gz(tar_gz: &Path, dest_dir: &Path) -> Result<(), String> {
 #[cfg(unix)]
 fn set_executable(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(not(unix))]
@@ -436,7 +460,11 @@ fn ensure_binary(app: &AppHandle, cancel: &Arc<AtomicBool>) -> Result<String, St
             }
             return Ok(exe.to_string_lossy().to_string());
         }
-        emit(app, "log", json!({ "level": "warn", "msg": "本地陶瓦二进制校验失败，重新下载" }));
+        emit(
+            app,
+            "log",
+            json!({ "level": "warn", "msg": "本地陶瓦二进制校验失败，重新下载" }),
+        );
         let _ = std::fs::remove_file(&exe);
     }
     let pkg_path = dir.join(&asset.pkg);
@@ -446,8 +474,15 @@ fn ensure_binary(app: &AppHandle, cancel: &Arc<AtomicBool>) -> Result<String, St
             let outcome: Result<(), String> = (|| {
                 set_state(app, json!({ "phase": "downloading" }));
                 let url = format!("{base}/{}", asset.pkg);
-                let host = reqwest::Url::parse(&url).ok().and_then(|u| u.host_str().map(|h| h.to_string())).unwrap_or_default();
-                emit(app, "log", json!({ "level": "info", "msg": format!("下载陶瓦官方二进制：{host}") }));
+                let host = reqwest::Url::parse(&url)
+                    .ok()
+                    .and_then(|u| u.host_str().map(|h| h.to_string()))
+                    .unwrap_or_default();
+                emit(
+                    app,
+                    "log",
+                    json!({ "level": "info", "msg": format!("下载陶瓦官方二进制：{host}") }),
+                );
                 download(app, &url, &pkg_path, &**cancel, 0)?;
                 if !verify_sha256(&pkg_path, asset.package_sha256) {
                     return Err("SHA-256 校验失败（包已损坏或被篡改）".to_string());
@@ -467,7 +502,11 @@ fn ensure_binary(app: &AppHandle, cancel: &Arc<AtomicBool>) -> Result<String, St
                 if !cfg!(windows) {
                     set_executable(&exe)?;
                 }
-                emit(app, "log", json!({ "level": "info", "msg": "陶瓦官方二进制就绪（已通过 SHA-256 校验）" }));
+                emit(
+                    app,
+                    "log",
+                    json!({ "level": "info", "msg": "陶瓦官方二进制就绪（已通过 SHA-256 校验）" }),
+                );
                 Ok(())
             })();
             match outcome {
@@ -478,7 +517,11 @@ fn ensure_binary(app: &AppHandle, cancel: &Arc<AtomicBool>) -> Result<String, St
                     if cancel.load(Ordering::SeqCst) {
                         return Err("下载已取消".to_string());
                     }
-                    emit(app, "log", json!({ "level": "warn", "msg": format!("下载源失败：{e}，尝试下一个") }));
+                    emit(
+                        app,
+                        "log",
+                        json!({ "level": "warn", "msg": format!("下载源失败：{e}，尝试下一个") }),
+                    );
                 }
             }
         }
@@ -491,14 +534,21 @@ fn ensure_binary(app: &AppHandle, cancel: &Arc<AtomicBool>) -> Result<String, St
 }
 
 fn tc_install(app: &AppHandle) -> Result<Value, String> {
-    if installing() || STARTING.load(Ordering::SeqCst) || STOPPING.load(Ordering::SeqCst) || proc_alive() {
+    if installing()
+        || STARTING.load(Ordering::SeqCst)
+        || STOPPING.load(Ordering::SeqCst)
+        || proc_alive()
+    {
         return Err("陶瓦正在运行或下载，请稍后重试".to_string());
     }
     let rec = crate::tasks::register_task("下载陶瓦工具", "download");
     let task_id = rec.id.clone();
     let cancel = rec.cancelled.clone();
     *INSTALL_TASK.lock().unwrap() = Some(task_id.clone());
-    set_state(app, json!({ "phase": "downloading", "error": Value::Null, "downloaded": 0, "total": 0 }));
+    set_state(
+        app,
+        json!({ "phase": "downloading", "error": Value::Null, "downloaded": 0, "total": 0 }),
+    );
     let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
     let app2 = app.clone();
     let thread_cancel = cancel.clone();
@@ -507,8 +557,22 @@ fn tc_install(app: &AppHandle) -> Result<Value, String> {
         let res = ensure_binary(&app2, &thread_cancel).map(|_| ());
         let cancelled = thread_cancel.load(Ordering::SeqCst);
         match &res {
-            Ok(()) => crate::tasks::task_done(&app2, &done_task_id, true, None, false, Some("terracotta".to_string())),
-            Err(e) => crate::tasks::task_done(&app2, &done_task_id, false, Some(e.clone()), cancelled, Some("terracotta".to_string())),
+            Ok(()) => crate::tasks::task_done(
+                &app2,
+                &done_task_id,
+                true,
+                None,
+                false,
+                Some("terracotta".to_string()),
+            ),
+            Err(e) => crate::tasks::task_done(
+                &app2,
+                &done_task_id,
+                false,
+                Some(e.clone()),
+                cancelled,
+                Some("terracotta".to_string()),
+            ),
         }
         let _ = tx.send(res);
     });
@@ -526,7 +590,11 @@ fn tc_install(app: &AppHandle) -> Result<Value, String> {
             Ok(Value::Null)
         }
         Err(e) => {
-            let msg = if cancel.load(Ordering::SeqCst) { "下载已取消".to_string() } else { e };
+            let msg = if cancel.load(Ordering::SeqCst) {
+                "下载已取消".to_string()
+            } else {
+                e
+            };
             set_state(app, json!({ "phase": "idle", "error": msg.clone() }));
             Err(msg)
         }
@@ -595,7 +663,11 @@ fn prepare_mac_identity(dir_path: &Path, session: &Path) -> Result<(), String> {
         return Err("陶瓦身份目录不是独立目录".to_string());
     }
     let identity = persistent.join("machine-id");
-    match std::fs::OpenOptions::new().write(true).create_new(true).open(&identity) {
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&identity)
+    {
         Ok(mut f) => f.write_all(&random_bytes(16)).map_err(|e| e.to_string())?,
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(e) => return Err(e.to_string()),
@@ -607,11 +679,19 @@ fn prepare_mac_identity(dir_path: &Path, session: &Path) -> Result<(), String> {
     let service = session.join("terracotta");
     std::fs::create_dir(&service).map_err(|e| e.to_string())?;
     let bytes = std::fs::read(&identity).map_err(|e| e.to_string())?;
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(service.join("machine-id")).map_err(|e| e.to_string())?;
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(service.join("machine-id"))
+        .map_err(|e| e.to_string())?;
     f.write_all(&bytes).map_err(|e| e.to_string())
 }
 
-fn spawn_log_reader<R: Read + Send + 'static>(app: &AppHandle, pipe: Option<R>, level: &'static str) {
+fn spawn_log_reader<R: Read + Send + 'static>(
+    app: &AppHandle,
+    pipe: Option<R>,
+    level: &'static str,
+) {
     let Some(mut pipe) = pipe else { return };
     let app = app.clone();
     std::thread::spawn(move || {
@@ -630,7 +710,11 @@ fn spawn_log_reader<R: Read + Send + 'static>(app: &AppHandle, pipe: Option<R>, 
 }
 
 fn proc_matches(pid: u32) -> bool {
-    PROC.lock().unwrap().as_ref().map(|p| p.pid == pid).unwrap_or(false)
+    PROC.lock()
+        .unwrap()
+        .as_ref()
+        .map(|p| p.pid == pid)
+        .unwrap_or(false)
 }
 
 // 对应原版 startProcess()：--hmcl2 <portFile>（Windows）+ 轮询端口文件，120s 上限
@@ -646,8 +730,18 @@ fn start_process(app: &AppHandle) -> Result<u64, String> {
             return Err("陶瓦工具目录不是独立目录".to_string());
         }
     }
-    let prefix = if linux { "linux-session-" } else if mac { "mac-session-" } else { "kamucl-tc-" };
-    let base = if linux || mac { dir_path.clone() } else { std::env::temp_dir() };
+    let prefix = if linux {
+        "linux-session-"
+    } else if mac {
+        "mac-session-"
+    } else {
+        "kamucl-tc-"
+    };
+    let base = if linux || mac {
+        dir_path.clone()
+    } else {
+        std::env::temp_dir()
+    };
     let session = base.join(format!("{prefix}{}", crate::accounts::uuid_v4()));
     std::fs::create_dir_all(&session).map_err(|e| e.to_string())?;
     let port_file = session.join("http");
@@ -657,7 +751,11 @@ fn start_process(app: &AppHandle) -> Result<u64, String> {
         prepare_mac_identity(&dir_path, &session)?;
     }
     let mut cmd = std::process::Command::new(&exe);
-    let flags = if mac { "--daemon".to_string() } else { if cfg!(windows) { "--hmcl2" } else { "--hmcl" }.to_string() };
+    let flags = if mac {
+        "--daemon".to_string()
+    } else {
+        if cfg!(windows) { "--hmcl2" } else { "--hmcl" }.to_string()
+    };
     cmd.arg(&flags);
     if !mac {
         cmd.arg(port_file.to_string_lossy().to_string());
@@ -681,7 +779,11 @@ fn start_process(app: &AppHandle) -> Result<u64, String> {
     let stderr = child.stderr.take();
     let child = Arc::new(Mutex::new(child));
     let exited = Arc::new(AtomicBool::new(false));
-    *PROC.lock().unwrap() = Some(Arc::new(Proc { child: child.clone(), pid, exited: exited.clone() }));
+    *PROC.lock().unwrap() = Some(Arc::new(Proc {
+        child: child.clone(),
+        pid,
+        exited: exited.clone(),
+    }));
     *PORT_FILE.lock().unwrap() = port_file.to_string_lossy().to_string();
 
     spawn_log_reader(app, stdout, "info");
@@ -702,14 +804,23 @@ fn start_process(app: &AppHandle) -> Result<u64, String> {
                 std::thread::sleep(Duration::from_millis(PROC_POLL_MS));
             };
             watch_exit.store(true, Ordering::SeqCst);
-            let text = code.map(|c| c.to_string()).unwrap_or_else(|| "信号".to_string());
-            emit(&app, "log", json!({ "level": "info", "msg": format!("陶瓦进程退出（{text}）") }));
+            let text = code
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "信号".to_string());
+            emit(
+                &app,
+                "log",
+                json!({ "level": "info", "msg": format!("陶瓦进程退出（{text}）") }),
+            );
             if !proc_matches(pid) {
                 return;
             }
             *PROC.lock().unwrap() = None;
             if !DISPOSED_BY_USER.load(Ordering::SeqCst) {
-                set_state(&app, json!({ "phase": "idle", "room": Value::Null, "url": Value::Null }));
+                set_state(
+                    &app,
+                    json!({ "phase": "idle", "room": Value::Null, "url": Value::Null }),
+                );
                 emit(&app, "stopped", Value::Null);
             }
         });
@@ -726,8 +837,15 @@ fn start_process(app: &AppHandle) -> Result<u64, String> {
                 HTTP_PORT.store(port, Ordering::SeqCst);
                 if let Ok(text) = tc_get("/state") {
                     let observed: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-                    if observed.get("state").and_then(|v| v.as_str()).is_some() && proc_matches(pid) && !exited.load(Ordering::SeqCst) {
-                        emit(app, "log", json!({ "level": "info", "msg": format!("陶瓦 HTTP 端口 {port}") }));
+                    if observed.get("state").and_then(|v| v.as_str()).is_some()
+                        && proc_matches(pid)
+                        && !exited.load(Ordering::SeqCst)
+                    {
+                        emit(
+                            app,
+                            "log",
+                            json!({ "level": "info", "msg": format!("陶瓦 HTTP 端口 {port}") }),
+                        );
                         return Ok(port);
                     }
                 }
@@ -740,7 +858,11 @@ fn start_process(app: &AppHandle) -> Result<u64, String> {
                 if let Some(m) = cap.get(1) {
                     if let Ok(port) = m.as_str().parse::<u64>() {
                         HTTP_PORT.store(port, Ordering::SeqCst);
-                        emit(app, "log", json!({ "level": "info", "msg": format!("陶瓦 HTTP 端口 {port}") }));
+                        emit(
+                            app,
+                            "log",
+                            json!({ "level": "info", "msg": format!("陶瓦 HTTP 端口 {port}") }),
+                        );
                         return Ok(port);
                     }
                 }
@@ -787,27 +909,48 @@ fn poll_until_ready(app: &AppHandle, kind: &str, timeout_sec: u64) -> Result<Val
         }
         if let Ok(text) = tc_get("/state") {
             if let Ok(json) = serde_json::from_str::<Value>(&text) {
-                let st = json.get("state").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-                let prev = state().get("stateRaw").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let st = json
+                    .get("state")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                let prev = state()
+                    .get("stateRaw")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 if prev.as_deref() != Some(st.as_str()) {
                     set_state(app, json!({ "stateRaw": st.clone() }));
-                    emit(app, "log", json!({ "level": "info", "msg": format!("陶瓦状态：{st}") }));
+                    emit(
+                        app,
+                        "log",
+                        json!({ "level": "info", "msg": format!("陶瓦状态：{st}") }),
+                    );
                 }
                 if st == "exception" || st == "fatal" || st == "failed" {
                     let _ = tc_get("/state/ide");
                     return Err(format!("陶瓦进入异常状态（{st}），已复位，可重试"));
                 }
-                if kind == "host" && st == "host-ok" && json.get("room").and_then(|v| v.as_str()).is_some() {
+                if kind == "host"
+                    && st == "host-ok"
+                    && json.get("room").and_then(|v| v.as_str()).is_some()
+                {
                     return Ok(json);
                 }
-                if kind == "join" && st == "guest-ok" && json.get("url").and_then(|v| v.as_str()).is_some() {
+                if kind == "join"
+                    && st == "guest-ok"
+                    && json.get("url").and_then(|v| v.as_str()).is_some()
+                {
                     return Ok(json);
                 }
             }
         }
         std::thread::sleep(Duration::from_millis(STATE_POLL_MS));
     }
-    Err(if kind == "host" { "等待房间号超时（30s）".to_string() } else { "等待连接就绪超时".to_string() })
+    Err(if kind == "host" {
+        "等待房间号超时（30s）".to_string()
+    } else {
+        "等待连接就绪超时".to_string()
+    })
 }
 
 fn payload_str(payload: &Value, key: &str) -> String {
@@ -835,7 +978,11 @@ fn tc_start(app: &AppHandle, payload: &Value) -> Result<Value, String> {
     }
     let generation = OPERATION.fetch_add(1, Ordering::SeqCst) + 1;
     STARTING.store(true, Ordering::SeqCst);
-    let mode = payload.get("mode").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let mode = payload
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let outcome: Result<(), String> = (|| {
         let ready = match asset_for(&asset_key()) {
             Some(asset) => verify_sha256(&tc_dir(app).join(&asset.exe), asset.sha256),
@@ -853,33 +1000,69 @@ fn tc_start(app: &AppHandle, payload: &Value) -> Result<Value, String> {
             return Ok(());
         }
         let name = payload_str(payload, "playerName");
-        let me = if name.is_empty() { "KAMUCL".to_string() } else { name };
+        let me = if name.is_empty() {
+            "KAMUCL".to_string()
+        } else {
+            name
+        };
         if mode == "host" {
-            set_state(app, json!({ "phase": "hosting", "room": Value::Null, "url": Value::Null, "error": Value::Null }));
+            set_state(
+                app,
+                json!({ "phase": "hosting", "room": Value::Null, "url": Value::Null, "error": Value::Null }),
+            );
             tc_get(&format!("/state/scanning?player={}", enc_component(&me)))?;
-            emit(app, "log", json!({ "level": "info", "msg": "已请求创建陶瓦房间，等待房间号…" }));
+            emit(
+                app,
+                "log",
+                json!({ "level": "info", "msg": "已请求创建陶瓦房间，等待房间号…" }),
+            );
             let final_state = poll_until_ready(app, "host", HOST_TIMEOUT_SEC)?;
             if generation != OPERATION.load(Ordering::SeqCst) {
                 return Ok(());
             }
             let room = final_state.get("room").cloned().unwrap_or(Value::Null);
-            set_state(app, json!({ "phase": "ready", "room": room, "url": Value::Null }));
-            emit(app, "ready", json!({ "mode": "host", "room": room, "state": final_state.get("state").cloned().unwrap_or(Value::Null) }));
+            set_state(
+                app,
+                json!({ "phase": "ready", "room": room, "url": Value::Null }),
+            );
+            emit(
+                app,
+                "ready",
+                json!({ "mode": "host", "room": room, "state": final_state.get("state").cloned().unwrap_or(Value::Null) }),
+            );
         } else {
             let code = payload_str(payload, "code").trim().to_uppercase();
             if !room_code_re().is_match(&code) {
                 return Err("陶瓦房间码格式应为 U/XXXX-XXXX-XXXX-XXXX（U/ 开头共四段）".to_string());
             }
-            set_state(app, json!({ "phase": "joining", "room": code.clone(), "url": Value::Null, "error": Value::Null }));
-            tc_get(&format!("/state/guesting?room={}&player={}", enc_component(&code), enc_component(&me)))?;
-            emit(app, "log", json!({ "level": "info", "msg": "已请求加入陶瓦房间，等待连接就绪…" }));
+            set_state(
+                app,
+                json!({ "phase": "joining", "room": code.clone(), "url": Value::Null, "error": Value::Null }),
+            );
+            tc_get(&format!(
+                "/state/guesting?room={}&player={}",
+                enc_component(&code),
+                enc_component(&me)
+            ))?;
+            emit(
+                app,
+                "log",
+                json!({ "level": "info", "msg": "已请求加入陶瓦房间，等待连接就绪…" }),
+            );
             let final_state = poll_until_ready(app, "join", JOIN_TIMEOUT_SEC)?;
             if generation != OPERATION.load(Ordering::SeqCst) {
                 return Ok(());
             }
             let url = final_state.get("url").cloned().unwrap_or(Value::Null);
-            set_state(app, json!({ "phase": "ready", "room": code, "url": url.clone() }));
-            emit(app, "ready", json!({ "mode": "join", "url": url, "state": final_state.get("state").cloned().unwrap_or(Value::Null) }));
+            set_state(
+                app,
+                json!({ "phase": "ready", "room": code, "url": url.clone() }),
+            );
+            emit(
+                app,
+                "ready",
+                json!({ "mode": "join", "url": url, "state": final_state.get("state").cloned().unwrap_or(Value::Null) }),
+            );
         }
         Ok(())
     })();
@@ -933,7 +1116,10 @@ pub fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Option<Result<V
             abort_install();
             Some(Ok(Value::Null))
         }
-        "tc:start" => Some(tc_start(app, &args.first().cloned().unwrap_or_else(|| json!({})))),
+        "tc:start" => Some(tc_start(
+            app,
+            &args.first().cloned().unwrap_or_else(|| json!({})),
+        )),
         "tc:stop" => Some(Ok(tc_stop(app, false))),
         _ => None,
     }

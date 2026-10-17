@@ -37,13 +37,10 @@ pub fn handle<R: tauri::Runtime>(
 
     let candidate = PathBuf::from(&path_param);
     let root = managed_root(app);
-    let authorized = normalize(&candidate).ok().and_then(|p| {
-        if p.starts_with(&root) {
-            Some(p)
-        } else {
-            None
-        }
-    });
+    let authorized =
+        normalize(&candidate)
+            .ok()
+            .and_then(|p| if p.starts_with(&root) { Some(p) } else { None });
     let Some(authorized) = authorized else {
         return not_found();
     };

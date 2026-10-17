@@ -45,7 +45,11 @@ fn game_args(chain: &[Value]) -> Vec<String> {
     let re = RE.get_or_init(|| Regex::new(r#""[^"]*"|\S+"#).unwrap());
     let mut out = Vec::new();
     for j in chain {
-        if let Some(game) = j.get("arguments").and_then(|a| a.get("game")).and_then(Value::as_array) {
+        if let Some(game) = j
+            .get("arguments")
+            .and_then(|a| a.get("game"))
+            .and_then(Value::as_array)
+        {
             for a in game {
                 match a {
                     Value::String(s) => out.push(s.clone()),
@@ -122,7 +126,9 @@ pub fn resolve_instance_metadata(
             return args.get(index + 1).cloned();
         }
         let prefix = format!("{name}=");
-        args.iter().find(|a| a.starts_with(prefix.as_str())).map(|a| a[prefix.len()..].to_string())
+        args.iter()
+            .find(|a| a.starts_with(prefix.as_str()))
+            .map(|a| a[prefix.len()..].to_string())
     };
     let libraries: Vec<Vec<String>> = chain
         .iter()
@@ -144,7 +150,10 @@ pub fn resolve_instance_metadata(
     let lib = |group: &str, artifact: &str| -> Option<String> {
         libraries
             .iter()
-            .find(|parts| parts.first().map(|g| g == group).unwrap_or(false) && parts.get(1).map(|a| a == artifact).unwrap_or(false))
+            .find(|parts| {
+                parts.first().map(|g| g == group).unwrap_or(false)
+                    && parts.get(1).map(|a| a == artifact).unwrap_or(false)
+            })
             .and_then(|parts| parts.get(2).cloned())
     };
 
@@ -186,18 +195,32 @@ pub fn resolve_instance_metadata(
                 None
             }
         });
-    let forge = lib("net.minecraftforge", "forge").or_else(|| lib("net.minecraftforge", "fmlloader"));
+    let forge =
+        lib("net.minecraftforge", "forge").or_else(|| lib("net.minecraftforge", "fmlloader"));
     let base = chain.last().cloned().unwrap_or(Value::Null);
-    let vanilla_id = if truthy(&base, "inheritsFrom").is_none() && (loader.is_none() || chain.len() > 1) {
-        base.get("id").and_then(Value::as_str).map(str::to_string)
-    } else {
-        None
-    };
+    let vanilla_id =
+        if truthy(&base, "inheritsFrom").is_none() && (loader.is_none() || chain.len() > 1) {
+            base.get("id").and_then(Value::as_str).map(str::to_string)
+        } else {
+            None
+        };
     let mut candidates: Vec<Option<String>> = vec![arg("--fml.mcVersion")];
-    candidates.extend(chain.iter().map(|j| j.get("clientVersion").and_then(Value::as_str).map(str::to_string)));
-    candidates.extend(chain.iter().map(|j| j.get("_mcVersion").and_then(Value::as_str).map(str::to_string)));
+    candidates.extend(chain.iter().map(|j| {
+        j.get("clientVersion")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    }));
+    candidates.extend(chain.iter().map(|j| {
+        j.get("_mcVersion")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    }));
     candidates.push(vanilla_id);
-    candidates.extend(chain.iter().map(|j| j.get("inheritsFrom").and_then(Value::as_str).map(str::to_string)));
+    candidates.extend(chain.iter().map(|j| {
+        j.get("inheritsFrom")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    }));
     candidates.push(lib("net.fabricmc", "intermediary"));
     candidates.push(lib("org.quiltmc", "hashed"));
     candidates.push(
@@ -224,13 +247,20 @@ pub fn resolve_instance_metadata(
         mc_version = "未知".to_string();
     }
     let raw_loader = match loader {
-        Some("neoforge") => arg("--fml.neoForgeVersion").or_else(|| lib("net.neoforged", "neoforge")),
+        Some("neoforge") => {
+            arg("--fml.neoForgeVersion").or_else(|| lib("net.neoforged", "neoforge"))
+        }
         Some("forge") => arg("--fml.forgeVersion").or_else(|| forge.clone()),
         Some("fabric") => lib("net.fabricmc", "fabric-loader"),
         Some("quilt") => lib("org.quiltmc", "quilt-loader"),
         _ => None,
     }
-    .or_else(|| chain.iter().find_map(|j| truthy(j, "_loaderVersion")).map(str::to_string));
+    .or_else(|| {
+        chain
+            .iter()
+            .find_map(|j| truthy(j, "_loaderVersion"))
+            .map(str::to_string)
+    });
     let loader_version = raw_loader
         .filter(|raw| !raw.is_empty())
         .map(|raw| normalize_loader_version(&raw, loader, Some(mc_version.as_str())));

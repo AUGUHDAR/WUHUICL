@@ -34,7 +34,9 @@ const TIMEOUT_MS: u64 = 30_000;
 // ---------------- 基础请求（community.ts fetchJson） ----------------
 
 fn fetch_json(url: &str, headers: &[(&str, &str)], timeout_ms: u64) -> Result<Value, String> {
-    let mut req = net::client().get(url).timeout(Duration::from_millis(timeout_ms));
+    let mut req = net::client()
+        .get(url)
+        .timeout(Duration::from_millis(timeout_ms));
     req = req.header("User-Agent", UA_SEARCH);
     for (k, v) in headers {
         req = req.header(*k, *v);
@@ -52,7 +54,9 @@ pub fn enc(s: &str) -> String {
     let mut out = String::new();
     for b in s.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'*' => out.push(*b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'*' => {
+                out.push(*b as char)
+            }
             b' ' => out.push_str("%20"),
             _ => out.push_str(&format!("%{b:02X}")),
         }
@@ -61,11 +65,19 @@ pub fn enc(s: &str) -> String {
 }
 
 fn query_string(pairs: &[(&str, String)]) -> String {
-    pairs.iter().map(|(k, v)| format!("{}={}", enc(k), enc(v))).collect::<Vec<_>>().join("&")
+    pairs
+        .iter()
+        .map(|(k, v)| format!("{}={}", enc(k), enc(v)))
+        .collect::<Vec<_>>()
+        .join("&")
 }
 
 fn query_string_owned(pairs: &[(String, String)]) -> String {
-    pairs.iter().map(|(k, v)| format!("{}={}", enc(k), enc(v))).collect::<Vec<_>>().join("&")
+    pairs
+        .iter()
+        .map(|(k, v)| format!("{}={}", enc(k), enc(v)))
+        .collect::<Vec<_>>()
+        .join("&")
 }
 
 fn arg(args: &[Value], i: usize) -> Option<&Value> {
@@ -98,19 +110,32 @@ fn loader_map() -> &'static HashMap<String, &'static str> {
 
 /// normalizeLoader()
 pub fn normalize_loader(value: Option<&str>) -> Option<&'static str> {
-    let key: String = value.unwrap_or("").trim().to_lowercase().chars().filter(|c| !matches!(c, '-' | '_' | ' ')).collect();
+    let key: String = value
+        .unwrap_or("")
+        .trim()
+        .to_lowercase()
+        .chars()
+        .filter(|c| !matches!(c, '-' | '_' | ' '))
+        .collect();
     loader_map().get(&key).copied()
 }
 
 /// normalizeLoaderVersion()
 pub fn normalize_loader_version(value: &str, loader: Option<&str>, mc: Option<&str>) -> String {
     static PREFIX: OnceLock<regex::Regex> = OnceLock::new();
-    let re = PREFIX.get_or_init(|| regex::Regex::new(r"^(?:neoforge|forge|fabric(?:-loader)?|quilt(?:-loader)?)[\s:_-]+").unwrap());
+    let re = PREFIX.get_or_init(|| {
+        regex::Regex::new(r"^(?:neoforge|forge|fabric(?:-loader)?|quilt(?:-loader)?)[\s:_-]+")
+            .unwrap()
+    });
     let mut version = re.replace(value.trim(), "").to_string();
     // /^v(?=\d)/i：仅在前缀 v 后跟数字时剥掉
     if version.len() > 1
         && matches!(version.as_bytes()[0], b'v' | b'V')
-        && version[1..].chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+        && version[1..]
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
     {
         version = version[1..].to_string();
     }
@@ -126,9 +151,13 @@ pub fn normalize_loader_version(value: &str, loader: Option<&str>, mc: Option<&s
 
 fn parse_semver_like(v: &str) -> Option<(Vec<u64>, Option<String>)> {
     static RE: OnceLock<regex::Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| regex::Regex::new(r"^(\d+(?:\.\d+)*)(?:-([^+]*))?(?:\+.*)?$").unwrap());
+    let re =
+        RE.get_or_init(|| regex::Regex::new(r"^(\d+(?:\.\d+)*)(?:-([^+]*))?(?:\+.*)?$").unwrap());
     let c = re.captures(v.trim())?;
-    let nums = c[1].split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect();
+    let nums = c[1]
+        .split('.')
+        .map(|p| p.parse::<u64>().unwrap_or(0))
+        .collect();
     Some((nums, c.get(2).map(|m| m.as_str().to_string())))
 }
 
@@ -164,14 +193,22 @@ pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
                 if pv == qv {
                     continue;
                 }
-                let Some(p) = pv else { return std::cmp::Ordering::Less };
-                let Some(q) = qv else { return std::cmp::Ordering::Greater };
+                let Some(p) = pv else {
+                    return std::cmp::Ordering::Less;
+                };
+                let Some(q) = qv else {
+                    return std::cmp::Ordering::Greater;
+                };
                 let (pn, qn) = (p.parse::<u64>().ok(), q.parse::<u64>().ok());
                 if let (Some(a), Some(b)) = (pn, qn) {
                     return a.cmp(&b);
                 }
                 if pn.is_some() != qn.is_some() {
-                    return if pn.is_some() { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater };
+                    return if pn.is_some() {
+                        std::cmp::Ordering::Less
+                    } else {
+                        std::cmp::Ordering::Greater
+                    };
                 }
                 return p.cmp(q);
             }
@@ -186,20 +223,30 @@ fn range_predicate(range: &str, version: &str) -> bool {
     }
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| regex::Regex::new(r"^(>=|<=|>|<|=|~|\^)?([^\s,()[\]]+)$").unwrap());
-    let Some(c) = re.captures(range) else { return false };
+    let Some(c) = re.captures(range) else {
+        return false;
+    };
     let op = c.get(1).map(|m| m.as_str()).unwrap_or("=");
     let base = c[2].to_string();
     let parts: Vec<&str> = base.split('.').collect();
-    let wild = parts.iter().position(|p| p.eq_ignore_ascii_case("x") || *p == "*");
+    let wild = parts
+        .iter()
+        .position(|p| p.eq_ignore_ascii_case("x") || *p == "*");
     if let Some(w) = wild {
         if op != "=" {
             return false;
         }
-        if !parts[w..].iter().all(|p| p.eq_ignore_ascii_case("x") || *p == "*") {
+        if !parts[w..]
+            .iter()
+            .all(|p| p.eq_ignore_ascii_case("x") || *p == "*")
+        {
             return false;
         }
         let vparts: Vec<&str> = version.split('.').collect();
-        return parts[..w].iter().enumerate().all(|(i, p)| vparts.get(i) == Some(p));
+        return parts[..w]
+            .iter()
+            .enumerate()
+            .all(|(i, p)| vparts.get(i) == Some(p));
     }
     let cmp = compare_versions(version, &base);
     match op {
@@ -210,23 +257,38 @@ fn range_predicate(range: &str, version: &str) -> bool {
         "<=" => cmp != std::cmp::Ordering::Greater,
         "~" | "^" => {
             static BASE_OK: OnceLock<regex::Regex> = OnceLock::new();
-            let ok = BASE_OK.get_or_init(|| regex::Regex::new(r"^\d+(?:\.\d+)*(?:-[\w.-]+)?$").unwrap());
+            let ok =
+                BASE_OK.get_or_init(|| regex::Regex::new(r"^\d+(?:\.\d+)*(?:-[\w.-]+)?$").unwrap());
             if !ok.is_match(&base) {
                 return false;
             }
             let nums_str = base.split('-').next().unwrap_or("");
-            let nums: Vec<u64> = nums_str.split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect();
+            let nums: Vec<u64> = nums_str
+                .split('.')
+                .map(|p| p.parse::<u64>().unwrap_or(0))
+                .collect();
             let index = if op == "~" {
                 nums.len().saturating_sub(1).min(1)
             } else {
-                let first = nums.iter().position(|n| *n != 0).unwrap_or(nums.len().saturating_sub(1));
+                let first = nums
+                    .iter()
+                    .position(|n| *n != 0)
+                    .unwrap_or(nums.len().saturating_sub(1));
                 first.max(0)
             };
             let mut upper: Vec<u64> = nums[..=index.min(nums.len().saturating_sub(1))].to_vec();
             if let Some(last) = upper.last_mut() {
                 *last += 1;
             }
-            cmp != std::cmp::Ordering::Less && compare_versions(version, &upper.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(".")) == std::cmp::Ordering::Less
+            cmp != std::cmp::Ordering::Less
+                && compare_versions(
+                    version,
+                    &upper
+                        .iter()
+                        .map(|n| n.to_string())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                ) == std::cmp::Ordering::Less
         }
         _ => false,
     }
@@ -244,10 +306,14 @@ pub fn matches_version_range(range: &str, version: &str) -> bool {
         return true;
     }
     if r.contains("||") {
-        return r.split("||").any(|p| !p.trim().is_empty() && matches_version_range(p, version));
+        return r
+            .split("||")
+            .any(|p| !p.trim().is_empty() && matches_version_range(p, version));
     }
     if r.contains(" && ") {
-        return r.split(" && ").all(|p| !p.trim().is_empty() && matches_version_range(p, version));
+        return r
+            .split(" && ")
+            .all(|p| !p.trim().is_empty() && matches_version_range(p, version));
     }
     static HYPHEN: OnceLock<regex::Regex> = OnceLock::new();
     let hyphen = HYPHEN.get_or_init(|| regex::Regex::new(HYPHEN_RANGE).unwrap());
@@ -265,15 +331,22 @@ pub fn matches_version_range(range: &str, version: &str) -> bool {
         }
         let expand_bound = |value: &str, pick_lo: bool| -> String {
             if let Some(c) = hyphen.captures(value) {
-                return if pick_lo { c[1].to_string() } else { c[2].to_string() };
+                return if pick_lo {
+                    c[1].to_string()
+                } else {
+                    c[2].to_string()
+                };
             }
             value.to_string()
         };
         return intervals.iter().any(|interval| {
             let body = interval[1..interval.len() - 1].trim();
             if !body.contains(',') {
-                return interval.starts_with('[') && interval.ends_with(']') && !body.is_empty()
-                    && compare_versions(version, &expand_bound(body, true)) == std::cmp::Ordering::Equal;
+                return interval.starts_with('[')
+                    && interval.ends_with(']')
+                    && !body.is_empty()
+                    && compare_versions(version, &expand_bound(body, true))
+                        == std::cmp::Ordering::Equal;
             }
             let bounds: Vec<&str> = body.split(',').map(|s| s.trim()).collect();
             if bounds.len() != 2 || (bounds[0].is_empty() && bounds[1].is_empty()) {
@@ -281,46 +354,90 @@ pub fn matches_version_range(range: &str, version: &str) -> bool {
             }
             let lo = expand_bound(bounds[0], true);
             let hi = expand_bound(bounds[1], false);
-            if !lo.is_empty() && !hi.is_empty() && compare_versions(&lo, &hi) == std::cmp::Ordering::Greater {
+            if !lo.is_empty()
+                && !hi.is_empty()
+                && compare_versions(&lo, &hi) == std::cmp::Ordering::Greater
+            {
                 return false;
             }
-            let low = if lo.is_empty() { std::cmp::Ordering::Greater } else { compare_versions(version, &lo) };
-            let high = if hi.is_empty() { std::cmp::Ordering::Less } else { compare_versions(version, &hi) };
+            let low = if lo.is_empty() {
+                std::cmp::Ordering::Greater
+            } else {
+                compare_versions(version, &lo)
+            };
+            let high = if hi.is_empty() {
+                std::cmp::Ordering::Less
+            } else {
+                compare_versions(version, &hi)
+            };
             // 开区间上界「补丁延伸」宽容（如 [1.21,1.21.1) 纳入 1.21.x）
             let extends_by_patch = !lo.is_empty() && !hi.is_empty() && {
                 let lp: Vec<&str> = lo.split('.').collect();
                 let hp: Vec<&str> = hi.split('.').collect();
                 hp.len() > lp.len() && hp[..lp.len()].join(".") == lp.join(".")
             };
-            (low == std::cmp::Ordering::Greater || low == std::cmp::Ordering::Equal && interval.starts_with('['))
-                && (high == std::cmp::Ordering::Less || high == std::cmp::Ordering::Equal && (interval.ends_with(']') || extends_by_patch))
+            (low == std::cmp::Ordering::Greater
+                || low == std::cmp::Ordering::Equal && interval.starts_with('['))
+                && (high == std::cmp::Ordering::Less
+                    || high == std::cmp::Ordering::Equal
+                        && (interval.ends_with(']') || extends_by_patch))
         });
     }
     static OP_SPACE: OnceLock<regex::Regex> = OnceLock::new();
     let re = OP_SPACE.get_or_init(|| regex::Regex::new(r"(>=|<=|>|<|=|~|\^)\s+").unwrap());
-    re.replace_all(r, "$1").split_whitespace().all(|part| range_predicate(part, version))
+    re.replace_all(r, "$1")
+        .split_whitespace()
+        .all(|part| range_predicate(part, version))
 }
 
 fn fabric_predicate(part: &str) -> String {
     static CARET: OnceLock<regex::Regex> = OnceLock::new();
-    let re = CARET.get_or_init(|| regex::Regex::new(r"^(\^|~)(\d+(?:\.\d+)*)(?:-[^+]*)?(?:\+.*)?$").unwrap());
+    let re = CARET
+        .get_or_init(|| regex::Regex::new(r"^(\^|~)(\d+(?:\.\d+)*)(?:-[^+]*)?(?:\+.*)?$").unwrap());
     if let Some(c) = re.captures(part) {
-        let nums: Vec<u64> = c[2].split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect();
-        let index = if &c[1] == "^" { 0 } else { nums.len().saturating_sub(1).min(1) };
+        let nums: Vec<u64> = c[2]
+            .split('.')
+            .map(|p| p.parse::<u64>().unwrap_or(0))
+            .collect();
+        let index = if &c[1] == "^" {
+            0
+        } else {
+            nums.len().saturating_sub(1).min(1)
+        };
         let mut upper: Vec<u64> = nums[..=index].to_vec();
         if let Some(last) = upper.last_mut() {
             *last += 1;
         }
-        return format!(">={} <{}-", &part[1..], upper.iter().map(|n| n.to_string()).collect::<Vec<_>>().join("."));
+        return format!(
+            ">={} <{}-",
+            &part[1..],
+            upper
+                .iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join(".")
+        );
     }
     static WILD: OnceLock<regex::Regex> = OnceLock::new();
-    let re = WILD.get_or_init(|| regex::Regex::new(r"^(\d+(?:\.\d+)*)\.(?:x|\*)(?:\.(?:x|\*))*$").unwrap());
+    let re = WILD
+        .get_or_init(|| regex::Regex::new(r"^(\d+(?:\.\d+)*)\.(?:x|\*)(?:\.(?:x|\*))*$").unwrap());
     if let Some(c) = re.captures(part) {
-        let mut upper: Vec<u64> = c[1].split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect();
+        let mut upper: Vec<u64> = c[1]
+            .split('.')
+            .map(|p| p.parse::<u64>().unwrap_or(0))
+            .collect();
         if let Some(last) = upper.last_mut() {
             *last += 1;
         }
-        return format!(">={}- <{}-", &c[1], upper.iter().map(|n| n.to_string()).collect::<Vec<_>>().join("."));
+        return format!(
+            ">={}- <{}-",
+            &c[1],
+            upper
+                .iter()
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join(".")
+        );
     }
     part.to_string()
 }
@@ -333,14 +450,21 @@ fn range_terms(value: &Value, dialect: &str, depth: u32) -> Result<Vec<Vec<Strin
         Value::String(v) => {
             let range = if dialect == "fabric" {
                 static OP_SPACE: OnceLock<regex::Regex> = OnceLock::new();
-                let re = OP_SPACE.get_or_init(|| regex::Regex::new(r"(>=|<=|>|<|=|~|\^)\s+").unwrap());
-                re.replace_all(v.trim(), "$1").split_whitespace().map(|p| fabric_predicate(p)).collect::<Vec<_>>().join(" ")
+                let re =
+                    OP_SPACE.get_or_init(|| regex::Regex::new(r"(>=|<=|>|<|=|~|\^)\s+").unwrap());
+                re.replace_all(v.trim(), "$1")
+                    .split_whitespace()
+                    .map(|p| fabric_predicate(p))
+                    .collect::<Vec<_>>()
+                    .join(" ")
             } else {
                 v.trim().to_string()
             };
             let normalized = if dialect == "quilt" {
                 static Q: OnceLock<regex::Regex> = OnceLock::new();
-                let re = Q.get_or_init(|| regex::Regex::new(r"^\d+(?:\.\d+)*(?:-[\w.-]+)?(?:\+[\w.-]+)?$").unwrap());
+                let re = Q.get_or_init(|| {
+                    regex::Regex::new(r"^\d+(?:\.\d+)*(?:-[\w.-]+)?(?:\+[\w.-]+)?$").unwrap()
+                });
                 if re.is_match(&range) {
                     format!("^{range}")
                 } else {
@@ -349,7 +473,10 @@ fn range_terms(value: &Value, dialect: &str, depth: u32) -> Result<Vec<Vec<Strin
             } else {
                 range
             };
-            Ok(normalized.split("||").map(|part| part.trim().split(" && ").map(str::to_string).collect()).collect())
+            Ok(normalized
+                .split("||")
+                .map(|part| part.trim().split(" && ").map(str::to_string).collect())
+                .collect())
         }
         Value::Null => Ok(vec![vec!["*".to_string()]]),
         Value::Array(any) => {
@@ -413,7 +540,11 @@ pub fn dependency_range(value: &Value, dialect: &str) -> String {
         return String::new();
     }
     match range_terms(value, dialect, 0) {
-        Ok(terms) => terms.iter().map(|term| term.join(" && ")).collect::<Vec<_>>().join(" || "),
+        Ok(terms) => terms
+            .iter()
+            .map(|term| term.join(" && "))
+            .collect::<Vec<_>>()
+            .join(" || "),
         Err(_) => "!unsupported-range!".to_string(),
     }
 }
@@ -422,27 +553,52 @@ pub fn dependency_range(value: &Value, dialect: &str) -> String {
 pub fn mod_matches_instance(mod_info: &Value, instance: &Value) -> bool {
     let loader = normalize_loader(instance.get("loader").and_then(|v| v.as_str()));
     if mod_info.get("error").is_some()
-        || instance.get("failed").and_then(|v| v.as_bool()).unwrap_or(false)
-        || instance.get("incomplete").and_then(|v| v.as_bool()).unwrap_or(false)
+        || instance
+            .get("failed")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        || instance
+            .get("incomplete")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
         || loader.is_none()
     {
         return false;
     }
-    let variants = mod_info.get("variants").and_then(|v| v.as_array()).filter(|a| !a.is_empty());
+    let variants = mod_info
+        .get("variants")
+        .and_then(|v| v.as_array())
+        .filter(|a| !a.is_empty());
     let specs: Vec<&Value> = match variants {
-        Some(list) => list.iter().filter(|s| loader == normalize_loader(s.get("loader").and_then(|v| v.as_str()))).collect(),
+        Some(list) => list
+            .iter()
+            .filter(|s| loader == normalize_loader(s.get("loader").and_then(|v| v.as_str())))
+            .collect(),
         None => vec![mod_info],
     };
     if specs.is_empty() {
         return false;
     }
-    let mc = instance.get("mcVersion").and_then(|v| v.as_str()).unwrap_or("");
-    let lv = instance.get("loaderVersion").and_then(|v| v.as_str()).unwrap_or("");
+    let mc = instance
+        .get("mcVersion")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let lv = instance
+        .get("loaderVersion")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     specs.iter().all(|spec| {
-        matches_version_range(spec.get("mcRange").and_then(|v| v.as_str()).unwrap_or(""), mc)
-            && spec.get("loaderRange").and_then(|v| v.as_str()).map(|lr| {
-                lr.is_empty() || matches_version_range(lr, &normalize_loader_version(lv, loader, Some(mc)))
-            }).unwrap_or(true)
+        matches_version_range(
+            spec.get("mcRange").and_then(|v| v.as_str()).unwrap_or(""),
+            mc,
+        ) && spec
+            .get("loaderRange")
+            .and_then(|v| v.as_str())
+            .map(|lr| {
+                lr.is_empty()
+                    || matches_version_range(lr, &normalize_loader_version(lv, loader, Some(mc)))
+            })
+            .unwrap_or(true)
     })
 }
 
@@ -451,32 +607,70 @@ pub fn mod_mismatch_reasons(mod_info: &Value, instance: &Value) -> Vec<String> {
     if let Some(err) = mod_info.get("error").and_then(|v| v.as_str()) {
         return vec![err.to_string()];
     }
-    if instance.get("failed").and_then(|v| v.as_bool()).unwrap_or(false)
-        || instance.get("incomplete").and_then(|v| v.as_bool()).unwrap_or(false)
+    if instance
+        .get("failed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        || instance
+            .get("incomplete")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
     {
         return vec!["实例安装不完整或元数据无法读取".to_string()];
     }
     let loader = normalize_loader(instance.get("loader").and_then(|v| v.as_str()));
-    let variants = mod_info.get("variants").and_then(|v| v.as_array()).filter(|a| !a.is_empty());
+    let variants = mod_info
+        .get("variants")
+        .and_then(|v| v.as_array())
+        .filter(|a| !a.is_empty());
     let specs: Vec<&Value> = match variants {
-        Some(list) => list.iter().filter(|s| loader.is_some() && loader == normalize_loader(s.get("loader").and_then(|v| v.as_str()))).collect(),
+        Some(list) => list
+            .iter()
+            .filter(|s| {
+                loader.is_some()
+                    && loader == normalize_loader(s.get("loader").and_then(|v| v.as_str()))
+            })
+            .collect(),
         None => vec![mod_info],
     };
     if specs.is_empty() {
-        let declared = mod_info.get("loader").and_then(|v| v.as_str()).unwrap_or("已声明的加载器");
-        return vec![format!("需要 {declared}，实例为 {}", loader.unwrap_or("纯净版/未知"))];
+        let declared = mod_info
+            .get("loader")
+            .and_then(|v| v.as_str())
+            .unwrap_or("已声明的加载器");
+        return vec![format!(
+            "需要 {declared}，实例为 {}",
+            loader.unwrap_or("纯净版/未知")
+        )];
     }
-    let mc = instance.get("mcVersion").and_then(|v| v.as_str()).unwrap_or("");
-    let lv = instance.get("loaderVersion").and_then(|v| v.as_str()).unwrap_or("");
+    let mc = instance
+        .get("mcVersion")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let lv = instance
+        .get("loaderVersion")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let mut reasons: Vec<String> = Vec::new();
     for spec in specs {
         let mc_range = spec.get("mcRange").and_then(|v| v.as_str()).unwrap_or("");
         if !matches_version_range(mc_range, mc) {
-            reasons.push(format!("Minecraft {mc} 不满足 {mc_range}（方括号含边界，圆括号不含边界）"));
+            reasons.push(format!(
+                "Minecraft {mc} 不满足 {mc_range}（方括号含边界，圆括号不含边界）"
+            ));
         }
-        if let Some(lr) = spec.get("loaderRange").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        if let Some(lr) = spec
+            .get("loaderRange")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
             if !matches_version_range(lr, &normalize_loader_version(lv, loader, Some(mc))) {
-                reasons.push(format!("{} {} 不满足 {}", loader.unwrap_or(""), if lv.is_empty() { "版本未知" } else { lv }, lr));
+                reasons.push(format!(
+                    "{} {} 不满足 {}",
+                    loader.unwrap_or(""),
+                    if lv.is_empty() { "版本未知" } else { lv },
+                    lr
+                ));
             }
         }
     }
@@ -515,21 +709,43 @@ pub struct FileFilter {
 
 /// effectiveCommunityFilter()
 pub fn effective_filter(filter: &FileFilter) -> FileFilter {
-    let mc = filter.mc_version.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    let mc = filter
+        .mc_version
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let loader = if uses_community_loader(filter.kind.as_deref()) {
-        filter.loader.as_deref().filter(|s| !s.is_empty()).map(str::to_string)
+        filter
+            .loader
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
     } else {
         None
     };
-    FileFilter { mc_version: mc, loader, kind: filter.kind.clone() }
+    FileFilter {
+        mc_version: mc,
+        loader,
+        kind: filter.kind.clone(),
+    }
 }
 
 pub fn filter_from_value(v: Option<&Value>) -> FileFilter {
     let v = v.filter(|v| v.is_object());
     FileFilter {
-        mc_version: v.and_then(|v| v.get("mcVersion")).and_then(|x| x.as_str()).map(str::to_string),
-        loader: v.and_then(|v| v.get("loader")).and_then(|x| x.as_str()).map(str::to_string),
-        kind: v.and_then(|v| v.get("kind")).and_then(|x| x.as_str()).map(str::to_string),
+        mc_version: v
+            .and_then(|v| v.get("mcVersion"))
+            .and_then(|x| x.as_str())
+            .map(str::to_string),
+        loader: v
+            .and_then(|v| v.get("loader"))
+            .and_then(|x| x.as_str())
+            .map(str::to_string),
+        kind: v
+            .and_then(|v| v.get("kind"))
+            .and_then(|x| x.as_str())
+            .map(str::to_string),
     }
 }
 
@@ -539,7 +755,11 @@ pub fn matches_community_filter(file: &Value, filter: &FileFilter) -> bool {
     let resource_loaders = filter.kind.as_deref().and_then(modrinth_resource_loaders);
     if file.get("source").and_then(|v| v.as_str()) == Some("modrinth") {
         if let Some(rl) = resource_loaders {
-            let has = file.get("loaders").and_then(|v| v.as_array()).map(|a| a.iter().any(|l| rl.contains(&l.as_str().unwrap_or("")))).unwrap_or(false);
+            let has = file
+                .get("loaders")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().any(|l| rl.contains(&l.as_str().unwrap_or(""))))
+                .unwrap_or(false);
             if !has {
                 return false;
             }
@@ -547,9 +767,17 @@ pub fn matches_community_filter(file: &Value, filter: &FileFilter) -> bool {
     }
     let mc_ok = match &filter.mc_version {
         None => true,
-        Some(mc) => file.get("gameVersions").and_then(|v| v.as_array()).map(|a| {
-            a.iter().any(|v| v.as_str().map(|s| compare_versions(s, mc) == std::cmp::Ordering::Equal).unwrap_or(false))
-        }).unwrap_or(false),
+        Some(mc) => file
+            .get("gameVersions")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter().any(|v| {
+                    v.as_str()
+                        .map(|s| compare_versions(s, mc) == std::cmp::Ordering::Equal)
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false),
     };
     if !mc_ok {
         return false;
@@ -558,23 +786,40 @@ pub fn matches_community_filter(file: &Value, filter: &FileFilter) -> bool {
         None => true,
         Some(loader) => {
             let want = normalize_loader(Some(loader.as_str()));
-            file.get("loaders").and_then(|v| v.as_array()).map(|a| {
-                a.iter().any(|l| normalize_loader(l.as_str()) == want)
-            }).unwrap_or(false)
+            file.get("loaders")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().any(|l| normalize_loader(l.as_str()) == want))
+                .unwrap_or(false)
         }
     }
 }
 
 /// communityFileMatchesInstance()
 pub fn community_file_matches_instance(file: &Value, instance: &Value) -> bool {
-    !instance.get("failed").and_then(|v| v.as_bool()).unwrap_or(false)
-        && !instance.get("incomplete").and_then(|v| v.as_bool()).unwrap_or(false)
-        && instance.get("loader").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false)
+    !instance
+        .get("failed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+        && !instance
+            .get("incomplete")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        && instance
+            .get("loader")
+            .and_then(|v| v.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
         && matches_community_filter(
             file,
             &FileFilter {
-                mc_version: instance.get("mcVersion").and_then(|v| v.as_str()).map(str::to_string),
-                loader: instance.get("loader").and_then(|v| v.as_str()).map(str::to_string),
+                mc_version: instance
+                    .get("mcVersion")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                loader: instance
+                    .get("loader")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
                 kind: None,
             },
         )
@@ -583,159 +828,451 @@ pub fn community_file_matches_instance(file: &Value, instance: &Value) -> bool {
 // ---------------- community-zh.ts：热门 MOD 中文名映射 ----------------
 
 pub const MOD_ZH: &[(&str, &str)] = &[
-    ("sodium", "钠"), ("sodium-extra", "钠·扩展"), ("iris", "鸢尾光影"), ("oculus", "Oculus 光影"),
-    ("lithium", "锂"), ("starlight", "星光"), ("ferritecore", "铁氧体磁芯"), ("modernfix", "现代化修复"),
-    ("memoryleakfix", "内存泄漏修复"), ("entityculling", "实体剔除"), ("moreculling", "更多剔除"),
-    ("c2me-fabric", "C2ME 区块引擎"), ("noisium", "噪声优化"), ("cesium", "铯"), ("dynamic-fps", "动态FPS"),
-    ("immediatelyfast", "即时渲染"), ("fastbench", "快速工作台"), ("fast-furnace", "快速熔炉"),
-    ("clumps", "经验团合并"), ("get-it-together-drops", "掉落物合并"), ("krypton", "氪"),
-    ("async-locator", "异步定位"), ("alternate-current", "交流电"), ("enhanced-block-entities", "增强方块实体"),
-    ("entity-model-features", "实体模型特性"), ("entity-texture-features", "实体纹理特性"),
-    ("distant-horizons", "遥远地平线"), ("bobby", "区块缓存 Bobby"), ("farsight", "远视"),
-    ("vulkanmod", "Vulkan 渲染"), ("nvidium", "Nvidium"), ("spark", "Spark 性能分析"),
-    ("observable", "性能观测"), ("cull-less-leaves", "树叶剔除优化"), ("smooth-chunk", "平滑区块加载"),
-    ("threadtweak", "线程调整"), ("packet-fixer", "数据包修复"), ("connectivity", "连接优化"),
-    ("badoptimizations", "BadOptimizations 优化"), ("very-many-players", "超多玩家优化"),
-    ("jei", "JEI物品管理器"), ("rei", "REI 物品管理"), ("emi", "EMI 物品管理"),
-    ("just-enough-resources", "JER 资源查询"), ("just-enough-professions", "JEP 职业查询"),
-    ("wthit", "WTHIT 高亮显示"), ("waila", "WAILA 高亮显示"), ("jade", "Jade 高亮显示"),
-    ("the-one-probe", "TOP 高亮显示"), ("modmenu", "模组菜单"), ("cloth-config", "Cloth 配置库"),
-    ("configured", "配置界面"), ("catalogue", "模组目录"), ("betterf3", "更好的F3"),
-    ("equipment-compare", "装备对比"), ("item-filters", "物品过滤器"), ("durability-tooltip", "耐久提示"),
-    ("durability-viewer", "耐久查看"), ("enchantment-descriptions", "附魔描述"),
-    ("shulker-box-tooltip", "潜影盒提示"), ("inventory-sorter", "物品栏整理"), ("mouse-tweaks", "鼠标手势"),
-    ("crafting-tweaks", "合成辅助"), ("polymorph", "多态合成"), ("toast-control", "通知控制"),
-    ("chat-heads", "聊天头像"), ("emojiful", "聊天表情"), ("no-chat-reports", "禁用聊天举报"),
-    ("screenshots-to-clipboard", "截图到剪贴板"), ("edit-sign", "编辑告示牌"), ("freecam", "自由相机"),
-    ("better-third-person", "更好的第三人称"), ("first-person-model", "第一人称模型"),
-    ("not-enough-animations", "更多动画"), ("eating-animation", "进食动画"), ("swingthrough", "挥砍穿草"),
-    ("skin-layers-3d", "3D 皮肤层"), ("customskinloader", "万用皮肤补丁"), ("emotecraft", "表情工艺"),
-    ("gamma-utils", "伽马工具"), ("advancement-plaques", "进度牌匾"), ("better-advancements", "更好的进度"),
-    ("trading-post", "交易站"), ("visual-workbench", "可视化工作台"), ("neat", "生物血条"),
-    ("toast", "通知美化"), ("tips", "提示"),
-    ("fabric-api", "Fabric API"), ("forge-config-api-port", "Forge 配置移植"),
-    ("architectury-api", "Architectury"), ("puzzles-lib", "Puzzles Lib"), ("bookshelf", "Bookshelf 前置"),
-    ("balm", "Balm 前置"), ("collective", "Collective 前置"), ("moonlight", "月光 Selene"),
-    ("geckolib", "GeckoLib 动画库"), ("azurelib", "AzureLib"), ("playeranimator", "玩家动画库"),
-    ("curios", "饰品栏"), ("trinkets", "饰品 Trinkets"), ("flywheel", "飞轮 Flywheel"),
-    ("kotlin-for-forge", "Kotlin for Forge"), ("bclib", "BCLib"), ("terrablender", "地形混合器"),
-    ("corgilib", "柯基库"), ("lithostitched", "缝合地形"), ("resourceful-lib", "Resourceful 库"),
-    ("resourceful-config", "Resourceful 配置"), ("botarium", "Botarium"), ("team-reactor", "Reactor 库"),
-    ("cupboard", "橱柜 Cupboard"), ("sheti-phian-core", "ShetiPhian 核心"), ("cofh-core", "CoFH 核心"),
-    ("titanium", "钛 Titanium"), ("mcjtylib", "McJty 库"), ("obscure-api", "Obscure API"),
-    ("attributeslib", "属性库"), ("placebo", "安慰剂 Placebo"), ("supermartijn642s-core-lib", "超级马丁核心库"),
+    ("sodium", "钠"),
+    ("sodium-extra", "钠·扩展"),
+    ("iris", "鸢尾光影"),
+    ("oculus", "Oculus 光影"),
+    ("lithium", "锂"),
+    ("starlight", "星光"),
+    ("ferritecore", "铁氧体磁芯"),
+    ("modernfix", "现代化修复"),
+    ("memoryleakfix", "内存泄漏修复"),
+    ("entityculling", "实体剔除"),
+    ("moreculling", "更多剔除"),
+    ("c2me-fabric", "C2ME 区块引擎"),
+    ("noisium", "噪声优化"),
+    ("cesium", "铯"),
+    ("dynamic-fps", "动态FPS"),
+    ("immediatelyfast", "即时渲染"),
+    ("fastbench", "快速工作台"),
+    ("fast-furnace", "快速熔炉"),
+    ("clumps", "经验团合并"),
+    ("get-it-together-drops", "掉落物合并"),
+    ("krypton", "氪"),
+    ("async-locator", "异步定位"),
+    ("alternate-current", "交流电"),
+    ("enhanced-block-entities", "增强方块实体"),
+    ("entity-model-features", "实体模型特性"),
+    ("entity-texture-features", "实体纹理特性"),
+    ("distant-horizons", "遥远地平线"),
+    ("bobby", "区块缓存 Bobby"),
+    ("farsight", "远视"),
+    ("vulkanmod", "Vulkan 渲染"),
+    ("nvidium", "Nvidium"),
+    ("spark", "Spark 性能分析"),
+    ("observable", "性能观测"),
+    ("cull-less-leaves", "树叶剔除优化"),
+    ("smooth-chunk", "平滑区块加载"),
+    ("threadtweak", "线程调整"),
+    ("packet-fixer", "数据包修复"),
+    ("connectivity", "连接优化"),
+    ("badoptimizations", "BadOptimizations 优化"),
+    ("very-many-players", "超多玩家优化"),
+    ("jei", "JEI物品管理器"),
+    ("rei", "REI 物品管理"),
+    ("emi", "EMI 物品管理"),
+    ("just-enough-resources", "JER 资源查询"),
+    ("just-enough-professions", "JEP 职业查询"),
+    ("wthit", "WTHIT 高亮显示"),
+    ("waila", "WAILA 高亮显示"),
+    ("jade", "Jade 高亮显示"),
+    ("the-one-probe", "TOP 高亮显示"),
+    ("modmenu", "模组菜单"),
+    ("cloth-config", "Cloth 配置库"),
+    ("configured", "配置界面"),
+    ("catalogue", "模组目录"),
+    ("betterf3", "更好的F3"),
+    ("equipment-compare", "装备对比"),
+    ("item-filters", "物品过滤器"),
+    ("durability-tooltip", "耐久提示"),
+    ("durability-viewer", "耐久查看"),
+    ("enchantment-descriptions", "附魔描述"),
+    ("shulker-box-tooltip", "潜影盒提示"),
+    ("inventory-sorter", "物品栏整理"),
+    ("mouse-tweaks", "鼠标手势"),
+    ("crafting-tweaks", "合成辅助"),
+    ("polymorph", "多态合成"),
+    ("toast-control", "通知控制"),
+    ("chat-heads", "聊天头像"),
+    ("emojiful", "聊天表情"),
+    ("no-chat-reports", "禁用聊天举报"),
+    ("screenshots-to-clipboard", "截图到剪贴板"),
+    ("edit-sign", "编辑告示牌"),
+    ("freecam", "自由相机"),
+    ("better-third-person", "更好的第三人称"),
+    ("first-person-model", "第一人称模型"),
+    ("not-enough-animations", "更多动画"),
+    ("eating-animation", "进食动画"),
+    ("swingthrough", "挥砍穿草"),
+    ("skin-layers-3d", "3D 皮肤层"),
+    ("customskinloader", "万用皮肤补丁"),
+    ("emotecraft", "表情工艺"),
+    ("gamma-utils", "伽马工具"),
+    ("advancement-plaques", "进度牌匾"),
+    ("better-advancements", "更好的进度"),
+    ("trading-post", "交易站"),
+    ("visual-workbench", "可视化工作台"),
+    ("neat", "生物血条"),
+    ("toast", "通知美化"),
+    ("tips", "提示"),
+    ("fabric-api", "Fabric API"),
+    ("forge-config-api-port", "Forge 配置移植"),
+    ("architectury-api", "Architectury"),
+    ("puzzles-lib", "Puzzles Lib"),
+    ("bookshelf", "Bookshelf 前置"),
+    ("balm", "Balm 前置"),
+    ("collective", "Collective 前置"),
+    ("moonlight", "月光 Selene"),
+    ("geckolib", "GeckoLib 动画库"),
+    ("azurelib", "AzureLib"),
+    ("playeranimator", "玩家动画库"),
+    ("curios", "饰品栏"),
+    ("trinkets", "饰品 Trinkets"),
+    ("flywheel", "飞轮 Flywheel"),
+    ("kotlin-for-forge", "Kotlin for Forge"),
+    ("bclib", "BCLib"),
+    ("terrablender", "地形混合器"),
+    ("corgilib", "柯基库"),
+    ("lithostitched", "缝合地形"),
+    ("resourceful-lib", "Resourceful 库"),
+    ("resourceful-config", "Resourceful 配置"),
+    ("botarium", "Botarium"),
+    ("team-reactor", "Reactor 库"),
+    ("cupboard", "橱柜 Cupboard"),
+    ("sheti-phian-core", "ShetiPhian 核心"),
+    ("cofh-core", "CoFH 核心"),
+    ("titanium", "钛 Titanium"),
+    ("mcjtylib", "McJty 库"),
+    ("obscure-api", "Obscure API"),
+    ("attributeslib", "属性库"),
+    ("placebo", "安慰剂 Placebo"),
+    ("supermartijn642s-core-lib", "超级马丁核心库"),
     ("valhelsia-core", "Valhelsia 核心"),
-    ("create", "机械动力"), ("create-fabric", "机械动力（Fabric）"), ("createaddition", "机械动力：附加"),
-    ("create-stuff-additions", "机械动力附属"), ("steam-rails", "蒸汽铁轨"), ("farmers-delight", "农夫乐事"),
-    ("croptopia", "丰收物语"), ("supplementaries", "锦致装饰"), ("ftb-quests", "FTB 任务"),
-    ("ftb-teams", "FTB 团队"), ("ftb-library", "FTB 基础库"), ("ftb-chunks", "FTB 区块认领"),
-    ("ftb-ultimine", "FTB 连锁挖矿"), ("ftb-backups", "FTB 备份"), ("ftb-essentials", "FTB 基础"),
-    ("indium", "铟"), ("carry-on", "搬运"), ("appleskin", "苹果皮"), ("journeymap", "旅行地图"),
-    ("xaeros-minimap", "Xaero的小地图"), ("xaeros-world-map", "Xaero的世界地图"), ("waystones", "传送石"),
-    ("litematica", "投影"), ("worldedit", "创世神"), ("building-gadgets", "建筑小帮手"),
-    ("chunk-loaders", "区块加载器"), ("terralith", "特拉石"), ("biomesoplenty", "超多生物群系"),
-    ("oh-the-biomes-youll-go", "你将去的生物群系"), ("regions-unexplored", "未探索区域"),
-    ("tectonic", "构造地形"), ("reterraforged", "重构地形"), ("continents", "大陆"),
-    ("twilightforest", "暮色森林"), ("aether", "天境（以太）"), ("deep-aether", "深邃以太"),
-    ("aether-redux", "以太重制"), ("ancient-aether", "远古以太"), ("blue-skies", "蔚蓝天空"),
-    ("the-bumblezone", "大黄蜂领域"), ("the-undergarden", "地下花园"), ("better-end", "更好的末地"),
-    ("better-nether", "更好的下界"), ("outer-end", "外域末地"), ("enderscape", "末地景观"),
-    ("nullscape", "虚无景观"), ("starmute", "星寂"), ("quark", "夸克"), ("charm", "魅力 Charm"),
-    ("mrcrayfishs-furniture", "蜡笔小新家具"), ("another-furniture", "另一个家具"),
-    ("hand-crafted", "手工制作"), ("framed", "框架方块"), ("mcw-doors", "马克门窗"),
-    ("mcw-windows", "马克窗户"), ("mcw-fences", "马克栅栏"), ("mcw-roofs", "马克屋顶"),
-    ("mcw-bridges", "马克桥梁"), ("mcw-furniture", "马克家具"), ("decorative-blocks", "装饰方块"),
-    ("chipped", "凿刻"), ("rechiseled", "再凿刻"), ("every-compat", "通用木制品兼容"),
-    ("woodworks", "木工作品"), ("connected-glass", "连接玻璃"), ("tinted-glass", "染色玻璃"),
-    ("mekanism", "通用机械"), ("applied-energistics-2", "应用能源2"), ("refined-storage", "精致存储"),
-    ("extra-storage", "额外存储"), ("thermal-expansion", "热力膨胀"), ("thermal-foundation", "热力基础"),
-    ("thermal-dynamics", "热力管道"), ("thermal-innovation", "热力革新"), ("thermal-cultivation", "热力农业"),
-    ("thermal-locomotion", "热力运输"), ("redstone-arsenal", "红石兵工厂"), ("enderio", "末影接口"),
-    ("industrial-foregoing", "工业先锋"), ("pneumaticcraft", "气动工艺"), ("immersive-engineering", "沉浸工程"),
-    ("tinkers-construct", "匠魂"), ("botania", "植物魔法"), ("blood-magic", "血魔法"),
-    ("powah", "电力满满 Powah"), ("big-reactors", "大反应堆"), ("extreme-reactors", "极限反应堆"),
-    ("nuclearcraft", "核工艺"), ("draconic-evolution", "龙之进化"), ("projecte", "等价交换"),
-    ("pipez", "管道 Pipez"), ("pretty-pipes", "精美管道"), ("laserio", "激光IO"),
-    ("modular-routers", "模块化路由器"), ("xnet", "XNet 网络"), ("flux-networks", "通量网络"),
-    ("cable-facades", "线缆伪装"), ("little-logistics", "小小物流"), ("rftools-base", "RF工具基础"),
-    ("rftools-utility", "RF工具实用"), ("rftools-dimensions", "RF工具维度"), ("compact-machines", "微型空间"),
-    ("gregtech", "格雷科技"), ("gtceu", "格雷科技现代版"), ("tech-reborn", "科技重生"),
-    ("modern-industrialization", "现代工业化"), ("sophisticated-backpacks", "精妙背包"),
-    ("sophisticated-storage", "精妙存储"), ("sophisticated-core", "精妙核心"), ("iron-chests", "更多箱子"),
-    ("storage-drawers", "储物抽屉"), ("functional-storage", "功能性存储"), ("pedestals", "基座"),
-    ("travelers-backpack", "旅行者背包"), ("backpacked", "背包客"), ("inmis", "更多背包"),
-    ("packed-up", "打包背包"), ("useful-backpacks", "实用背包"), ("simple-voice-chat", "简单语音聊天"),
-    ("open-parties-and-claims", "开放队伍与认领"), ("easy-villagers", "简单村民"),
-    ("easy-piglins", "简单猪灵"), ("villager-names", "村民命名"), ("guard-villagers", "村民警卫"),
-    ("more-villagers", "更多村民"), ("minecraft-comes-alive", "凡家物语"), ("minecolonies", "模拟殖民地"),
-    ("structurize", "结构化"), ("lootr", "Lootr 战利品箱"), ("corpse", "尸体 Corpse"),
-    ("gravestone", "墓碑"), ("artifacts", "奇珍异宝"), ("relics", "遗物 Relics"),
-    ("enigmatic-legacy", "神秘遗产"), ("apotheosis", "神化"), ("patchouli", "帕秋莉手册"),
-    ("ars-nouveau", "新生魔艺"), ("ars-elemental", "元素魔艺"), ("mana-and-artifice", "魔法艺术"),
-    ("mahou-tsukai", "魔法使"), ("occultism", "神秘学"), ("irons-spellbooks", "铁之法术书"),
-    ("natures-aura", "自然灵气"), ("astral-sorcery", "星辉魔法"), ("elementalcraft", "元素工艺"),
-    ("forbidden-arcanus", "禁忌与奥秘"), ("evilcraft", "邪恶工艺"), ("vampirism", "吸血鬼"),
-    ("werewolves", "狼人"), ("ice-and-fire", "冰与火之歌"), ("wyrmroost", "龙栖"),
-    ("alexsmobs", "亚历克斯的生物"), ("mowziesmobs", "Mowzie的生物"), ("cataclysm", "大灾变"),
-    ("deeperdarker", "深邃黑暗"), ("galosphere", "钟乳石洞"), ("creeper-overhaul", "苦力怕革新"),
-    ("mutant-more", "突变生物"), ("naturalist", "博物学家"), ("critters-and-crawlers", "小动物与爬虫"),
-    ("untamedwilds", "野性未驯"), ("exotic-birds", "珍禽"), ("friends-and-foes", "友与敌"),
-    ("illage-and-spillage", "劫掠与蹂躏"), ("rotten-creatures", "腐尸生物"), ("graveyard", "墓地"),
-    ("nyfsspiders", "Nyf的蜘蛛"), ("cave-dweller", "洞穴居民"), ("the-mimicer", "模仿者"),
-    ("siren-head", "警笛头"), ("goat-man", "山羊人"), ("the-knocker", "敲门者"),
-    ("herobrine-lives", "HIM复活"), ("mystical-agriculture", "神秘农业"), ("resourceful-bees", "资源蜜蜂"),
-    ("productive-bees", "生产蜜蜂"), ("botany-pots", "植物盆栽"), ("botany-trees", "盆栽树木"),
-    ("aquaculture", "水产养殖"), ("aquamirae", "深海幻影"), ("go-fish", "去钓鱼"),
-    ("fishing-real", "真实钓鱼"), ("tide", "潮汐"), ("stardew-fishing", "星露谷钓鱼"),
-    ("upgrade-aquatic", "碧海新生"), ("atmospheric", "悠然一派"), ("autumnity", "秋原"),
-    ("environmental", "自然环境"), ("neapolitan", "那不勒斯风味"), ("savage-and-ravage", "野蛮与蹂躏"),
-    ("upgraded-netherite", "下界合金升级"), ("endergetic", "末地拓展"), ("repurposed-structures", "结构再利用"),
-    ("dungeon-crawl", "地牢爬行"), ("lost-cities", "失落城市"), ("sky-villages", "天空村庄"),
-    ("towers-of-the-wild", "荒野之塔"), ("yungs-api", "Yung 的 API"), ("yungs-better-dungeons", "更好的地牢（Yung）"),
-    ("yungs-better-mineshafts", "更好的矿井（Yung）"), ("yungs-better-strongholds", "更好的要塞（Yung）"),
-    ("yungs-better-ocean-monuments", "更好的海底神殿（Yung）"), ("yungs-better-desert-temples", "更好的沙漠神殿（Yung）"),
-    ("yungs-better-jungle-temples", "更好的丛林神庙（Yung）"), ("yungs-better-witch-huts", "更好的女巫小屋（Yung）"),
-    ("awesome-dungeon", "Awesome 地牢"), ("spirit", "灵魂 Spirit"), ("simply-swords", "简单剑"),
-    ("better-combat", "更好的战斗"), ("spartan-weaponry", "斯巴达武器"), ("spartan-shields", "斯巴达盾牌"),
-    ("tetra", "Tetra 工匠"), ("silent-gear", "寂静装备"), ("silent-lib", "寂静库"),
-    ("paragliders", "滑翔伞"), ("wall-jump", "蹬墙跳"), ("crawl", "爬行"), ("go-prone", "匍匐"),
-    ("elytra-slot", "鞘翅槽"), ("backslot", "背部槽"), ("icarus", "伊卡洛斯之翼"),
-    ("dragon-mounts-legacy", "龙坐骑遗产"), ("mythic-mounts", "神话坐骑"), ("dragon-survival", "龙之生存"),
-    ("l2-hostility", "L2 敌意"), ("l2-complements", "L2 补充"), ("l2-library", "L2 库"),
-    ("mine-and-slash", "挖矿与砍杀"), ("age-of-exile", "流放时代"), ("divine-rpg", "神圣RPG"),
-    ("aoa3", "虚无世界"), ("cobblemon", "方块宝可梦"), ("pixelmon", "像素精灵宝可梦"),
-    ("pokecube", "宝可梦方块"), ("digimobs", "数码宝贝"), ("galacticraft", "星系"),
-    ("ad-astra", "星际 Ad Astra"), ("beyond-earth", "超越地球"), ("minecraft-transit-railway", "我的世界铁路"),
-    ("immersive-railroading", "沉浸铁路"), ("ultimate-car-mod", "终极汽车"), ("immersive-aircraft", "沉浸飞机"),
-    ("simple-planes", "简单飞机"), ("man-of-many-planes", "多飞机"), ("valkyrien-skies", "女武神之空"),
-    ("clockwork", "发条 Clockwork"), ("eureka-ships", "尤里卡之船"), ("da-vincis-vessels", "达芬奇之船"),
-    ("small-boats", "小船"), ("ex-nihilo", "无中生有"), ("sky-orchards", "天空果园"),
-    ("stoneblock", "石头世界"), ("chunky", "区块预生成"), ("world-pre-generator", "世界预生成"),
-    ("default-options", "默认选项"), ("default-world-type", "默认世界类型"), ("global-gamerules", "全局游戏规则"),
-    ("enhanced-celestials", "增强天体"), ("blood-moon", "血月"), ("serene-seasons", "静谧四季"),
-    ("tough-as-nails", "意志坚定"), ("thirst", "口渴"), ("dehydration", "脱水"),
-    ("weather-storms-tornadoes", "天气风暴龙卷风"), ("hardcore-darkness", "硬核黑暗"),
-    ("true-darkness", "真实黑暗"), ("nyctophobia", "黑夜恐惧"), ("survival-plus", "生存增强"),
-    ("first-aid", "急救"), ("zombie-apocalypse", "僵尸启示录"), ("zombie-awareness", "僵尸警觉"),
-    ("zombie-invasion", "僵尸入侵"), ("the-hordes", "尸潮"), ("security-craft", "安全工艺"),
-    ("locks", "锁 Locks"), ("exposure", "曝光 Exposure"), ("joy-of-painting", "绘画之乐"),
-    ("table-top-craft", "桌面游戏"), ("fantasy-furniture", "梦幻家具"), ("fantasy-dice", "梦幻骰子"),
-    ("bingo", "宾果 Bingo"), ("mine-cards", "我的卡牌"), ("murder-mystery", "谋杀之谜"),
-    ("hide-and-seek", "捉迷藏"), ("imposter", "内鬼 Imposter"), ("immersive-portals", "沉浸传送门"),
-    ("dimension-doors", "维度之门"), ("pocket-dimensions", "口袋维度"), ("abyssalcraft", "深渊国度"),
-    ("the-midnight", "午夜"), ("the-betweenlands", "交错次元"), ("the-erebus", "埃里伯斯"),
-    ("atum", "阿图姆"), ("voidscape", "虚空之境"), ("ratlantis", "老鼠兰蒂斯"),
-    ("fossils-and-archeology", "化石与考古"), ("jurassi-craft", "侏罗纪工艺"), ("rediscovered", "重新发现"),
-    ("unearthed", "出土文物"), ("kubejs", "KubeJS"), ("crafttweaker", "CraftTweaker"),
-    ("lootjs", "LootJS"), ("probejs", "ProbeJS"), ("contenttweaker", "内容调整"), ("jaopca", "JAOPCA"),
-    ("emendatus-enigmatica", "神秘统一 EE"), ("almost-unified", "近乎统一"),
-    ("allthemodium", "全能矿 Allthemodium"), ("alltheores", "全矿物 AllTheOres"),
-    ("unobtainium", "不可得矿"), ("vibranium", "振金"), ("matter-overdrive", "物质超驱动"),
-    ("sync", "克隆同步 Sync"), ("cyberware", "赛博组件"), ("presence-footsteps", "临场脚步声"),
-    ("sound-physics-remastered", "声音物理"), ("ambient-sounds", "环境音效"),
-    ("dynamic-surroundings", "动态环境"), ("better-foliage", "更好的树叶"), ("particle-rain", "粒子雨"),
-    ("effective", "水花特效 Effective"), ("fancy-block-particles", "Fancy 方块粒子"),
-    ("auroras", "极光"), ("better-clouds", "更好的云"), ("simple-clouds", "简单云"),
+    ("create", "机械动力"),
+    ("create-fabric", "机械动力（Fabric）"),
+    ("createaddition", "机械动力：附加"),
+    ("create-stuff-additions", "机械动力附属"),
+    ("steam-rails", "蒸汽铁轨"),
+    ("farmers-delight", "农夫乐事"),
+    ("croptopia", "丰收物语"),
+    ("supplementaries", "锦致装饰"),
+    ("ftb-quests", "FTB 任务"),
+    ("ftb-teams", "FTB 团队"),
+    ("ftb-library", "FTB 基础库"),
+    ("ftb-chunks", "FTB 区块认领"),
+    ("ftb-ultimine", "FTB 连锁挖矿"),
+    ("ftb-backups", "FTB 备份"),
+    ("ftb-essentials", "FTB 基础"),
+    ("indium", "铟"),
+    ("carry-on", "搬运"),
+    ("appleskin", "苹果皮"),
+    ("journeymap", "旅行地图"),
+    ("xaeros-minimap", "Xaero的小地图"),
+    ("xaeros-world-map", "Xaero的世界地图"),
+    ("waystones", "传送石"),
+    ("litematica", "投影"),
+    ("worldedit", "创世神"),
+    ("building-gadgets", "建筑小帮手"),
+    ("chunk-loaders", "区块加载器"),
+    ("terralith", "特拉石"),
+    ("biomesoplenty", "超多生物群系"),
+    ("oh-the-biomes-youll-go", "你将去的生物群系"),
+    ("regions-unexplored", "未探索区域"),
+    ("tectonic", "构造地形"),
+    ("reterraforged", "重构地形"),
+    ("continents", "大陆"),
+    ("twilightforest", "暮色森林"),
+    ("aether", "天境（以太）"),
+    ("deep-aether", "深邃以太"),
+    ("aether-redux", "以太重制"),
+    ("ancient-aether", "远古以太"),
+    ("blue-skies", "蔚蓝天空"),
+    ("the-bumblezone", "大黄蜂领域"),
+    ("the-undergarden", "地下花园"),
+    ("better-end", "更好的末地"),
+    ("better-nether", "更好的下界"),
+    ("outer-end", "外域末地"),
+    ("enderscape", "末地景观"),
+    ("nullscape", "虚无景观"),
+    ("starmute", "星寂"),
+    ("quark", "夸克"),
+    ("charm", "魅力 Charm"),
+    ("mrcrayfishs-furniture", "蜡笔小新家具"),
+    ("another-furniture", "另一个家具"),
+    ("hand-crafted", "手工制作"),
+    ("framed", "框架方块"),
+    ("mcw-doors", "马克门窗"),
+    ("mcw-windows", "马克窗户"),
+    ("mcw-fences", "马克栅栏"),
+    ("mcw-roofs", "马克屋顶"),
+    ("mcw-bridges", "马克桥梁"),
+    ("mcw-furniture", "马克家具"),
+    ("decorative-blocks", "装饰方块"),
+    ("chipped", "凿刻"),
+    ("rechiseled", "再凿刻"),
+    ("every-compat", "通用木制品兼容"),
+    ("woodworks", "木工作品"),
+    ("connected-glass", "连接玻璃"),
+    ("tinted-glass", "染色玻璃"),
+    ("mekanism", "通用机械"),
+    ("applied-energistics-2", "应用能源2"),
+    ("refined-storage", "精致存储"),
+    ("extra-storage", "额外存储"),
+    ("thermal-expansion", "热力膨胀"),
+    ("thermal-foundation", "热力基础"),
+    ("thermal-dynamics", "热力管道"),
+    ("thermal-innovation", "热力革新"),
+    ("thermal-cultivation", "热力农业"),
+    ("thermal-locomotion", "热力运输"),
+    ("redstone-arsenal", "红石兵工厂"),
+    ("enderio", "末影接口"),
+    ("industrial-foregoing", "工业先锋"),
+    ("pneumaticcraft", "气动工艺"),
+    ("immersive-engineering", "沉浸工程"),
+    ("tinkers-construct", "匠魂"),
+    ("botania", "植物魔法"),
+    ("blood-magic", "血魔法"),
+    ("powah", "电力满满 Powah"),
+    ("big-reactors", "大反应堆"),
+    ("extreme-reactors", "极限反应堆"),
+    ("nuclearcraft", "核工艺"),
+    ("draconic-evolution", "龙之进化"),
+    ("projecte", "等价交换"),
+    ("pipez", "管道 Pipez"),
+    ("pretty-pipes", "精美管道"),
+    ("laserio", "激光IO"),
+    ("modular-routers", "模块化路由器"),
+    ("xnet", "XNet 网络"),
+    ("flux-networks", "通量网络"),
+    ("cable-facades", "线缆伪装"),
+    ("little-logistics", "小小物流"),
+    ("rftools-base", "RF工具基础"),
+    ("rftools-utility", "RF工具实用"),
+    ("rftools-dimensions", "RF工具维度"),
+    ("compact-machines", "微型空间"),
+    ("gregtech", "格雷科技"),
+    ("gtceu", "格雷科技现代版"),
+    ("tech-reborn", "科技重生"),
+    ("modern-industrialization", "现代工业化"),
+    ("sophisticated-backpacks", "精妙背包"),
+    ("sophisticated-storage", "精妙存储"),
+    ("sophisticated-core", "精妙核心"),
+    ("iron-chests", "更多箱子"),
+    ("storage-drawers", "储物抽屉"),
+    ("functional-storage", "功能性存储"),
+    ("pedestals", "基座"),
+    ("travelers-backpack", "旅行者背包"),
+    ("backpacked", "背包客"),
+    ("inmis", "更多背包"),
+    ("packed-up", "打包背包"),
+    ("useful-backpacks", "实用背包"),
+    ("simple-voice-chat", "简单语音聊天"),
+    ("open-parties-and-claims", "开放队伍与认领"),
+    ("easy-villagers", "简单村民"),
+    ("easy-piglins", "简单猪灵"),
+    ("villager-names", "村民命名"),
+    ("guard-villagers", "村民警卫"),
+    ("more-villagers", "更多村民"),
+    ("minecraft-comes-alive", "凡家物语"),
+    ("minecolonies", "模拟殖民地"),
+    ("structurize", "结构化"),
+    ("lootr", "Lootr 战利品箱"),
+    ("corpse", "尸体 Corpse"),
+    ("gravestone", "墓碑"),
+    ("artifacts", "奇珍异宝"),
+    ("relics", "遗物 Relics"),
+    ("enigmatic-legacy", "神秘遗产"),
+    ("apotheosis", "神化"),
+    ("patchouli", "帕秋莉手册"),
+    ("ars-nouveau", "新生魔艺"),
+    ("ars-elemental", "元素魔艺"),
+    ("mana-and-artifice", "魔法艺术"),
+    ("mahou-tsukai", "魔法使"),
+    ("occultism", "神秘学"),
+    ("irons-spellbooks", "铁之法术书"),
+    ("natures-aura", "自然灵气"),
+    ("astral-sorcery", "星辉魔法"),
+    ("elementalcraft", "元素工艺"),
+    ("forbidden-arcanus", "禁忌与奥秘"),
+    ("evilcraft", "邪恶工艺"),
+    ("vampirism", "吸血鬼"),
+    ("werewolves", "狼人"),
+    ("ice-and-fire", "冰与火之歌"),
+    ("wyrmroost", "龙栖"),
+    ("alexsmobs", "亚历克斯的生物"),
+    ("mowziesmobs", "Mowzie的生物"),
+    ("cataclysm", "大灾变"),
+    ("deeperdarker", "深邃黑暗"),
+    ("galosphere", "钟乳石洞"),
+    ("creeper-overhaul", "苦力怕革新"),
+    ("mutant-more", "突变生物"),
+    ("naturalist", "博物学家"),
+    ("critters-and-crawlers", "小动物与爬虫"),
+    ("untamedwilds", "野性未驯"),
+    ("exotic-birds", "珍禽"),
+    ("friends-and-foes", "友与敌"),
+    ("illage-and-spillage", "劫掠与蹂躏"),
+    ("rotten-creatures", "腐尸生物"),
+    ("graveyard", "墓地"),
+    ("nyfsspiders", "Nyf的蜘蛛"),
+    ("cave-dweller", "洞穴居民"),
+    ("the-mimicer", "模仿者"),
+    ("siren-head", "警笛头"),
+    ("goat-man", "山羊人"),
+    ("the-knocker", "敲门者"),
+    ("herobrine-lives", "HIM复活"),
+    ("mystical-agriculture", "神秘农业"),
+    ("resourceful-bees", "资源蜜蜂"),
+    ("productive-bees", "生产蜜蜂"),
+    ("botany-pots", "植物盆栽"),
+    ("botany-trees", "盆栽树木"),
+    ("aquaculture", "水产养殖"),
+    ("aquamirae", "深海幻影"),
+    ("go-fish", "去钓鱼"),
+    ("fishing-real", "真实钓鱼"),
+    ("tide", "潮汐"),
+    ("stardew-fishing", "星露谷钓鱼"),
+    ("upgrade-aquatic", "碧海新生"),
+    ("atmospheric", "悠然一派"),
+    ("autumnity", "秋原"),
+    ("environmental", "自然环境"),
+    ("neapolitan", "那不勒斯风味"),
+    ("savage-and-ravage", "野蛮与蹂躏"),
+    ("upgraded-netherite", "下界合金升级"),
+    ("endergetic", "末地拓展"),
+    ("repurposed-structures", "结构再利用"),
+    ("dungeon-crawl", "地牢爬行"),
+    ("lost-cities", "失落城市"),
+    ("sky-villages", "天空村庄"),
+    ("towers-of-the-wild", "荒野之塔"),
+    ("yungs-api", "Yung 的 API"),
+    ("yungs-better-dungeons", "更好的地牢（Yung）"),
+    ("yungs-better-mineshafts", "更好的矿井（Yung）"),
+    ("yungs-better-strongholds", "更好的要塞（Yung）"),
+    ("yungs-better-ocean-monuments", "更好的海底神殿（Yung）"),
+    ("yungs-better-desert-temples", "更好的沙漠神殿（Yung）"),
+    ("yungs-better-jungle-temples", "更好的丛林神庙（Yung）"),
+    ("yungs-better-witch-huts", "更好的女巫小屋（Yung）"),
+    ("awesome-dungeon", "Awesome 地牢"),
+    ("spirit", "灵魂 Spirit"),
+    ("simply-swords", "简单剑"),
+    ("better-combat", "更好的战斗"),
+    ("spartan-weaponry", "斯巴达武器"),
+    ("spartan-shields", "斯巴达盾牌"),
+    ("tetra", "Tetra 工匠"),
+    ("silent-gear", "寂静装备"),
+    ("silent-lib", "寂静库"),
+    ("paragliders", "滑翔伞"),
+    ("wall-jump", "蹬墙跳"),
+    ("crawl", "爬行"),
+    ("go-prone", "匍匐"),
+    ("elytra-slot", "鞘翅槽"),
+    ("backslot", "背部槽"),
+    ("icarus", "伊卡洛斯之翼"),
+    ("dragon-mounts-legacy", "龙坐骑遗产"),
+    ("mythic-mounts", "神话坐骑"),
+    ("dragon-survival", "龙之生存"),
+    ("l2-hostility", "L2 敌意"),
+    ("l2-complements", "L2 补充"),
+    ("l2-library", "L2 库"),
+    ("mine-and-slash", "挖矿与砍杀"),
+    ("age-of-exile", "流放时代"),
+    ("divine-rpg", "神圣RPG"),
+    ("aoa3", "虚无世界"),
+    ("cobblemon", "方块宝可梦"),
+    ("pixelmon", "像素精灵宝可梦"),
+    ("pokecube", "宝可梦方块"),
+    ("digimobs", "数码宝贝"),
+    ("galacticraft", "星系"),
+    ("ad-astra", "星际 Ad Astra"),
+    ("beyond-earth", "超越地球"),
+    ("minecraft-transit-railway", "我的世界铁路"),
+    ("immersive-railroading", "沉浸铁路"),
+    ("ultimate-car-mod", "终极汽车"),
+    ("immersive-aircraft", "沉浸飞机"),
+    ("simple-planes", "简单飞机"),
+    ("man-of-many-planes", "多飞机"),
+    ("valkyrien-skies", "女武神之空"),
+    ("clockwork", "发条 Clockwork"),
+    ("eureka-ships", "尤里卡之船"),
+    ("da-vincis-vessels", "达芬奇之船"),
+    ("small-boats", "小船"),
+    ("ex-nihilo", "无中生有"),
+    ("sky-orchards", "天空果园"),
+    ("stoneblock", "石头世界"),
+    ("chunky", "区块预生成"),
+    ("world-pre-generator", "世界预生成"),
+    ("default-options", "默认选项"),
+    ("default-world-type", "默认世界类型"),
+    ("global-gamerules", "全局游戏规则"),
+    ("enhanced-celestials", "增强天体"),
+    ("blood-moon", "血月"),
+    ("serene-seasons", "静谧四季"),
+    ("tough-as-nails", "意志坚定"),
+    ("thirst", "口渴"),
+    ("dehydration", "脱水"),
+    ("weather-storms-tornadoes", "天气风暴龙卷风"),
+    ("hardcore-darkness", "硬核黑暗"),
+    ("true-darkness", "真实黑暗"),
+    ("nyctophobia", "黑夜恐惧"),
+    ("survival-plus", "生存增强"),
+    ("first-aid", "急救"),
+    ("zombie-apocalypse", "僵尸启示录"),
+    ("zombie-awareness", "僵尸警觉"),
+    ("zombie-invasion", "僵尸入侵"),
+    ("the-hordes", "尸潮"),
+    ("security-craft", "安全工艺"),
+    ("locks", "锁 Locks"),
+    ("exposure", "曝光 Exposure"),
+    ("joy-of-painting", "绘画之乐"),
+    ("table-top-craft", "桌面游戏"),
+    ("fantasy-furniture", "梦幻家具"),
+    ("fantasy-dice", "梦幻骰子"),
+    ("bingo", "宾果 Bingo"),
+    ("mine-cards", "我的卡牌"),
+    ("murder-mystery", "谋杀之谜"),
+    ("hide-and-seek", "捉迷藏"),
+    ("imposter", "内鬼 Imposter"),
+    ("immersive-portals", "沉浸传送门"),
+    ("dimension-doors", "维度之门"),
+    ("pocket-dimensions", "口袋维度"),
+    ("abyssalcraft", "深渊国度"),
+    ("the-midnight", "午夜"),
+    ("the-betweenlands", "交错次元"),
+    ("the-erebus", "埃里伯斯"),
+    ("atum", "阿图姆"),
+    ("voidscape", "虚空之境"),
+    ("ratlantis", "老鼠兰蒂斯"),
+    ("fossils-and-archeology", "化石与考古"),
+    ("jurassi-craft", "侏罗纪工艺"),
+    ("rediscovered", "重新发现"),
+    ("unearthed", "出土文物"),
+    ("kubejs", "KubeJS"),
+    ("crafttweaker", "CraftTweaker"),
+    ("lootjs", "LootJS"),
+    ("probejs", "ProbeJS"),
+    ("contenttweaker", "内容调整"),
+    ("jaopca", "JAOPCA"),
+    ("emendatus-enigmatica", "神秘统一 EE"),
+    ("almost-unified", "近乎统一"),
+    ("allthemodium", "全能矿 Allthemodium"),
+    ("alltheores", "全矿物 AllTheOres"),
+    ("unobtainium", "不可得矿"),
+    ("vibranium", "振金"),
+    ("matter-overdrive", "物质超驱动"),
+    ("sync", "克隆同步 Sync"),
+    ("cyberware", "赛博组件"),
+    ("presence-footsteps", "临场脚步声"),
+    ("sound-physics-remastered", "声音物理"),
+    ("ambient-sounds", "环境音效"),
+    ("dynamic-surroundings", "动态环境"),
+    ("better-foliage", "更好的树叶"),
+    ("particle-rain", "粒子雨"),
+    ("effective", "水花特效 Effective"),
+    ("fancy-block-particles", "Fancy 方块粒子"),
+    ("auroras", "极光"),
+    ("better-clouds", "更好的云"),
+    ("simple-clouds", "简单云"),
     ("nocubes", "平滑地形 NoCubes"),
 ];
 
@@ -764,7 +1301,9 @@ fn zh_to_slugs() -> &'static HashMap<String, Vec<String>> {
     M.get_or_init(|| {
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
         for (slug, zh) in MOD_ZH {
-            map.entry(zh.to_lowercase()).or_default().push(slug.to_string());
+            map.entry(zh.to_lowercase())
+                .or_default()
+                .push(slug.to_string());
         }
         map
     })
@@ -797,7 +1336,10 @@ pub fn normalize_chinese_mod_keyword(value: &str) -> String {
         s.truncate(s.len() - "模组".len());
     } else if lower.ends_with("模組") {
         s.truncate(s.len() - "模組".len());
-    } else if s.len() >= 3 && s.is_char_boundary(s.len() - 3) && s[s.len() - 3..].eq_ignore_ascii_case("mod") {
+    } else if s.len() >= 3
+        && s.is_char_boundary(s.len() - 3)
+        && s[s.len() - 3..].eq_ignore_ascii_case("mod")
+    {
         s.truncate(s.len() - 3);
     }
     s.retain(|c| !matches!(c, '·' | '：' | ':' | '(' | ')' | '（' | '）'));
@@ -814,8 +1356,12 @@ pub fn has_exact_chinese_mod_name(keyword: &str) -> bool {
     if key.is_empty() {
         return false;
     }
-    MOD_ZH_ALIASES.iter().any(|(name, _)| normalize_chinese_mod_keyword(name) == key)
-        || zh_to_slugs().keys().any(|name| normalize_chinese_mod_keyword(name) == key)
+    MOD_ZH_ALIASES
+        .iter()
+        .any(|(name, _)| normalize_chinese_mod_keyword(name) == key)
+        || zh_to_slugs()
+            .keys()
+            .any(|name| normalize_chinese_mod_keyword(name) == key)
 }
 
 /// chineseModSearchTerms()：精确名优先，子串命中按名称长度升序，最多 5 个 slug
@@ -829,16 +1375,27 @@ pub fn chinese_mod_search_terms(keyword: &str) -> Vec<String> {
     }
     let mut entries: Vec<(String, Vec<String>)> = MOD_ZH_ALIASES
         .iter()
-        .map(|(name, slugs)| (name.to_string(), slugs.iter().map(|s| s.to_string()).collect()))
+        .map(|(name, slugs)| {
+            (
+                name.to_string(),
+                slugs.iter().map(|s| s.to_string()).collect(),
+            )
+        })
         .collect();
     for (name, slugs) in zh_to_slugs() {
         entries.push((name.clone(), slugs.clone()));
     }
-    let exact: Vec<_> = entries.iter().filter(|(name, _)| normalize_chinese_mod_keyword(name) == key).collect();
+    let exact: Vec<_> = entries
+        .iter()
+        .filter(|(name, _)| normalize_chinese_mod_keyword(name) == key)
+        .collect();
     let candidates = if !exact.is_empty() {
         exact
     } else {
-        let mut sub: Vec<_> = entries.iter().filter(|(name, _)| normalize_chinese_mod_keyword(name).contains(&key)).collect();
+        let mut sub: Vec<_> = entries
+            .iter()
+            .filter(|(name, _)| normalize_chinese_mod_keyword(name).contains(&key))
+            .collect();
         sub.sort_by_key(|(name, _)| name.len());
         sub
     };
@@ -879,7 +1436,13 @@ struct McmodState {
 
 fn mcmod_state() -> &'static Mutex<McmodState> {
     static S: OnceLock<Mutex<McmodState>> = OnceLock::new();
-    S.get_or_init(|| Mutex::new(McmodState { cache: HashMap::new(), order: VecDeque::new(), pending: HashMap::new() }))
+    S.get_or_init(|| {
+        Mutex::new(McmodState {
+            cache: HashMap::new(),
+            order: VecDeque::new(),
+            pending: HashMap::new(),
+        })
+    })
 }
 
 /// 并发上限 2 的请求槽（requestSlot 等价）
@@ -925,10 +1488,22 @@ fn mcmod_text(html: &str) -> String {
             } else {
                 v.parse::<u32>().ok()
             };
-            point.filter(|p| *p <= 0x10FFFF).and_then(char::from_u32).map(|c| c.to_string()).unwrap_or_default()
+            point
+                .filter(|p| *p <= 0x10FFFF)
+                .and_then(char::from_u32)
+                .map(|c| c.to_string())
+                .unwrap_or_default()
         })
         .to_string();
-    for (from, to) in [("&amp;", "&"), ("&quot;", "\""), ("&apos;", "'"), ("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " "), ("&AMP;", "&")] {
+    for (from, to) in [
+        ("&amp;", "&"),
+        ("&quot;", "\""),
+        ("&apos;", "'"),
+        ("&lt;", "<"),
+        ("&gt;", ">"),
+        ("&nbsp;", " "),
+        ("&AMP;", "&"),
+    ] {
         s = s.replace(from, to);
     }
     let ws = WS.get_or_init(|| regex::Regex::new(r"\s+").unwrap());
@@ -942,11 +1517,15 @@ fn mcmod_anchors(html: &str) -> Vec<(String, String)> {
     let mut cursor = 0usize;
     while let Some(a_start) = lower[cursor..].find("<a") {
         let tag_start = cursor + a_start;
-        let Some(tag_end_rel) = lower[tag_start..].find('>') else { break };
+        let Some(tag_end_rel) = lower[tag_start..].find('>') else {
+            break;
+        };
         let tag = &html[tag_start..tag_start + tag_end_rel];
         let href = extract_attr(tag, "href");
         cursor = tag_start + tag_end_rel;
-        let Some(close_rel) = lower[cursor..].find("</a") else { break };
+        let Some(close_rel) = lower[cursor..].find("</a") else {
+            break;
+        };
         let inner = &html[cursor..cursor + close_rel];
         // 跳过 </a 后的收尾（\s*>）
         if let Some(gt) = lower[cursor + close_rel..].find('>') {
@@ -985,7 +1564,10 @@ pub fn mcmod_name_rank(title: &str, keyword: &str) -> i32 {
     static PAREN: OnceLock<regex::Regex> = OnceLock::new();
     let bracket = BRACKET.get_or_init(|| regex::Regex::new(r"^\[[^\]]+\]\s*").unwrap());
     let paren = PAREN.get_or_init(|| regex::Regex::new(r"\s+\([^一-鿿]*\)\s*$").unwrap());
-    let name = paren.replace(bracket.replace(title, "").trim(), "").trim().to_string();
+    let name = paren
+        .replace(bracket.replace(title, "").trim(), "")
+        .trim()
+        .to_string();
     let key = normalize_chinese_mod_keyword(keyword);
     if key.is_empty() {
         return i32::MAX;
@@ -994,7 +1576,10 @@ pub fn mcmod_name_rank(title: &str, keyword: &str) -> i32 {
     if main == key {
         return 0;
     }
-    if name.split(['／', '/']).any(|part| normalize_chinese_mod_keyword(part) == key) {
+    if name
+        .split(['／', '/'])
+        .any(|part| normalize_chinese_mod_keyword(part) == key)
+    {
         return 1;
     }
     if main.contains(&key) {
@@ -1013,35 +1598,56 @@ fn parse_mcmod_entry_title(html: &str) -> Option<String> {
 
 /// parseMcmodSearch()：只解析结果列表；导航/正文/推荐位不产生项目身份
 fn parse_mcmod_search(html: &str, keyword: &str) -> Result<Vec<(String, String, String)>, String> {
-    let list = find_section(html, r#"<div\b[^>]*class=["'][^"']*\bsearch-result-list\b[^"']*["'][^>]*>"#, &[
-        r#"<div\b[^>]*class=["'][^"']*search-result-pages"#,
-        r"<footer\b",
-    ])
+    let list = find_section(
+        html,
+        r#"<div\b[^>]*class=["'][^"']*\bsearch-result-list\b[^"']*["'][^>]*>"#,
+        &[
+            r#"<div\b[^>]*class=["'][^"']*search-result-pages"#,
+            r"<footer\b",
+        ],
+    )
     .ok_or_else(|| "MC百科搜索页面格式变化或访问受限".to_string())?;
     let key = normalize_chinese_mod_keyword(keyword);
     static ITEM: OnceLock<regex::Regex> = OnceLock::new();
     static BODY: OnceLock<regex::Regex> = OnceLock::new();
     static CLASS_ID: OnceLock<regex::Regex> = OnceLock::new();
-    let item_re = ITEM.get_or_init(|| regex::Regex::new(r#"(?i)<div\b[^>]*class=["']result-item["'][^>]*>"#).unwrap());
-    let body_re = BODY.get_or_init(|| regex::Regex::new(r#"(?i)<div\b[^>]*class=["']body["']"#).unwrap());
+    let item_re = ITEM.get_or_init(|| {
+        regex::Regex::new(r#"(?i)<div\b[^>]*class=["']result-item["'][^>]*>"#).unwrap()
+    });
+    let body_re =
+        BODY.get_or_init(|| regex::Regex::new(r#"(?i)<div\b[^>]*class=["']body["']"#).unwrap());
     let id_re = CLASS_ID.get_or_init(|| regex::Regex::new(r"^/class/(\d+)\.html$").unwrap());
     let mut found: Vec<(String, String, String)> = Vec::new();
     let mut segments: Vec<&str> = Vec::new();
     let mut pos = 0usize;
     while let Some(m) = item_re.find_at(&list, pos) {
         let start = m.end();
-        let next = item_re.find_at(&list, start).map(|n| n.start()).unwrap_or(list.len());
+        let next = item_re
+            .find_at(&list, start)
+            .map(|n| n.start())
+            .unwrap_or(list.len());
         segments.push(&list[start..next]);
         pos = next;
     }
     for item in segments {
-        let head = body_re.find(item).map(|m| &item[..m.start()]).unwrap_or(item);
+        let head = body_re
+            .find(item)
+            .map(|m| &item[..m.start()])
+            .unwrap_or(item);
         for (href, title) in mcmod_anchors(head) {
-            let Ok(url) = url_join("https://www.mcmod.cn", &href) else { continue };
-            if url.scheme != "https:" || url.host != "www.mcmod.cn" || !url.username.is_empty() || !url.password.is_empty() {
+            let Ok(url) = url_join("https://www.mcmod.cn", &href) else {
+                continue;
+            };
+            if url.scheme != "https:"
+                || url.host != "www.mcmod.cn"
+                || !url.username.is_empty()
+                || !url.password.is_empty()
+            {
                 continue;
             }
-            let Some(idc) = id_re.captures(&url.path) else { continue };
+            let Some(idc) = id_re.captures(&url.path) else {
+                continue;
+            };
             let id = idc[1].to_string();
             if title.is_empty() {
                 continue;
@@ -1050,11 +1656,18 @@ fn parse_mcmod_search(html: &str, keyword: &str) -> Result<Vec<(String, String, 
             static PAREN: OnceLock<regex::Regex> = OnceLock::new();
             let bracket = BRACKET.get_or_init(|| regex::Regex::new(r"^\[[^\]]+\]\s*").unwrap());
             let paren = PAREN.get_or_init(|| regex::Regex::new(r"\s+\([^一-鿿]*\)\s*$").unwrap());
-            let name = paren.replace(bracket.replace(&title, "").trim(), "").trim().to_string();
+            let name = paren
+                .replace(bracket.replace(&title, "").trim(), "")
+                .trim()
+                .to_string();
             if mcmod_name_rank(&name, &key) == i32::MAX {
                 continue;
             }
-            found.push((id.clone(), name, format!("https://www.mcmod.cn/class/{id}.html")));
+            found.push((
+                id.clone(),
+                name,
+                format!("https://www.mcmod.cn/class/{id}.html"),
+            ));
         }
     }
     let mut unique: Vec<(String, String, String)> = Vec::new();
@@ -1064,8 +1677,15 @@ fn parse_mcmod_search(html: &str, keyword: &str) -> Result<Vec<(String, String, 
             unique.push(f);
         }
     }
-    let exact: Vec<_> = unique.iter().filter(|(_, t, _)| mcmod_name_rank(t, &key) < 2).collect();
-    let base = if exact.is_empty() { unique.iter().collect() } else { exact };
+    let exact: Vec<_> = unique
+        .iter()
+        .filter(|(_, t, _)| mcmod_name_rank(t, &key) < 2)
+        .collect();
+    let base = if exact.is_empty() {
+        unique.iter().collect()
+    } else {
+        exact
+    };
     let mut out: Vec<(String, String, String)> = base.into_iter().cloned().collect();
     out.sort_by_key(|(_, t, _)| mcmod_name_rank(t, &key));
     Ok(out)
@@ -1076,7 +1696,12 @@ fn find_section<'a>(html: &'a str, start_re: &str, end_res: &[&str]) -> Option<&
     static CACHE: OnceLock<Mutex<HashMap<String, regex::Regex>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let get = |pattern: &str| -> regex::Regex {
-        cache.lock().unwrap().entry(pattern.to_string()).or_insert_with(|| regex::Regex::new(&format!("(?i){pattern}")).unwrap()).clone()
+        cache
+            .lock()
+            .unwrap()
+            .entry(pattern.to_string())
+            .or_insert_with(|| regex::Regex::new(&format!("(?i){pattern}")).unwrap())
+            .clone()
     };
     let m = get(start_re).find(html)?;
     let start = m.end();
@@ -1099,7 +1724,11 @@ struct ParsedUrl {
 }
 
 fn url_join(base: &str, href: &str) -> Result<ParsedUrl, String> {
-    let full = if href.contains("://") { href.to_string() } else { format!("{base}{href}") };
+    let full = if href.contains("://") {
+        href.to_string()
+    } else {
+        format!("{base}{href}")
+    };
     parse_url(&full)
 }
 
@@ -1121,36 +1750,72 @@ fn parse_url(raw: &str) -> Result<ParsedUrl, String> {
         Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) => (h.to_string(), p.to_string()),
         _ => (hostport.to_string(), String::new()),
     };
-    let path = path_query.split(['?', '#']).next().unwrap_or("").to_string();
-    Ok(ParsedUrl { scheme: format!("{scheme}:"), host, path, username, password, port })
+    let path = path_query
+        .split(['?', '#'])
+        .next()
+        .unwrap_or("")
+        .to_string();
+    Ok(ParsedUrl {
+        scheme: format!("{scheme}:"),
+        host,
+        path,
+        username,
+        password,
+        port,
+    })
 }
 
 /// parseMcmodProjects()：条目相关链接列表中的来源项目（link.mcmod.cn 跳转解包）
 fn parse_mcmod_projects(html: &str) -> Vec<McmodProjectLink> {
-    let Some(links) = find_section(html, r#"<ul\b[^>]*class=["'][^"']*\bcommon-link-icon-frame\b[^"']*["'][^>]*>"#, &[r"</ul>"]) else {
+    let Some(links) = find_section(
+        html,
+        r#"<ul\b[^>]*class=["'][^"']*\bcommon-link-icon-frame\b[^"']*["'][^>]*>"#,
+        &[r"</ul>"],
+    ) else {
         return Vec::new();
     };
     let mut result: Vec<McmodProjectLink> = Vec::new();
     for (href, _) in mcmod_anchors(links) {
-        let Ok(mut url) = url_join("https://www.mcmod.cn", &href) else { continue };
+        let Ok(mut url) = url_join("https://www.mcmod.cn", &href) else {
+            continue;
+        };
         if url.scheme != "https:" || !url.username.is_empty() || !url.password.is_empty() {
             continue;
         }
         if url.host == "link.mcmod.cn" && url.path.starts_with("/target/") {
             let encoded = &url.path["/target/".len()..];
-            if encoded.len() > 2048 || !encoded.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '_' | '=' | '-')) {
+            if encoded.len() > 2048
+                || !encoded
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '_' | '=' | '-'))
+            {
                 continue;
             }
             use base64::Engine;
-            let decoded = base64::engine::general_purpose::STANDARD.decode(encoded)
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
                 .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(encoded))
-                .or_else(|_| base64::engine::general_purpose::STANDARD.decode(format!("{}{}", encoded, "=".repeat((4 - encoded.len() % 4) % 4))))
+                .or_else(|_| {
+                    base64::engine::general_purpose::STANDARD.decode(format!(
+                        "{}{}",
+                        encoded,
+                        "=".repeat((4 - encoded.len() % 4) % 4)
+                    ))
+                })
                 .ok();
             let Some(bytes) = decoded else { continue };
-            let Ok(target) = String::from_utf8(bytes) else { continue };
-            let Ok(next) = parse_url(&target) else { continue };
+            let Ok(target) = String::from_utf8(bytes) else {
+                continue;
+            };
+            let Ok(next) = parse_url(&target) else {
+                continue;
+            };
             url = next;
-            if url.scheme != "https:" || !url.username.is_empty() || !url.password.is_empty() || (!url.port.is_empty() && url.port != "443") {
+            if url.scheme != "https:"
+                || !url.username.is_empty()
+                || !url.password.is_empty()
+                || (!url.port.is_empty() && url.port != "443")
+            {
                 continue;
             }
         }
@@ -1164,12 +1829,21 @@ fn parse_mcmod_projects(html: &str) -> Vec<McmodProjectLink> {
         static MR: OnceLock<regex::Regex> = OnceLock::new();
         static CF: OnceLock<regex::Regex> = OnceLock::new();
         let slug = if source == "modrinth" {
-            MR.get_or_init(|| regex::Regex::new(r"^/mod/([a-zA-Z0-9_-]+)/?$").unwrap()).captures(&url.path).map(|c| c[1].to_string())
+            MR.get_or_init(|| regex::Regex::new(r"^/mod/([a-zA-Z0-9_-]+)/?$").unwrap())
+                .captures(&url.path)
+                .map(|c| c[1].to_string())
         } else {
-            CF.get_or_init(|| regex::Regex::new(r"^/minecraft/(?:mc-mods|mods)/([a-zA-Z0-9_-]+)/?$").unwrap()).captures(&url.path).map(|c| c[1].to_string())
+            CF.get_or_init(|| {
+                regex::Regex::new(r"^/minecraft/(?:mc-mods|mods)/([a-zA-Z0-9_-]+)/?$").unwrap()
+            })
+            .captures(&url.path)
+            .map(|c| c[1].to_string())
         };
         if let Some(slug) = slug {
-            result.push(McmodProjectLink { source: source.to_string(), slug: slug.to_lowercase() });
+            result.push(McmodProjectLink {
+                source: source.to_string(),
+                slug: slug.to_lowercase(),
+            });
         }
     }
     let mut unique: Vec<McmodProjectLink> = Vec::new();
@@ -1204,7 +1878,12 @@ fn mcmod_read_html(url: &str) -> Result<String, String> {
     if !(200..300).contains(&status) {
         return Err(format!("MC百科 HTTP {status}"));
     }
-    let ctype = resp.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let ctype = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     if !ctype.contains("text/html") {
         return Err("MC百科未返回可识别的搜索页面".into());
     }
@@ -1267,7 +1946,9 @@ pub fn lookup_mcmod(keyword: &str) -> McmodResult {
                     }
                 }
                 state.order.push_back(key.clone());
-                state.cache.insert(key.clone(), (crate::download::now_ms(), r.clone()));
+                state
+                    .cache
+                    .insert(key.clone(), (crate::download::now_ms(), r.clone()));
             }
         }
         *slot.0.lock().unwrap() = Some(result.clone());
@@ -1283,13 +1964,21 @@ fn run_mcmod_lookup(keyword: &str) -> Result<McmodResult, String> {
     let re = SUFFIX.get_or_init(|| regex::Regex::new(r"(?i)\s*(?:模组|模組|mod)$").unwrap());
     let key_param = re.replace(trimmed, "").to_string();
     let mut params = vec![("key", key_param), ("filter", "1".to_string())];
-    let html = mcmod_read_html(&format!("https://search.mcmod.cn/s?{}", query_string(&params)))?;
+    let html = mcmod_read_html(&format!(
+        "https://search.mcmod.cn/s?{}",
+        query_string(&params)
+    ))?;
     let mut candidates = parse_mcmod_search(&html, keyword)?;
-    let has_exact = candidates.iter().any(|(_, t, _)| mcmod_name_rank(t, &normalize_chinese_mod_keyword(keyword)) < 2);
+    let has_exact = candidates
+        .iter()
+        .any(|(_, t, _)| mcmod_name_rank(t, &normalize_chinese_mod_keyword(keyword)) < 2);
     let mut limited = false;
     if !has_exact && html.contains("data-page=\"2\"") {
         params.push(("page", "2".to_string()));
-        let next = mcmod_read_html(&format!("https://search.mcmod.cn/s?{}", query_string(&params)))?;
+        let next = mcmod_read_html(&format!(
+            "https://search.mcmod.cn/s?{}",
+            query_string(&params)
+        ))?;
         let mut merged = candidates;
         for c in parse_mcmod_search(&next, keyword)? {
             if !merged.iter().any(|m| m.0 == c.0) {
@@ -1300,7 +1989,11 @@ fn run_mcmod_lookup(keyword: &str) -> Result<McmodResult, String> {
         candidates = merged;
     }
     let key_norm = normalize_chinese_mod_keyword(keyword);
-    let matched: Vec<_> = candidates.iter().filter(|(_, t, _)| mcmod_name_rank(t, &key_norm) < 2).cloned().collect();
+    let matched: Vec<_> = candidates
+        .iter()
+        .filter(|(_, t, _)| mcmod_name_rank(t, &key_norm) < 2)
+        .cloned()
+        .collect();
     if !matched.is_empty() {
         candidates = matched;
     }
@@ -1312,29 +2005,47 @@ fn run_mcmod_lookup(keyword: &str) -> Result<McmodResult, String> {
         match mcmod_read_html(url) {
             Ok(page) => {
                 let Some(entry_title) = parse_mcmod_entry_title(&page) else {
-                    entries.push((id.clone(), title.clone(), url.clone(), parse_mcmod_projects(&page)));
+                    entries.push((
+                        id.clone(),
+                        title.clone(),
+                        url.clone(),
+                        parse_mcmod_projects(&page),
+                    ));
                     continue;
                 };
                 let title_rank = mcmod_name_rank(title, &key_norm);
                 let page_rank = mcmod_name_rank(&entry_title, &key_norm);
                 if page_rank == i32::MAX || (title_rank < 2 && page_rank >= 2) {
-                    warnings.push(format!("MC百科“{title}”的条目名称已变化，未关联其他同名项目；请核对完整名称。"));
+                    warnings.push(format!(
+                        "MC百科“{title}”的条目名称已变化，未关联其他同名项目；请核对完整名称。"
+                    ));
                     continue;
                 }
-                entries.push((id.clone(), entry_title, url.clone(), parse_mcmod_projects(&page)));
+                entries.push((
+                    id.clone(),
+                    entry_title,
+                    url.clone(),
+                    parse_mcmod_projects(&page),
+                ));
             }
-            Err(_) => warnings.push(format!("MC百科“{title}”的来源链接读取失败，未自动关联项目；可重试。")),
+            Err(_) => warnings.push(format!(
+                "MC百科“{title}”的来源链接读取失败，未自动关联项目；可重试。"
+            )),
         }
     }
     if limited {
-        warnings.push("MC百科中文检索仅关联前两页中的最多 5 个条目；请使用完整中文名缩小范围。".into());
+        warnings
+            .push("MC百科中文检索仅关联前两页中的最多 5 个条目；请使用完整中文名缩小范围。".into());
     }
     Ok(McmodResult { entries, warnings })
 }
 
 // ---------------- Modrinth（community.ts mrFetch/mrSearch/mrFiles） ----------------
 
-const MR_BASES: [&str; 2] = ["https://api.modrinth.com/v2", "https://mod.mcimirror.top/modrinth/v2"];
+const MR_BASES: [&str; 2] = [
+    "https://api.modrinth.com/v2",
+    "https://mod.mcimirror.top/modrinth/v2",
+];
 
 /// 主备互备请求 Modrinth
 pub fn mr_fetch(path: &str) -> Result<Value, String> {
@@ -1349,7 +2060,13 @@ pub fn mr_fetch(path: &str) -> Result<Value, String> {
 }
 
 /// mrPost()：POST 主备互备（mirror=bmclapi 时主备对调，与 modUpdates.mrPost 同源策略）
-pub fn mr_post(app: &tauri::AppHandle, path: &str, body: &Value, ua: &str, timeout_ms: u64) -> Result<Value, String> {
+pub fn mr_post(
+    app: &tauri::AppHandle,
+    path: &str,
+    body: &Value,
+    ua: &str,
+    timeout_ms: u64,
+) -> Result<Value, String> {
     let mirror = crate::settings::get(app)
         .get("mirror")
         .and_then(|v| v.as_str())
@@ -1427,10 +2144,25 @@ struct Query {
 impl Query {
     fn from_value(v: &Value) -> Query {
         Query {
-            keyword: v.get("keyword").and_then(|x| x.as_str()).unwrap_or("").to_string(),
-            kind: v.get("kind").and_then(|x| x.as_str()).unwrap_or("mod").to_string(),
-            source: v.get("source").and_then(|x| x.as_str()).unwrap_or("all").to_string(),
-            mc_version: v.get("mcVersion").and_then(|x| x.as_str()).map(str::to_string),
+            keyword: v
+                .get("keyword")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .to_string(),
+            kind: v
+                .get("kind")
+                .and_then(|x| x.as_str())
+                .unwrap_or("mod")
+                .to_string(),
+            source: v
+                .get("source")
+                .and_then(|x| x.as_str())
+                .unwrap_or("all")
+                .to_string(),
+            mc_version: v
+                .get("mcVersion")
+                .and_then(|x| x.as_str())
+                .map(str::to_string),
             loader: v.get("loader").and_then(|x| x.as_str()).map(str::to_string),
             sort: v.get("sort").and_then(|x| x.as_str()).map(str::to_string),
             offset: v.get("offset").and_then(|x| x.as_i64()).unwrap_or(0).max(0) as u64,
@@ -1440,7 +2172,9 @@ impl Query {
 
     fn clone_with(&self, keyword: Option<&str>, offset: u64, limit: u64) -> Query {
         Query {
-            keyword: keyword.map(str::to_string).unwrap_or_else(|| self.keyword.clone()),
+            keyword: keyword
+                .map(str::to_string)
+                .unwrap_or_else(|| self.keyword.clone()),
             kind: self.kind.clone(),
             source: self.source.clone(),
             mc_version: self.mc_version.clone(),
@@ -1471,7 +2205,8 @@ impl Query {
 
 /// mrSearch()
 fn mr_search(q: &Query) -> Result<Page, String> {
-    let mut facets: Vec<Vec<String>> = vec![vec![format!("project_type:{}", mr_project_type(&q.kind))]];
+    let mut facets: Vec<Vec<String>> =
+        vec![vec![format!("project_type:{}", mr_project_type(&q.kind))]];
     if let Some(mc) = &q.mc_version {
         facets.push(vec![format!("versions:{mc}")]);
     }
@@ -1514,7 +2249,13 @@ fn mr_search(q: &Query) -> Result<Page, String> {
                 .collect()
         })
         .unwrap_or_default();
-    Ok(Page { items, total, offset: q.offset, limit: q.limit, warnings: Vec::new() })
+    Ok(Page {
+        items,
+        total,
+        offset: q.offset,
+        limit: q.limit,
+        warnings: Vec::new(),
+    })
 }
 
 struct MrVersionFile<'a> {
@@ -1526,29 +2267,48 @@ struct MrVersionFile<'a> {
 }
 
 /// mapMrVersions()
-fn map_mr_versions(arr: &[Value], project_id: Option<&str>, retain_unavailable: bool) -> Vec<Value> {
+fn map_mr_versions(
+    arr: &[Value],
+    project_id: Option<&str>,
+    retain_unavailable: bool,
+) -> Vec<Value> {
     let mut out = Vec::new();
     for v in arr {
-        let files = v.get("files").and_then(|f| f.as_array()).cloned().unwrap_or_default();
+        let files = v
+            .get("files")
+            .and_then(|f| f.as_array())
+            .cloned()
+            .unwrap_or_default();
         let mapped: Vec<MrVersionFile<'_>> = files
             .iter()
             .map(|f| MrVersionFile {
                 filename: f.get("filename").and_then(|x| x.as_str()),
                 url: f.get("url").and_then(|x| x.as_str()),
-                sha1: f.get("hashes").and_then(|h| h.get("sha1")).and_then(|x| x.as_str()),
+                sha1: f
+                    .get("hashes")
+                    .and_then(|h| h.get("sha1"))
+                    .and_then(|x| x.as_str()),
                 size: f.get("size").and_then(|x| x.as_u64()).unwrap_or(0),
                 primary: f.get("primary").and_then(|x| x.as_bool()).unwrap_or(false),
             })
             .collect();
         let f = mapped.iter().find(|x| x.primary).or_else(|| mapped.first());
-        if (f.map(|x| x.url.is_none() || x.filename.is_none()).unwrap_or(true)) && !retain_unavailable {
+        if (f
+            .map(|x| x.url.is_none() || x.filename.is_none())
+            .unwrap_or(true))
+            && !retain_unavailable
+        {
             continue;
         }
         let mut item = serde_json::Map::new();
         item.insert("source".into(), json!("modrinth"));
         item.insert(
             "projectId".into(),
-            json!(v.get("project_id").and_then(|x| x.as_str()).or(project_id).unwrap_or("")),
+            json!(v
+                .get("project_id")
+                .and_then(|x| x.as_str())
+                .or(project_id)
+                .unwrap_or("")),
         );
         let deps: Vec<Value> = v
             .get("dependencies")
@@ -1563,7 +2323,13 @@ fn map_mr_versions(arr: &[Value], project_id: Option<&str>, retain_unavailable: 
                         if let Some(fid) = d.get("version_id").and_then(|x| x.as_str()) {
                             o.insert("fileId".into(), json!(fid));
                         }
-                        o.insert("required".into(), json!(d.get("dependency_type").and_then(|x| x.as_str()) == Some("required")));
+                        o.insert(
+                            "required".into(),
+                            json!(
+                                d.get("dependency_type").and_then(|x| x.as_str())
+                                    == Some("required")
+                            ),
+                        );
                         Value::Object(o)
                     })
                     .collect()
@@ -1572,12 +2338,23 @@ fn map_mr_versions(arr: &[Value], project_id: Option<&str>, retain_unavailable: 
         item.insert("dependencies".into(), Value::Array(deps));
         item.insert(
             "fileId".into(),
-            json!(v.get("id").and_then(|x| x.as_str()).or(f.and_then(|x| x.filename)).unwrap_or("")),
+            json!(v
+                .get("id")
+                .and_then(|x| x.as_str())
+                .or(f.and_then(|x| x.filename))
+                .unwrap_or("")),
         );
-        item.insert("fileName".into(), json!(f.and_then(|x| x.filename).unwrap_or("")));
+        item.insert(
+            "fileName".into(),
+            json!(f.and_then(|x| x.filename).unwrap_or("")),
+        );
         item.insert(
             "version".into(),
-            json!(v.get("version_number").and_then(|x| x.as_str()).or(f.and_then(|x| x.filename)).unwrap_or("")),
+            json!(v
+                .get("version_number")
+                .and_then(|x| x.as_str())
+                .or(f.and_then(|x| x.filename))
+                .unwrap_or("")),
         );
         item.insert("url".into(), json!(f.and_then(|x| x.url).unwrap_or("")));
         if let Some(sha1) = f.and_then(|x| x.sha1) {
@@ -1585,32 +2362,79 @@ fn map_mr_versions(arr: &[Value], project_id: Option<&str>, retain_unavailable: 
         }
         item.insert("size".into(), json!(f.map(|x| x.size).unwrap_or(0)));
         let vt = v.get("version_type").and_then(|x| x.as_str()).unwrap_or("");
-        item.insert("releaseType".into(), json!(if vt == "beta" { "beta" } else if vt == "alpha" { "alpha" } else { "release" }));
-        item.insert("gameVersions".into(), v.get("game_versions").cloned().unwrap_or(json!([])));
-        item.insert("loaders".into(), v.get("loaders").cloned().unwrap_or(json!([])));
-        item.insert("date".into(), json!(v.get("date_published").and_then(|x| x.as_str()).unwrap_or("")));
+        item.insert(
+            "releaseType".into(),
+            json!(if vt == "beta" {
+                "beta"
+            } else if vt == "alpha" {
+                "alpha"
+            } else {
+                "release"
+            }),
+        );
+        item.insert(
+            "gameVersions".into(),
+            v.get("game_versions").cloned().unwrap_or(json!([])),
+        );
+        item.insert(
+            "loaders".into(),
+            v.get("loaders").cloned().unwrap_or(json!([])),
+        );
+        item.insert(
+            "date".into(),
+            json!(v
+                .get("date_published")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")),
+        );
         out.push(Value::Object(item));
     }
     out
 }
 
 /// mrFiles()：项目版本列表（可按 mc 版本 / loader / kind 过滤；retainUnavailable 供收藏校验用）
-pub fn mr_files(project_id: &str, filter: Option<&FileFilter>, retain_unavailable: bool) -> Result<Vec<Value>, String> {
+pub fn mr_files(
+    project_id: &str,
+    filter: Option<&FileFilter>,
+    retain_unavailable: bool,
+) -> Result<Vec<Value>, String> {
     let mut params: Vec<(String, String)> = Vec::new();
-    if let Some(mc) = filter.and_then(|f| f.mc_version.as_deref()).filter(|s| !s.is_empty()) {
-        params.push(("game_versions".into(), serde_json::to_string(&[mc]).unwrap_or_default()));
+    if let Some(mc) = filter
+        .and_then(|f| f.mc_version.as_deref())
+        .filter(|s| !s.is_empty())
+    {
+        params.push((
+            "game_versions".into(),
+            serde_json::to_string(&[mc]).unwrap_or_default(),
+        ));
     }
     let kind = filter.and_then(|f| f.kind.as_deref());
-    let loaders: Option<Vec<String>> = kind.and_then(modrinth_resource_loaders).map(|ls| ls.iter().map(|s| s.to_string()).collect()).or_else(|| {
-        filter.and_then(|f| f.loader.as_deref()).filter(|s| !s.is_empty()).map(|l| vec![l.to_string()])
-    });
+    let loaders: Option<Vec<String>> = kind
+        .and_then(modrinth_resource_loaders)
+        .map(|ls| ls.iter().map(|s| s.to_string()).collect())
+        .or_else(|| {
+            filter
+                .and_then(|f| f.loader.as_deref())
+                .filter(|s| !s.is_empty())
+                .map(|l| vec![l.to_string()])
+        });
     if let Some(ls) = loaders {
-        params.push(("loaders".into(), serde_json::to_string(&ls).unwrap_or_default()));
+        params.push((
+            "loaders".into(),
+            serde_json::to_string(&ls).unwrap_or_default(),
+        ));
     }
     let qs = if params.is_empty() {
         String::new()
     } else {
-        format!("?{}", params.iter().map(|(k, v)| format!("{}={}", enc(k), enc(v))).collect::<Vec<_>>().join("&"))
+        format!(
+            "?{}",
+            params
+                .iter()
+                .map(|(k, v)| format!("{}={}", enc(k), enc(v)))
+                .collect::<Vec<_>>()
+                .join("&")
+        )
     };
     let arr = mr_fetch(&format!("/project/{}/version{}", enc(project_id), qs))?;
     let arr = arr.as_array().cloned().unwrap_or_default();
@@ -1630,7 +2454,10 @@ pub struct CfChannel {
 
 /// cfChannel()：环境变量 → settings.curseforgeApiKey → 内置公开 key
 pub fn cf_channel(app: &tauri::AppHandle) -> CfChannel {
-    let env = std::env::var("KAMUCL_CF_API_KEY").ok().map(|s| s.trim().to_string()).unwrap_or_default();
+    let env = std::env::var("KAMUCL_CF_API_KEY")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
     let setting = crate::settings::get(app)
         .get("curseforgeApiKey")
         .and_then(|v| v.as_str())
@@ -1645,9 +2472,17 @@ pub fn cf_channel(app: &tauri::AppHandle) -> CfChannel {
         builtin.to_string()
     };
     if !key.is_empty() {
-        CfChannel { base: CF_OFFICIAL, official: true, key }
+        CfChannel {
+            base: CF_OFFICIAL,
+            official: true,
+            key,
+        }
     } else {
-        CfChannel { base: CF_MIRROR, official: false, key: String::new() }
+        CfChannel {
+            base: CF_MIRROR,
+            official: false,
+            key: String::new(),
+        }
     }
 }
 
@@ -1683,7 +2518,11 @@ pub fn cf_fetch_public(app: &tauri::AppHandle, path: &str) -> Result<Value, Stri
 fn cf_fetch(app: &tauri::AppHandle, path: &str) -> Result<Value, String> {
     let ch = cf_channel(app);
     if ch.official {
-        fetch_json(&format!("{}{}", ch.base, path), &[("x-api-key", &ch.key)], TIMEOUT_MS)
+        fetch_json(
+            &format!("{}{}", ch.base, path),
+            &[("x-api-key", &ch.key)],
+            TIMEOUT_MS,
+        )
     } else {
         fetch_json(&format!("{}{}", ch.base, path), &[], TIMEOUT_MS)
     }
@@ -1705,7 +2544,10 @@ fn cf_search(app: &tauri::AppHandle, q: &Query) -> Result<Page, String> {
         ("searchFilter".into(), q.keyword.clone()),
         ("index".into(), q.offset.to_string()),
         ("pageSize".into(), q.limit.to_string()),
-        ("sortField".into(), cf_sort_field(q.sort.as_deref()).to_string()),
+        (
+            "sortField".into(),
+            cf_sort_field(q.sort.as_deref()).to_string(),
+        ),
         ("sortOrder".into(), "desc".into()),
     ];
     if let Some(mc) = &q.mc_version {
@@ -1716,7 +2558,10 @@ fn cf_search(app: &tauri::AppHandle, q: &Query) -> Result<Page, String> {
             params.push(("modLoaderType".into(), cf_loader_type(loader).to_string()));
         }
     }
-    let data = cf_fetch(app, &format!("/mods/search?{}", query_string_owned(&params)))?;
+    let data = cf_fetch(
+        app,
+        &format!("/mods/search?{}", query_string_owned(&params)),
+    )?;
     let total_count = data
         .get("pagination")
         .and_then(|p| p.get("totalCount"))
@@ -1751,7 +2596,13 @@ fn cf_search(app: &tauri::AppHandle, q: &Query) -> Result<Page, String> {
         .unwrap_or_default();
     // CurseForge 只允许访问前 10,000 个结果。
     let total = total_count.min(10_000);
-    Ok(Page { items, total, offset: q.offset, limit: q.limit, warnings: Vec::new() })
+    Ok(Page {
+        items,
+        total,
+        offset: q.offset,
+        limit: q.limit,
+        warnings: Vec::new(),
+    })
 }
 
 /// mapCfFiles()
@@ -1829,12 +2680,22 @@ fn map_cf_files(files: &[Value], project_id: &str) -> Vec<Value> {
 }
 
 /// cfFiles()：分页拉全量文件（pageSize 50）
-fn cf_files(app: &tauri::AppHandle, project_id: &str, filter: Option<&FileFilter>) -> Result<Vec<Value>, String> {
+fn cf_files(
+    app: &tauri::AppHandle,
+    project_id: &str,
+    filter: Option<&FileFilter>,
+) -> Result<Vec<Value>, String> {
     let mut params: Vec<(String, String)> = vec![("pageSize".into(), "50".into())];
-    if let Some(mc) = filter.and_then(|f| f.mc_version.as_deref()).filter(|s| !s.is_empty()) {
+    if let Some(mc) = filter
+        .and_then(|f| f.mc_version.as_deref())
+        .filter(|s| !s.is_empty())
+    {
         params.push(("gameVersion".into(), mc.to_string()));
     }
-    if let Some(loader) = filter.and_then(|f| f.loader.as_deref()).filter(|s| !s.is_empty()) {
+    if let Some(loader) = filter
+        .and_then(|f| f.loader.as_deref())
+        .filter(|s| !s.is_empty())
+    {
         params.push(("modLoaderType".into(), cf_loader_type(loader).to_string()));
     }
     let mut all: Vec<Value> = Vec::new();
@@ -1842,9 +2703,23 @@ fn cf_files(app: &tauri::AppHandle, project_id: &str, filter: Option<&FileFilter
     loop {
         params.retain(|(k, _)| k != "index");
         params.push(("index".into(), index.to_string()));
-        let data = cf_fetch(app, &format!("/mods/{}/files?{}", enc(project_id), query_string_owned(&params)))?;
-        let page: Vec<Value> = data.get("data").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-        let total = data.get("pagination").and_then(|p| p.get("totalCount")).and_then(|v| v.as_u64());
+        let data = cf_fetch(
+            app,
+            &format!(
+                "/mods/{}/files?{}",
+                enc(project_id),
+                query_string_owned(&params)
+            ),
+        )?;
+        let page: Vec<Value> = data
+            .get("data")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let total = data
+            .get("pagination")
+            .and_then(|p| p.get("totalCount"))
+            .and_then(|v| v.as_u64());
         let page_len = page.len();
         all.extend(page);
         if page_len < 50 || all.len() as u64 >= total.unwrap_or(u64::MAX) {
@@ -1869,15 +2744,25 @@ struct Slot {
 /// communityPageSlots()：两源交错组成一条结果序列；一源耗尽后继续另一源
 fn community_page_slots(mr_total: u64, cf_total: u64, offset: u64, limit: u64) -> Vec<Slot> {
     let paired = mr_total.min(cf_total);
-    let remainder: &'static str = if mr_total > paired { "modrinth" } else { "curseforge" };
+    let remainder: &'static str = if mr_total > paired {
+        "modrinth"
+    } else {
+        "curseforge"
+    };
     let mut slots = Vec::new();
     let end = (offset + limit).min(mr_total + cf_total);
     let mut i = offset;
     while i < end {
         if i < paired * 2 {
-            slots.push(Slot { source: if i % 2 == 1 { "curseforge" } else { "modrinth" }, index: i / 2 });
+            slots.push(Slot {
+                source: if i % 2 == 1 { "curseforge" } else { "modrinth" },
+                index: i / 2,
+            });
         } else {
-            slots.push(Slot { source: remainder, index: paired + i - paired * 2 });
+            slots.push(Slot {
+                source: remainder,
+                index: paired + i - paired * 2,
+            });
         }
         i += 1;
     }
@@ -1910,7 +2795,9 @@ impl Page {
 
 fn dedup_warnings(list: Vec<String>) -> Vec<String> {
     let mut seen = HashSet::new();
-    list.into_iter().filter(|w| seen.insert(w.clone())).collect()
+    list.into_iter()
+        .filter(|w| seen.insert(w.clone()))
+        .collect()
 }
 
 fn dedup_items(items: Vec<Value>) -> Vec<Value> {
@@ -1949,7 +2836,11 @@ fn alias_cache_get(key: &str) -> Option<AliasCatalog> {
     let (map, _) = &mut *alias_catalogs().lock().unwrap();
     let entry = map.get(key)?;
     if crate::download::now_ms() - entry.at < 60_000 {
-        Some(AliasCatalog { at: entry.at, items: entry.items.clone(), warnings: entry.warnings.clone() })
+        Some(AliasCatalog {
+            at: entry.at,
+            items: entry.items.clone(),
+            warnings: entry.warnings.clone(),
+        })
     } else {
         None
     }
@@ -1963,7 +2854,14 @@ fn alias_cache_put(key: String, items: Vec<Value>, warnings: Vec<String>) {
         }
     }
     order.push_back(key.clone());
-    map.insert(key, AliasCatalog { at: crate::download::now_ms(), items, warnings });
+    map.insert(
+        key,
+        AliasCatalog {
+            at: crate::download::now_ms(),
+            items,
+            warnings,
+        },
+    );
 }
 
 /// rawProviderSearch()
@@ -1996,7 +2894,13 @@ fn provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> Result<Pa
                 .skip(q.offset as usize)
                 .take(q.limit as usize)
                 .collect();
-            return Ok(Page { items, total, offset: q.offset, limit: q.limit, warnings: catalog.warnings });
+            return Ok(Page {
+                items,
+                total,
+                offset: q.offset,
+                limit: q.limit,
+                warnings: catalog.warnings,
+            });
         }
         // 注意：total 取目录长度（此处已截取 items，先记录长度再截取）
         let encyclopedia = lookup_mcmod(&q.keyword);
@@ -2007,7 +2911,13 @@ fn provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> Result<Pa
             };
             let mut warnings = page.warnings.clone();
             warnings.extend(encyclopedia.warnings.clone());
-            return Ok(Page { items: page.items, total: page.total, offset: page.offset, limit: page.limit, warnings });
+            return Ok(Page {
+                items: page.items,
+                total: page.total,
+                offset: page.offset,
+                limit: page.limit,
+                warnings,
+            });
         }
         // MC 百科只提供身份桥接，不替代下载仓库：保留原关键词结果
         let original = raw_provider_search(app, source, &q.clone_with(None, 0, 50));
@@ -2019,7 +2929,9 @@ fn provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> Result<Pa
                 items.extend(page.items.iter().cloned());
                 warnings.extend(page.warnings.iter().cloned());
             }
-            Err(_) => warnings.push("原中文关键词查询失败，当前仅显示已核对来源标识的百科关联项目；可重试。".into()),
+            Err(_) => warnings.push(
+                "原中文关键词查询失败，当前仅显示已核对来源标识的百科关联项目；可重试。".into(),
+            ),
         }
         warnings.extend(encyclopedia.warnings.iter().cloned());
         let mut linked: Vec<(String, String)> = Vec::new(); // slug -> title
@@ -2038,13 +2950,19 @@ fn provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> Result<Pa
         }
         let identities: Vec<(String, String)> = by_slug.into_iter().collect();
         if identities.len() > 10 {
-            warnings.push("百科条目关联的来源项目较多，本次仅核对前 10 项；请使用完整中文名缩小范围。".into());
+            warnings.push(
+                "百科条目关联的来源项目较多，本次仅核对前 10 项；请使用完整中文名缩小范围。".into(),
+            );
         }
         let identities: Vec<_> = identities.into_iter().take(10).collect();
         if identities.is_empty() {
             warnings.push(format!(
                 "MC百科条目未提供 {} 项目链接，已保留原中文结果；可切换来源。",
-                if source == "modrinth" { "Modrinth" } else { "CurseForge" }
+                if source == "modrinth" {
+                    "Modrinth"
+                } else {
+                    "CurseForge"
+                }
             ));
         }
         let mut original_total: u64 = 0;
@@ -2057,14 +2975,29 @@ fn provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> Result<Pa
                 Ok(page) => {
                     provider_succeeded = true;
                     for item in page.items {
-                        let item_slug = item.get("slug").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                        let item_slug = item
+                            .get("slug")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_lowercase();
                         if item_slug == slug.to_lowercase() {
                             let mut it = item.clone();
-                            let original_title = it.get("originalTitle").and_then(|v| v.as_str()).map(str::to_string)
-                                .unwrap_or_else(|| it.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string());
+                            let original_title = it
+                                .get("originalTitle")
+                                .and_then(|v| v.as_str())
+                                .map(str::to_string)
+                                .unwrap_or_else(|| {
+                                    it.get("title")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string()
+                                });
                             if let Some(obj) = it.as_object_mut() {
                                 obj.insert("originalTitle".into(), json!(original_title));
-                                obj.insert("title".into(), json!(format!("{title} | {original_title}")));
+                                obj.insert(
+                                    "title".into(),
+                                    json!(format!("{title} | {original_title}")),
+                                );
                             }
                             items.push(it);
                         }
@@ -2072,7 +3005,11 @@ fn provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> Result<Pa
                 }
                 Err(_) => warnings.push(format!(
                     "“{title}”的 {} 项目查询失败，可重试；未使用同名项目替代。",
-                    if source == "modrinth" { "Modrinth" } else { "CurseForge" }
+                    if source == "modrinth" {
+                        "Modrinth"
+                    } else {
+                        "CurseForge"
+                    }
                 )),
             }
         }
@@ -2080,36 +3017,71 @@ fn provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> Result<Pa
             return Err(original_err.unwrap_or_else(|| "社区来源查询失败，请稍后重试".into()));
         }
         if !encyclopedia.entries.is_empty() {
-            warnings.push("MC百科中文名称关联：仅使用百科条目明确链接且当前版本／加载器筛选匹配的来源项目。".into());
+            warnings.push(
+                "MC百科中文名称关联：仅使用百科条目明确链接且当前版本／加载器筛选匹配的来源项目。"
+                    .into(),
+            );
         }
         if original_total > 50 {
-            warnings.push("原中文关键词匹配较多，本次百科关联合并前 50 项；请缩小关键词查看其他结果。".into());
+            warnings.push(
+                "原中文关键词匹配较多，本次百科关联合并前 50 项；请缩小关键词查看其他结果。".into(),
+            );
         }
         let items = dedup_items(items);
         let warnings = dedup_warnings(warnings);
         let total = items.len() as u64;
         // 百科不可用/失败查询不入缓存（空结果与失败可立即重试）；缓存保存全量列表
-        let cacheable = encyclopedia.warnings.is_empty() && !warnings.iter().any(|w| w.contains("查询失败"));
+        let cacheable =
+            encyclopedia.warnings.is_empty() && !warnings.iter().any(|w| w.contains("查询失败"));
         if cacheable {
             alias_cache_put(key, items.clone(), warnings.clone());
         }
-        let paged: Vec<Value> = items.into_iter().skip(q.offset as usize).take(q.limit as usize).collect();
-        return Ok(Page { items: paged, total, offset: q.offset, limit: q.limit, warnings });
+        let paged: Vec<Value> = items
+            .into_iter()
+            .skip(q.offset as usize)
+            .take(q.limit as usize)
+            .collect();
+        return Ok(Page {
+            items: paged,
+            total,
+            offset: q.offset,
+            limit: q.limit,
+            warnings,
+        });
     }
     builtin_provider_search(app, source, q)
 }
 
 /// builtinProviderSearch()：中文别名检索（别名仅补充来源标识完全匹配的项目）
-fn builtin_provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> Result<Page, String> {
-    let terms = if q.kind == "mod" { chinese_mod_search_terms(&q.keyword) } else { Vec::new() };
+fn builtin_provider_search(
+    app: &tauri::AppHandle,
+    source: &str,
+    q: &Query,
+) -> Result<Page, String> {
+    let terms = if q.kind == "mod" {
+        chinese_mod_search_terms(&q.keyword)
+    } else {
+        Vec::new()
+    };
     if terms.is_empty() {
         return raw_provider_search(app, source, q);
     }
     let key = q.cache_key(source, false);
     if let Some(catalog) = alias_cache_get(&key) {
         let total = catalog.items.len() as u64;
-        let items: Vec<Value> = catalog.items.into_iter().skip(q.offset as usize).take(q.limit as usize).collect();
-        return Ok(Page { items, total, offset: q.offset, limit: q.limit, warnings: catalog.warnings });
+        let items: Vec<Value> = catalog
+            .items
+            .into_iter()
+            .skip(q.offset as usize)
+            .take(q.limit as usize)
+            .collect();
+        return Ok(Page {
+            items,
+            total,
+            offset: q.offset,
+            limit: q.limit,
+            warnings: catalog.warnings,
+        });
     }
     let mut searches: Vec<String> = vec![q.keyword.clone()];
     for t in &terms {
@@ -2127,9 +3099,15 @@ fn builtin_provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> R
                 let mut warnings: Vec<String> = Vec::new();
                 let mut items = first.items.clone();
                 if first.total > 50 {
-                    match raw_provider_search(app, source, &q.clone_with(Some(keyword.as_str()), 50, 50)) {
+                    match raw_provider_search(
+                        app,
+                        source,
+                        &q.clone_with(Some(keyword.as_str()), 50, 50),
+                    ) {
                         Ok(second) => items.extend(second.items),
-                        Err(_) => warnings.push(format!("“{keyword}”的后续结果查询失败，已保留已读取项目；可重试。")),
+                        Err(_) => warnings.push(format!(
+                            "“{keyword}”的后续结果查询失败，已保留已读取项目；可重试。"
+                        )),
                     }
                 }
                 if first.total > 100 {
@@ -2140,10 +3118,22 @@ fn builtin_provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> R
                 } else {
                     items
                         .into_iter()
-                        .filter(|item| item.get("slug").and_then(|v| v.as_str()).unwrap_or("").to_lowercase() == keyword.to_lowercase())
+                        .filter(|item| {
+                            item.get("slug")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_lowercase()
+                                == keyword.to_lowercase()
+                        })
                         .collect()
                 };
-                pages.push(Page { items: filtered, total: first.total, offset: first.offset, limit: first.limit, warnings });
+                pages.push(Page {
+                    items: filtered,
+                    total: first.total,
+                    offset: first.offset,
+                    limit: first.limit,
+                    warnings,
+                });
             }
             Err(e) => {
                 failures.push(e);
@@ -2162,13 +3152,20 @@ fn builtin_provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> R
         }
     }
     if successes == 0 {
-        return Err(failures.first().cloned().unwrap_or_else(|| "社区来源查询失败，请稍后重试".into()));
+        return Err(failures
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "社区来源查询失败，请稍后重试".into()));
     }
     let items = dedup_items(pages.iter().flat_map(|p| p.items.iter().cloned()).collect());
     let header = format!(
         "中文别名检索：{} → {}；保留原中文结果，仅补充来源标识完全匹配的项目。",
         q.keyword,
-        terms.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("、")
+        terms
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("、")
     );
     let mut warnings = vec![header];
     warnings.extend(pages.iter().flat_map(|p| p.warnings.iter().cloned()));
@@ -2177,18 +3174,40 @@ fn builtin_provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> R
     if !warnings.iter().any(|w| w.contains("查询失败")) {
         alias_cache_put(key, items.clone(), warnings.clone());
     }
-    let paged: Vec<Value> = items.into_iter().skip(q.offset as usize).take(q.limit as usize).collect();
-    Ok(Page { items: paged, total, offset: q.offset, limit: q.limit, warnings })
+    let paged: Vec<Value> = items
+        .into_iter()
+        .skip(q.offset as usize)
+        .take(q.limit as usize)
+        .collect();
+    Ok(Page {
+        items: paged,
+        total,
+        offset: q.offset,
+        limit: q.limit,
+        warnings,
+    })
 }
 
 /// withZhTitle()：slug 命中映射表时给标题加中文名前缀
 fn with_zh_title(list: Vec<Value>) -> Vec<Value> {
     list.into_iter()
         .map(|r| {
-            let title = r.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let title = r
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let had_original = r.get("originalTitle").and_then(|v| v.as_str()).is_some();
-            let original = r.get("originalTitle").and_then(|v| v.as_str()).unwrap_or(&title).to_string();
-            let slug = r.get("slug").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let original = r
+                .get("originalTitle")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&title)
+                .to_string();
+            let slug = r
+                .get("slug")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let mut out = r;
             if let Some(obj) = out.as_object_mut() {
                 obj.insert("originalTitle".into(), json!(original));
@@ -2209,15 +3228,25 @@ struct SourceCounts {
 
 fn source_counts() -> &'static Mutex<SourceCounts> {
     static M: OnceLock<Mutex<SourceCounts>> = OnceLock::new();
-    M.get_or_init(|| Mutex::new(SourceCounts { map: HashMap::new() }))
+    M.get_or_init(|| {
+        Mutex::new(SourceCounts {
+            map: HashMap::new(),
+        })
+    })
 }
 
-fn covers(pages: &HashMap<&'static str, (u64, u64, Vec<Value>)>, source: &str, own: &[Slot]) -> bool {
+fn covers(
+    pages: &HashMap<&'static str, (u64, u64, Vec<Value>)>,
+    source: &str,
+    own: &[Slot],
+) -> bool {
     if own.is_empty() {
         return true;
     }
     match pages.get(source) {
-        Some((offset, limit, _)) => own[0].index >= *offset && own[own.len() - 1].index < offset + limit,
+        Some((offset, limit, _)) => {
+            own[0].index >= *offset && own[own.len() - 1].index < offset + limit
+        }
         None => false,
     }
 }
@@ -2239,7 +3268,10 @@ pub fn community_search_page(app: &tauri::AppHandle, input: &Value) -> Result<Va
         let mut out = page.to_json();
         if let Some(obj) = out.as_object_mut() {
             let items = obj.remove("items").unwrap_or(json!([]));
-            obj.insert("items".into(), Value::Array(with_zh_title(items.as_array().cloned().unwrap_or_default())));
+            obj.insert(
+                "items".into(),
+                Value::Array(with_zh_title(items.as_array().cloned().unwrap_or_default())),
+            );
         }
         return Ok(out);
     }
@@ -2253,7 +3285,10 @@ pub fn community_search_page(app: &tauri::AppHandle, input: &Value) -> Result<Va
         if q.offset > 0 {
             let cached = {
                 let sc = source_counts().lock().unwrap();
-                sc.map.get(&key).filter(|(_, at)| crate::download::now_ms() - *at < 60_000).map(|(t, _)| *t)
+                sc.map
+                    .get(&key)
+                    .filter(|(_, at)| crate::download::now_ms() - *at < 60_000)
+                    .map(|(t, _)| *t)
             };
             if let Some(t) = cached {
                 totals.insert(source, t);
@@ -2270,7 +3305,11 @@ pub fn community_search_page(app: &tauri::AppHandle, input: &Value) -> Result<Va
                 warnings.extend(p.warnings.iter().cloned());
                 totals.insert(source, p.total);
                 if p.warnings.is_empty() {
-                    source_counts().lock().unwrap().map.insert(key, (p.total, crate::download::now_ms()));
+                    source_counts()
+                        .lock()
+                        .unwrap()
+                        .map
+                        .insert(key, (p.total, crate::download::now_ms()));
                 } else {
                     source_counts().lock().unwrap().map.remove(&key);
                 }
@@ -2283,24 +3322,37 @@ pub fn community_search_page(app: &tauri::AppHandle, input: &Value) -> Result<Va
             }
         }
     }
-    let failed: Vec<&'static str> = sources.iter().copied().filter(|s| !totals.contains_key(s)).collect();
+    let failed: Vec<&'static str> = sources
+        .iter()
+        .copied()
+        .filter(|s| !totals.contains_key(s))
+        .collect();
     if failed.len() == sources.len() {
         return Err(first_failure.unwrap_or_else(|| "社区来源查询失败，请稍后重试".into()));
     }
     for source in failed {
         warnings.push(format!(
             "{} 暂不可用，当前仅统计另一来源；可重试或切换来源。",
-            if source == "modrinth" { "Modrinth" } else { "CurseForge" }
+            if source == "modrinth" {
+                "Modrinth"
+            } else {
+                "CurseForge"
+            }
         ));
     }
     totals.entry("modrinth").or_insert(0);
     totals.entry("curseforge").or_insert(0);
     let mut pages: HashMap<&'static str, (u64, u64, Vec<Value>)> = HashMap::new();
     for _round in 0..=sources.len() {
-        let planned = community_page_slots(totals["modrinth"], totals["curseforge"], q.offset, q.limit);
+        let planned =
+            community_page_slots(totals["modrinth"], totals["curseforge"], q.offset, q.limit);
         let mut needed: Vec<(&'static str, Vec<Slot>)> = Vec::new();
         for source in sources {
-            let own: Vec<Slot> = planned.iter().copied().filter(|s| s.source == source).collect();
+            let own: Vec<Slot> = planned
+                .iter()
+                .copied()
+                .filter(|s| s.source == source)
+                .collect();
             if !covers(&pages, source, &own) {
                 needed.push((source, own));
             }
@@ -2321,9 +3373,17 @@ pub fn community_search_page(app: &tauri::AppHandle, input: &Value) -> Result<Va
                     pages.remove(source);
                     warnings.push(format!(
                         "{} 结果读取失败，当前仅统计另一来源；可重试或切换来源。",
-                        if source == "modrinth" { "Modrinth" } else { "CurseForge" }
+                        if source == "modrinth" {
+                            "Modrinth"
+                        } else {
+                            "CurseForge"
+                        }
                     ));
-                    source_counts().lock().unwrap().map.remove(&q.cache_key(source, false));
+                    source_counts()
+                        .lock()
+                        .unwrap()
+                        .map
+                        .remove(&q.cache_key(source, false));
                     if failed_all(&pages, &sources) {
                         return Err(e);
                     }
@@ -2333,7 +3393,11 @@ pub fn community_search_page(app: &tauri::AppHandle, input: &Value) -> Result<Va
     }
     let slots = community_page_slots(totals["modrinth"], totals["curseforge"], q.offset, q.limit);
     for source in sources {
-        let own: Vec<Slot> = slots.iter().copied().filter(|s| s.source == source).collect();
+        let own: Vec<Slot> = slots
+            .iter()
+            .copied()
+            .filter(|s| s.source == source)
+            .collect();
         if !covers(&pages, source, &own) {
             return Err("社区来源结果在翻页时持续变化，请重新搜索后重试。".into());
         }
@@ -2358,7 +3422,10 @@ pub fn community_search_page(app: &tauri::AppHandle, input: &Value) -> Result<Va
     Ok(Value::Object(out))
 }
 
-fn failed_all(pages: &HashMap<&'static str, (u64, u64, Vec<Value>)>, sources: &[&'static str]) -> bool {
+fn failed_all(
+    pages: &HashMap<&'static str, (u64, u64, Vec<Value>)>,
+    sources: &[&'static str],
+) -> bool {
     sources.iter().all(|s| !pages.contains_key(*s))
 }
 
@@ -2379,7 +3446,11 @@ fn project_count(value: Option<&Value>) -> Option<u64> {
 fn project_webpage(value: Option<&str>, source: &str) -> Option<String> {
     let raw = value?;
     let url = parse_url(raw).ok()?;
-    if url.scheme != "https:" || !url.username.is_empty() || !url.password.is_empty() || !url.port.is_empty() {
+    if url.scheme != "https:"
+        || !url.username.is_empty()
+        || !url.password.is_empty()
+        || !url.port.is_empty()
+    {
         return None;
     }
     let allowed: &[&str] = if source == "modrinth" {
@@ -2407,22 +3478,34 @@ pub fn favorite_icon_url(value: Option<&Value>) -> Option<String> {
 }
 
 /// communityProject()：MOD 项目元数据（收藏/下载页校验来源与项目类型）
-pub fn community_project(app: &tauri::AppHandle, source: &str, project_id: &str, kind: &str) -> Result<Value, String> {
+pub fn community_project(
+    app: &tauri::AppHandle,
+    source: &str,
+    project_id: &str,
+    kind: &str,
+) -> Result<Value, String> {
     if kind != "mod" {
         return Err("收藏详情仅支持 MOD 项目".into());
     }
     static MR_ID: OnceLock<regex::Regex> = OnceLock::new();
     static CF_ID: OnceLock<regex::Regex> = OnceLock::new();
     if source == "modrinth" {
-        let id_ok = MR_ID.get_or_init(|| regex::Regex::new(r"^[a-zA-Z0-9_-]{1,100}$").unwrap()).is_match(project_id);
+        let id_ok = MR_ID
+            .get_or_init(|| regex::Regex::new(r"^[a-zA-Z0-9_-]{1,100}$").unwrap())
+            .is_match(project_id);
         if id_ok {
             let project = mr_fetch(&format!("/project/{}", enc(project_id)))?;
-            let ptype = project.get("project_type").and_then(|v| v.as_str()).unwrap_or("");
+            let ptype = project
+                .get("project_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let id = project.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let title = project.get("title").and_then(|v| v.as_str()).unwrap_or("");
             if ptype != "mod"
                 || id.is_empty()
-                || !MR_ID.get_or_init(|| regex::Regex::new(r"^[a-zA-Z0-9_-]{1,100}$").unwrap()).is_match(id)
+                || !MR_ID
+                    .get_or_init(|| regex::Regex::new(r"^[a-zA-Z0-9_-]{1,100}$").unwrap())
+                    .is_match(id)
                 || title.is_empty()
             {
                 return Err("该 Modrinth 项目不是有效模组".into());
@@ -2430,19 +3513,38 @@ pub fn community_project(app: &tauri::AppHandle, source: &str, project_id: &str,
             let slug = project_text(project.get("slug"), 100).unwrap_or_default();
             let license = project
                 .get("license")
-                .map(|l| l.get("name").filter(|v| v.as_str().map(|s| !s.is_empty()).unwrap_or(false)).or_else(|| l.get("id")).cloned())
+                .map(|l| {
+                    l.get("name")
+                        .filter(|v| v.as_str().map(|s| !s.is_empty()).unwrap_or(false))
+                        .or_else(|| l.get("id"))
+                        .cloned()
+                })
                 .unwrap_or(None);
             let categories: Vec<String> = project
                 .get("categories")
                 .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|c| project_text(Some(c), 100)).take(30).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|c| project_text(Some(c), 100))
+                        .take(30)
+                        .collect()
+                })
                 .unwrap_or_default();
-            let webpage = project_webpage(Some(&format!("https://modrinth.com/mod/{}", if slug.is_empty() { id } else { &slug })), source);
+            let webpage = project_webpage(
+                Some(&format!(
+                    "https://modrinth.com/mod/{}",
+                    if slug.is_empty() { id } else { &slug }
+                )),
+                source,
+            );
             let mut obj = serde_json::Map::new();
             obj.insert("kind".into(), json!("mod"));
             obj.insert("source".into(), json!(source));
             obj.insert("projectId".into(), json!(id));
-            obj.insert("title".into(), json!(title.chars().take(200).collect::<String>()));
+            obj.insert(
+                "title".into(),
+                json!(title.chars().take(200).collect::<String>()),
+            );
             obj.insert("slug".into(), json!(slug));
             if let Some(icon) = favorite_icon_url(project.get("icon_url")) {
                 obj.insert("iconUrl".into(), json!(icon));
@@ -2470,7 +3572,9 @@ pub fn community_project(app: &tauri::AppHandle, source: &str, project_id: &str,
         }
     }
     if source == "curseforge" {
-        let id_ok = CF_ID.get_or_init(|| regex::Regex::new(r"^\d{1,20}$").unwrap()).is_match(project_id);
+        let id_ok = CF_ID
+            .get_or_init(|| regex::Regex::new(r"^\d{1,20}$").unwrap())
+            .is_match(project_id);
         if id_ok {
             let result = cf_fetch(app, &format!("/mods/{project_id}"))?;
             let project = result.get("data").cloned().unwrap_or(Value::Null);
@@ -2478,7 +3582,11 @@ pub fn community_project(app: &tauri::AppHandle, source: &str, project_id: &str,
             let game_id = project.get("gameId").and_then(|v| v.as_u64()).unwrap_or(0);
             let class_id = project.get("classId").and_then(|v| v.as_u64()).unwrap_or(0);
             let name = project.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            if pid.as_str() != project_id || game_id != 432 || class_id != u64::from(cf_class_id("mod")) || name.is_empty() {
+            if pid.as_str() != project_id
+                || game_id != 432
+                || class_id != u64::from(cf_class_id("mod"))
+                || name.is_empty()
+            {
                 return Err("该 CurseForge 项目不是有效 Minecraft 模组".into());
             }
             let author = project
@@ -2495,18 +3603,35 @@ pub fn community_project(app: &tauri::AppHandle, source: &str, project_id: &str,
             let categories: Vec<String> = project
                 .get("categories")
                 .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|c| c.get("name").and_then(|n| n.as_str()).map(|s| s.chars().take(100).collect::<String>())).take(30).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|c| {
+                            c.get("name")
+                                .and_then(|n| n.as_str())
+                                .map(|s| s.chars().take(100).collect::<String>())
+                        })
+                        .take(30)
+                        .collect()
+                })
                 .unwrap_or_default();
             let webpage = project_webpage(
-                project.get("links").and_then(|l| l.get("websiteUrl")).and_then(|v| v.as_str()),
+                project
+                    .get("links")
+                    .and_then(|l| l.get("websiteUrl"))
+                    .and_then(|v| v.as_str()),
                 source,
             );
             let mut obj = serde_json::Map::new();
             obj.insert("kind".into(), json!("mod"));
             obj.insert("source".into(), json!(source));
             obj.insert("projectId".into(), json!(project_id));
-            obj.insert("title".into(), json!(name.chars().take(200).collect::<String>()));
-            if let Some(icon) = favorite_icon_url(project.get("logo").and_then(|l| l.get("thumbnailUrl"))) {
+            obj.insert(
+                "title".into(),
+                json!(name.chars().take(200).collect::<String>()),
+            );
+            if let Some(icon) =
+                favorite_icon_url(project.get("logo").and_then(|l| l.get("thumbnailUrl")))
+            {
                 obj.insert("iconUrl".into(), json!(icon));
             }
             if let Some(s) = project_text(project.get("slug"), 100) {
@@ -2535,34 +3660,69 @@ pub fn community_project(app: &tauri::AppHandle, source: &str, project_id: &str,
 }
 
 /// communityModProject()：收藏关联用的轻量身份
-pub fn community_mod_project(app: &tauri::AppHandle, source: &str, project_id: &str) -> Result<Value, String> {
+pub fn community_mod_project(
+    app: &tauri::AppHandle,
+    source: &str,
+    project_id: &str,
+) -> Result<Value, String> {
     let project = community_project(app, source, project_id, "mod")?;
     let mut obj = serde_json::Map::new();
-    obj.insert("source".into(), json!(project.get("source").cloned().unwrap_or(json!(source))));
-    obj.insert("projectId".into(), json!(project.get("projectId").cloned().unwrap_or(json!(project_id))));
-    obj.insert("name".into(), json!(project.get("title").cloned().unwrap_or(json!(""))));
-    if let Some(icon) = project.get("iconUrl").filter(|v| v.as_str().map(|s| !s.is_empty()).unwrap_or(false)) {
+    obj.insert(
+        "source".into(),
+        json!(project.get("source").cloned().unwrap_or(json!(source))),
+    );
+    obj.insert(
+        "projectId".into(),
+        json!(project
+            .get("projectId")
+            .cloned()
+            .unwrap_or(json!(project_id))),
+    );
+    obj.insert(
+        "name".into(),
+        json!(project.get("title").cloned().unwrap_or(json!(""))),
+    );
+    if let Some(icon) = project
+        .get("iconUrl")
+        .filter(|v| v.as_str().map(|s| !s.is_empty()).unwrap_or(false))
+    {
         obj.insert("iconUrl".into(), icon.clone());
     }
     Ok(Value::Object(obj))
 }
 
 /// curseForgeFilePage()：文件页网址（modpack:openFile 由 modpacks.rs 调用）
-pub fn curse_forge_file_page(app: &tauri::AppHandle, project_id: u64, file_id: u64) -> Result<String, String> {
+pub fn curse_forge_file_page(
+    app: &tauri::AppHandle,
+    project_id: u64,
+    file_id: u64,
+) -> Result<String, String> {
     if project_id == 0 || file_id == 0 {
         return Err("CurseForge 文件标识无效".into());
     }
     let ch = cf_channel(app);
-    let sources: Vec<(&str, Option<&String>)> = vec![(CF_MIRROR, None), (ch.base, if ch.official { Some(&ch.key) } else { None })];
+    let sources: Vec<(&str, Option<&String>)> = vec![
+        (CF_MIRROR, None),
+        (ch.base, if ch.official { Some(&ch.key) } else { None }),
+    ];
     for (base, key) in sources {
         let mut headers: Vec<(&str, &str)> = Vec::new();
         if let Some(k) = key {
             headers.push(("x-api-key", k));
         }
-        let Ok(data) = fetch_json(&format!("{base}/mods/{project_id}"), &headers, 6_000) else { continue };
-        let Some(web) = data.pointer("/data/links/websiteUrl").and_then(|v| v.as_str()) else { continue };
+        let Ok(data) = fetch_json(&format!("{base}/mods/{project_id}"), &headers, 6_000) else {
+            continue;
+        };
+        let Some(web) = data
+            .pointer("/data/links/websiteUrl")
+            .and_then(|v| v.as_str())
+        else {
+            continue;
+        };
         let Ok(url) = parse_url(web) else { continue };
-        if url.scheme != "https:" || !["curseforge.com", "www.curseforge.com"].contains(&url.host.as_str()) {
+        if url.scheme != "https:"
+            || !["curseforge.com", "www.curseforge.com"].contains(&url.host.as_str())
+        {
             continue;
         }
         let mut path = url.path.trim_end_matches('/').to_string();
@@ -2575,7 +3735,12 @@ pub fn curse_forge_file_page(app: &tauri::AppHandle, project_id: u64, file_id: u
 // ---------------- 文件列表 / 精确文件 ----------------
 
 /// communityFiles()：项目文件列表（新→旧）
-pub fn community_files(app: &tauri::AppHandle, source: &str, project_id: &str, filter: Option<&FileFilter>) -> Result<Vec<Value>, String> {
+pub fn community_files(
+    app: &tauri::AppHandle,
+    source: &str,
+    project_id: &str,
+    filter: Option<&FileFilter>,
+) -> Result<Vec<Value>, String> {
     let project_id = project_id.to_string();
     let filter = effective_filter(&filter.cloned().unwrap_or_default());
     let mut files = if source == "modrinth" {
@@ -2593,21 +3758,46 @@ pub fn community_files(app: &tauri::AppHandle, source: &str, project_id: &str, f
 }
 
 /// communityExactFile()：依赖解析始终使用精确仓库身份
-pub fn community_exact_file(app: &tauri::AppHandle, source: &str, project_id: Option<&str>, file_id: &str) -> Result<Value, String> {
+pub fn community_exact_file(
+    app: &tauri::AppHandle,
+    source: &str,
+    project_id: Option<&str>,
+    file_id: &str,
+) -> Result<Value, String> {
     let files = if source == "modrinth" {
         let version = mr_fetch(&format!("/version/{}", enc(file_id)))?;
         map_mr_versions(std::slice::from_ref(&version), project_id, false)
     } else {
-        let data = cf_fetch(app, &format!("/mods/{}/files/{}", enc(project_id.unwrap_or("")), enc(file_id)))?;
+        let data = cf_fetch(
+            app,
+            &format!(
+                "/mods/{}/files/{}",
+                enc(project_id.unwrap_or("")),
+                enc(file_id)
+            ),
+        )?;
         let file = data.get("data").cloned().unwrap_or(Value::Null);
         map_cf_files(std::slice::from_ref(&file), project_id.unwrap_or(""))
     };
-    files.into_iter().next().ok_or_else(|| "依赖版本没有可下载文件".to_string())
+    files
+        .into_iter()
+        .next()
+        .ok_or_else(|| "依赖版本没有可下载文件".to_string())
 }
 
 /// communityFavoriteCandidates()：收藏版本查询（Modrinth 保留无直链文件以区分不兼容与不可靠）
-pub fn community_favorite_candidates(app: &tauri::AppHandle, source: &str, project_id: &str, mc_version: &str, loader: &str) -> Result<Vec<Value>, String> {
-    let filter = FileFilter { mc_version: Some(mc_version.to_string()), loader: Some(loader.to_string()), kind: Some("mod".into()) };
+pub fn community_favorite_candidates(
+    app: &tauri::AppHandle,
+    source: &str,
+    project_id: &str,
+    mc_version: &str,
+    loader: &str,
+) -> Result<Vec<Value>, String> {
+    let filter = FileFilter {
+        mc_version: Some(mc_version.to_string()),
+        loader: Some(loader.to_string()),
+        kind: Some("mod".into()),
+    };
     let mut files = if source == "modrinth" {
         mr_files(project_id, Some(&filter), true)?
     } else {
@@ -2625,12 +3815,17 @@ pub fn community_favorite_candidates(app: &tauri::AppHandle, source: &str, proje
 /// communitySearch()（依赖查找数组接口）：communitySearchPage().items
 pub fn community_search_items(app: &tauri::AppHandle, q: &Value) -> Result<Vec<Value>, String> {
     let page = community_search_page(app, q)?;
-    Ok(page.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default())
+    Ok(page
+        .get("items")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default())
 }
 
 // ---------------- downloadFileName.ts ----------------
 
-const RESERVED_DEVICE: &str = r"^(?:con|prn|aux|nul|clock\$|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)";
+const RESERVED_DEVICE: &str =
+    r"^(?:con|prn|aux|nul|clock\$|conin\$|conout\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)";
 const MAX_NAME_BYTES: usize = 200;
 
 fn trim_to_bytes(value: &str, budget: usize) -> String {
@@ -2650,7 +3845,11 @@ fn trim_to_bytes(value: &str, budget: usize) -> String {
 /// downloadFileName()：来源文件名是标签不是路径；非法字符替换 + 稳定后缀防覆盖
 pub fn download_file_name(input: &str) -> Result<String, String> {
     let original = input;
-    if original.contains('/') || original.contains('\\') || original.trim() == "." || original.trim() == ".." {
+    if original.contains('/')
+        || original.contains('\\')
+        || original.trim() == "."
+        || original.trim() == ".."
+    {
         return Err("下载文件名不能包含目录或路径跳转".into());
     }
     if original.is_empty() {
@@ -2658,7 +3857,16 @@ pub fn download_file_name(input: &str) -> Result<String, String> {
     }
     let mut safe: String = original
         .chars()
-        .map(|c| if matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\u{0}'..='\u{1f}' | '\u{7f}') { '_' } else { c })
+        .map(|c| {
+            if matches!(
+                c,
+                '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\u{0}'..='\u{1f}' | '\u{7f}'
+            ) {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     while safe.ends_with('.') || safe.ends_with(' ') {
         safe.pop();
@@ -2682,9 +3890,17 @@ pub fn download_file_name(input: &str) -> Result<String, String> {
         Some(i) if i > 0 => safe[i..].to_string(),
         _ => String::new(),
     };
-    let extension = if ext_os.len() <= 32 { ext_os } else { String::new() };
+    let extension = if ext_os.len() <= 32 {
+        ext_os
+    } else {
+        String::new()
+    };
     let suffix = format!("-{digest}{extension}");
-    let stem = if extension.is_empty() { safe.clone() } else { safe[..safe.len() - extension.len()].to_string() };
+    let stem = if extension.is_empty() {
+        safe.clone()
+    } else {
+        safe[..safe.len() - extension.len()].to_string()
+    };
     let mut stem = trim_to_bytes(&stem, MAX_NAME_BYTES.saturating_sub(suffix.len()));
     while stem.ends_with('.') || stem.ends_with(' ') {
         stem.pop();
@@ -2723,7 +3939,11 @@ impl DownloadEmit {
     fn emit(&self, event: &Value) {
         let mut g = self.guard.lock().unwrap();
         let normalized = g.normalize(event);
-        let stage = normalized.get("stage").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let stage = normalized
+            .get("stage")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if stage != "error" && stage != "done" {
             *self.last_stage.lock().unwrap() = stage;
         }
@@ -2760,14 +3980,31 @@ fn transfer(
     let display = display_name.to_string();
     let progress = move |done: u64, total: u64, wire: u64| {
         bytes.fetch_add(wire, Ordering::SeqCst);
-        let remaining = if total > done { Some(total - done) } else { None };
-        let snap = est.lock().unwrap().sample(bytes.load(Ordering::SeqCst), remaining, start.elapsed().as_millis() as f64, paused_flag.load(Ordering::SeqCst));
-        let frac = if total > 0 { done as f64 / total as f64 } else { 0.0 };
+        let remaining = if total > done {
+            Some(total - done)
+        } else {
+            None
+        };
+        let snap = est.lock().unwrap().sample(
+            bytes.load(Ordering::SeqCst),
+            remaining,
+            start.elapsed().as_millis() as f64,
+            paused_flag.load(Ordering::SeqCst),
+        );
+        let frac = if total > 0 {
+            done as f64 / total as f64
+        } else {
+            0.0
+        };
         let text = format!(
             "下载 {} {:.1}MB{}",
             display,
             done as f64 / 1024.0 / 1024.0,
-            if total > 0 { format!("/{:.1}MB", total as f64 / 1024.0 / 1024.0) } else { String::new() }
+            if total > 0 {
+                format!("/{:.1}MB", total as f64 / 1024.0 / 1024.0)
+            } else {
+                String::new()
+            }
         );
         let mut ev = json!({
             "stage": "download",
@@ -2867,24 +4104,47 @@ fn community_download_in_folder(
     check_cancel()?;
     let raw_name = file.get("fileName").and_then(|v| v.as_str()).unwrap_or("");
     let file_name = download_file_name(raw_name)?;
-    let display_name = if raw_name.is_empty() { file_name.clone() } else { raw_name.to_string() };
-    let kind = target.get("kind").and_then(|v| v.as_str()).unwrap_or("mod").to_string();
+    let display_name = if raw_name.is_empty() {
+        file_name.clone()
+    } else {
+        raw_name.to_string()
+    };
+    let kind = target
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("mod")
+        .to_string();
     let modpack = kind == "modpack";
 
     // CurseForge 受限文件（作者禁止直链，downloadUrl 为 null）：官方 API 现场解析真实下载地址
-    let mut url = file.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let mut url = file
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     if file.get("source").and_then(|v| v.as_str()) == Some("curseforge") && url.is_empty() {
-        let project_id = file.get("projectId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let project_id = file
+            .get("projectId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if project_id.is_empty() {
             return Err("缺少 CurseForge 项目 ID，请重新选择下载文件".into());
         }
         let ch = cf_channel(app);
         if !ch.official {
-            return Err("该文件作者限制了直链下载，需要在设置页填入 CurseForge API Key 后才能下载".into());
+            return Err(
+                "该文件作者限制了直链下载，需要在设置页填入 CurseForge API Key 后才能下载".into(),
+            );
         }
         let file_id = file.get("fileId").and_then(|v| v.as_str()).unwrap_or("");
         let data = fetch_json(
-            &format!("{}/mods/{}/files/{}/download-url", ch.base, enc(&project_id), enc(file_id)),
+            &format!(
+                "{}/mods/{}/files/{}/download-url",
+                ch.base,
+                enc(&project_id),
+                enc(file_id)
+            ),
             &[("x-api-key", &ch.key)],
             TIMEOUT_MS,
         )?;
@@ -2896,17 +4156,31 @@ fn community_download_in_folder(
             .to_string();
     }
 
-    let sha1 = file.get("sha1").and_then(|v| v.as_str()).map(str::to_string);
+    let sha1 = file
+        .get("sha1")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let size = file.get("size").and_then(|v| v.as_u64()).filter(|s| *s > 0);
     let url2 = url.clone();
 
     if modpack {
         // 独占临时目录避免并发下载冲突，并约束 .part 清理范围
-        let tmp_root = std::env::temp_dir().join(format!("kamucl-pack-{}", crate::accounts::uuid_v4()));
+        let tmp_root =
+            std::env::temp_dir().join(format!("kamucl-pack-{}", crate::accounts::uuid_v4()));
         std::fs::create_dir_all(&tmp_root).map_err(|e| e.to_string())?;
         let tmp_path = tmp_root.join(&file_name);
-        let transferred = transfer(app, rec, emit, &url2, sha1.as_deref(), size, &tmp_path, &display_name, true)
-            .and_then(|_| check_cancel());
+        let transferred = transfer(
+            app,
+            rec,
+            emit,
+            &url2,
+            sha1.as_deref(),
+            size,
+            &tmp_path,
+            &display_name,
+            true,
+        )
+        .and_then(|_| check_cancel());
         if let Err(e) = transferred {
             let _ = std::fs::remove_dir_all(&tmp_root);
             return Err(e);
@@ -2923,12 +4197,20 @@ fn community_download_in_folder(
                 // 对应原版 installProgress：overall = 0.1 + (overall ?? progress) * 0.9
                 let mut mapped = event.clone();
                 if let Some(obj) = mapped.as_object_mut() {
-                    let base = obj.get("overall").and_then(|v| v.as_f64()).or_else(|| obj.get("progress").and_then(|v| v.as_f64())).unwrap_or(0.0);
+                    let base = obj
+                        .get("overall")
+                        .and_then(|v| v.as_f64())
+                        .or_else(|| obj.get("progress").and_then(|v| v.as_f64()))
+                        .unwrap_or(0.0);
                     obj.insert("overall".into(), json!(0.1 + base * 0.9));
                 }
                 let mut g = guard.lock().unwrap();
                 let normalized = g.normalize(&mapped);
-                let stage = normalized.get("stage").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let stage = normalized
+                    .get("stage")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 if stage != "error" && stage != "done" {
                     *last_stage.lock().unwrap() = stage;
                 }
@@ -2955,17 +4237,34 @@ fn community_download_in_folder(
                 match outcome {
                     Ok(version_id) => {
                         tasks::task_done(&app2, &task_id, true, None, false, None);
-                        installer::emit_event(&app2, "event:installDone", &json!({
-                            "versionId": version_id,
-                            "ok": true,
-                            "taskId": task_id,
-                            "cancelled": false
-                        }));
+                        installer::emit_event(
+                            &app2,
+                            "event:installDone",
+                            &json!({
+                                "versionId": version_id,
+                                "ok": true,
+                                "taskId": task_id,
+                                "cancelled": false
+                            }),
+                        );
                     }
                     Err(e) => {
                         let cancelled = e == "已取消";
-                        emit_ref(&json!({ "stage": "error", "progress": 0, "text": format!("整合包安装失败: {e}") }));
-                        tasks::task_done(&app2, &task_id, false, Some(e.clone()), cancelled, if stage.is_empty() { None } else { Some(stage.clone()) });
+                        emit_ref(
+                            &json!({ "stage": "error", "progress": 0, "text": format!("整合包安装失败: {e}") }),
+                        );
+                        tasks::task_done(
+                            &app2,
+                            &task_id,
+                            false,
+                            Some(e.clone()),
+                            cancelled,
+                            if stage.is_empty() {
+                                None
+                            } else {
+                                Some(stage.clone())
+                            },
+                        );
                         let mut obj = serde_json::Map::new();
                         obj.insert("versionId".into(), json!(""));
                         obj.insert("ok".into(), json!(false));
@@ -2987,7 +4286,10 @@ fn community_download_in_folder(
             task_title: rec.title.clone(),
             pack_path: tmp_path,
             display_name,
-            target_folder: target.get("folder").and_then(|v| v.as_str()).map(str::to_string),
+            target_folder: target
+                .get("folder")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
             emit_install: emit_shared,
             finish,
         };
@@ -2996,7 +4298,11 @@ fn community_download_in_folder(
     }
 
     // 与最终启动使用同一个目录解析器，避免资源被装进未参与启动的目录。
-    let version_id = target.get("versionId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let version_id = target
+        .get("versionId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let version_json = installer::read_version_json(app, folder, &version_id)?;
     let base = installer::instance_directory_state(app, folder, &version_id, &version_json)
         .get("path")
@@ -3018,18 +4324,54 @@ fn community_download_in_folder(
             }
         }
         if worlds.len() == 1 {
-            let dest = saves_dir.join(&worlds[0]).join("datapacks").join(&file_name);
-            transfer(app, rec, emit, &url2, sha1.as_deref(), size, &dest, &display_name, false)?;
+            let dest = saves_dir
+                .join(&worlds[0])
+                .join("datapacks")
+                .join(&file_name);
+            transfer(
+                app,
+                rec,
+                emit,
+                &url2,
+                sha1.as_deref(),
+                size,
+                &dest,
+                &display_name,
+                false,
+            )?;
             return Ok(dest.to_string_lossy().into_owned());
         }
         let dest = Path::new(&base).join("datapacks").join(&file_name);
-        transfer(app, rec, emit, &url2, sha1.as_deref(), size, &dest, &display_name, false)?;
-        return Ok(format!("{}（提示：请将文件移入存档 saves/<世界>/datapacks 后生效）", dest.to_string_lossy()));
+        transfer(
+            app,
+            rec,
+            emit,
+            &url2,
+            sha1.as_deref(),
+            size,
+            &dest,
+            &display_name,
+            false,
+        )?;
+        return Ok(format!(
+            "{}（提示：请将文件移入存档 saves/<世界>/datapacks 后生效）",
+            dest.to_string_lossy()
+        ));
     }
 
     let sub = kind_subdir(&kind).ok_or_else(|| format!("不支持的资源类型: {kind}"))?;
     let dest = Path::new(&base).join(sub).join(&file_name);
-    transfer(app, rec, emit, &url2, sha1.as_deref(), size, &dest, &display_name, false)?;
+    transfer(
+        app,
+        rec,
+        emit,
+        &url2,
+        sha1.as_deref(),
+        size,
+        &dest,
+        &display_name,
+        false,
+    )?;
     Ok(dest.to_string_lossy().into_owned())
 }
 
@@ -3039,12 +4381,27 @@ fn community_download_ipc(app: &tauri::AppHandle, args: &[Value]) -> Result<Valu
     let target = arg(args, 1).cloned().unwrap_or(Value::Null);
     let operation_id = arg(args, 2)
         .and_then(|v| v.as_str())
-        .filter(|s| regex::Regex::new(r"^[a-zA-Z0-9:_-]{1,96}$").unwrap().is_match(s))
+        .filter(|s| {
+            regex::Regex::new(r"^[a-zA-Z0-9:_-]{1,96}$")
+                .unwrap()
+                .is_match(s)
+        })
         .map(str::to_string);
-    let file_name = file.get("fileName").and_then(|v| v.as_str()).unwrap_or("资源");
+    let file_name = file
+        .get("fileName")
+        .and_then(|v| v.as_str())
+        .unwrap_or("资源");
     let rec = tasks::register_task(&format!("下载 {file_name}"), "download");
-    let kind = target.get("kind").and_then(|v| v.as_str()).unwrap_or("mod").to_string();
-    let version_id = target.get("versionId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let kind = target
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("mod")
+        .to_string();
+    let version_id = target
+        .get("versionId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     // Freeze both the instance and shared directory before the first network await.
     let folder_provided = target.get("folder").is_some();
@@ -3055,23 +4412,51 @@ fn community_download_ipc(app: &tauri::AppHandle, args: &[Value]) -> Result<Valu
             installer::folder_of_version(app, &version_id)
         }
     } else {
-        target.get("folder").and_then(|v| v.as_str()).unwrap_or("").trim().to_string()
+        target
+            .get("folder")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
     };
     if requested.is_empty() {
-        tasks::task_done(app, &rec.id, false, Some("目标游戏文件夹不能为空".into()), false, None);
+        tasks::task_done(
+            app,
+            &rec.id,
+            false,
+            Some("目标游戏文件夹不能为空".into()),
+            false,
+            None,
+        );
         return Err("目标游戏文件夹不能为空".into());
     }
     let registered = crate::settings::get(app)
         .get("folders")
         .and_then(|f| f.as_array())
-        .and_then(|a| a.iter().find(|f| f.get("path").and_then(|p| p.as_str()).map(|p| installer::same_path(p, &requested)).unwrap_or(false)))
+        .and_then(|a| {
+            a.iter().find(|f| {
+                f.get("path")
+                    .and_then(|p| p.as_str())
+                    .map(|p| installer::same_path(p, &requested))
+                    .unwrap_or(false)
+            })
+        })
         .and_then(|f| f.get("path").and_then(|p| p.as_str()))
         .map(str::to_string);
     if registered.is_none() && (kind == "modpack" || folder_provided) {
-        tasks::task_done(app, &rec.id, false, Some("目标游戏文件夹未在 WUHUICL 中登记".into()), false, None);
+        tasks::task_done(
+            app,
+            &rec.id,
+            false,
+            Some("目标游戏文件夹未在 WUHUICL 中登记".into()),
+            false,
+            None,
+        );
         return Err("目标游戏文件夹未在 WUHUICL 中登记".into());
     }
-    let folder = installer::canonical_path(registered.as_deref().unwrap_or(&requested)).to_string_lossy().into_owned();
+    let folder = installer::canonical_path(registered.as_deref().unwrap_or(&requested))
+        .to_string_lossy()
+        .into_owned();
 
     let emit = Arc::new(DownloadEmit {
         app: app.clone(),
@@ -3109,9 +4494,17 @@ fn community_download_ipc(app: &tauri::AppHandle, args: &[Value]) -> Result<Valu
                 app,
                 &rec.id,
                 false,
-                Some(if cancelled { "已取消".into() } else { e.clone() }),
+                Some(if cancelled {
+                    "已取消".into()
+                } else {
+                    e.clone()
+                }),
                 cancelled,
-                if last_stage.is_empty() { None } else { Some(last_stage) },
+                if last_stage.is_empty() {
+                    None
+                } else {
+                    Some(last_stage)
+                },
             );
             Err(e)
         }
@@ -3122,18 +4515,36 @@ fn community_download_ipc(app: &tauri::AppHandle, args: &[Value]) -> Result<Valu
 // ---------------- IPC 入口 ----------------
 
 /// 统一入口：返回 None 表示本模块不认识该通道
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
-        "community:search" => Some(installer::run_blocking(|| community_search_page(app, args.first().unwrap_or(&Value::Null)))),
+        "community:search" => Some(installer::run_blocking(|| {
+            community_search_page(app, args.first().unwrap_or(&Value::Null))
+        })),
         "community:project" => Some(installer::run_blocking(|| {
             let source = arg_str(args, 0).unwrap_or("").to_string();
-            let project_id = arg(args, 1).map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())).unwrap_or_default();
+            let project_id = arg(args, 1)
+                .map(|v| {
+                    v.as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| v.to_string())
+                })
+                .unwrap_or_default();
             let kind = arg_str(args, 2).unwrap_or("mod").to_string();
             community_project(app, &source, &project_id, &kind)
         })),
         "community:files" => Some(installer::run_blocking(|| {
             let source = arg_str(args, 0).unwrap_or("").to_string();
-            let project_id = arg(args, 1).map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())).unwrap_or_default();
+            let project_id = arg(args, 1)
+                .map(|v| {
+                    v.as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| v.to_string())
+                })
+                .unwrap_or_default();
             let filter = filter_from_value(arg(args, 2));
             community_files(app, &source, &project_id, Some(&filter)).map(|list| json!(list))
         })),

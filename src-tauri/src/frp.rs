@@ -54,7 +54,11 @@ fn js_falsy(v: &Value) -> bool {
     }
 }
 fn or_val(v: &Value, fallback: Value) -> Value {
-    if js_falsy(v) { fallback } else { v.clone() }
+    if js_falsy(v) {
+        fallback
+    } else {
+        v.clone()
+    }
 }
 fn or_null(v: &Value) -> Value {
     or_val(v, Value::Null)
@@ -71,22 +75,37 @@ fn js_string(v: &Value) -> String {
     }
 }
 fn str_field(v: &Value) -> String {
-    if v.is_null() { String::new() } else { js_string(v) }
+    if v.is_null() {
+        String::new()
+    } else {
+        js_string(v)
+    }
 }
 fn as_i64(v: &Value) -> Option<i64> {
-    v.as_i64().or_else(|| v.as_f64().filter(|f| f.fract() == 0.0).map(|f| f as i64))
+    v.as_i64()
+        .or_else(|| v.as_f64().filter(|f| f.fract() == 0.0).map(|f| f as i64))
 }
 fn num_or(v: &Value, def: i64) -> i64 {
     as_i64(v).unwrap_or(def)
 }
 fn is_safe_integer(v: &Value) -> bool {
-    as_i64(v).map(|i| i.abs() <= 9_007_199_254_740_991).unwrap_or(false)
+    as_i64(v)
+        .map(|i| i.abs() <= 9_007_199_254_740_991)
+        .unwrap_or(false)
 }
 fn parse_int_loose(s: &str) -> i64 {
     let trimmed = s.trim_start();
     let digits = match trimmed.strip_prefix('-') {
-        Some(rest) => format!("-{}", rest.chars().take_while(|c| c.is_ascii_digit()).collect::<String>()),
-        None => trimmed.chars().take_while(|c| c.is_ascii_digit()).collect::<String>(),
+        Some(rest) => format!(
+            "-{}",
+            rest.chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+        ),
+        None => trimmed
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>(),
     };
     digits.parse::<i64>().unwrap_or(0)
 }
@@ -108,7 +127,9 @@ fn encode_uri_component(value: &str) -> String {
     let mut out = String::new();
     for b in value.as_bytes() {
         let c = *b as char;
-        if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '!' | '~' | '*' | '\'' | '(' | ')') {
+        if c.is_ascii_alphanumeric()
+            || matches!(c, '-' | '_' | '.' | '!' | '~' | '*' | '\'' | '(' | ')')
+        {
             out.push(c);
         } else {
             out.push_str(&format!("%{b:02X}"));
@@ -154,7 +175,9 @@ pub fn load_frp_config(app: &AppHandle) -> Option<Value> {
 
 // 对应原版 frpManager.ts 的 readFrpRegistry()/writeFrpRegistry()
 fn is_hex64(s: &str) -> bool {
-    s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+    s.len() == 64
+        && s.chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
 }
 
 fn read_registry(app: &AppHandle) -> Result<Value, String> {
@@ -179,7 +202,10 @@ fn read_registry(app: &AppHandle) -> Result<Value, String> {
     }
     let raw = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
     let parsed: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-    if parsed["version"].as_i64() != Some(2) || !parsed["tunnels"].is_array() || !parsed["accessKey"].is_string() {
+    if parsed["version"].as_i64() != Some(2)
+        || !parsed["tunnels"].is_array()
+        || !parsed["accessKey"].is_string()
+    {
         return Err("隧道配置损坏，已保留原文件".to_string());
     }
     if let Some(ids) = parsed.get("deletedIds") {
@@ -195,9 +221,16 @@ fn read_registry(app: &AppHandle) -> Result<Value, String> {
     let tunnels = parsed["tunnels"].as_array().cloned().unwrap_or_default();
     for r in &tunnels {
         let cfg = &r["config"];
-        let digits_only = cfg["tunnelId"].as_str().map(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())).unwrap_or(false);
+        let digits_only = cfg["tunnelId"]
+            .as_str()
+            .map(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
+            .unwrap_or(false);
         let expected = tunnel_identity(&text_of(&cfg["accessKey"]), &text_of(&cfg["tunnelId"]));
-        if js_falsy(&cfg["accessKey"]) || !digits_only || r["id"].as_str() != Some(expected.as_str()) || !r["desired"].is_boolean() {
+        if js_falsy(&cfg["accessKey"])
+            || !digits_only
+            || r["id"].as_str() != Some(expected.as_str())
+            || !r["desired"].is_boolean()
+        {
             return Err("隧道配置无效，已保留原文件".to_string());
         }
     }
@@ -210,7 +243,11 @@ fn write_registry(app: &AppHandle, data: &Value) -> Result<(), String> {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let temp = format!("{}.tmp", file.to_string_lossy());
-    std::fs::write(&temp, serde_json::to_vec_pretty(data).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::write(
+        &temp,
+        serde_json::to_vec_pretty(data).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     std::fs::rename(&temp, &file).map_err(|e| e.to_string())
 }
 
@@ -224,10 +261,16 @@ static NODES_CACHE: OnceLock<Mutex<Option<NodesCache>>> = OnceLock::new();
 static MANAGER: OnceLock<Mutex<ManagerState>> = OnceLock::new();
 
 fn nodes_cache() -> std::sync::MutexGuard<'static, Option<NodesCache>> {
-    NODES_CACHE.get_or_init(|| Mutex::new(None)).lock().unwrap_or_else(|e| e.into_inner())
+    NODES_CACHE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
 }
 fn manager() -> std::sync::MutexGuard<'static, ManagerState> {
-    MANAGER.get_or_init(|| Mutex::new(ManagerState::default())).lock().unwrap_or_else(|e| e.into_inner())
+    MANAGER
+        .get_or_init(|| Mutex::new(ManagerState::default()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
 }
 fn clear_nodes_cache() {
     *nodes_cache() = None;
@@ -268,10 +311,17 @@ fn api_get(path: &str, access_key: &str, body: Option<Value>) -> Result<Value, S
                 detail = format!("{code}: {}", text_of(&parsed["msg"]));
             }
         }
-        let safe_detail = if access_key.is_empty() { detail } else { detail.replace(access_key, "***") };
-        return Err(format!("natfrp API {path} 请求失败（HTTP {status}）：{safe_detail}"));
+        let safe_detail = if access_key.is_empty() {
+            detail
+        } else {
+            detail.replace(access_key, "***")
+        };
+        return Err(format!(
+            "natfrp API {path} 请求失败（HTTP {status}）：{safe_detail}"
+        ));
     }
-    serde_json::from_str::<Value>(&text).map_err(|_| format!("natfrp API {path} 返回了无法解析的内容"))
+    serde_json::from_str::<Value>(&text)
+        .map_err(|_| format!("natfrp API {path} 返回了无法解析的内容"))
 }
 
 fn fetch_frp_nodes(access_key: &str, refresh: bool) -> Result<Value, String> {
@@ -280,7 +330,9 @@ fn fetch_frp_nodes(access_key: &str, refresh: bool) -> Result<Value, String> {
         return Err("请先填写访问密钥，再查询节点列表".to_string());
     }
     if !refresh {
-        let hit = nodes_cache().as_ref().map(|c| (c.access_key.clone(), c.result.clone(), c.expires_at));
+        let hit = nodes_cache()
+            .as_ref()
+            .map(|c| (c.access_key.clone(), c.result.clone(), c.expires_at));
         if let Some((ck, res, exp)) = hit {
             if ck == key && now_ms() < exp {
                 return Ok(res);
@@ -347,19 +399,30 @@ fn fetch_frp_nodes(access_key: &str, refresh: bool) -> Result<Value, String> {
         let fa = a["free"].as_bool().unwrap_or(false);
         let fb = b["free"].as_bool().unwrap_or(false);
         if fa != fb {
-            return if fa { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater };
+            return if fa {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            };
         }
         let oa = a["online"].as_bool().unwrap_or(false);
         let ob = b["online"].as_bool().unwrap_or(false);
         if oa != ob {
-            return if oa { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater };
+            return if oa {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Greater
+            };
         }
         if let (Some(la), Some(lb)) = (a["load"].as_i64(), b["load"].as_i64()) {
             if la != lb {
                 return la.cmp(&lb);
             }
         }
-        a["id"].as_i64().unwrap_or(0).cmp(&b["id"].as_i64().unwrap_or(0))
+        a["id"]
+            .as_i64()
+            .unwrap_or(0)
+            .cmp(&b["id"].as_i64().unwrap_or(0))
     });
 
     let mut tunnels: Option<Vec<Value>> = None;
@@ -375,7 +438,14 @@ fn fetch_frp_nodes(access_key: &str, refresh: bool) -> Result<Value, String> {
                     .map(|t| {
                         let has_node = t["node"].is_number();
                         let node = num_or(&t["node"], 0);
-                        let node_name = if has_node { name_by_id.get(&node).map(|s| json!(s)).unwrap_or(Value::Null) } else { Value::Null };
+                        let node_name = if has_node {
+                            name_by_id
+                                .get(&node)
+                                .map(|s| json!(s))
+                                .unwrap_or(Value::Null)
+                        } else {
+                            Value::Null
+                        };
                         json!({
                             "id": t["id"].clone(),
                             "name": t["name"].as_str().unwrap_or_default().to_string(),
@@ -399,7 +469,11 @@ fn fetch_frp_nodes(access_key: &str, refresh: bool) -> Result<Value, String> {
         "nodes": nodes,
         "tunnels": tunnels.map(Value::from).unwrap_or(Value::Null)
     });
-    *nodes_cache() = Some(NodesCache { access_key: key, result: result.clone(), expires_at: now_ms() + CACHE_TTL_MS });
+    *nodes_cache() = Some(NodesCache {
+        access_key: key,
+        result: result.clone(),
+        expires_at: now_ms() + CACHE_TTL_MS,
+    });
     Ok(result)
 }
 
@@ -423,7 +497,10 @@ fn get_runnable_frp_tunnel(access_key: &str, id: &str) -> Result<Value, String> 
     let node_id = num_or(&tunnel["node"], -1);
     let node_online = result["nodes"]
         .as_array()
-        .map(|arr| arr.iter().any(|n| num_or(&n["id"], -1) == node_id && n["online"].as_bool().unwrap_or(false)))
+        .map(|arr| {
+            arr.iter()
+                .any(|n| num_or(&n["id"], -1) == node_id && n["online"].as_bool().unwrap_or(false))
+        })
         .unwrap_or(false);
     if !node_online {
         return Err("隧道所在节点已离线，请选择其他隧道".to_string());
@@ -490,16 +567,27 @@ fn create_frp_tunnel(access_key: &str, input: &Value) -> Result<Value, String> {
     };
     let remote_supplied = !js_falsy(&input["remotePort"]);
     let remote_port = as_i64(&input["remotePort"]);
-    if remote_supplied && !remote_port.map(|p| (1..=65535).contains(&p)).unwrap_or(false) {
+    if remote_supplied
+        && !remote_port
+            .map(|p| (1..=65535).contains(&p))
+            .unwrap_or(false)
+    {
         return Err("远程端口无效".to_string());
     }
     let result = fetch_frp_nodes(access_key, true)?;
     let node_id = num_or(&input["node"], -1);
-    let node = result["nodes"]
-        .as_array()
-        .and_then(|arr| arr.iter().find(|n| num_or(&n["id"], -1) == node_id).cloned());
+    let node = result["nodes"].as_array().and_then(|arr| {
+        arr.iter()
+            .find(|n| num_or(&n["id"], -1) == node_id)
+            .cloned()
+    });
     let node = match node {
-        Some(n) if n["online"].as_bool().unwrap_or(false) && n["canCreate"].as_bool().unwrap_or(false) => n,
+        Some(n)
+            if n["online"].as_bool().unwrap_or(false)
+                && n["canCreate"].as_bool().unwrap_or(false) =>
+        {
+            n
+        }
         _ => return Err("所选节点离线或已满，请选择其他节点".to_string()),
     };
     let mut body = json!({
@@ -546,7 +634,9 @@ fn registry_of(m: &mut ManagerState, app: &AppHandle) -> Result<Value, String> {
     if m.registry.is_none() {
         m.registry = Some(read_registry(app)?);
     }
-    Ok(m.registry.clone().unwrap_or_else(|| json!({ "version": 2, "accessKey": "", "tunnels": [] })))
+    Ok(m.registry
+        .clone()
+        .unwrap_or_else(|| json!({ "version": 2, "accessKey": "", "tunnels": [] })))
 }
 
 fn commit(m: &mut ManagerState, app: &AppHandle, next: Value) -> Result<(), String> {
@@ -569,12 +659,20 @@ fn bump(m: &mut ManagerState, id: &str) -> u64 {
 
 fn snapshot(m: &ManagerState, rec: &Value) -> Value {
     let id = text_of(&rec["id"]);
-    let live = m.workers.get(&id).map(|w| worker_state_json(&w.lock().unwrap()));
+    let live = m
+        .workers
+        .get(&id)
+        .map(|w| worker_state_json(&w.lock().unwrap()));
     let chosen = match live {
         Some(v) if !v["config"].is_null() => Some(v),
         _ => m.last_states.get(&id).cloned(),
     };
-    let pick = |field: &str| chosen.as_ref().map(|v| v[field].clone()).unwrap_or(Value::Null);
+    let pick = |field: &str| {
+        chosen
+            .as_ref()
+            .map(|v| v[field].clone())
+            .unwrap_or(Value::Null)
+    };
     let error = m.failures.get(&id);
     let status = match error {
         Some(_) => json!("error"),
@@ -617,7 +715,11 @@ fn emit_tunnel(app: &AppHandle, id: &str) {
     if m.registry.is_none() {
         m.registry = read_registry(app).ok();
     }
-    let payload = m.registry.as_ref().and_then(|reg| find_record(reg, id)).map(|rec| snapshot(&m, &rec));
+    let payload = m
+        .registry
+        .as_ref()
+        .and_then(|reg| find_record(reg, id))
+        .map(|rec| snapshot(&m, &rec));
     drop(m);
     if let Some(tunnel) = payload {
         if let Some(win) = app.get_webview_window("main") {
@@ -634,10 +736,16 @@ fn manager_register(app: &AppHandle, key: &str, tunnels: &[Value]) -> Result<(),
     let deletions = m.deletions.clone();
     let deleted_ids: Vec<String> = next["deletedIds"]
         .as_array()
-        .map(|a| a.iter().filter_map(|i| i.as_str().map(str::to_string)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|i| i.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default();
     {
-        let arr = next["tunnels"].as_array_mut().ok_or("隧道配置损坏，已保留原文件")?;
+        let arr = next["tunnels"]
+            .as_array_mut()
+            .ok_or("隧道配置损坏，已保留原文件")?;
         for t in tunnels {
             let id_str = js_string(&t["id"]);
             let id = tunnel_identity(&trimmed, &id_str);
@@ -648,7 +756,10 @@ fn manager_register(app: &AppHandle, key: &str, tunnels: &[Value]) -> Result<(),
             let node_name = or_val(&t["nodeName"], json!(""));
             let local_ip = t["localIp"].clone();
             let local_port = t["localPort"].clone();
-            if let Some(old) = arr.iter_mut().find(|r| r["id"].as_str() == Some(id.as_str())) {
+            if let Some(old) = arr
+                .iter_mut()
+                .find(|r| r["id"].as_str() == Some(id.as_str()))
+            {
                 old["name"] = name;
                 old["nodeName"] = node_name;
                 old["localIp"] = local_ip;
@@ -694,7 +805,10 @@ fn manager_start(app: &AppHandle, id: &str) -> Result<(), String> {
                 .get(id)
                 .map(|w| {
                     let g = w.lock().unwrap();
-                    g.session.as_ref().map(|s| text_of(&s["status"])).unwrap_or_default()
+                    g.session
+                        .as_ref()
+                        .map(|s| text_of(&s["status"]))
+                        .unwrap_or_default()
                 })
                 .unwrap_or_default();
             if active == "running" || active == "starting" {
@@ -772,7 +886,11 @@ fn manager_start(app: &AppHandle, id: &str) -> Result<(), String> {
     let mut m = manager();
     if m.generations.get(id) == Some(&generation) && !m.closing {
         if let Err(e) = &result {
-            let message = if access_key.is_empty() { e.clone() } else { e.replace(&access_key, "***") };
+            let message = if access_key.is_empty() {
+                e.clone()
+            } else {
+                e.replace(&access_key, "***")
+            };
             m.failures.insert(id.to_string(), message);
         }
     }
@@ -845,7 +963,12 @@ fn manager_remove(app: &AppHandle, id: &str) -> Result<Value, String> {
         if let Some(w) = worker.as_ref() {
             let pid = {
                 let g = w.lock().unwrap();
-                or_null(&g.session.as_ref().map(|s| s["pid"].clone()).unwrap_or(Value::Null))
+                or_null(
+                    &g.session
+                        .as_ref()
+                        .map(|s| s["pid"].clone())
+                        .unwrap_or(Value::Null),
+                )
             };
             if !pid.is_null() {
                 return Err("本地隧道尚未停止，未执行远端删除，请稍后重试".to_string());
@@ -858,7 +981,8 @@ fn manager_remove(app: &AppHandle, id: &str) -> Result<Value, String> {
         if let Some(arr) = next["tunnels"].as_array_mut() {
             arr.retain(|t| t["id"].as_str() != Some(id));
         }
-        let mut deleted_ids: Vec<Value> = next["deletedIds"].as_array().cloned().unwrap_or_default();
+        let mut deleted_ids: Vec<Value> =
+            next["deletedIds"].as_array().cloned().unwrap_or_default();
         if !deleted_ids.iter().any(|i| i.as_str() == Some(id)) {
             deleted_ids.push(json!(id));
         }
@@ -870,7 +994,11 @@ fn manager_remove(app: &AppHandle, id: &str) -> Result<Value, String> {
         Ok(result)
     })();
     let outcome = outcome.map_err(|e| {
-        let detail = if access_key.is_empty() { e } else { e.replace(&access_key, "***") };
+        let detail = if access_key.is_empty() {
+            e
+        } else {
+            e.replace(&access_key, "***")
+        };
         if remote_deleted {
             format!("远端隧道已删除，但本地记录保存失败；请重试清理：{detail}")
         } else {
@@ -883,7 +1011,11 @@ fn manager_remove(app: &AppHandle, id: &str) -> Result<Value, String> {
         m.failures.insert(id.to_string(), msg.clone());
     }
     m.deletions.remove(id);
-    let still_there = m.registry.as_ref().map(|r| find_record(r, id).is_some()).unwrap_or(false);
+    let still_there = m
+        .registry
+        .as_ref()
+        .map(|r| find_record(r, id).is_some())
+        .unwrap_or(false);
     drop(m);
     if still_there {
         emit_tunnel(app, id);
@@ -940,7 +1072,11 @@ pub fn shutdown() {
             .registry
             .as_ref()
             .and_then(|r| r["tunnels"].as_array().cloned())
-            .map(|a| a.iter().filter_map(|t| t["id"].as_str().map(str::to_string)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|t| t["id"].as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default();
         for id in ids {
             bump(&mut m, &id);
@@ -1007,18 +1143,36 @@ fn frpc_asset() -> Result<(String, Option<String>), String> {
     }
     if platform == "linux" && (arch == "x64" || arch == "arm64") {
         let (bin, sha) = if arch == "x64" {
-            ("amd64", "8d3fcf1e24537719c36c6270c122fcdc09954d22ae9dd74105241675e6dce4d0")
+            (
+                "amd64",
+                "8d3fcf1e24537719c36c6270c122fcdc09954d22ae9dd74105241675e6dce4d0",
+            )
         } else {
-            ("arm64", "7f1bf530eb6b46b47e9b1e4bb022d689b5f26f5132581c29c5f43d922a42e595")
+            (
+                "arm64",
+                "7f1bf530eb6b46b47e9b1e4bb022d689b5f26f5132581c29c5f43d922a42e595",
+            )
         };
-        return Ok((format!("{FRPC_ASSET_BASE}/frpc_linux_{bin}"), Some(sha.to_string())));
+        return Ok((
+            format!("{FRPC_ASSET_BASE}/frpc_linux_{bin}"),
+            Some(sha.to_string()),
+        ));
     }
     let (bin, sha) = match (platform, arch) {
-        ("darwin", "x64") => ("amd64", "74ee362350314dd5ac8936fbe2299fc76671051e10beb46c8dd37c36a4503935"),
-        ("darwin", "arm64") => ("arm64", "465db9daea0e14e3adaa89926640afa8b44737dadc1cf0b75f9b091850d2e331"),
+        ("darwin", "x64") => (
+            "amd64",
+            "74ee362350314dd5ac8936fbe2299fc76671051e10beb46c8dd37c36a4503935",
+        ),
+        ("darwin", "arm64") => (
+            "arm64",
+            "465db9daea0e14e3adaa89926640afa8b44737dadc1cf0b75f9b091850d2e331",
+        ),
         _ => return Err(format!("樱花穿透暂不支持 {platform}/{arch}")),
     };
-    Ok((format!("{FRPC_ASSET_BASE}/frpc_darwin_{bin}"), Some(sha.to_string())))
+    Ok((
+        format!("{FRPC_ASSET_BASE}/frpc_darwin_{bin}"),
+        Some(sha.to_string()),
+    ))
 }
 
 fn ensure_frpc_installed(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1042,7 +1196,9 @@ fn ensure_frpc_installed(app: &AppHandle) -> Result<PathBuf, String> {
             }
             Ok(target)
         }
-        Err(msg) => Err(format!("frpc 下载失败：{msg}。请检查网络后重试，官方下载地址：{url}")),
+        Err(msg) => Err(format!(
+            "frpc 下载失败：{msg}。请检查网络后重试，官方下载地址：{url}"
+        )),
     }
 }
 
@@ -1057,7 +1213,12 @@ fn ghost_task() -> Arc<crate::tasks::TaskRecord> {
     })
 }
 
-fn worker_start(app: &AppHandle, id: &str, worker: &Arc<Mutex<WorkerState>>, config: &Value) -> Result<(), String> {
+fn worker_start(
+    app: &AppHandle,
+    id: &str,
+    worker: &Arc<Mutex<WorkerState>>,
+    config: &Value,
+) -> Result<(), String> {
     let epoch = {
         let mut w = worker.lock().unwrap();
         if w.session.is_some() {
@@ -1123,7 +1284,10 @@ fn worker_start(app: &AppHandle, id: &str, worker: &Arc<Mutex<WorkerState>>, con
         {
             let mut w = worker.lock().unwrap();
             if let Some(s) = w.session.as_mut() {
-                push_log(s, json!({ "ts": now_iso(), "stream": "system", "text": format!("进程错误：{message}") }));
+                push_log(
+                    s,
+                    json!({ "ts": now_iso(), "stream": "system", "text": format!("进程错误：{message}") }),
+                );
             }
         }
         worker_event(app, id, worker, "log", None, None);
@@ -1222,20 +1386,30 @@ fn worker_start(app: &AppHandle, id: &str, worker: &Arc<Mutex<WorkerState>>, con
             #[cfg(unix)]
             let signal = {
                 use std::os::unix::process::ExitStatusExt;
-                if code.is_none() { status_opt.as_ref().and_then(|s| s.signal()) } else { None }
+                if code.is_none() {
+                    status_opt.as_ref().and_then(|s| s.signal())
+                } else {
+                    None
+                }
             };
             #[cfg(not(unix))]
             let signal: Option<i32> = None;
             let text = format!(
                 "frpc 已退出（code={}, signal={}）",
-                code.map(|c| c.to_string()).unwrap_or_else(|| "null".to_string()),
-                signal.map(|c| c.to_string()).unwrap_or_else(|| "null".to_string())
+                code.map(|c| c.to_string())
+                    .unwrap_or_else(|| "null".to_string()),
+                signal
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "null".to_string())
             );
             {
                 let mut w = worker.lock().unwrap();
                 match w.session.as_mut() {
                     Some(s) if s["startedAt"].as_str() == Some(stamp.as_str()) => {
-                        push_log(s, json!({ "ts": now_iso(), "stream": "system", "text": text.clone() }));
+                        push_log(
+                            s,
+                            json!({ "ts": now_iso(), "stream": "system", "text": text.clone() }),
+                        );
                     }
                     _ => return,
                 }
@@ -1263,7 +1437,14 @@ fn worker_start(app: &AppHandle, id: &str, worker: &Arc<Mutex<WorkerState>>, con
                     _ => return,
                 }
             };
-            worker_event(&app, &id, &worker, "stopped", Some(&final_status), Some(&text));
+            worker_event(
+                &app,
+                &id,
+                &worker,
+                "stopped",
+                Some(&final_status),
+                Some(&text),
+            );
             let mut w = worker.lock().unwrap();
             if w.session.as_ref().and_then(|s| s["startedAt"].as_str()) == Some(stamp.as_str()) {
                 w.session = None;
@@ -1273,7 +1454,15 @@ fn worker_start(app: &AppHandle, id: &str, worker: &Arc<Mutex<WorkerState>>, con
     Ok(())
 }
 
-fn flush_line(app: &AppHandle, id: &str, worker: &Arc<Mutex<WorkerState>>, stream: &str, bytes: &[u8], key: &str, stamp: &str) {
+fn flush_line(
+    app: &AppHandle,
+    id: &str,
+    worker: &Arc<Mutex<WorkerState>>,
+    stream: &str,
+    bytes: &[u8],
+    key: &str,
+    stamp: &str,
+) {
     let mut line = bytes.to_vec();
     if line.last() == Some(&b'\n') {
         line.pop();
@@ -1309,7 +1498,12 @@ fn re_auth() -> &'static regex::Regex {
 }
 fn re_tunnel() -> &'static regex::Regex {
     static R: OnceLock<regex::Regex> = OnceLock::new();
-    R.get_or_init(|| regex::Regex::new(r"(?i)tunnel not exists|tunnel offline|proxy not found|隧道不存在|隧道已被禁用").unwrap())
+    R.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)tunnel not exists|tunnel offline|proxy not found|隧道不存在|隧道已被禁用",
+        )
+        .unwrap()
+    })
 }
 fn re_start_fail() -> &'static regex::Regex {
     static R: OnceLock<regex::Regex> = OnceLock::new();
@@ -1321,15 +1515,27 @@ fn re_running() -> &'static regex::Regex {
 }
 fn re_contextual() -> &'static regex::Regex {
     static R: OnceLock<regex::Regex> = OnceLock::new();
-    R.get_or_init(|| regex::Regex::new(r"(?i)需要输\s*IP\s*[:：]\s*端口|远程地址|remote address|(?:电信|联通|移动)\s*[:：]").unwrap())
+    R.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)需要输\s*IP\s*[:：]\s*端口|远程地址|remote address|(?:电信|联通|移动)\s*[:：]",
+        )
+        .unwrap()
+    })
 }
 fn re_priority() -> &'static regex::Regex {
     static R: OnceLock<regex::Regex> = OnceLock::new();
-    R.get_or_init(|| regex::Regex::new(r"(?i)需要输\s*IP\s*[:：]\s*端口|远程地址|remote address").unwrap())
+    R.get_or_init(|| {
+        regex::Regex::new(r"(?i)需要输\s*IP\s*[:：]\s*端口|远程地址|remote address").unwrap()
+    })
 }
 fn re_known() -> &'static regex::Regex {
     static R: OnceLock<regex::Regex> = OnceLock::new();
-    R.get_or_init(|| regex::Regex::new(r"(?i)(?:[\w-]+\.)*(?:natfrp\.cloud|nyatwork\.cn|frp-hub\.com|frp\.com|frp\.net)").unwrap())
+    R.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)(?:[\w-]+\.)*(?:natfrp\.cloud|nyatwork\.cn|frp-hub\.com|frp\.com|frp\.net)",
+        )
+        .unwrap()
+    })
 }
 fn re_banned() -> &'static regex::Regex {
     static R: OnceLock<regex::Regex> = OnceLock::new();
@@ -1337,7 +1543,9 @@ fn re_banned() -> &'static regex::Regex {
 }
 fn re_hostport() -> &'static regex::Regex {
     static R: OnceLock<regex::Regex> = OnceLock::new();
-    R.get_or_init(|| regex::Regex::new(r"(?i)((?:[a-z0-9-]+\.)+[a-z0-9-]+)\s*:\s*(\d{1,5})(\D|$)").unwrap())
+    R.get_or_init(|| {
+        regex::Regex::new(r"(?i)((?:[a-z0-9-]+\.)+[a-z0-9-]+)\s*:\s*(\d{1,5})(\D|$)").unwrap()
+    })
 }
 
 fn parse_frp_line(raw: &str) -> (Option<String>, Option<&'static str>) {
@@ -1356,9 +1564,22 @@ fn parse_frp_line(raw: &str) -> (Option<String>, Option<&'static str>) {
     let mut address: Option<String> = None;
     for caps in re_hostport().captures_iter(&text) {
         let host = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
-        let port: i64 = caps.get(2).map(|m| m.as_str()).unwrap_or_default().parse().unwrap_or(0);
-        let boundary_ok = caps.get(3).map(|m| m.as_str().is_empty() || !m.as_str().starts_with(|c: char| c.is_ascii_digit())).unwrap_or(true);
-        if (contextual || re_known().is_match(host)) && !re_banned().is_match(host) && boundary_ok && port > 0 && port <= 65535 {
+        let port: i64 = caps
+            .get(2)
+            .map(|m| m.as_str())
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or(0);
+        let boundary_ok = caps
+            .get(3)
+            .map(|m| m.as_str().is_empty() || !m.as_str().starts_with(|c: char| c.is_ascii_digit()))
+            .unwrap_or(true);
+        if (contextual || re_known().is_match(host))
+            && !re_banned().is_match(host)
+            && boundary_ok
+            && port > 0
+            && port <= 65535
+        {
             address = Some(format!("{host}:{port}"));
             break;
         }
@@ -1366,11 +1587,23 @@ fn parse_frp_line(raw: &str) -> (Option<String>, Option<&'static str>) {
     (address, status)
 }
 
-fn handle_line(app: &AppHandle, id: &str, worker: &Arc<Mutex<WorkerState>>, stream: &str, raw: String, key: &str, stamp: &str) {
+fn handle_line(
+    app: &AppHandle,
+    id: &str,
+    worker: &Arc<Mutex<WorkerState>>,
+    stream: &str,
+    raw: String,
+    key: &str,
+    stamp: &str,
+) {
     let cleaned = sanitize(&raw, key);
     let entry = json!({ "ts": now_iso(), "stream": stream, "text": cleaned.clone() });
     let (address, status) = parse_frp_line(&cleaned);
-    let priority = if re_priority().is_match(&cleaned) { 2 } else { 1 };
+    let priority = if re_priority().is_match(&cleaned) {
+        2
+    } else {
+        1
+    };
     let mut announced = false;
     {
         let mut guard = worker.lock().unwrap();
@@ -1379,7 +1612,9 @@ fn handle_line(app: &AppHandle, id: &str, worker: &Arc<Mutex<WorkerState>>, stre
             if s["startedAt"].as_str() == Some(stamp) {
                 push_log(s, entry.clone());
                 if let Some(addr) = &address {
-                    if priority >= st.address_priority && s["remoteAddress"].as_str() != Some(addr.as_str()) {
+                    if priority >= st.address_priority
+                        && s["remoteAddress"].as_str() != Some(addr.as_str())
+                    {
                         s["remoteAddress"] = json!(addr);
                         st.address_priority = priority;
                         announced = true;
@@ -1396,7 +1631,9 @@ fn handle_line(app: &AppHandle, id: &str, worker: &Arc<Mutex<WorkerState>>, stre
         let changed = {
             let mut w = worker.lock().unwrap();
             match w.session.as_mut() {
-                Some(s) if s["startedAt"].as_str() == Some(stamp) && text_of(&s["status"]) != st => {
+                Some(s)
+                    if s["startedAt"].as_str() == Some(stamp) && text_of(&s["status"]) != st =>
+                {
                     s["status"] = json!(st);
                     true
                 }
@@ -1406,7 +1643,10 @@ fn handle_line(app: &AppHandle, id: &str, worker: &Arc<Mutex<WorkerState>>, stre
         if changed {
             let remote = {
                 let w = worker.lock().unwrap();
-                w.session.as_ref().map(|s| or_null(&s["remoteAddress"])).unwrap_or(Value::Null)
+                w.session
+                    .as_ref()
+                    .map(|s| or_null(&s["remoteAddress"]))
+                    .unwrap_or(Value::Null)
             };
             let message = status_message(st, &remote);
             worker_event(app, id, worker, "status", Some(st), Some(&message));
@@ -1415,18 +1655,36 @@ fn handle_line(app: &AppHandle, id: &str, worker: &Arc<Mutex<WorkerState>>, stre
 }
 
 // 对应原版 frpManager.ts 的 worker.setSink() 与 frpIpc.ts 的 installFrpEventBridge()
-fn worker_event(app: &AppHandle, id: &str, worker: &Arc<Mutex<WorkerState>>, kind: &str, status: Option<&str>, message: Option<&str>) {
+fn worker_event(
+    app: &AppHandle,
+    id: &str,
+    worker: &Arc<Mutex<WorkerState>>,
+    kind: &str,
+    status: Option<&str>,
+    message: Option<&str>,
+) {
     let mut m = manager();
-    let same = m.workers.get(id).map(|w| Arc::ptr_eq(w, worker)).unwrap_or(false);
+    let same = m
+        .workers
+        .get(id)
+        .map(|w| Arc::ptr_eq(w, worker))
+        .unwrap_or(false);
     if !same {
         return;
     }
     let state = worker_state_json(&worker.lock().unwrap());
     m.last_states.insert(id.to_string(), state);
     if kind == "error" || (kind == "stopped" && status != Some("stopped")) {
-        m.failures.insert(id.to_string(), message.unwrap_or("隧道异常退出").to_string());
+        m.failures.insert(
+            id.to_string(),
+            message.unwrap_or("隧道异常退出").to_string(),
+        );
     }
-    let payload = m.registry.as_ref().and_then(|reg| find_record(reg, id)).map(|rec| snapshot(&m, &rec));
+    let payload = m
+        .registry
+        .as_ref()
+        .and_then(|reg| find_record(reg, id))
+        .map(|rec| snapshot(&m, &rec));
     drop(m);
     if let Some(tunnel) = payload {
         if let Some(win) = app.get_webview_window("main") {
@@ -1448,7 +1706,11 @@ fn worker_stop(worker: &Arc<Mutex<WorkerState>>) {
     };
     let (child_arc, pid) = {
         let w = worker.lock().unwrap();
-        let pid = w.session.as_ref().and_then(|s| s["pid"].as_u64()).unwrap_or(0);
+        let pid = w
+            .session
+            .as_ref()
+            .and_then(|s| s["pid"].as_u64())
+            .unwrap_or(0);
         (w.child.clone(), pid)
     };
     if let Some(arc) = child_arc {
@@ -1503,7 +1765,9 @@ pub fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Option<Result<V
                 key = text_of(&manager_list(app)?["accessKey"]);
             }
             if key.is_empty() {
-                key = load_frp_config(app).map(|c| text_of(&c["accessKey"])).unwrap_or_default();
+                key = load_frp_config(app)
+                    .map(|c| text_of(&c["accessKey"]))
+                    .unwrap_or_default();
             }
             let refresh = !js_falsy(&payload["refresh"]);
             let result = fetch_frp_nodes(&key, refresh)?;
@@ -1532,7 +1796,11 @@ pub fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Option<Result<V
             Ok(Value::Null)
         })()),
         "frp:stop" => Some((|| {
-            let id = if js_falsy(&payload["id"]) { String::new() } else { js_string(&payload["id"]) };
+            let id = if js_falsy(&payload["id"]) {
+                String::new()
+            } else {
+                js_string(&payload["id"])
+            };
             if id.is_empty() {
                 return Err("请选择要停止的隧道".to_string());
             }
@@ -1540,13 +1808,20 @@ pub fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Option<Result<V
             manager_list(app)
         })()),
         "frp:delete-tunnel" => Some((|| {
-            let id = if js_falsy(&payload["id"]) { String::new() } else { js_string(&payload["id"]) };
+            let id = if js_falsy(&payload["id"]) {
+                String::new()
+            } else {
+                js_string(&payload["id"])
+            };
             if id.is_empty() || payload["confirmed"].as_bool() != Some(true) {
                 return Err("请先确认删除该隧道".to_string());
             }
             manager_remove(app, &id)
         })()),
-        "frp:create-tunnel" => Some(create_frp_tunnel(&str_field(&payload["accessKey"]), &payload["tunnel"])),
+        "frp:create-tunnel" => Some(create_frp_tunnel(
+            &str_field(&payload["accessKey"]),
+            &payload["tunnel"],
+        )),
         _ => None,
     }
 }

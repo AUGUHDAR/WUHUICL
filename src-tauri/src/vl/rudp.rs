@@ -80,7 +80,11 @@ pub enum RudpEvent {
 }
 
 pub fn rudp_encode(f: &RudpFrame) -> Vec<u8> {
-    let count = if f.rtype == RUDP_TYPE_FEC_XOR { f.fec_lengths.len() } else { 0 };
+    let count = if f.rtype == RUDP_TYPE_FEC_XOR {
+        f.fec_lengths.len()
+    } else {
+        0
+    };
     let offset = if f.rtype == RUDP_TYPE_FEC_XOR {
         14 + count * 2
     } else if f.rtype == RUDP_TYPE_DATA {
@@ -225,14 +229,25 @@ fn target_addr(remote: &RudpTarget) -> Option<SocketAddr> {
 }
 
 /// 锁内只构造报文，发送一律放到锁外，避免与对端回包处理互相等锁
-fn build_send(st: &mut State, outs: &mut Vec<Outbound>, rtype: u8, payload: Vec<u8>, seq: u32, lengths: Vec<u16>) {
+fn build_send(
+    st: &mut State,
+    outs: &mut Vec<Outbound>,
+    rtype: u8,
+    payload: Vec<u8>,
+    seq: u32,
+    lengths: Vec<u16>,
+) {
     if st.ended || st.primary.is_none() {
         return;
     }
     let frame = rudp_encode(&RudpFrame {
         rtype,
         seq,
-        ack: if rtype == RUDP_TYPE_FEC_XOR { 0 } else { st.next_read },
+        ack: if rtype == RUDP_TYPE_FEC_XOR {
+            0
+        } else {
+            st.next_read
+        },
         payload,
         fec_count: lengths.len() as u8,
         fec_lengths: lengths,
@@ -240,7 +255,9 @@ fn build_send(st: &mut State, outs: &mut Vec<Outbound>, rtype: u8, payload: Vec<
     let packet = sign_punch_frame(&frame, st.auth_key.as_ref());
     let now = now_ms();
     let grace = st.grace_until;
-    let want_secondary = st.secondary.filter(|_| now < grace || rtype == RUDP_TYPE_KEEPALIVE);
+    let want_secondary = st
+        .secondary
+        .filter(|_| now < grace || rtype == RUDP_TYPE_KEEPALIVE);
     let primary = st.primary.unwrap();
     let mut indices = vec![primary];
     if let Some(s) = want_secondary {
@@ -253,7 +270,11 @@ fn build_send(st: &mut State, outs: &mut Vec<Outbound>, rtype: u8, payload: Vec<
             None => packet.clone(),
         };
         if let Some(addr) = target_addr(&path.remote) {
-            outs.push(Outbound { socket: path.socket.clone(), addr, bytes: wire });
+            outs.push(Outbound {
+                socket: path.socket.clone(),
+                addr,
+                bytes: wire,
+            });
         }
     }
 }
@@ -265,7 +286,11 @@ fn send_one(st: &mut State, outs: &mut Vec<Outbound>, idx: usize, bytes: Vec<u8>
         None => bytes.clone(),
     };
     if let Some(addr) = target_addr(&path.remote) {
-        outs.push(Outbound { socket: path.socket.clone(), addr, bytes: wire });
+        outs.push(Outbound {
+            socket: path.socket.clone(),
+            addr,
+            bytes: wire,
+        });
     }
 }
 
@@ -316,16 +341,26 @@ fn raise_recv_buffer(socket: &UdpSocket) {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawSocket;
-        use windows_sys::Win32::Networking::WinSock::{setsockopt, SO_RCVBUF, SOL_SOCKET};
+        use windows_sys::Win32::Networking::WinSock::{setsockopt, SOL_SOCKET, SO_RCVBUF};
         const TARGET: u32 = 256 * 1024;
         let mut want: u32 = TARGET;
         unsafe {
-            setsockopt(socket.as_raw_socket() as usize, SOL_SOCKET, SO_RCVBUF, &mut want as *mut u32 as windows_sys::core::PCSTR, 4);
+            setsockopt(
+                socket.as_raw_socket() as usize,
+                SOL_SOCKET,
+                SO_RCVBUF,
+                &mut want as *mut u32 as windows_sys::core::PCSTR,
+                4,
+            );
         }
     }
     #[cfg(not(windows))]
     {
-        if socket.recv_buffer_size().map(|v| v < 256 * 1024).unwrap_or(false) {
+        if socket
+            .recv_buffer_size()
+            .map(|v| v < 256 * 1024)
+            .unwrap_or(false)
+        {
             let _ = socket.set_recv_buffer_size(256 * 1024);
         }
     }
@@ -390,7 +425,10 @@ impl RudpConn {
             on_closed: Mutex::new(None),
             rx_tx: Mutex::new(None),
         });
-        RudpConn { inner, loop_thread: Mutex::new(None) }
+        RudpConn {
+            inner,
+            loop_thread: Mutex::new(None),
+        }
     }
 
     pub fn events(&self) -> Receiver<RudpEvent> {
@@ -413,7 +451,12 @@ impl RudpConn {
         st.primary.map(|i| st.paths[i].remote.clone())
     }
 
-    pub fn add_secondary_path(&self, socket: Arc<UdpSocket>, remote: RudpTarget, codec: Option<Arc<dyn RudpCodec>>) -> bool {
+    pub fn add_secondary_path(
+        &self,
+        socket: Arc<UdpSocket>,
+        remote: RudpTarget,
+        codec: Option<Arc<dyn RudpCodec>>,
+    ) -> bool {
         let mut st = self.inner.st.lock().unwrap();
         if st.ended || st.secondary.is_some() {
             return false;
@@ -488,7 +531,10 @@ impl RudpConn {
                 let inner = self.inner.clone();
                 std::thread::spawn(move || pump(inner, rx));
             }
-            (guard.clone(), None::<Receiver<(usize, Vec<u8>, SocketAddr)>>)
+            (
+                guard.clone(),
+                None::<Receiver<(usize, Vec<u8>, SocketAddr)>>,
+            )
         };
         let Some(tx) = tx else { return };
         let socket = self.inner.st.lock().unwrap().paths[idx].socket.clone();
@@ -501,7 +547,9 @@ impl RudpConn {
                         return;
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut => {}
                 Err(_) => return,
             }
         });
@@ -526,7 +574,14 @@ impl RudpConn {
         *self.loop_thread.lock().unwrap() = Some(handle);
         let mut outs = Vec::new();
         let mut st = self.inner.st.lock().unwrap();
-        build_send(&mut st, &mut outs, RUDP_TYPE_KEEPALIVE, Vec::new(), 0, Vec::new());
+        build_send(
+            &mut st,
+            &mut outs,
+            RUDP_TYPE_KEEPALIVE,
+            Vec::new(),
+            0,
+            Vec::new(),
+        );
         drop(st);
         flush(outs);
     }
@@ -545,7 +600,11 @@ impl RudpConn {
                 if st.ended {
                     return Err("连接已关闭".into());
                 }
-                let limit = if st.primary.map(|i| st.paths[i].codec.is_some()).unwrap_or(false) {
+                let limit = if st
+                    .primary
+                    .map(|i| st.paths[i].codec.is_some())
+                    .unwrap_or(false)
+                {
                     CHUNK_CODECCED
                 } else {
                     CHUNK_PLAIN
@@ -556,9 +615,24 @@ impl RudpConn {
                 let seq = st.next_send;
                 st.next_send = seq.wrapping_add(1);
                 let now = now_ms();
-                st.pending.push((seq, PendingPacket { data: part.clone(), sent: now, created: now, retries: 0 }));
+                st.pending.push((
+                    seq,
+                    PendingPacket {
+                        data: part.clone(),
+                        sent: now,
+                        created: now,
+                        retries: 0,
+                    },
+                ));
                 let mut outs = Vec::new();
-                build_send(&mut st, &mut outs, RUDP_TYPE_DATA, part.clone(), seq, Vec::new());
+                build_send(
+                    &mut st,
+                    &mut outs,
+                    RUDP_TYPE_DATA,
+                    part.clone(),
+                    seq,
+                    Vec::new(),
+                );
                 // 原版 sendFec：攒满 4 片就发一条 XOR 校验
                 st.fec_send.push(part);
                 if st.fec_send.len() == 4 {
@@ -571,7 +645,14 @@ impl RudpConn {
                         }
                     }
                     st.fec_send.clear();
-                    build_send(&mut st, &mut outs, RUDP_TYPE_FEC_XOR, parity, seq / 4, lengths);
+                    build_send(
+                        &mut st,
+                        &mut outs,
+                        RUDP_TYPE_FEC_XOR,
+                        parity,
+                        seq / 4,
+                        lengths,
+                    );
                 }
                 (seq, outs)
             };
@@ -623,7 +704,9 @@ impl RudpConn {
 
 fn drain_received(st: &mut State) {
     while st.incoming.len() < INCOMING_LIMIT {
-        let Some(data) = st.reordered.remove(&st.next_read) else { break };
+        let Some(data) = st.reordered.remove(&st.next_read) else {
+            break;
+        };
         st.next_read = st.next_read.wrapping_add(1);
         st.queued_bytes += data.len();
         st.incoming.push(data);
@@ -647,26 +730,42 @@ fn fec_group(st: &mut State, id: u32, now: f64) -> usize {
         st.fec_receive[pos].1.updated = now;
         return pos;
     }
-    st.fec_receive.retain(|(_, v)| now - v.updated <= FEC_GROUP_TTL);
+    st.fec_receive
+        .retain(|(_, v)| now - v.updated <= FEC_GROUP_TTL);
     while st.fec_receive.len() > FEC_GROUP_LIMIT {
         st.fec_receive.remove(0);
     }
-    st.fec_receive.push((id, FecGroup { data: Vec::new(), parity: None, lengths: None, updated: now }));
+    st.fec_receive.push((
+        id,
+        FecGroup {
+            data: Vec::new(),
+            parity: None,
+            lengths: None,
+            updated: now,
+        },
+    ));
     st.fec_receive.len() - 1
 }
 
 fn recover_fec(inner: &Arc<Inner>, id: u32) {
     let mut st = inner.st.lock().unwrap();
-    let Some(gi) = st.fec_receive.iter().position(|(k, _)| *k == id) else { return };
+    let Some(gi) = st.fec_receive.iter().position(|(k, _)| *k == id) else {
+        return;
+    };
     let group = &st.fec_receive[gi].1;
-    let (Some(parity), Some(lengths)) = (group.parity.clone(), group.lengths.clone()) else { return };
+    let (Some(parity), Some(lengths)) = (group.parity.clone(), group.lengths.clone()) else {
+        return;
+    };
     if group.data.len() != 3 {
         return;
     }
     let data = group.data.clone();
     let mut missing = -1i32;
     for i in 0..4u32 {
-        if !data.iter().any(|(s, _)| *s == id.wrapping_mul(4).wrapping_add(i)) {
+        if !data
+            .iter()
+            .any(|(s, _)| *s == id.wrapping_mul(4).wrapping_add(i))
+        {
             missing = i as i32;
         }
     }
@@ -767,7 +866,11 @@ fn close_now(inner: &Arc<Inner>, reason: &str) {
             None => packet.clone(),
         };
         if let Some(addr) = target_addr(&path.remote) {
-            outs.push(Outbound { socket: path.socket.clone(), addr, bytes: wire });
+            outs.push(Outbound {
+                socket: path.socket.clone(),
+                addr,
+                bytes: wire,
+            });
         }
     }
     st.ended = true;
@@ -798,7 +901,9 @@ fn receive(inner: &Arc<Inner>, pi: usize, packet: &[u8], from: SocketAddr) {
         Some(p) => (p.codec.clone(), p.remote.address.clone(), p.codec.is_some()),
         None => return,
     };
-    if from.ip().to_string() != remote_address || (has_codec && from.port() != st.paths[pi].remote.port) {
+    if from.ip().to_string() != remote_address
+        || (has_codec && from.port() != st.paths[pi].remote.port)
+    {
         return;
     }
     let decoded = match &codec {
@@ -909,11 +1014,15 @@ fn receive(inner: &Arc<Inner>, pi: usize, packet: &[u8], from: SocketAddr) {
     }
     let fec_ok = f.rtype == RUDP_TYPE_FEC_XOR
         && f.fec_count == 4
-        && f.fec_lengths.iter().all(|size| *size > 0 && *size as usize <= f.payload.len())
+        && f.fec_lengths
+            .iter()
+            .all(|size| *size > 0 && *size as usize <= f.payload.len())
         && f.fec_lengths.iter().copied().max().unwrap_or(0) as usize == f.payload.len();
     if fec_ok {
         let first = f.seq.wrapping_mul(4);
-        if seq_diff(first, st.next_read) < REORDER_WINDOW || seq_diff(st.next_read, first) <= REORDER_WINDOW {
+        if seq_diff(first, st.next_read) < REORDER_WINDOW
+            || seq_diff(st.next_read, first) <= REORDER_WINDOW
+        {
             let gi = fec_group(&mut st, f.seq, now);
             st.fec_receive[gi].1.parity = Some(f.payload.clone());
             st.fec_receive[gi].1.lengths = Some(f.fec_lengths.clone());
@@ -972,7 +1081,14 @@ fn pump_loop(inner: Arc<Inner>) {
                 }
                 if now - st.last_ping >= KEEPALIVE_MS {
                     st.last_ping = now;
-                    build_send(&mut st, &mut outs, RUDP_TYPE_KEEPALIVE, Vec::new(), 0, Vec::new());
+                    build_send(
+                        &mut st,
+                        &mut outs,
+                        RUDP_TYPE_KEEPALIVE,
+                        Vec::new(),
+                        0,
+                        Vec::new(),
+                    );
                 }
             }
         }
@@ -996,7 +1112,14 @@ mod tests {
     use super::*;
 
     fn frame(rtype: u8, seq: u32, ack: u32, payload: &[u8], lengths: Vec<u16>) -> RudpFrame {
-        RudpFrame { rtype, seq, ack, payload: payload.to_vec(), fec_count: lengths.len() as u8, fec_lengths: lengths }
+        RudpFrame {
+            rtype,
+            seq,
+            ack,
+            payload: payload.to_vec(),
+            fec_count: lengths.len() as u8,
+            fec_lengths: lengths,
+        }
     }
 
     #[test]
@@ -1004,13 +1127,22 @@ mod tests {
         let p = rudp_encode(&frame(RUDP_TYPE_ACK, 7, 3, &[], vec![]));
         assert_eq!(p, vec![86, 76, 4, 0, 0, 0, 7, 0, 0, 0, 3]);
         let d = rudp_encode(&frame(RUDP_TYPE_DATA, 1, 0, b"hi", vec![]));
-        assert_eq!(&d[..13], [86, 76, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 2].as_slice());
+        assert_eq!(
+            &d[..13],
+            [86, 76, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 2].as_slice()
+        );
         assert_eq!(&d[13..], b"hi");
     }
 
     #[test]
     fn fec_header_carries_count_and_lengths() {
-        let p = rudp_encode(&frame(RUDP_TYPE_FEC_XOR, 2, 9, &[1, 2, 3], vec![9, 8, 7, 6]));
+        let p = rudp_encode(&frame(
+            RUDP_TYPE_FEC_XOR,
+            2,
+            9,
+            &[1, 2, 3],
+            vec![9, 8, 7, 6],
+        ));
         assert_eq!(p[11..13], [0, 3]);
         assert_eq!(p[13], 4);
         assert_eq!(&p[14..22], [0, 9, 0, 8, 0, 7, 0, 6].as_slice());
@@ -1038,7 +1170,14 @@ mod tests {
 
     #[test]
     fn roundtrip_matches_every_type() {
-        for t in [RUDP_TYPE_PUNCH, RUDP_TYPE_DATA, RUDP_TYPE_ACK, RUDP_TYPE_KEEPALIVE, RUDP_TYPE_RESTART, RUDP_TYPE_VOICE] {
+        for t in [
+            RUDP_TYPE_PUNCH,
+            RUDP_TYPE_DATA,
+            RUDP_TYPE_ACK,
+            RUDP_TYPE_KEEPALIVE,
+            RUDP_TYPE_RESTART,
+            RUDP_TYPE_VOICE,
+        ] {
             let f = frame(t, 42, 41, b"xyz", vec![]);
             let back = rudp_decode(&rudp_encode(&f)).unwrap();
             assert_eq!(back.rtype, t);
@@ -1060,12 +1199,38 @@ mod tests {
 
     fn bare_state() -> State {
         State {
-            running: true, ended: false, last_rx: 0.0, last_ping: 0.0, next_send: 2, next_read: 0,
-            pending: vec![(1, PendingPacket { data: vec![1], sent: 0.0, created: 0.0, retries: 0 })],
-            fec_send: vec![], fec_receive: vec![], srtt: -1.0, rttvar: 0.0, rto: 200.0, last_ack: -1,
-            duplicate_acks: 0, reordered: HashMap::new(), incoming: vec![], queued_bytes: 0,
-            auth_key: None, allow_turn_auth_downgrade: false, auth_drops: 0, paths: vec![], primary: None,
-            secondary: None, grace_until: 0.0,
+            running: true,
+            ended: false,
+            last_rx: 0.0,
+            last_ping: 0.0,
+            next_send: 2,
+            next_read: 0,
+            pending: vec![(
+                1,
+                PendingPacket {
+                    data: vec![1],
+                    sent: 0.0,
+                    created: 0.0,
+                    retries: 0,
+                },
+            )],
+            fec_send: vec![],
+            fec_receive: vec![],
+            srtt: -1.0,
+            rttvar: 0.0,
+            rto: 200.0,
+            last_ack: -1,
+            duplicate_acks: 0,
+            reordered: HashMap::new(),
+            incoming: vec![],
+            queued_bytes: 0,
+            auth_key: None,
+            allow_turn_auth_downgrade: false,
+            auth_drops: 0,
+            paths: vec![],
+            primary: None,
+            secondary: None,
+            grace_until: 0.0,
         }
     }
 
@@ -1087,25 +1252,63 @@ mod tests {
     #[test]
     fn reorder_window_bounds_match_original() {
         let mut st = State {
-            running: true, ended: false, last_rx: 0.0, last_ping: 0.0, next_send: 0, next_read: 0,
-            pending: vec![], fec_send: vec![], fec_receive: vec![], srtt: -1.0, rttvar: 0.0, rto: 200.0,
-            last_ack: -1, duplicate_acks: 0, reordered: HashMap::new(), incoming: vec![], queued_bytes: 0,
-            auth_key: None, allow_turn_auth_downgrade: false, auth_drops: 0, paths: vec![], primary: None,
-            secondary: None, grace_until: 0.0,
+            running: true,
+            ended: false,
+            last_rx: 0.0,
+            last_ping: 0.0,
+            next_send: 0,
+            next_read: 0,
+            pending: vec![],
+            fec_send: vec![],
+            fec_receive: vec![],
+            srtt: -1.0,
+            rttvar: 0.0,
+            rto: 200.0,
+            last_ack: -1,
+            duplicate_acks: 0,
+            reordered: HashMap::new(),
+            incoming: vec![],
+            queued_bytes: 0,
+            auth_key: None,
+            allow_turn_auth_downgrade: false,
+            auth_drops: 0,
+            paths: vec![],
+            primary: None,
+            secondary: None,
+            grace_until: 0.0,
         };
         assert!(store_received(&mut st, 511, b"a"));
         assert!(!store_received(&mut st, 512, b"b"));
         assert!(st.reordered.contains_key(&511));
     }
 
-
     fn pair(key: Option<[u8; 32]>) -> (Arc<UdpSocket>, Arc<UdpSocket>, RudpConn, RudpConn) {
         let a = Arc::new(UdpSocket::bind("127.0.0.1:0").unwrap());
         let b = Arc::new(UdpSocket::bind("127.0.0.1:0").unwrap());
         let ap = a.local_addr().unwrap();
         let bp = b.local_addr().unwrap();
-        let conn_a = RudpConn::new(a.clone(), Some(RudpTarget { address: ap.ip().to_string(), port: bp.port() }), None, key, false, false);
-        let conn_b = RudpConn::new(b.clone(), Some(RudpTarget { address: bp.ip().to_string(), port: ap.port() }), None, key, false, false);
+        let conn_a = RudpConn::new(
+            a.clone(),
+            Some(RudpTarget {
+                address: ap.ip().to_string(),
+                port: bp.port(),
+            }),
+            None,
+            key,
+            false,
+            false,
+        );
+        let conn_b = RudpConn::new(
+            b.clone(),
+            Some(RudpTarget {
+                address: bp.ip().to_string(),
+                port: ap.port(),
+            }),
+            None,
+            key,
+            false,
+            false,
+        );
         (a, b, conn_a, conn_b)
     }
 
@@ -1151,14 +1354,19 @@ mod tests {
 
     #[test]
     fn wrong_key_drops_frames() {
-        let (_a, _b, conn_a, conn_b) = pair(crate::vl::punchauth::derive_punch_key("ABCDEF", "peer"));
+        let (_a, _b, conn_a, conn_b) =
+            pair(crate::vl::punchauth::derive_punch_key("ABCDEF", "peer"));
         conn_b.start();
         conn_a.start();
         // 换掉 b 的密钥：同一套帧必须整批被拒
-        conn_b.inner.st.lock().unwrap().auth_key = crate::vl::punchauth::derive_punch_key("ABCDEF", "other");
+        conn_b.inner.st.lock().unwrap().auth_key =
+            crate::vl::punchauth::derive_punch_key("ABCDEF", "other");
         std::thread::scope(|s| {
             s.spawn(|| conn_a.write(b"secret"));
-            assert!(read_until(&conn_b, 6, 2).is_empty(), "密钥不匹配却收到了数据");
+            assert!(
+                read_until(&conn_b, 6, 2).is_empty(),
+                "密钥不匹配却收到了数据"
+            );
         });
     }
 
@@ -1174,7 +1382,10 @@ mod tests {
             let pending = conn_a.inner.st.lock().unwrap().pending.len();
             assert!(pending <= WINDOW_PACKETS, "窗口超限: {}", pending);
             conn_a.close_with("收尾");
-            assert!(h.join().unwrap().is_err(), "窗口满且连接关闭后 write 应报错");
+            assert!(
+                h.join().unwrap().is_err(),
+                "窗口满且连接关闭后 write 应报错"
+            );
         });
     }
 }

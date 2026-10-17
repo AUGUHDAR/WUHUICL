@@ -90,9 +90,7 @@ fn path_key(value: &str) -> String {
         normalized = stripped.to_string();
     }
     let normalized = normalized.to_lowercase();
-    normalized
-        .trim_end_matches(['\\', '/'])
-        .to_string()
+    normalized.trim_end_matches(['\\', '/']).to_string()
 }
 
 fn real_executable(value: &str) -> Option<String> {
@@ -128,7 +126,11 @@ fn join_exe(dir: &str) -> String {
     format!("{}\\{}", dir.trim_end_matches(['\\', '/']), JAVA_EXE)
 }
 
-fn add_candidate(candidates: &mut HashMap<String, JavaCandidate>, value: Option<&str>, source_detail: &str) {
+fn add_candidate(
+    candidates: &mut HashMap<String, JavaCandidate>,
+    value: Option<&str>,
+    source_detail: &str,
+) {
     let Some(value) = value else { return };
     for executable in executable_paths(value) {
         let key = path_key(&executable);
@@ -146,7 +148,11 @@ fn expand_windows_environment(value: &str) -> String {
         std::env::vars()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
             .map(|(_, v)| v)
-            .unwrap_or_else(|| caps.get(0).map(|m| m.as_str().to_string()).unwrap_or_default())
+            .unwrap_or_else(|| {
+                caps.get(0)
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default()
+            })
     })
     .to_string()
 }
@@ -156,13 +162,22 @@ fn expand_windows_environment(value: &str) -> String {
 /// javaScanUtils.normalizeJavaArchitecture
 fn normalize_java_architecture(value: &str) -> String {
     let arch = value.trim().to_lowercase().replace([' ', '_', '-'], "");
-    if regex::Regex::new(r"^(amd64|x8664|x64)$").unwrap().is_match(&arch) {
+    if regex::Regex::new(r"^(amd64|x8664|x64)$")
+        .unwrap()
+        .is_match(&arch)
+    {
         return "x64".into();
     }
-    if regex::Regex::new(r"^(x86|i[3-6]86|i86pc)$").unwrap().is_match(&arch) {
+    if regex::Regex::new(r"^(x86|i[3-6]86|i86pc)$")
+        .unwrap()
+        .is_match(&arch)
+    {
         return "x86".into();
     }
-    if regex::Regex::new(r"^(aarch64|arm64)$").unwrap().is_match(&arch) {
+    if regex::Regex::new(r"^(aarch64|arm64)$")
+        .unwrap()
+        .is_match(&arch)
+    {
         return "arm64".into();
     }
     if regex::Regex::new(r"^(arm|arm32)$").unwrap().is_match(&arch) {
@@ -178,20 +193,23 @@ fn normalize_java_architecture(value: &str) -> String {
 fn probe_property(output: &str, name: &str) -> Option<String> {
     let escaped = regex::escape(name);
     let re = regex::Regex::new(&format!(r"(?im)^\s*{}\s*=\s*(.+?)\s*$", escaped)).unwrap();
-    re.captures(output).and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+    re.captures(output)
+        .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
 }
 
 /// javaScanUtils.parseJavaProbeOutput：major/version/is64Bit/architecture/vendor
 fn parse_java_probe_output(output: &str) -> Option<Value> {
-    let version = probe_property(output, "java.version")
-        .or_else(|| {
-            regex::Regex::new(r#"(?:openjdk|java) version\s+"([^"]+)""#)
-                .unwrap()
-                .captures(output)
-                .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
-        })?;
+    let version = probe_property(output, "java.version").or_else(|| {
+        regex::Regex::new(r#"(?:openjdk|java) version\s+"([^"]+)""#)
+            .unwrap()
+            .captures(output)
+            .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
+    })?;
     let major = if version.starts_with("1.") {
-        version.split('.').nth(1).and_then(|s| s.parse::<i64>().ok())?
+        version
+            .split('.')
+            .nth(1)
+            .and_then(|s| s.parse::<i64>().ok())?
     } else {
         regex::Regex::new(r"^(?:1\.)?(\d+)")
             .unwrap()
@@ -255,8 +273,14 @@ fn run_probe(exe: &str, args: &[&str], timeout_ms: u64) -> Option<String> {
         cmd.creation_flags(0x0800_0000);
     }
     let mut child = cmd.spawn().ok()?;
-    let stdout = child.stdout.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>);
-    let stderr = child.stderr.take().map(|s| Box::new(s) as Box<dyn std::io::Read + Send>);
+    let stdout = child
+        .stdout
+        .take()
+        .map(|s| Box::new(s) as Box<dyn std::io::Read + Send>);
+    let stderr = child
+        .stderr
+        .take()
+        .map(|s| Box::new(s) as Box<dyn std::io::Read + Send>);
     let read_all = |stream: Option<Box<dyn std::io::Read + Send>>| {
         std::thread::spawn(move || {
             let mut buf = Vec::new();
@@ -321,7 +345,10 @@ fn probe_stamp(exe: &str) -> String {
     stamps.join("|")
 }
 
-fn with_probe_cache<T>(app: &AppHandle, f: impl FnOnce(&mut serde_json::Map<String, Value>) -> T) -> T {
+fn with_probe_cache<T>(
+    app: &AppHandle,
+    f: impl FnOnce(&mut serde_json::Map<String, Value>) -> T,
+) -> T {
     let mut guard = PROBE_CACHE.lock().unwrap();
     if guard.is_none() {
         let entries = std::fs::read(probe_cache_file(app))
@@ -422,10 +449,16 @@ fn quick_candidates(app: &AppHandle, run_where: bool) -> Vec<JavaCandidate> {
     }
 
     // 2. JAVA_HOME
-    add_candidate(&mut map, std::env::var("JAVA_HOME").ok().as_deref(), "JAVA_HOME");
+    add_candidate(
+        &mut map,
+        std::env::var("JAVA_HOME").ok().as_deref(),
+        "JAVA_HOME",
+    );
 
     // 3. PATH
-    let path_env = std::env::var("Path").or_else(|_| std::env::var("PATH")).unwrap_or_default();
+    let path_env = std::env::var("Path")
+        .or_else(|_| std::env::var("PATH"))
+        .unwrap_or_default();
     for item in path_env.split(';') {
         if !item.trim().is_empty() {
             add_candidate(&mut map, Some(item.trim()), "PATH");
@@ -441,22 +474,41 @@ fn quick_candidates(app: &AppHandle, run_where: bool) -> Vec<JavaCandidate> {
 
     // 4. 当前系统盘常见安装目录
     let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
-    for dn in ["Java", "Eclipse Adoptium", "Microsoft", "Zulu", "Amazon Corretto", "BellSoft\\Liberica", "JavaSoft\\JRE"] {
+    for dn in [
+        "Java",
+        "Eclipse Adoptium",
+        "Microsoft",
+        "Zulu",
+        "Amazon Corretto",
+        "BellSoft\\Liberica",
+        "JavaSoft\\JRE",
+    ] {
         let base = format!("{}\\Program Files\\{}", system_drive, dn);
         if let Ok(entries) = std::fs::read_dir(&base) {
             for sub in entries.flatten() {
-                add_candidate(&mut map, Some(&sub.path().to_string_lossy()), "常见安装目录");
+                add_candidate(
+                    &mut map,
+                    Some(&sub.path().to_string_lossy()),
+                    "常见安装目录",
+                );
             }
         }
     }
     // 官方启动器运行时目录
-    let rt_base = dirs::data_dir().unwrap_or_default().join(".minecraft").join("runtime");
+    let rt_base = dirs::data_dir()
+        .unwrap_or_default()
+        .join(".minecraft")
+        .join("runtime");
     if let Ok(l1s) = std::fs::read_dir(&rt_base) {
         for l1 in l1s.flatten() {
             let l1p = l1.path();
             if let Ok(l2s) = std::fs::read_dir(&l1p) {
                 for l2 in l2s.flatten() {
-                    add_candidate(&mut map, Some(&l2.path().join(l1.file_name()).to_string_lossy()), "Minecraft 官方 Runtime");
+                    add_candidate(
+                        &mut map,
+                        Some(&l2.path().join(l1.file_name()).to_string_lossy()),
+                        "Minecraft 官方 Runtime",
+                    );
                 }
             }
         }
@@ -465,7 +517,11 @@ fn quick_candidates(app: &AppHandle, run_where: bool) -> Vec<JavaCandidate> {
     // 5. 启动器自管理 runtimes 目录
     if let Ok(entries) = std::fs::read_dir(runtimes_dir(app)) {
         for sub in entries.flatten() {
-            add_candidate(&mut map, Some(&sub.path().to_string_lossy()), "WUHUICL Runtime");
+            add_candidate(
+                &mut map,
+                Some(&sub.path().to_string_lossy()),
+                "WUHUICL Runtime",
+            );
         }
     }
 
@@ -525,7 +581,11 @@ fn cached_complete_list(app: &AppHandle, max_age: u64) -> Option<Vec<Value>> {
         return None;
     }
     let mut cache = SCAN_CACHE.lock().unwrap();
-    *cache = Some(ScanCache { time, list: list.clone(), complete: true });
+    *cache = Some(ScanCache {
+        time,
+        list: list.clone(),
+        complete: true,
+    });
     Some(list)
 }
 
@@ -534,7 +594,12 @@ fn sort_java(mut list: Vec<Value>) -> Vec<Value> {
         let am = a["major"].as_i64().unwrap_or(0);
         let bm = b["major"].as_i64().unwrap_or(0);
         bm.cmp(&am)
-            .then_with(|| b["is64Bit"].as_bool().unwrap_or(false).cmp(&a["is64Bit"].as_bool().unwrap_or(false)))
+            .then_with(|| {
+                b["is64Bit"]
+                    .as_bool()
+                    .unwrap_or(false)
+                    .cmp(&a["is64Bit"].as_bool().unwrap_or(false))
+            })
             .then_with(|| {
                 a["path"]
                     .as_str()
@@ -554,7 +619,12 @@ fn merge_custom(app: &AppHandle, list: Vec<Value>) -> Vec<Value> {
         .map(|a| {
             a.iter()
                 .filter_map(|p| p.as_str())
-                .flat_map(|p| [path_key(p), path_key(&real_executable(p).unwrap_or_else(|| p.to_string()))])
+                .flat_map(|p| {
+                    [
+                        path_key(p),
+                        path_key(&real_executable(p).unwrap_or_else(|| p.to_string())),
+                    ]
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -563,7 +633,9 @@ fn merge_custom(app: &AppHandle, list: Vec<Value>) -> Vec<Value> {
         .filter(|j| {
             let p = j["path"].as_str().unwrap_or("");
             !hidden.contains(&path_key(p))
-                && !hidden.contains(&path_key(&real_executable(p).unwrap_or_else(|| p.to_string())))
+                && !hidden.contains(&path_key(
+                    &real_executable(p).unwrap_or_else(|| p.to_string()),
+                ))
         })
         .collect();
     let mut manual: Vec<Value> = Vec::new();
@@ -576,10 +648,16 @@ fn merge_custom(app: &AppHandle, list: Vec<Value>) -> Vec<Value> {
             if hidden.contains(&path_key(&real)) {
                 continue;
             }
-            if auto.iter().any(|j| path_key(j["path"].as_str().unwrap_or("")) == path_key(&real)) {
+            if auto
+                .iter()
+                .any(|j| path_key(j["path"].as_str().unwrap_or("")) == path_key(&real))
+            {
                 continue;
             }
-            if manual.iter().any(|j| path_key(j["path"].as_str().unwrap_or("")) == path_key(&real)) {
+            if manual
+                .iter()
+                .any(|j| path_key(j["path"].as_str().unwrap_or("")) == path_key(&real))
+            {
                 continue;
             }
             if let Some(info) = probe(app, &real) {
@@ -612,7 +690,9 @@ pub fn scan_quick(app: &AppHandle, refresh: bool) -> Vec<Value> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut out: Vec<Value> = Vec::new();
     for candidate in quick_candidates(app, true) {
-        let Some(real) = real_executable(&candidate.executable) else { continue };
+        let Some(real) = real_executable(&candidate.executable) else {
+            continue;
+        };
         let key = path_key(&real);
         if seen.contains(&key) {
             continue;
@@ -629,7 +709,11 @@ pub fn scan_quick(app: &AppHandle, refresh: bool) -> Vec<Value> {
     let list = sort_java(out);
     {
         let mut cache = SCAN_CACHE.lock().unwrap();
-        *cache = Some(ScanCache { time: now_ms(), list: list.clone(), complete: false });
+        *cache = Some(ScanCache {
+            time: now_ms(),
+            list: list.clone(),
+            complete: false,
+        });
     }
     merge_custom(app, list)
 }
@@ -643,7 +727,10 @@ fn list_java_summary(app: &AppHandle) -> Vec<Value> {
         for info in list {
             candidates.push(JavaCandidate {
                 executable: info["path"].as_str().unwrap_or("").to_string(),
-                source_detail: info["sourceDetail"].as_str().unwrap_or("已缓存").to_string(),
+                source_detail: info["sourceDetail"]
+                    .as_str()
+                    .unwrap_or("已缓存")
+                    .to_string(),
             });
         }
     }
@@ -651,7 +738,10 @@ fn list_java_summary(app: &AppHandle) -> Vec<Value> {
     for c in candidates {
         if let Some(real) = real_executable(&c.executable) {
             let key = path_key(&real);
-            unique.entry(key).or_insert(JavaCandidate { executable: real, source_detail: c.source_detail });
+            unique.entry(key).or_insert(JavaCandidate {
+                executable: real,
+                source_detail: c.source_detail,
+            });
         }
     }
     let pending: Vec<JavaCandidate> = unique.into_values().collect();
@@ -672,7 +762,11 @@ fn list_java_summary(app: &AppHandle) -> Vec<Value> {
                 let info = probe(app, &c.executable);
                 if let Some(info) = info {
                     let mut item = info;
-                    item["source"] = json!(if c.source_detail == "手动添加" { "manual" } else { "auto" });
+                    item["source"] = json!(if c.source_detail == "手动添加" {
+                        "manual"
+                    } else {
+                        "auto"
+                    });
                     item["sourceDetail"] = json!(c.source_detail);
                     found.lock().unwrap().push(item);
                 }
@@ -716,10 +810,16 @@ fn registry_value_strings(key: &windows_registry::Key, out: &mut Vec<String>, de
     if let Ok(values) = key.values() {
         for (name, value) in values {
             let lname = name.to_lowercase();
-            if matches!(lname.as_str(), "javahome" | "java_home" | "path" | "home" | "installationpath") {
+            if matches!(
+                lname.as_str(),
+                "javahome" | "java_home" | "path" | "home" | "installationpath"
+            ) {
                 if let Ok(s) = String::try_from(value) {
                     let expanded = expand_windows_environment(&s);
-                    if regex::Regex::new(r"^[a-z]:\\").unwrap().is_match(&expanded.to_lowercase()) {
+                    if regex::Regex::new(r"^[a-z]:\\")
+                        .unwrap()
+                        .is_match(&expanded.to_lowercase())
+                    {
                         out.push(expanded);
                     }
                 }
@@ -823,7 +923,11 @@ fn fixed_windows_drives() -> Vec<String> {
         }
     }
     if drives.is_empty() {
-        drives.push(std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into()).to_uppercase());
+        drives.push(
+            std::env::var("SystemDrive")
+                .unwrap_or_else(|_| "C:".into())
+                .to_uppercase(),
+        );
     }
     drives
 }
@@ -831,8 +935,20 @@ fn fixed_windows_drives() -> Vec<String> {
 fn windows_scan_roots(drives: &[String]) -> Vec<ScanRoot> {
     let mut roots: HashMap<String, ScanRoot> = HashMap::new();
     let vendor_dirs = [
-        "Java", "Eclipse Adoptium", "Microsoft", "Zulu", "Amazon Corretto", "BellSoft", "IBM", "Semeru",
-        "JetBrains", "Android", "Minecraft Launcher", "PrismLauncher", "Modrinth App", "CurseForge",
+        "Java",
+        "Eclipse Adoptium",
+        "Microsoft",
+        "Zulu",
+        "Amazon Corretto",
+        "BellSoft",
+        "IBM",
+        "Semeru",
+        "JetBrains",
+        "Android",
+        "Minecraft Launcher",
+        "PrismLauncher",
+        "Modrinth App",
+        "CurseForge",
     ];
     let root_hints = regex::Regex::new(
         r"^(?:java|jdk|jre)(?:[-_. ].*)?$|^(?:apps?|tools?|software|programs?|development|dev|minecraft|games?|launchers?|runtimes?)$",
@@ -863,7 +979,21 @@ fn windows_scan_roots(drives: &[String]) -> Vec<ScanRoot> {
                 );
             }
         }
-        for name in ["Java", "JDK", "JRE", "Apps", "Tools", "Software", "Programs", "Development", "Dev", "Minecraft", "Games", "Launchers", "Runtimes"] {
+        for name in [
+            "Java",
+            "JDK",
+            "JRE",
+            "Apps",
+            "Tools",
+            "Software",
+            "Programs",
+            "Development",
+            "Dev",
+            "Minecraft",
+            "Games",
+            "Launchers",
+            "Runtimes",
+        ] {
             add_scan_root(
                 &mut roots,
                 ScanRoot {
@@ -899,9 +1029,18 @@ fn windows_scan_roots(drives: &[String]) -> Vec<ScanRoot> {
     let app_data = dirs::data_dir().unwrap_or_default();
     let local_app_data = std::env::var("LOCALAPPDATA")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| app_data.parent().map(|p| p.join("Local")).unwrap_or_default());
+        .unwrap_or_else(|_| {
+            app_data
+                .parent()
+                .map(|p| p.join("Local"))
+                .unwrap_or_default()
+        });
     let user_roots: Vec<(PathBuf, &str, usize)> = vec![
-        (app_data.join(".minecraft").join("runtime"), "Minecraft 官方 Runtime", 8),
+        (
+            app_data.join(".minecraft").join("runtime"),
+            "Minecraft 官方 Runtime",
+            8,
+        ),
         (app_data.join("PrismLauncher"), "Prism Launcher Runtime", 7),
         (app_data.join("ModrinthApp"), "Modrinth Runtime", 7),
         (app_data.join("com.modrinth.theseus"), "Modrinth Runtime", 8),
@@ -927,7 +1066,11 @@ fn windows_scan_roots(drives: &[String]) -> Vec<ScanRoot> {
 }
 
 /// java.ts discoverInRoot：BFS + java/jdk/jre 线索深挖
-fn discover_in_root(root: &ScanRoot, candidates: &mut HashMap<String, JavaCandidate>, rec: &TaskRecord) -> usize {
+fn discover_in_root(
+    root: &ScanRoot,
+    candidates: &mut HashMap<String, JavaCandidate>,
+    rec: &TaskRecord,
+) -> usize {
     let mut queue: Vec<(String, usize, bool)> = vec![(root.directory.clone(), 0, false)];
     let deep_hint = regex::Regex::new(r"^(?:java|jdk|jre|jbr|runtime)(?:[-_. ].*)?$").unwrap();
     let mut cursor = 0;
@@ -962,7 +1105,11 @@ fn discover_in_root(root: &ScanRoot, candidates: &mut HashMap<String, JavaCandid
             }
             let promoted = promoted || deep_hint.is_match(&name);
             let depth = depth + 1;
-            let depth_limit = if promoted { root.max_depth } else { root.shallow_depth.unwrap_or(root.max_depth) };
+            let depth_limit = if promoted {
+                root.max_depth
+            } else {
+                root.shallow_depth.unwrap_or(root.max_depth)
+            };
             if depth > depth_limit {
                 continue;
             }
@@ -972,8 +1119,15 @@ fn discover_in_root(root: &ScanRoot, candidates: &mut HashMap<String, JavaCandid
     visited
 }
 
-fn scan_progress(app: &AppHandle, emit: &(dyn Fn(&Value) + Send + Sync), progress: f64, text: &str) {
-    emit(&json!({ "stage": "java-scan", "progress": progress, "overall": progress, "text": text, "indeterminate": false }));
+fn scan_progress(
+    app: &AppHandle,
+    emit: &(dyn Fn(&Value) + Send + Sync),
+    progress: f64,
+    text: &str,
+) {
+    emit(
+        &json!({ "stage": "java-scan", "progress": progress, "overall": progress, "text": text, "indeterminate": false }),
+    );
     let _ = app;
 }
 
@@ -987,7 +1141,12 @@ fn scan_java_installations(
     let started = std::time::Instant::now();
     if !refresh {
         if let Some(cached) = cached_complete_list(app, PERSISTENT_SCAN_TTL_MS) {
-            scan_progress(app, emit, 1.0, &format!("已从缓存载入 {} 个 Java", cached.len()));
+            scan_progress(
+                app,
+                emit,
+                1.0,
+                &format!("已从缓存载入 {} 个 Java", cached.len()),
+            );
             return Ok(merge_custom(app, cached));
         }
     }
@@ -997,7 +1156,11 @@ fn scan_java_installations(
     scan_progress(app, emit, 0.02, "正在读取 Java 配置、PATH 与注册表…");
     let mut candidates: HashMap<String, JavaCandidate> = HashMap::new();
     for candidate in quick_candidates(app, true) {
-        add_candidate(&mut candidates, Some(&candidate.executable), &candidate.source_detail);
+        add_candidate(
+            &mut candidates,
+            Some(&candidate.executable),
+            &candidate.source_detail,
+        );
     }
     for home in registry_java_homes() {
         add_candidate(&mut candidates, Some(&home), "Windows 注册表");
@@ -1023,7 +1186,9 @@ fn scan_java_installations(
     // 去重到真实可执行文件
     let mut unique: HashMap<String, JavaCandidate> = HashMap::new();
     for candidate in candidates.values() {
-        let Some(real) = real_executable(&candidate.executable) else { continue };
+        let Some(real) = real_executable(&candidate.executable) else {
+            continue;
+        };
         let key = path_key(&real);
         unique.entry(key).or_insert(JavaCandidate {
             executable: real,
@@ -1064,7 +1229,12 @@ fn scan_java_installations(
                     ),
                     None => format!("正在验证 Java {}/{}", done, total),
                 };
-                scan_progress(app, emit, 0.62 + (done as f64 / total.max(1) as f64) * 0.37, &text);
+                scan_progress(
+                    app,
+                    emit,
+                    0.62 + (done as f64 / total.max(1) as f64) * 0.37,
+                    &text,
+                );
                 if let Some(i) = info {
                     let mut item = i;
                     item["path"] = json!(candidate.executable);
@@ -1083,7 +1253,11 @@ fn scan_java_installations(
     let list = sort_java(found.lock().unwrap().clone());
     {
         let mut cache = SCAN_CACHE.lock().unwrap();
-        *cache = Some(ScanCache { time: now_ms(), list: list.clone(), complete: true });
+        *cache = Some(ScanCache {
+            time: now_ms(),
+            list: list.clone(),
+            complete: true,
+        });
     }
     write_persistent_cache(app, &list);
     // 用户点「重新扫描」= 要一份最新真相：曾被隐藏但磁盘上真实存在的 Java 自动解除隐藏
@@ -1098,7 +1272,11 @@ fn scan_java_installations(
                 .collect();
             let restore: Vec<Value> = hidden
                 .iter()
-                .filter(|p| p.as_str().map(|p| found_keys.contains(&path_key(p))).unwrap_or(false))
+                .filter(|p| {
+                    p.as_str()
+                        .map(|p| found_keys.contains(&path_key(p)))
+                        .unwrap_or(false)
+                })
                 .cloned()
                 .collect();
             if !restore.is_empty() {
@@ -1115,7 +1293,12 @@ fn scan_java_installations(
         }
     }
     let _ = started;
-    scan_progress(app, emit, 1.0, &format!("扫描完成，共找到 {} 个可用 Java", list.len()));
+    scan_progress(
+        app,
+        emit,
+        1.0,
+        &format!("扫描完成，共找到 {} 个可用 Java", list.len()),
+    );
     Ok(merge_custom(app, list))
 }
 
@@ -1129,7 +1312,10 @@ fn java_refresh(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
             return Err("Java 扫描已在进行中".into());
         }
     }
-    let refresh = args.first().map(|v| v != &Value::Bool(false)).unwrap_or(true);
+    let refresh = args
+        .first()
+        .map(|v| v != &Value::Bool(false))
+        .unwrap_or(true);
     let rec = tasks::register_task("扫描本机 Java", "java");
     *ACTIVE_SCAN_TASK.lock().unwrap() = Some(rec.id.clone());
     let task_id = rec.id.clone();
@@ -1158,7 +1344,14 @@ fn java_refresh(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
         }
         Err(e) => {
             let cancelled = e == "已取消" || rec.cancelled.load(Ordering::SeqCst);
-            tasks::task_done(app, &task_id, false, Some(e.clone()), cancelled, Some("java-scan".into()));
+            tasks::task_done(
+                app,
+                &task_id,
+                false,
+                Some(e.clone()),
+                cancelled,
+                Some("java-scan".into()),
+            );
             Err(e)
         }
     }
@@ -1183,7 +1376,11 @@ fn add_custom_java(app: &AppHandle, java_path: &str) -> Result<(), String> {
     let real = real.unwrap();
     let s = settings::get(app);
     let mut list: Vec<Value> = s["javaCustom"].as_array().cloned().unwrap_or_default();
-    if !list.iter().any(|p| p.as_str().map(|p| path_key(p) == path_key(&real)).unwrap_or(false)) {
+    if !list.iter().any(|p| {
+        p.as_str()
+            .map(|p| path_key(p) == path_key(&real))
+            .unwrap_or(false)
+    }) {
         list.push(json!(real));
     }
     // 若曾被隐藏则取消隐藏
@@ -1192,7 +1389,11 @@ fn add_custom_java(app: &AppHandle, java_path: &str) -> Result<(), String> {
         .cloned()
         .unwrap_or_default()
         .into_iter()
-        .filter(|p| p.as_str().map(|p| path_key(p) != path_key(&real)).unwrap_or(true))
+        .filter(|p| {
+            p.as_str()
+                .map(|p| path_key(p) != path_key(&real))
+                .unwrap_or(true)
+        })
         .collect();
     settings::save(app, json!({ "javaCustom": list, "javaHidden": hidden }))?;
     Ok(())
@@ -1207,7 +1408,9 @@ fn pick_add_java(app: &AppHandle) -> Result<Value, String> {
         .add_filter("Java 可执行文件", &["exe"])
         .add_filter("所有文件", &["*"])
         .blocking_pick_file();
-    let Some(picked) = picked else { return Ok(Value::Null) };
+    let Some(picked) = picked else {
+        return Ok(Value::Null);
+    };
     add_custom_java(app, &picked.to_string())?;
     Ok(json!(scan_quick(app, false)))
 }
@@ -1230,7 +1433,11 @@ pub fn select_by_major(list: &[Value], need: i64, architecture: &str) -> Option<
         .find(|j| {
             j["major"].as_i64() == Some(need)
                 && j["is64Bit"].as_bool().unwrap_or(false)
-                && (architecture.is_empty() || j["architecture"].as_str().map(|a| a == architecture).unwrap_or(false))
+                && (architecture.is_empty()
+                    || j["architecture"]
+                        .as_str()
+                        .map(|a| a == architecture)
+                        .unwrap_or(false))
         })
         .cloned()
 }

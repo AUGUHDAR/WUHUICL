@@ -64,15 +64,25 @@ pub fn stun_parse(packet: &[u8], request: &[u8]) -> Option<StunMappedAddr> {
         }
         if (atype == 1 || atype == 0x20 || atype == 0x8020) && size >= 8 && packet[start + 1] == 1 {
             let mask = if atype == 1 { 0u32 } else { STUN_MAGIC_COOKIE };
-            let raw = u32::from_be_bytes([packet[start + 4], packet[start + 5], packet[start + 6], packet[start + 7]]);
+            let raw = u32::from_be_bytes([
+                packet[start + 4],
+                packet[start + 5],
+                packet[start + 6],
+                packet[start + 7],
+            ]);
             let ip = raw ^ mask;
-            let port = u16::from_be_bytes([packet[start + 2], packet[start + 3]]) ^ ((mask >> 16) as u16);
+            let port =
+                u16::from_be_bytes([packet[start + 2], packet[start + 3]]) ^ ((mask >> 16) as u16);
             let value = StunMappedAddr {
                 ip: std::net::Ipv4Addr::from(ip).to_string(),
                 port,
             };
             // 原版：命中候选属性就结束本次解析，端口非法也不回退去扫后面的属性
-            return if valid_mapped_addr(&value) { Some(value) } else { None };
+            return if valid_mapped_addr(&value) {
+                Some(value)
+            } else {
+                None
+            };
         }
         cursor = start + ((size + 3) & !3);
     }
@@ -112,7 +122,11 @@ pub fn stun_query(
         let request = stun_build_request();
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
         let _ = socket.send_to(&request, remote);
-        let mut next_resend = if resends >= 1 { Some(Instant::now() + Duration::from_millis(stun_resend_delay(1, rand_random()))) } else { None };
+        let mut next_resend = if resends >= 1 {
+            Some(Instant::now() + Duration::from_millis(stun_resend_delay(1, rand_random())))
+        } else {
+            None
+        };
         let mut attempt = 1u32;
         loop {
             let now = Instant::now();
@@ -141,7 +155,9 @@ pub fn stun_query(
                         return Some(answer);
                     }
                 }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(ref e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut => {}
                 Err(_) => return None,
             }
         }
@@ -161,7 +177,15 @@ pub struct StunSampler {
 
 impl StunSampler {
     /// 对应 stunSampleSeries：按 preferred 优先排序后逐个采样
-    pub fn sample_series(&mut self, socket: &UdpSocket, servers: &[String], count: usize, tries: u32, timeout_ms: u64, cancelled: &AtomicBool) -> Vec<StunMappedAddr> {
+    pub fn sample_series(
+        &mut self,
+        socket: &UdpSocket,
+        servers: &[String],
+        count: usize,
+        tries: u32,
+        timeout_ms: u64,
+        cancelled: &AtomicBool,
+    ) -> Vec<StunMappedAddr> {
         let mut ordered: Vec<String> = servers.to_vec();
         // 原版 Number(has(b)) - Number(has(a))：上次成功的服务器排前面
         ordered.sort_by(|a, b| self.preferred.contains(b).cmp(&self.preferred.contains(a)));
@@ -229,7 +253,9 @@ pub fn sample_ports_sequential(
             break;
         }
     }
-    let Some((winner, first)) = selected else { return Vec::new() };
+    let Some((winner, first)) = selected else {
+        return Vec::new();
+    };
     let mut samples = vec![first];
     for i in 1..count {
         if cancelled.load(Ordering::SeqCst) {
@@ -366,7 +392,13 @@ mod tests {
             let jitter = (rto as f64 * 0.2) as u64;
             for r in [0.0f64, 0.5, 0.999_999] {
                 let value = stun_resend_delay(n, r);
-                assert!(value >= rto - jitter && value <= rto + jitter, "n={} r={} value={}", n, r, value);
+                assert!(
+                    value >= rto - jitter && value <= rto + jitter,
+                    "n={} r={} value={}",
+                    n,
+                    r,
+                    value
+                );
             }
         }
         // 随机数为 0 时落在窗口下沿：rto - jitter
@@ -379,13 +411,22 @@ mod tests {
 
     #[test]
     fn delta_and_nat_shape_rules() {
-        let s = |p: u16| StunMappedAddr { ip: "1.1.1.1".into(), port: p };
+        let s = |p: u16| StunMappedAddr {
+            ip: "1.1.1.1".into(),
+            port: p,
+        };
         assert_eq!(stun_delta_from_samples(&[s(100)]), 0);
         assert_eq!(stun_delta_from_samples(&[s(100), s(140)]), 40);
         assert_eq!(stun_delta_from_samples(&[s(100), s(100)]), 0);
         assert!(valid_mapped_addr(&s(65535)));
-        assert!(!valid_mapped_addr(&StunMappedAddr { ip: "1.1.1.1".into(), port: 0 }));
-        assert!(!valid_mapped_addr(&StunMappedAddr { ip: String::new(), port: 80 }));
+        assert!(!valid_mapped_addr(&StunMappedAddr {
+            ip: "1.1.1.1".into(),
+            port: 0
+        }));
+        assert!(!valid_mapped_addr(&StunMappedAddr {
+            ip: String::new(),
+            port: 80
+        }));
     }
 
     #[test]

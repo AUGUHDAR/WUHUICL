@@ -40,7 +40,10 @@ pub fn punch_random_nonce() -> u16 {
 }
 
 fn is_ipv4_text(value: &str) -> bool {
-    value.parse::<IpAddr>().map(|ip| ip.is_ipv4()).unwrap_or(false)
+    value
+        .parse::<IpAddr>()
+        .map(|ip| ip.is_ipv4())
+        .unwrap_or(false)
 }
 
 fn first_two_octets(value: &str) -> Option<String> {
@@ -52,8 +55,14 @@ fn first_two_octets(value: &str) -> Option<String> {
 }
 
 /// UdpHolePuncher.java acceptAddress：同 IP 直接过；仅未鉴权的控制包允许 /16 CGNAT 漂移
-pub fn punch_accept_source(expected: Option<&PunchAddress>, actual: Option<&PunchAddress>, authenticated: bool) -> bool {
-    let (Some(expected), Some(actual)) = (expected, actual) else { return false };
+pub fn punch_accept_source(
+    expected: Option<&PunchAddress>,
+    actual: Option<&PunchAddress>,
+    authenticated: bool,
+) -> bool {
+    let (Some(expected), Some(actual)) = (expected, actual) else {
+        return false;
+    };
     if expected.address == actual.address {
         return true;
     }
@@ -74,7 +83,11 @@ pub struct PpsLimiter {
 
 impl PpsLimiter {
     pub fn new(max_pps: f64) -> Self {
-        PpsLimiter { max_pps, start: elapsed_ms(), sent: 0 }
+        PpsLimiter {
+            max_pps,
+            start: elapsed_ms(),
+            sent: 0,
+        }
     }
 
     /// UdpHolePuncher.java beforeSend：单调预算，超发就补睡
@@ -92,7 +105,10 @@ impl PpsLimiter {
 fn elapsed_ms() -> f64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     // performance.now() 在原版里是单调时钟，这里用同一进程内的毫秒差
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64() * 1000.0).unwrap_or_default()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs_f64() * 1000.0)
+        .unwrap_or_default()
 }
 
 pub fn shuffle(values: &mut Vec<i64>, random: &Rng) {
@@ -220,9 +236,16 @@ fn mode_is_group(mode: &PunchMode) -> bool {
 }
 
 impl Puncher {
-    pub fn new(conn: Arc<UdpSocket>, sockets: Vec<Arc<UdpSocket>>, options: PuncherOptions) -> Self {
+    pub fn new(
+        conn: Arc<UdpSocket>,
+        sockets: Vec<Arc<UdpSocket>>,
+        options: PuncherOptions,
+    ) -> Self {
         let profile = options.profile.clone().unwrap_or_else(|| DEFAULT.clone());
-        let params = options.params.clone().unwrap_or_else(|| from_profile(&profile));
+        let params = options
+            .params
+            .clone()
+            .unwrap_or_else(|| from_profile(&profile));
         let timeout_ms = options.timeout_ms.unwrap_or(params.timeout_ms);
         let sockets_tried = if sockets.is_empty() { 1 } else { sockets.len() };
         let range = options.range.unwrap_or(0);
@@ -233,8 +256,7 @@ impl Puncher {
             prediction_delta: 0.0,
             elapsed_ms: 0.0,
             firewall_detected: false,
-            port_prediction_active: mode_is_group(&options.mode)
-                && params.easy_sym_bomb
+            port_prediction_active: mode_is_group(&options.mode) && params.easy_sym_bomb
                 || (!matches!(options.mode, PunchMode::Ports) && range > 0),
             success: false,
         };
@@ -242,7 +264,11 @@ impl Puncher {
         let (tx, rx) = std::sync::mpsc::channel();
         Puncher {
             inner: Arc::new(Inner {
-                sockets: if sockets.is_empty() { vec![conn.clone()] } else { sockets },
+                sockets: if sockets.is_empty() {
+                    vec![conn.clone()]
+                } else {
+                    sockets
+                },
                 conn,
                 nonce: punch_random_nonce(),
                 profile,
@@ -274,8 +300,16 @@ impl Puncher {
             return answer;
         }
         let answer = match self.inner.waiter.lock().unwrap().take() {
-            Some(rx) => rx.recv().unwrap_or_else(|_| Err(PunchFailure { result: self.stats(), message: "打洞已取消".into() })),
-            None => Err(PunchFailure { result: self.stats(), message: "打洞已取消".into() }),
+            Some(rx) => rx.recv().unwrap_or_else(|_| {
+                Err(PunchFailure {
+                    result: self.stats(),
+                    message: "打洞已取消".into(),
+                })
+            }),
+            None => Err(PunchFailure {
+                result: self.stats(),
+                message: "打洞已取消".into(),
+            }),
         };
         *self.inner.answer.lock().unwrap() = Some(answer.clone());
         answer
@@ -333,7 +367,9 @@ impl Puncher {
                         Ok((size, from)) => {
                             message(&inner, &socket, &buf[..size], from);
                         }
-                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {}
+                        Err(ref e)
+                            if e.kind() == std::io::ErrorKind::WouldBlock
+                                || e.kind() == std::io::ErrorKind::TimedOut => {}
                         Err(_) => return,
                     }
                 }
@@ -363,7 +399,10 @@ impl Puncher {
             let stats = st.stats.clone();
             drop(st);
             if let Some(tx) = self.inner.result.lock().unwrap().take() {
-                let _ = tx.send(Err(PunchFailure { result: stats, message: "打洞已取消".into() }));
+                let _ = tx.send(Err(PunchFailure {
+                    result: stats,
+                    message: "打洞已取消".into(),
+                }));
             }
         }
     }
@@ -381,7 +420,10 @@ fn send_pkt(socket: &Arc<UdpSocket>, packet: &[u8], remote: &PunchAddress) -> bo
             if socket.send_to(packet, (addr, remote.port)).is_ok() {
                 return true;
             }
-        } else if socket.send_to(packet, (remote.address.as_str(), remote.port)).is_ok() {
+        } else if socket
+            .send_to(packet, (remote.address.as_str(), remote.port))
+            .is_ok()
+        {
             return true;
         }
     }
@@ -401,8 +443,15 @@ fn message(inner: &Arc<Inner>, socket: &Arc<UdpSocket>, packet: &[u8], from: std
         Some(f) => f,
         None => return,
     };
-    let actual = PunchAddress { address: from.ip().to_string(), port: from.port() };
-    if !punch_accept_source(st.remote.as_ref(), Some(&actual), inner.options.auth_key.is_some()) {
+    let actual = PunchAddress {
+        address: from.ip().to_string(),
+        port: from.port(),
+    };
+    if !punch_accept_source(
+        st.remote.as_ref(),
+        Some(&actual),
+        inner.options.auth_key.is_some(),
+    ) {
         return;
     }
     if frame.0 == 1 {
@@ -443,8 +492,15 @@ fn fail(inner: &Arc<Inner>, firewall: bool) {
     st.active = false;
     drop(st);
     if let Some(tx) = inner.result.lock().unwrap().take() {
-        let message = if stats.firewall_detected { "本轮未收到 UDP 回包" } else { "本轮打洞未命中" };
-        let _ = tx.send(Err(PunchFailure { result: stats, message: message.into() }));
+        let message = if stats.firewall_detected {
+            "本轮未收到 UDP 回包"
+        } else {
+            "本轮打洞未命中"
+        };
+        let _ = tx.send(Err(PunchFailure {
+            result: stats,
+            message: message.into(),
+        }));
     }
 }
 
@@ -458,14 +514,22 @@ fn sleep_cancelable(inner: &Arc<Inner>, ms: f64) {
     }
 }
 
-fn send_control(inner: &Arc<Inner>, socket: &Arc<UdpSocket>, port: i64, limiter: Option<&mut PpsLimiter>) {
+fn send_control(
+    inner: &Arc<Inner>,
+    socket: &Arc<UdpSocket>,
+    port: i64,
+    limiter: Option<&mut PpsLimiter>,
+) {
     let remote = {
         let st = inner.state.lock().unwrap();
         if !st.active {
             return;
         }
         match &st.remote {
-            Some(r) => PunchAddress { address: r.address.clone(), port: r.port },
+            Some(r) => PunchAddress {
+                address: r.address.clone(),
+                port: r.port,
+            },
             None => return,
         }
     };
@@ -486,7 +550,10 @@ fn send_control(inner: &Arc<Inner>, socket: &Arc<UdpSocket>, port: i64, limiter:
     let key = inner.options.auth_key;
     drop(st);
     let frame = sign_punch_frame(&punch_build_control(1, nonce), key.as_ref());
-    let target = PunchAddress { address: remote.address, port: port as u16 };
+    let target = PunchAddress {
+        address: remote.address,
+        port: port as u16,
+    };
     send_pkt(socket, &frame, &target);
 }
 
@@ -513,9 +580,12 @@ fn spray(inner: &Arc<Inner>, round: i64, limiter: &mut PpsLimiter) {
             send_control(inner, &inner.conn, port, Some(limiter));
         }
     }
-    let base = p.spray_port_count_min + (random() * (p.spray_port_count_max - p.spray_port_count_min + 1.0).max(1.0)).floor();
+    let base = p.spray_port_count_min
+        + (random() * (p.spray_port_count_max - p.spray_port_count_min + 1.0).max(1.0)).floor();
     let count = if round > 2 {
-        (base * p.spray_decay_numerator / round as f64).trunc().max(p.spray_decay_floor)
+        (base * p.spray_decay_numerator / round as f64)
+            .trunc()
+            .max(p.spray_decay_floor)
     } else {
         base
     };
@@ -598,7 +668,12 @@ fn send_loop(inner: &Arc<Inner>) {
             } else {
                 let spread = inner.options.sweep_spread.unwrap_or(0);
                 for (i, socket) in inner.sockets.clone().into_iter().enumerate() {
-                    let port = remote.port as i64 + if spread > 0 { (i as i64) % (spread * 2 + 1) - spread } else { 0 };
+                    let port = remote.port as i64
+                        + if spread > 0 {
+                            (i as i64) % (spread * 2 + 1) - spread
+                        } else {
+                            0
+                        };
                     for _ in 0..3 {
                         if !inner.state.lock().unwrap().active {
                             return;
@@ -607,8 +682,16 @@ fn send_loop(inner: &Arc<Inner>) {
                     }
                 }
             }
-            let bomb_active = p.easy_sym_bomb && (elapsed_ms() - inner.state.lock().unwrap().started_at) < p.bomb_duration_ms;
-            sleep_cancelable(inner, if bomb_active { p.bomb_round_interval_ms } else { p.send_interval });
+            let bomb_active = p.easy_sym_bomb
+                && (elapsed_ms() - inner.state.lock().unwrap().started_at) < p.bomb_duration_ms;
+            sleep_cancelable(
+                inner,
+                if bomb_active {
+                    p.bomb_round_interval_ms
+                } else {
+                    p.send_interval
+                },
+            );
         } else if matches!(inner.options.mode, PunchMode::Ports) {
             let ports = inner.state.lock().unwrap().ports.clone();
             for port in ports {
@@ -621,12 +704,35 @@ fn send_loop(inner: &Arc<Inner>) {
         } else {
             let range = inner.options.range.unwrap_or(0);
             if range > 0 {
-                let progressive_index = ((cycle / profile.cycles_per_range.max(1) as i64) as usize).min(profile.progressive_ranges.len() - 1);
+                let progressive_index = ((cycle / profile.cycles_per_range.max(1) as i64) as usize)
+                    .min(profile.progressive_ranges.len() - 1);
                 let progressive = profile.progressive_ranges[progressive_index] as i64;
-                let current_range = if inner.options.fixed_range { range } else { (if range == 0 { p.port_range as i64 } else { range }).min(progressive) };
-                let ports = control_ports(remote.port as i64, current_range, s.sweep_window_size as i64, &*random);
-                let passes = if p.send_min_rounds > 0.0 { p.send_min_rounds as i64 } else { s.min_rounds as i64 };
-                let reps = if p.send_min_pass > 0.0 { p.send_min_pass as i64 } else { s.min_pass as i64 };
+                let current_range = if inner.options.fixed_range {
+                    range
+                } else {
+                    (if range == 0 {
+                        p.port_range as i64
+                    } else {
+                        range
+                    })
+                    .min(progressive)
+                };
+                let ports = control_ports(
+                    remote.port as i64,
+                    current_range,
+                    s.sweep_window_size as i64,
+                    &*random,
+                );
+                let passes = if p.send_min_rounds > 0.0 {
+                    p.send_min_rounds as i64
+                } else {
+                    s.min_rounds as i64
+                };
+                let reps = if p.send_min_pass > 0.0 {
+                    p.send_min_pass as i64
+                } else {
+                    s.min_pass as i64
+                };
                 let mut pass = 0i64;
                 while pass < passes {
                     for i in 0..ports.len() {
@@ -665,7 +771,6 @@ pub fn punch_listen(preferred_port: i64) -> Arc<UdpSocket> {
     Arc::new(UdpSocket::bind("0.0.0.0:0").expect("无法绑定临时 UDP 端口"))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,17 +778,27 @@ mod tests {
     fn seeded(seed: u64) -> impl Fn() -> f64 {
         let state = std::sync::atomic::AtomicU64::new(seed);
         move || {
-            let x = state.fetch_update(
-                std::sync::atomic::Ordering::SeqCst,
-                std::sync::atomic::Ordering::SeqCst,
-                |v| Some(v.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407)),
-            ).unwrap();
+            let x = state
+                .fetch_update(
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                    |v| {
+                        Some(
+                            v.wrapping_mul(6364136223846793005)
+                                .wrapping_add(1442695040888963407),
+                        )
+                    },
+                )
+                .unwrap();
             ((x >> 11) as f64) / ((1u64 << 53) as f64)
         }
     }
 
     fn addr(ip: &str, port: u16) -> PunchAddress {
-        PunchAddress { address: ip.into(), port }
+        PunchAddress {
+            address: ip.into(),
+            port,
+        }
     }
 
     #[test]
@@ -691,7 +806,10 @@ mod tests {
         let frame = punch_build_control(1, 0xABCD);
         assert_eq!(frame, [86, 76, 1, 0xAB, 0xCD]);
         assert_eq!(punch_parse_control(&frame), Some((1, 0xABCD)));
-        assert_eq!(punch_parse_control(&punch_build_control(2, 7)), Some((2, 7)));
+        assert_eq!(
+            punch_parse_control(&punch_build_control(2, 7)),
+            Some((2, 7))
+        );
         assert_eq!(punch_parse_control(&[86, 76, 3, 0, 7]), None);
         assert_eq!(punch_parse_control(&[86, 76, 1, 0]), None);
         assert_eq!(punch_parse_control(&[0, 0, 1, 0, 7]), None);
@@ -699,14 +817,34 @@ mod tests {
 
     #[test]
     fn source_accept_follows_cgnat_rule_only_when_unauthenticated() {
-        assert!(punch_accept_source(Some(&addr("10.20.30.40", 1)), Some(&addr("10.20.30.40", 9)), false));
-        assert!(punch_accept_source(Some(&addr("10.20.1.1", 1)), Some(&addr("10.20.99.99", 1)), false));
-        assert!(!punch_accept_source(Some(&addr("10.20.1.1", 1)), Some(&addr("10.21.1.1", 1)), false));
-        assert!(!punch_accept_source(Some(&addr("10.20.1.1", 1)), Some(&addr("10.20.99.99", 1)), true));
+        assert!(punch_accept_source(
+            Some(&addr("10.20.30.40", 1)),
+            Some(&addr("10.20.30.40", 9)),
+            false
+        ));
+        assert!(punch_accept_source(
+            Some(&addr("10.20.1.1", 1)),
+            Some(&addr("10.20.99.99", 1)),
+            false
+        ));
+        assert!(!punch_accept_source(
+            Some(&addr("10.20.1.1", 1)),
+            Some(&addr("10.21.1.1", 1)),
+            false
+        ));
+        assert!(!punch_accept_source(
+            Some(&addr("10.20.1.1", 1)),
+            Some(&addr("10.20.99.99", 1)),
+            true
+        ));
         assert!(!punch_accept_source(None, Some(&addr("1.1.1.1", 1)), false));
         assert!(!punch_accept_source(Some(&addr("1.1.1.1", 1)), None, false));
         // 非 IPv4 不能走 /16 例外
-        assert!(!punch_accept_source(Some(&addr("fe80::1", 1)), Some(&addr("fe80::2", 1)), false));
+        assert!(!punch_accept_source(
+            Some(&addr("fe80::1", 1)),
+            Some(&addr("fe80::2", 1)),
+            false
+        ));
     }
 
     #[test]
@@ -785,7 +923,13 @@ mod tests {
             Puncher::new(
                 socket.clone(),
                 vec![socket.clone()],
-                PuncherOptions { mode, range: Some(range), params: Some(params), profile: Some(profile), ..Default::default() },
+                PuncherOptions {
+                    mode,
+                    range: Some(range),
+                    params: Some(params),
+                    profile: Some(profile),
+                    ..Default::default()
+                },
             )
             .stats()
             .port_prediction_active

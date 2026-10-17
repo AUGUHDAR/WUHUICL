@@ -1,8 +1,8 @@
 //! 系统信息 / 光标位置（对应原版 app:systemInfo 与闪屏 pointerTimer 的取点）
 
+use windows_sys::Win32::Foundation::POINT;
 use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
-use windows_sys::Win32::Foundation::POINT;
 
 /// app:systemInfo → 对应原版 ipc.ts appSystemInfo：credentialStorage + 内存 + platformInfo
 pub fn system_info() -> serde_json::Value {

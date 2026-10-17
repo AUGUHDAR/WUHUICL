@@ -43,7 +43,11 @@ pub fn list_installed(settings: &Value, all: bool) -> Value {
     };
     let mut out: Vec<Value> = Vec::new();
     for root in &roots {
-        let (versions, _) = scan_folder(root, Some(default_folder.as_str()), Some(active_root.as_str()));
+        let (versions, _) = scan_folder(
+            root,
+            Some(default_folder.as_str()),
+            Some(active_root.as_str()),
+        );
         out.extend(versions);
     }
     sort_installed(&mut out);
@@ -63,7 +67,11 @@ fn text<'a>(j: &'a Value, key: &str) -> Option<&'a str> {
     j.get(key).and_then(Value::as_str).filter(|s| !s.is_empty())
 }
 
-fn scan_folder(root: &str, default_folder: Option<&str>, active_root: Option<&str>) -> (Vec<Value>, Vec<String>) {
+fn scan_folder(
+    root: &str,
+    default_folder: Option<&str>,
+    active_root: Option<&str>,
+) -> (Vec<Value>, Vec<String>) {
     let mut out: Vec<Value> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
     let root_path = installer::canonical_path(root);
@@ -94,7 +102,9 @@ fn scan_folder(root: &str, default_folder: Option<&str>, active_root: Option<&st
         let name = entry.file_name().to_string_lossy().to_string();
         let json_path = vdir.join(&name).join(format!("{name}.json"));
         if !json_path.exists() {
-            out.push(json!({ "id": name, "mcVersion": "未知", "folder": root_s, "incomplete": true }));
+            out.push(
+                json!({ "id": name, "mcVersion": "未知", "folder": root_s, "incomplete": true }),
+            );
             errors.push(format!("{name}：缺少版本描述 {name}.json"));
             continue;
         }
@@ -227,23 +237,36 @@ fn scan_folder(root: &str, default_folder: Option<&str>, active_root: Option<&st
 
 /// 对应原版 instances.ts instanceDirectoryState（installer 版需要 AppHandle，这里用同一套公共原语按根目录判定）
 fn directory_state(root: &str, id: &str, j: &Value) -> (String, bool, &'static str) {
-    let shared = installer::canonical_path(root).to_string_lossy().to_string();
-    let instance = installer::canonical_path(&Path::new(&shared).join("versions").join(id).to_string_lossy())
+    let shared = installer::canonical_path(root)
         .to_string_lossy()
         .to_string();
+    let instance = installer::canonical_path(
+        &Path::new(&shared)
+            .join("versions")
+            .join(id)
+            .to_string_lossy(),
+    )
+    .to_string_lossy()
+    .to_string();
     match j.get("_gameDir") {
         Some(Value::Bool(true)) => return (instance, true, "explicit"),
         Some(Value::Bool(false)) => return (shared, false, "shared"),
         _ => {}
     }
-    if let Some(configured) = j.get("_gameDirectory").or_else(|| j.get("gameDirectory")).and_then(Value::as_str) {
+    if let Some(configured) = j
+        .get("_gameDirectory")
+        .or_else(|| j.get("gameDirectory"))
+        .and_then(Value::as_str)
+    {
         if !configured.trim().is_empty() {
             let raw = if Path::new(configured).is_absolute() {
                 PathBuf::from(configured)
             } else {
                 Path::new(&instance).join(configured)
             };
-            let resolved = installer::canonical_path(&raw.to_string_lossy()).to_string_lossy().to_string();
+            let resolved = installer::canonical_path(&raw.to_string_lossy())
+                .to_string_lossy()
+                .to_string();
             let isolated = !installer::same_path(&resolved, &shared);
             return (resolved, isolated, "configured-path");
         }
@@ -298,7 +321,11 @@ fn weights(s: &str) -> Vec<Weight> {
             if c.is_ascii_digit() {
                 Weight(2, c as u32, 0)
             } else if c.is_ascii_alphabetic() {
-                Weight(4, c.to_ascii_lowercase() as u32, if c.is_ascii_uppercase() { 1 } else { 0 })
+                Weight(
+                    4,
+                    c.to_ascii_lowercase() as u32,
+                    if c.is_ascii_uppercase() { 1 } else { 0 },
+                )
             } else if c as u32 > 127 {
                 Weight(3, c as u32, 0)
             } else {
@@ -316,7 +343,14 @@ fn digit_run(weights: &[Weight], from: usize) -> (usize, String) {
         end += 1;
     }
     let trimmed = digits.trim_start_matches('0');
-    (end, if trimmed.is_empty() { "0".to_string() } else { trimmed.to_string() })
+    (
+        end,
+        if trimmed.is_empty() {
+            "0".to_string()
+        } else {
+            trimmed.to_string()
+        },
+    )
 }
 
 fn locale_cmp(a: &str, b: &str, numeric: bool) -> Ordering {
@@ -354,11 +388,24 @@ fn sort_installed(out: &mut Vec<Value>) {
         if left != right {
             return locale_cmp(right, left, true);
         }
-        let has = |v: &Value| v.get("loader").and_then(Value::as_str).map(|s| !s.is_empty()).unwrap_or(false);
+        let has = |v: &Value| {
+            v.get("loader")
+                .and_then(Value::as_str)
+                .map(|s| !s.is_empty())
+                .unwrap_or(false)
+        };
         let (la, lb) = (has(a), has(b));
         if la != lb {
-            return if la { Ordering::Greater } else { Ordering::Less };
+            return if la {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            };
         }
-        locale_cmp(a["id"].as_str().unwrap_or(""), b["id"].as_str().unwrap_or(""), false)
+        locale_cmp(
+            a["id"].as_str().unwrap_or(""),
+            b["id"].as_str().unwrap_or(""),
+            false,
+        )
     });
 }

@@ -6,7 +6,12 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, Window, WindowEvent};
 
 /// ipc_send 路由的窗口动作（from_main = 调用方是否主窗口，对应原版 event.sender === win.webContents）
-pub fn command(app: &AppHandle, from_main: bool, channel: &str, args: &[serde_json::Value]) -> Result<(), String> {
+pub fn command(
+    app: &AppHandle,
+    from_main: bool,
+    channel: &str,
+    args: &[serde_json::Value],
+) -> Result<(), String> {
     if !from_main && channel.starts_with("window:") {
         return Ok(()); // 原版：非主窗口发来的一律忽略
     }
@@ -116,16 +121,26 @@ pub fn palette_blocked() -> bool {
 
 /// 原版 index.ts:143：仅「只卡在写偏好」时，写完后补一次关窗
 pub fn note_deferred_close() {
-    DEFERRED_CLOSE.store(prefs_pending() && !SKIN_DIRTY.load(SeqCst) && !busy_pending(), SeqCst);
+    DEFERRED_CLOSE.store(
+        prefs_pending() && !SKIN_DIRTY.load(SeqCst) && !busy_pending(),
+        SeqCst,
+    );
 }
 
 /// 原版 index.ts:327：退出流程卡在写偏好时，写完后补一次退出
 pub fn note_deferred_quit() {
-    DEFERRED_QUIT.store(prefs_pending() && !SKIN_DIRTY.load(SeqCst) && !busy_pending(), SeqCst);
+    DEFERRED_QUIT.store(
+        prefs_pending() && !SKIN_DIRTY.load(SeqCst) && !busy_pending(),
+        SeqCst,
+    );
 }
 
 pub fn emit_palette_close(app: &AppHandle, quit: bool) {
-    let payload = if quit { json!({ "quit": true }) } else { json!({}) };
+    let payload = if quit {
+        json!({ "quit": true })
+    } else {
+        json!({})
+    };
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.emit_to("main", "window:skinEditorClose", payload);
     }
@@ -136,7 +151,11 @@ pub fn mascot_pending() -> bool {
 }
 
 pub fn emit_mascot_close(app: &AppHandle, quit: bool) {
-    let payload = if quit { json!({ "quit": true }) } else { json!({}) };
+    let payload = if quit {
+        json!({ "quit": true })
+    } else {
+        json!({})
+    };
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.emit_to("main", "window:mascotClose", payload);
     }
@@ -166,7 +185,9 @@ fn owner_flag(args: &[serde_json::Value]) -> Option<(String, bool)> {
     let pending = value.get("pending").and_then(|v| v.as_bool())?;
     if owner.is_empty()
         || owner.len() > 64
-        || !owner.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        || !owner
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
     {
         return None;
     }
@@ -356,7 +377,10 @@ pub fn apply_native_appearance(win: &tauri::WebviewWindow, settings: &serde_json
         b: i32,
     }
     extern "system" {
-        fn DwmExtendFrameIntoClientArea(hwnd: *mut std::ffi::c_void, margins: *const Margins) -> i32;
+        fn DwmExtendFrameIntoClientArea(
+            hwnd: *mut std::ffi::c_void,
+            margins: *const Margins,
+        ) -> i32;
         fn DwmSetWindowAttribute(
             hwnd: *mut std::ffi::c_void,
             attr: u32,

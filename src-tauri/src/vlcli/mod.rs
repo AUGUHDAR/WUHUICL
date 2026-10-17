@@ -11,34 +11,99 @@ use std::time::Duration;
 const ONE_SHOT: Duration = Duration::from_secs(25);
 const LONG: Duration = Duration::from_secs(900);
 
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     if !channel.starts_with("vlcli:") {
         return None;
     }
     let first = args.first().cloned().unwrap_or(Value::Null);
     let result = match channel {
-        "vlcli:ensure" => wrap(asset::ensure(app, first["force"].as_bool().unwrap_or(false))),
+        "vlcli:ensure" => wrap(asset::ensure(
+            app,
+            first["force"].as_bool().unwrap_or(false),
+        )),
         "vlcli:status" => Ok(json!({ "ok": true, "data": {
             "alive": session::alive(), "snapshot": session::snapshot() } })),
         "vlcli:stop" => wrap(session::stop()),
         "vlcli:capabilities" => wrap(capabilities(app)),
         "vlcli:pickFiles" => Ok(json!({ "ok": true, "data": { "files": pick_files(app) } })),
-        "vlcli:lobby" => one_shot(app, "lobby list", &pick(&first, &[("page", "page"), ("size", "size"),
-            ("category", "category"), ("loader", "loader"), ("search", "search")]), ONE_SHOT),
+        "vlcli:lobby" => one_shot(
+            app,
+            "lobby list",
+            &pick(
+                &first,
+                &[
+                    ("page", "page"),
+                    ("size", "size"),
+                    ("category", "category"),
+                    ("loader", "loader"),
+                    ("search", "search"),
+                ],
+            ),
+            ONE_SHOT,
+        ),
         "vlcli:lobbyCategories" => one_shot(app, "lobby categories", "{}", ONE_SHOT),
-        "vlcli:roomInfo" => one_shot(app, "room info", &pick(&first, &[("code", "code")]), ONE_SHOT),
-        "vlcli:roomMods" => one_shot(app, "room mods", &pick(&first, &[("code", "code")]), ONE_SHOT),
+        "vlcli:roomInfo" => one_shot(
+            app,
+            "room info",
+            &pick(&first, &[("code", "code")]),
+            ONE_SHOT,
+        ),
+        "vlcli:roomMods" => one_shot(
+            app,
+            "room mods",
+            &pick(&first, &[("code", "code")]),
+            ONE_SHOT,
+        ),
         "vlcli:relayStatus" => one_shot(app, "relay status", "{}", ONE_SHOT),
         "vlcli:relayList" => one_shot(app, "relay list", "{}", ONE_SHOT),
         "vlcli:netPorts" => one_shot(app, "net ports", "{}", ONE_SHOT),
         "vlcli:settingsGet" => one_shot(app, "settings get", "{}", ONE_SHOT),
-        "vlcli:settingsSave" => one_shot(app, "settings save", &pick(&first, &[("theme", "theme"),
-            ("clientTag", "clientTag"), ("relayEnabled", "relayEnabled")]), ONE_SHOT),
-        "vlcli:host" => start(app, "room create", &pick(&first, &[("name", "name"), ("hostPort", "hostPort"),
-            ("password", "password"), ("category", "category"), ("loader", "loader"),
-            ("gameVersion", "gameVersion"), ("visible", "visible"), ("clientTag", "clientTag")])),
-        "vlcli:join" => start(app, "room join", &pick(&first, &[("code", "code"), ("password", "password"),
-            ("modsync", "modsync")])),
+        "vlcli:settingsSave" => one_shot(
+            app,
+            "settings save",
+            &pick(
+                &first,
+                &[
+                    ("theme", "theme"),
+                    ("clientTag", "clientTag"),
+                    ("relayEnabled", "relayEnabled"),
+                ],
+            ),
+            ONE_SHOT,
+        ),
+        "vlcli:host" => start(
+            app,
+            "room create",
+            &pick(
+                &first,
+                &[
+                    ("name", "name"),
+                    ("hostPort", "hostPort"),
+                    ("password", "password"),
+                    ("category", "category"),
+                    ("loader", "loader"),
+                    ("gameVersion", "gameVersion"),
+                    ("visible", "visible"),
+                    ("clientTag", "clientTag"),
+                ],
+            ),
+        ),
+        "vlcli:join" => start(
+            app,
+            "room join",
+            &pick(
+                &first,
+                &[
+                    ("code", "code"),
+                    ("password", "password"),
+                    ("modsync", "modsync"),
+                ],
+            ),
+        ),
         "vlcli:modsync" => modsync(app, &first),
         "vlcli:tickets" => tickets(app, &first),
         _ => Ok(json!({ "ok": false, "code": "UNKNOWN_CHANNEL", "message": "未知的联机通道" })),
@@ -77,7 +142,12 @@ fn envelope(v: Result<Value, cmd::Failure>) -> Value {
     }
 }
 
-fn one_shot(app: &tauri::AppHandle, command: &str, payload: &str, timeout: Duration) -> Result<Value, String> {
+fn one_shot(
+    app: &tauri::AppHandle,
+    command: &str,
+    payload: &str,
+    timeout: Duration,
+) -> Result<Value, String> {
     // 组件按 "域 动作" 两个参数解析，合成一个 token 会被判成未知命令
     let mut args: Vec<String> = command.split_whitespace().map(str::to_string).collect();
     if payload != "{}" {
@@ -92,7 +162,9 @@ fn start(app: &tauri::AppHandle, command: &str, payload: &str) -> Result<Value, 
         let parsed: Value = serde_json::from_str(payload).unwrap_or(Value::Null);
         let code = parsed["code"].as_str().unwrap_or("");
         if sanitize_code(code).is_empty() {
-            return Ok(json!({ "ok": false, "code": "INVALID_PARAMS", "message": "请输入有效的六位房间码" }));
+            return Ok(
+                json!({ "ok": false, "code": "INVALID_PARAMS", "message": "请输入有效的六位房间码" }),
+            );
         }
     }
     session::start(&binary(app), command, payload)
@@ -124,12 +196,33 @@ fn modsync(app: &tauri::AppHandle, arg: &Value) -> Result<Value, String> {
         "hostStatus" => "modsync host-status",
         "rebuild" => "modsync rebuild",
         "settings" => "modsync settings",
-        other => return Ok(json!({ "ok": false, "code": "USAGE", "message": format!("未知的模组同步动作 {}", other), "usage": true })),
+        other => {
+            return Ok(
+                json!({ "ok": false, "code": "USAGE", "message": format!("未知的模组同步动作 {}", other), "usage": true }),
+            )
+        }
     };
-    let timeout = if action == "download" || action == "wait" { LONG } else { ONE_SHOT };
-    one_shot(app, command, &pick(arg, &[("code", "code"), ("scope", "scope"),
-        ("timeoutSec", "timeoutSec"), ("downloadTimeoutSec", "downloadTimeoutSec"),
-        ("keys", "keys"), ("jsonRaw", "jsonRaw")]), timeout)
+    let timeout = if action == "download" || action == "wait" {
+        LONG
+    } else {
+        ONE_SHOT
+    };
+    one_shot(
+        app,
+        command,
+        &pick(
+            arg,
+            &[
+                ("code", "code"),
+                ("scope", "scope"),
+                ("timeoutSec", "timeoutSec"),
+                ("downloadTimeoutSec", "downloadTimeoutSec"),
+                ("keys", "keys"),
+                ("jsonRaw", "jsonRaw"),
+            ],
+        ),
+        timeout,
+    )
 }
 
 fn tickets(app: &tauri::AppHandle, arg: &Value) -> Result<Value, String> {
@@ -143,10 +236,27 @@ fn tickets(app: &tauri::AppHandle, arg: &Value) -> Result<Value, String> {
         "retract" => "ticket retract",
         "viewed" => "ticket viewed",
         "delete" => "ticket delete",
-        other => return Ok(json!({ "ok": false, "code": "USAGE", "message": format!("未知的工单动作 {}", other), "usage": true })),
+        other => {
+            return Ok(
+                json!({ "ok": false, "code": "USAGE", "message": format!("未知的工单动作 {}", other), "usage": true }),
+            )
+        }
     };
-    one_shot(app, command, &pick(arg, &[("id", "id"), ("description", "description"), ("text", "text"),
-        ("msg", "msg"), ("files", "files")]), ONE_SHOT)
+    one_shot(
+        app,
+        command,
+        &pick(
+            arg,
+            &[
+                ("id", "id"),
+                ("description", "description"),
+                ("text", "text"),
+                ("msg", "msg"),
+                ("files", "files"),
+            ],
+        ),
+        ONE_SHOT,
+    )
 }
 
 /// 工单附件用系统文件框多选，路径交给组件的 --files。
@@ -179,7 +289,10 @@ mod tests {
     #[test]
     fn pick_renames_and_drops_missing() {
         let arg = json!({ "code": "AB12CD", "password": null, "extra": 1 });
-        assert_eq!(pick(&arg, &[("code", "code"), ("password", "password")]), r#"{"code":"AB12CD"}"#);
+        assert_eq!(
+            pick(&arg, &[("code", "code"), ("password", "password")]),
+            r#"{"code":"AB12CD"}"#
+        );
     }
 
     #[test]
@@ -200,7 +313,11 @@ mod tests {
 
     #[test]
     fn failure_keeps_usage_flag() {
-        let e = envelope(Err(cmd::Failure { code: "USAGE".into(), message: "没这条命令".into(), usage: true }));
+        let e = envelope(Err(cmd::Failure {
+            code: "USAGE".into(),
+            message: "没这条命令".into(),
+            usage: true,
+        }));
         assert_eq!(e["ok"], false);
         assert_eq!(e["usage"], true);
         assert_eq!(e["code"], "USAGE");

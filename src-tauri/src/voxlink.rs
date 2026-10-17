@@ -25,7 +25,11 @@ static SETTINGS: Mutex<Option<Value>> = Mutex::new(None);
 
 fn emit(app: &AppHandle, kind: &str, data: Value) {
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.emit_to("main", "voxlink:event", json!({ "type": kind, "data": data }));
+        let _ = win.emit_to(
+            "main",
+            "voxlink:event",
+            json!({ "type": kind, "data": data }),
+        );
     }
 }
 
@@ -74,7 +78,8 @@ fn save_settings(value: &Value, file: &Path) -> Result<(), String> {
     });
     let bytes = serde_json::to_vec(&body).map_err(|e| e.to_string())?;
     let written = std::fs::write(&temporary, bytes).map_err(|e| e.to_string());
-    let renamed = written.and_then(|_| std::fs::rename(&temporary, file).map_err(|e| e.to_string()));
+    let renamed =
+        written.and_then(|_| std::fs::rename(&temporary, file).map_err(|e| e.to_string()));
     let _ = std::fs::remove_file(&temporary);
     renamed
 }
@@ -159,7 +164,9 @@ fn enc(value: &str) -> String {
     let mut out = String::new();
     for b in value.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'*' | b'/' => out.push(*b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'*' | b'/' => {
+                out.push(*b as char)
+            }
             b' ' => out.push('+'),
             _ => out.push_str(&format!("%{b:02x}")),
         }
@@ -170,7 +177,12 @@ fn enc(value: &str) -> String {
 // 对应原版 api.ts ApiClient.do()：三个请求头、信封 {success,data,error,message}、4MB 上限、
 // 10s 超时，错误串取 APIError.toString() 的 `"<code>: <message>"`；
 // 编码按 URLSearchParams（空格转 +），但 `/` 保持字面、hex 用小写——服务端对 %2F 回 UNKNOWN_ENDPOINT
-fn api_get(app: &AppHandle, base: &str, route: &str, params: &[(String, String)]) -> Result<Value, String> {
+fn api_get(
+    app: &AppHandle,
+    base: &str,
+    route: &str,
+    params: &[(String, String)],
+) -> Result<Value, String> {
     if !validate_server_url(base) {
         return Err(api_error("NETWORK", "服务器地址无效"));
     }
@@ -210,13 +222,18 @@ fn api_get(app: &AppHandle, base: &str, route: &str, params: &[(String, String)]
     }
     let envelope: Value = serde_json::from_slice(&buf)
         .map_err(|_| api_error(&format!("HTTP_{status}"), "服务器未返回有效 JSON"))?;
-    if !(200..=299).contains(&status) || envelope.get("success").and_then(|v| v.as_bool()) != Some(true) {
+    if !(200..=299).contains(&status)
+        || envelope.get("success").and_then(|v| v.as_bool()) != Some(true)
+    {
         let code = match envelope.get("error").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None if status == 429 => "RATE_LIMITED".to_string(),
             None => format!("HTTP_{status}"),
         };
-        let message = envelope.get("message").and_then(|v| v.as_str()).unwrap_or("请求失败");
+        let message = envelope
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("请求失败");
         return Err(api_error(&code, message));
     }
     Ok(envelope.get("data").cloned().unwrap_or(Value::Null))
@@ -224,8 +241,17 @@ fn api_get(app: &AppHandle, base: &str, route: &str, params: &[(String, String)]
 
 /// 对应原版 engine.ts:518 listRooms() 的 page/size 夹取（index.ts voxlink:lobby）
 fn list_rooms(app: &AppHandle, query: &Value) -> Result<Value, String> {
-    let page = query.get("page").and_then(|v| v.as_f64()).unwrap_or(1.0).max(1.0);
-    let size = query.get("size").and_then(|v| v.as_f64()).unwrap_or(20.0).max(1.0).min(100.0);
+    let page = query
+        .get("page")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0)
+        .max(1.0);
+    let size = query
+        .get("size")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(20.0)
+        .max(1.0)
+        .min(100.0);
     let mut pairs: Vec<(String, String)> = Vec::new();
     let mut saw_page = false;
     let mut saw_size = false;
@@ -318,7 +344,13 @@ fn js_number(value: Option<&Value>) -> f64 {
     match value {
         None | Some(Value::Null) => 0.0,
         Some(Value::Number(n)) => n.as_f64().unwrap_or(f64::NAN),
-        Some(Value::Bool(b)) => if *b { 1.0 } else { 0.0 },
+        Some(Value::Bool(b)) => {
+            if *b {
+                1.0
+            } else {
+                0.0
+            }
+        }
         Some(Value::String(s)) => num_from_str(s.trim()),
         Some(_) => f64::NAN,
     }
@@ -340,13 +372,18 @@ fn js_truthy(value: Option<&Value>) -> bool {
 // 对应原版 mc_ports.ts detectMcPorts()：本地进程/端口探测，不外发网络包
 fn capture(program: &str, arguments: &[&str]) -> Result<String, String> {
     let mut cmd = std::process::Command::new(program);
-    cmd.args(arguments).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    cmd.args(arguments)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000);
     }
-    let mut child = cmd.stdout(std::process::Stdio::piped()).spawn().map_err(|e| e.to_string())?;
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
     let pipe = child.stdout.take();
     let reader = std::thread::spawn(move || {
         let mut buf = Vec::new();
@@ -384,7 +421,10 @@ fn detect_mc_ports() -> Vec<u64> {
     let mut found: Vec<(f64, f64)> = Vec::new();
     if std::env::consts::OS == "windows" {
         const QUERY: &str = r#"$p = @(Get-CimInstance Win32_Process -Filter "Name = 'java.exe' OR Name = 'javaw.exe'" | Where-Object { $_.CommandLine -match 'minecraft|fabric|forge|quilt|net\.minecraft' } | ForEach-Object { $_.ProcessId }); @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $p -contains $_.OwningProcess } | Select-Object LocalPort,OwningProcess) | ConvertTo-Json -Compress"#;
-        let raw = match capture("powershell.exe", &["-NoProfile", "-NonInteractive", "-Command", QUERY]) {
+        let raw = match capture(
+            "powershell.exe",
+            &["-NoProfile", "-NonInteractive", "-Command", QUERY],
+        ) {
             Ok(v) => v,
             Err(_) => return Vec::new(),
         };
@@ -414,9 +454,14 @@ fn detect_mc_ports() -> Vec<u64> {
         for line in listing.lines() {
             if let Some(cap) = proc_re().captures(line.trim()) {
                 let command = cap.get(2).map(|m| m.as_str()).unwrap_or("");
-                let pid: u64 = cap.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+                let pid: u64 = cap
+                    .get(1)
+                    .and_then(|m| m.as_str().parse().ok())
+                    .unwrap_or(0);
                 if command.to_lowercase().contains("java")
-                    && ["minecraft", "fabric", "forge", "quilt"].iter().any(|k| command.to_lowercase().contains(k))
+                    && ["minecraft", "fabric", "forge", "quilt"]
+                        .iter()
+                        .any(|k| command.to_lowercase().contains(k))
                 {
                     pids.push(pid);
                 }
@@ -446,7 +491,10 @@ fn detect_mc_ports() -> Vec<u64> {
     for row in found {
         if row.0.fract() == 0.0 && row.0 > 0.0 && row.0 <= 65535.0 && row.1 > 0.0 {
             let key = format!("{}:{}", row.1 as i64, row.0 as i64);
-            if let Some(idx) = rows.iter().position(|r| format!("{}:{}", r.1 as i64, r.0 as i64) == key) {
+            if let Some(idx) = rows
+                .iter()
+                .position(|r| format!("{}:{}", r.1 as i64, r.0 as i64) == key)
+            {
                 rows[idx] = row;
             } else {
                 rows.push(row);
@@ -482,7 +530,11 @@ fn voxlink_start(payload: &Value) -> Result<Value, String> {
         }
         let mut host_port = js_number(payload.get("hostPort"));
         if host_port == 0.0 || host_port.is_nan() {
-            host_port = detect_mc_ports().first().copied().map(|p| p as f64).unwrap_or(0.0);
+            host_port = detect_mc_ports()
+                .first()
+                .copied()
+                .map(|p| p as f64)
+                .unwrap_or(0.0);
         }
         if host_port == 0.0 || host_port.is_nan() {
             return Err("请先启动游戏并对局域网开放世界".to_string());
@@ -499,7 +551,10 @@ fn voxlink_start(payload: &Value) -> Result<Value, String> {
 pub fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
     match channel {
         "voxlink:status" => Some(Ok(snapshot(app))),
-        "voxlink:settings" => Some(Ok(apply_settings(app, &args.first().cloned().unwrap_or(json!({}))))),
+        "voxlink:settings" => Some(Ok(apply_settings(
+            app,
+            &args.first().cloned().unwrap_or(json!({})),
+        ))),
         "voxlink:lobby" => Some(list_rooms(app, &args.first().cloned().unwrap_or(json!({})))),
         "voxlink:stop" => Some(Ok(stop(app))),
         "voxlink:tryDirect" => Some(Ok(try_direct())),

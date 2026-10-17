@@ -37,7 +37,8 @@ const ZIP_ENTRY_LIMIT: usize = 100000;
 const DRAG_LIMIT: usize = 1000;
 const COLON: &str = "：";
 
-static CATALOG: LazyLock<Mutex<HashMap<String, Stored>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static CATALOG: LazyLock<Mutex<HashMap<String, Stored>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 static SCAN_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone)]
@@ -62,13 +63,19 @@ struct ScanErr {
 
 impl ScanErr {
     fn msg(message: impl Into<String>) -> Self {
-        Self { not_found: false, message: message.into() }
+        Self {
+            not_found: false,
+            message: message.into(),
+        }
     }
 }
 
 impl From<std::io::Error> for ScanErr {
     fn from(e: std::io::Error) -> Self {
-        Self { not_found: e.kind() == std::io::ErrorKind::NotFound, message: e.to_string() }
+        Self {
+            not_found: e.kind() == std::io::ErrorKind::NotFound,
+            message: e.to_string(),
+        }
     }
 }
 
@@ -76,7 +83,11 @@ impl From<std::io::Error> for ScanErr {
 
 fn resolve_abs(input: &Path) -> PathBuf {
     let absolute = input.is_absolute();
-    let mut out = if absolute { PathBuf::new() } else { std::env::current_dir().unwrap_or_default() };
+    let mut out = if absolute {
+        PathBuf::new()
+    } else {
+        std::env::current_dir().unwrap_or_default()
+    };
     let mut stack: Vec<std::ffi::OsString> = Vec::new();
     for comp in input.components() {
         match comp {
@@ -113,9 +124,9 @@ fn safe_relative(value: &str) -> Result<(), String> {
         || value.contains('\\')
         || value.contains('\0')
         || value.starts_with('/')
-        || value
-            .split('/')
-            .any(|p| p.is_empty() || p == "." || p == ".." || p.chars().any(|c| ":*?\"<>|".contains(c)));
+        || value.split('/').any(|p| {
+            p.is_empty() || p == "." || p == ".." || p.chars().any(|c| ":*?\"<>|".contains(c))
+        });
     if bad {
         return Err(format!("无效的相对路径：{value}"));
     }
@@ -125,7 +136,10 @@ fn safe_relative(value: &str) -> Result<(), String> {
 fn safe_path(root: &Path, rel: &str, missing: bool) -> Result<PathBuf, ScanErr> {
     safe_relative(rel).map_err(ScanErr::msg)?;
     let base = resolve_abs(root);
-    let base_stat = std::fs::symlink_metadata(&base).map_err(|e| ScanErr { not_found: e.kind() == std::io::ErrorKind::NotFound, message: "目录不是普通目录".into() })?;
+    let base_stat = std::fs::symlink_metadata(&base).map_err(|e| ScanErr {
+        not_found: e.kind() == std::io::ErrorKind::NotFound,
+        message: "目录不是普通目录".into(),
+    })?;
     if !base_stat.is_dir() || base_stat.is_symlink() {
         return Err(ScanErr::msg("目录不是普通目录"));
     }
@@ -133,14 +147,19 @@ fn safe_path(root: &Path, rel: &str, missing: bool) -> Result<PathBuf, ScanErr> 
     for part in rel.split('/') {
         current = current.join(part);
         match std::fs::symlink_metadata(&current) {
-            Ok(meta) if meta.is_symlink() => return Err(ScanErr::msg(format!("不跟随符号链接：{rel}"))),
+            Ok(meta) if meta.is_symlink() => {
+                return Err(ScanErr::msg(format!("不跟随符号链接：{rel}")))
+            }
             Ok(_) => {}
             Err(e) => {
                 let not_found = e.kind() == std::io::ErrorKind::NotFound;
                 if missing && not_found {
                     continue;
                 }
-                return Err(ScanErr { not_found, message: e.to_string() });
+                return Err(ScanErr {
+                    not_found,
+                    message: e.to_string(),
+                });
             }
         }
     }
@@ -201,7 +220,14 @@ fn active_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .to_string();
     let bound = s["folders"]
         .as_array()
-        .map(|list| list.iter().any(|f| f["path"].as_str().map(|p| key_of_str(p) == key_of_str(&root)).unwrap_or(false)))
+        .map(|list| {
+            list.iter().any(|f| {
+                f["path"]
+                    .as_str()
+                    .map(|p| key_of_str(p) == key_of_str(&root))
+                    .unwrap_or(false)
+            })
+        })
         .unwrap_or(false);
     if root.is_empty() || !bound {
         return Err("请先选择已登记的游戏文件夹".into());
@@ -228,7 +254,9 @@ fn validate_instance_name(name: &str) -> Result<(), String> {
         || name.len() > 80
         || name == "."
         || name == ".."
-        || name.chars().any(|c| "\\/:*?\"<>|".contains(c) || (c as u32) < 0x20)
+        || name
+            .chars()
+            .any(|c| "\\/:*?\"<>|".contains(c) || (c as u32) < 0x20)
     {
         return Err("实例名称无效".into());
     }
@@ -243,7 +271,14 @@ fn center_target_dir(app: &tauri::AppHandle, target: &Value) -> Result<PathBuf, 
     let s = settings::get(app);
     let registered = s["folders"]
         .as_array()
-        .map(|list| list.iter().any(|f| f["path"].as_str().map(|p| same_path(p, folder)).unwrap_or(false)))
+        .map(|list| {
+            list.iter().any(|f| {
+                f["path"]
+                    .as_str()
+                    .map(|p| same_path(p, folder))
+                    .unwrap_or(false)
+            })
+        })
         .unwrap_or(false);
     if !registered {
         return Err("游戏文件夹尚未登记".into());
@@ -314,7 +349,14 @@ fn selected_items(app: &tauri::AppHandle, ids: &Value) -> Result<Vec<Stored>, St
         if !seen.insert(id.clone()) {
             continue;
         }
-        let matched = catalog.get(&id).filter(|stored| stored.source.folder.as_ref().map(|f| bound.contains(&key_of(f))).unwrap_or(false));
+        let matched = catalog.get(&id).filter(|stored| {
+            stored
+                .source
+                .folder
+                .as_ref()
+                .map(|f| bound.contains(&key_of(f)))
+                .unwrap_or(false)
+        });
         match matched {
             Some(stored) => out.push(stored.clone()),
             None => return Err("录像所属文件夹已解除绑定，请刷新列表".into()),
@@ -359,7 +401,11 @@ fn drag_path(root: &Path, rel: &str) -> Result<PathBuf, String> {
 
 fn recycle_bin_delete(target: &Path) -> Result<(), String> {
     let escaped = target.to_string_lossy().replace('\'', "''");
-    let method = if target.is_dir() { "DeleteDirectory" } else { "DeleteFile" };
+    let method = if target.is_dir() {
+        "DeleteDirectory"
+    } else {
+        "DeleteFile"
+    };
     let script = format!(
         "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::{method}('{escaped}', 'OnlyErrorDialogs', 'SendToRecycleBin')"
     );
@@ -383,7 +429,9 @@ fn recycle_file(directory: &Path, name: &str) -> Result<(), String> {
     let bad_name = name.is_empty()
         || name == "."
         || name == ".."
-        || name.chars().any(|c| "\\/:*?\"<>|\0".contains(c) || (c as u32) < 0x20)
+        || name
+            .chars()
+            .any(|c| "\\/:*?\"<>|\0".contains(c) || (c as u32) < 0x20)
         || name.ends_with('.')
         || name.ends_with(' ');
     if bad_name {
@@ -410,8 +458,10 @@ fn recycle_file(directory: &Path, name: &str) -> Result<(), String> {
     let current = stat_of(&target)?;
     #[cfg(unix)]
     let moved = current.is_symlink()
-        || std::os::unix::fs::MetadataExt::ino(&current) != std::os::unix::fs::MetadataExt::ino(&stat)
-        || std::os::unix::fs::MetadataExt::dev(&current) != std::os::unix::fs::MetadataExt::dev(&stat);
+        || std::os::unix::fs::MetadataExt::ino(&current)
+            != std::os::unix::fs::MetadataExt::ino(&stat)
+        || std::os::unix::fs::MetadataExt::dev(&current)
+            != std::os::unix::fs::MetadataExt::dev(&stat);
     #[cfg(not(unix))]
     let moved = current.is_symlink() || file_id(&current) != file_id(&stat);
     if moved {
@@ -462,7 +512,11 @@ pub fn validate_recording(file: &Path, kind: &str) -> Result<Value, String> {
     const CORRUPT: &str = "录像压缩包损坏或尚未保存完成";
     let handle = std::fs::File::open(file).map_err(|_| CORRUPT.to_string())?;
     let mut archive = zip::ZipArchive::new(handle).map_err(|_| CORRUPT.to_string())?;
-    let meta_name = if kind == "replaymod" { "metaData.json" } else { "metadata.json" };
+    let meta_name = if kind == "replaymod" {
+        "metaData.json"
+    } else {
+        "metadata.json"
+    };
     let mut names: HashSet<String> = HashSet::new();
     let mut count = 0usize;
     let mut meta_index: Option<usize> = None;
@@ -471,7 +525,9 @@ pub fn validate_recording(file: &Path, kind: &str) -> Result<Value, String> {
         if count > ZIP_ENTRY_LIMIT {
             return Err("录像条目过多".into());
         }
-        let entry = archive.by_index_raw(index).map_err(|_| CORRUPT.to_string())?;
+        let entry = archive
+            .by_index_raw(index)
+            .map_err(|_| CORRUPT.to_string())?;
         let name = entry.name().to_string();
         names.insert(name.clone());
         if name == meta_name {
@@ -484,13 +540,17 @@ pub fn validate_recording(file: &Path, kind: &str) -> Result<Value, String> {
     let metadata: Value = match meta_index {
         None => Value::Null,
         Some(index) => {
-            let entry = archive.by_index(index).map_err(|_| "无法读取录像元数据".to_string())?;
+            let entry = archive
+                .by_index(index)
+                .map_err(|_| "无法读取录像元数据".to_string())?;
             let mut bytes = Vec::new();
-            std::io::Read::read_to_end(&mut entry.take(META_LIMIT + 1), &mut bytes).map_err(|_| "无法读取录像元数据".to_string())?;
+            std::io::Read::read_to_end(&mut entry.take(META_LIMIT + 1), &mut bytes)
+                .map_err(|_| "无法读取录像元数据".to_string())?;
             if bytes.len() as u64 > META_LIMIT {
                 return Err("录像元数据过大".into());
             }
-            let parsed: Value = serde_json::from_slice(&bytes).map_err(|_| "录像元数据损坏".to_string())?;
+            let parsed: Value =
+                serde_json::from_slice(&bytes).map_err(|_| "录像元数据损坏".to_string())?;
             if !parsed.is_object() {
                 return Err("录像元数据损坏".into());
             }
@@ -501,13 +561,24 @@ pub fn validate_recording(file: &Path, kind: &str) -> Result<Value, String> {
         metadata.is_object() && names.contains("recording.tmcpr")
     } else {
         let chunks_ok = match metadata.get("chunks") {
-            Some(Value::Object(map)) => !map.is_empty() && map.keys().all(|name| names.contains(name)),
+            Some(Value::Object(map)) => {
+                !map.is_empty() && map.keys().all(|name| names.contains(name))
+            }
             _ => false,
         };
-        metadata.is_object() && metadata.get("uuid").map(|v| v.is_string()).unwrap_or(false) && chunks_ok
+        metadata.is_object()
+            && metadata.get("uuid").map(|v| v.is_string()).unwrap_or(false)
+            && chunks_ok
     };
     if !valid {
-        return Err(format!("不是完整的 {} 录像", if kind == "replaymod" { "ReplayMod" } else { "Flashback" }));
+        return Err(format!(
+            "不是完整的 {} 录像",
+            if kind == "replaymod" {
+                "ReplayMod"
+            } else {
+                "Flashback"
+            }
+        ));
     }
     Ok(metadata)
 }
@@ -521,7 +592,12 @@ impl Drop for StageGuard {
 }
 
 // 对应原版 recordingFiles.ts copyRecording()
-fn copy_recording_core(source: &Path, destination: &Path, rec: Option<&TaskRecord>, mut on_bytes: &mut dyn FnMut(u64)) -> Result<PathBuf, String> {
+fn copy_recording_core(
+    source: &Path,
+    destination: &Path,
+    rec: Option<&TaskRecord>,
+    mut on_bytes: &mut dyn FnMut(u64),
+) -> Result<PathBuf, String> {
     const CHANGED: &str = "录像在复制期间发生变化，请停止录制后重试";
     let before = stat_of(source)?;
     if !before.is_file() || before.is_symlink() {
@@ -550,14 +626,20 @@ fn copy_recording_core(source: &Path, destination: &Path, rec: Option<&TaskRecor
             break;
         }
         digest.update(&buffer[..read]);
-        writer.write_all(&buffer[..read]).map_err(|e| e.to_string())?;
+        writer
+            .write_all(&buffer[..read])
+            .map_err(|e| e.to_string())?;
         transferred += read as u64;
         on_bytes(transferred);
     }
     writer.flush().map_err(|e| e.to_string())?;
     drop(writer);
     let after = stat_of(source)?;
-    if after.is_symlink() || file_id(&after) != file_id(&before) || after.len() != before.len() || mtime_ms(&after) != mtime_ms(&before) {
+    if after.is_symlink()
+        || file_id(&after) != file_id(&before)
+        || after.len() != before.len()
+        || mtime_ms(&after) != mtime_ms(&before)
+    {
         return Err(CHANGED.into());
     }
     let sha = hex::encode(digest.finalize());
@@ -569,8 +651,14 @@ fn copy_recording_core(source: &Path, destination: &Path, rec: Option<&TaskRecor
             return Err("已取消".into());
         }
     }
-    let stem = source.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let ext = source.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let stem = source
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = source
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
     let source_abs = resolve_abs(source);
     for index in 0..10000usize {
         let name = if index == 0 {
@@ -596,13 +684,27 @@ fn copy_recording_core(source: &Path, destination: &Path, rec: Option<&TaskRecor
     Err("同名录像过多，请整理目标目录".into())
 }
 
-pub fn copy_recording(app: &tauri::AppHandle, source: &Path, destination: &Path, task_id: &str) -> Result<PathBuf, String> {
+pub fn copy_recording(
+    app: &tauri::AppHandle,
+    source: &Path,
+    destination: &Path,
+    task_id: &str,
+) -> Result<PathBuf, String> {
     let rec = tasks::get_task(task_id);
-    let size = std::fs::symlink_metadata(source).map(|m| m.len()).unwrap_or(0);
+    let size = std::fs::symlink_metadata(source)
+        .map(|m| m.len())
+        .unwrap_or(0);
     let title = rec.as_ref().map(|t| t.title.clone()).unwrap_or_default();
-    let name = source.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let mut on_bytes = move |bytes: u64| {
-        let progress = if size > 0 { (bytes as f64 / size as f64).min(1.0) } else { 1.0 };
+        let progress = if size > 0 {
+            (bytes as f64 / size as f64).min(1.0)
+        } else {
+            1.0
+        };
         tasks::emit_progress(
             app,
             json!({ "taskId": task_id, "taskTitle": title, "stage": "world", "progress": progress, "text": name }),
@@ -624,7 +726,9 @@ fn visit_source(
 ) -> Result<(), ScanErr> {
     *visited += 1;
     if *visited > SCAN_DIR_LIMIT {
-        return Err(ScanErr::msg("扫描已达到 20000 个目录/文件上限，请分目录整理"));
+        return Err(ScanErr::msg(
+            "扫描已达到 20000 个目录/文件上限，请分目录整理",
+        ));
     }
     let dir = safe_path(&source.root, rel, true)?;
     let reader = match std::fs::read_dir(&dir) {
@@ -636,7 +740,12 @@ fn visit_source(
     for entry in reader {
         let entry = entry.map_err(ScanErr::from)?;
         let file_type = entry.file_type().map_err(ScanErr::from)?;
-        listing.push((entry.file_name().to_string_lossy().into_owned(), file_type.is_dir(), file_type.is_file(), file_type.is_symlink()));
+        listing.push((
+            entry.file_name().to_string_lossy().into_owned(),
+            file_type.is_dir(),
+            file_type.is_file(),
+            file_type.is_symlink(),
+        ));
     }
     let suffix = if kind == "replaymod" { ".mcpr" } else { ".zip" };
     for (name, is_dir, is_file, is_link) in listing {
@@ -647,7 +756,10 @@ fn visit_source(
         if is_dir {
             if depth < 4 {
                 let lower = name.to_lowercase();
-                if !lower.ends_with(".cache") && !lower.ends_with(".tmp") && !lower.ends_with(".del") {
+                if !lower.ends_with(".cache")
+                    && !lower.ends_with(".tmp")
+                    && !lower.ends_with(".del")
+                {
                     visit_source(source, kind, &next, depth + 1, visited, found, order)?;
                 }
             }
@@ -664,7 +776,10 @@ fn visit_source(
         let id = hex::encode(Sha256::digest(key_of(&full).as_bytes()));
         let mut entry = Map::new();
         if let Some(folder) = &source.folder {
-            entry.insert("folder".into(), json!(folder.to_string_lossy().into_owned()));
+            entry.insert(
+                "folder".into(),
+                json!(folder.to_string_lossy().into_owned()),
+            );
         }
         entry.insert("id".into(), json!(id.clone()));
         entry.insert("name".into(), json!(name));
@@ -672,17 +787,35 @@ fn visit_source(
         entry.insert("size".into(), json!(meta.len()));
         entry.insert("modified".into(), json!(mtime_ms(&meta)));
         entry.insert("source".into(), json!(source.label));
-        entry.insert("directory".into(), json!(full.parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()));
+        entry.insert(
+            "directory".into(),
+            json!(full
+                .parent()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default()),
+        );
         entry.insert("library".into(), json!(source.library));
         if !found.contains_key(&id) {
             order.push(id.clone());
         }
-        found.insert(id, Stored { entry: Value::Object(entry), source: source.clone(), rel: next });
+        found.insert(
+            id,
+            Stored {
+                entry: Value::Object(entry),
+                source: source.clone(),
+                rel: next,
+            },
+        );
     }
     Ok(())
 }
 
-fn scan_inner(app: &tauri::AppHandle, rec: &TaskRecord, task_id: &str, task_title: &str) -> Result<Value, String> {
+fn scan_inner(
+    app: &tauri::AppHandle,
+    rec: &TaskRecord,
+    task_id: &str,
+    task_title: &str,
+) -> Result<Value, String> {
     let generation = SCAN_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let root = active_root(app)?;
     let collection = root.join("recordings");
@@ -703,9 +836,23 @@ fn scan_inner(app: &tauri::AppHandle, rec: &TaskRecord, task_id: &str, task_titl
     for folder in &registered {
         let root_path = resolve_abs(Path::new(folder["path"].as_str().unwrap_or("")));
         let root_text = root_path.to_string_lossy().into_owned();
-        let label = folder["name"].as_str().filter(|v| !v.is_empty()).map(str::to_string).unwrap_or_else(|| root_text.clone());
-        sources.push(Source { folder: Some(root_path.clone()), root: root_path.join("recordings"), label: format!("{label} · 集中收藏"), library: true });
-        sources.push(Source { folder: Some(root_path.clone()), root: root_path.clone(), label: format!("{label} · 共享目录"), library: false });
+        let label = folder["name"]
+            .as_str()
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| root_text.clone());
+        sources.push(Source {
+            folder: Some(root_path.clone()),
+            root: root_path.join("recordings"),
+            label: format!("{label} · 集中收藏"),
+            library: true,
+        });
+        sources.push(Source {
+            folder: Some(root_path.clone()),
+            root: root_path.clone(),
+            label: format!("{label} · 共享目录"),
+            library: false,
+        });
         let (ids, errors) = installed_version_ids(&root_path);
         for error in errors {
             warnings.push(format!("{root_text}{COLON}{error}"));
@@ -713,7 +860,12 @@ fn scan_inner(app: &tauri::AppHandle, rec: &TaskRecord, task_id: &str, task_titl
         for id in ids {
             match center_target_dir(app, &json!({ "folder": root_text, "id": id })) {
                 Ok(dir) => {
-                    sources.push(Source { folder: Some(root_path.clone()), root: dir, label: id.clone(), library: false });
+                    sources.push(Source {
+                        folder: Some(root_path.clone()),
+                        root: dir,
+                        label: id.clone(),
+                        library: false,
+                    });
                     instances.push(json!({ "folder": root_text, "id": id, "name": format!("{id} · {root_text}") }));
                 }
                 Err(_) => warnings.push(format!("无法读取实例：{root_text}{COLON}{id}")),
@@ -729,7 +881,15 @@ fn scan_inner(app: &tauri::AppHandle, rec: &TaskRecord, task_id: &str, task_titl
             continue;
         }
         for kind in ["replaymod", "flashback"] {
-            if let Err(e) = visit_source(source, kind, recording_dir(kind), 0, &mut visited, &mut found, &mut order) {
+            if let Err(e) = visit_source(
+                source,
+                kind,
+                recording_dir(kind),
+                0,
+                &mut visited,
+                &mut found,
+                &mut order,
+            ) {
                 if !e.not_found {
                     warnings.push(format!("{}{COLON}{}", source.label, e.message));
                 }
@@ -762,8 +922,17 @@ fn scan_inner(app: &tauri::AppHandle, rec: &TaskRecord, task_id: &str, task_titl
             }
         }
     }
-    let mut entries: Vec<Value> = order.iter().filter_map(|id| found.get(id)).map(|stored| stored.entry.clone()).collect();
-    entries.sort_by(|a, b| b["modified"].as_f64().unwrap_or(0.0).total_cmp(&a["modified"].as_f64().unwrap_or(0.0)));
+    let mut entries: Vec<Value> = order
+        .iter()
+        .filter_map(|id| found.get(id))
+        .map(|stored| stored.entry.clone())
+        .collect();
+    entries.sort_by(|a, b| {
+        b["modified"]
+            .as_f64()
+            .unwrap_or(0.0)
+            .total_cmp(&a["modified"].as_f64().unwrap_or(0.0))
+    });
     Ok(json!({
         "entries": entries,
         "warnings": warnings,
@@ -795,8 +964,22 @@ fn action_title(action: &str) -> &'static str {
     }
 }
 
-fn emit_run_progress(app: &tauri::AppHandle, task_id: &str, task_title: &str, total: u64, base: u64, bytes: u64, processed: usize, count: usize, name: &str) {
-    let progress = if total > 0 { ((base + bytes) as f64 / total as f64).min(1.0) } else { 0.0 };
+fn emit_run_progress(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    task_title: &str,
+    total: u64,
+    base: u64,
+    bytes: u64,
+    processed: usize,
+    count: usize,
+    name: &str,
+) {
+    let progress = if total > 0 {
+        ((base + bytes) as f64 / total as f64).min(1.0)
+    } else {
+        0.0
+    };
     tasks::emit_progress(
         app,
         json!({
@@ -827,8 +1010,13 @@ fn run_one(
         return Err("已取消".into());
     }
     let name = item.entry["name"].as_str().unwrap_or("").to_string();
-    let kind = item.entry["kind"].as_str().unwrap_or("replaymod").to_string();
-    emit_run_progress(app, task_id, task_title, total, base, 0, processed, count, &name);
+    let kind = item.entry["kind"]
+        .as_str()
+        .unwrap_or("replaymod")
+        .to_string();
+    emit_run_progress(
+        app, task_id, task_title, total, base, 0, processed, count, &name,
+    );
     let file = current_file(item)?;
     if action == "trash" {
         let inner = item.clone();
@@ -840,16 +1028,25 @@ fn run_one(
             current_file(&inner)?;
             let full = safe_path(&inner.source.root, &inner.rel, false).map_err(|e| e.message)?;
             let parent = full.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-            let leaf = full.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let leaf = full
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             recycle_file(&parent, &leaf)
         })?;
         return Ok(None);
     }
     validate_recording(&file, &kind)?;
-    let root = destination.ok_or("未指定录像目标目录".to_string())?.to_path_buf();
+    let root = destination
+        .ok_or("未指定录像目标目录".to_string())?
+        .to_path_buf();
     let mut on_bytes = {
         let (name, app_ref, tid, title) = (name.clone(), app, task_id, task_title);
-        move |bytes: u64| emit_run_progress(app_ref, tid, title, total, base, bytes, processed, count, &name)
+        move |bytes: u64| {
+            emit_run_progress(
+                app_ref, tid, title, total, base, bytes, processed, count, &name,
+            )
+        }
     };
     let mut output: Option<PathBuf> = None;
     {
@@ -875,11 +1072,19 @@ fn run_one(
     Ok(output)
 }
 
-fn run(app: &tauri::AppHandle, items: Vec<Stored>, action: &str, destination: Option<&Path>) -> Result<Value, String> {
+fn run(
+    app: &tauri::AppHandle,
+    items: Vec<Stored>,
+    action: &str,
+    destination: Option<&Path>,
+) -> Result<Value, String> {
     let rec = tasks::register_task(&format!("录像文件 · {}", action_title(action)), "world");
     let task_id = rec.id.clone();
     let task_title = rec.title.clone();
-    let total: u64 = items.iter().map(|item| item.entry["size"].as_u64().unwrap_or(0)).sum();
+    let total: u64 = items
+        .iter()
+        .map(|item| item.entry["size"].as_u64().unwrap_or(0))
+        .sum();
     let count = items.len();
     let mut results: Vec<Value> = Vec::new();
     let mut done = 0u64;
@@ -888,7 +1093,19 @@ fn run(app: &tauri::AppHandle, items: Vec<Stored>, action: &str, destination: Op
         let name = item.entry["name"].as_str().unwrap_or("").to_string();
         let size = item.entry["size"].as_u64().unwrap_or(0);
         let processed = results.len();
-        let outcome = run_one(app, &rec, item, action, destination, &task_id, &task_title, total, done, processed, count);
+        let outcome = run_one(
+            app,
+            &rec,
+            item,
+            action,
+            destination,
+            &task_id,
+            &task_title,
+            total,
+            done,
+            processed,
+            count,
+        );
         match outcome {
             Ok(path) => {
                 let mut row = json!({ "id": id, "name": name, "ok": true });
@@ -898,15 +1115,26 @@ fn run(app: &tauri::AppHandle, items: Vec<Stored>, action: &str, destination: Op
                 results.push(row);
             }
             Err(e) => {
-                let message = if rec.cancelled.load(Ordering::SeqCst) { "任务已取消，原录像保留".to_string() } else { e };
+                let message = if rec.cancelled.load(Ordering::SeqCst) {
+                    "任务已取消，原录像保留".to_string()
+                } else {
+                    e
+                };
                 results.push(json!({ "id": id, "name": name, "ok": false, "error": message }));
             }
         }
         done += size;
     }
-    let failed = results.iter().filter(|row| row["ok"].as_bool() != Some(true)).count();
+    let failed = results
+        .iter()
+        .filter(|row| row["ok"].as_bool() != Some(true))
+        .count();
     let cancelled = rec.cancelled.load(Ordering::SeqCst);
-    let error = if failed > 0 { Some(format!("{failed} 个录像处理失败，请查看录像页结果")) } else { None };
+    let error = if failed > 0 {
+        Some(format!("{failed} 个录像处理失败，请查看录像页结果"))
+    } else {
+        None
+    };
     tasks::task_done(app, &task_id, failed == 0, error, cancelled, None);
     Ok(Value::Array(results))
 }
@@ -917,7 +1145,12 @@ fn operate(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
     let ids = request["ids"].clone();
     let valid_action = matches!(action.as_str(), "collect" | "export" | "dispatch" | "trash");
     let id_len = ids.as_array().map(|a| a.len()).unwrap_or(0);
-    if !request.is_object() || !valid_action || !ids.is_array() || id_len < 1 || id_len > SCAN_ENTRY_LIMIT {
+    if !request.is_object()
+        || !valid_action
+        || !ids.is_array()
+        || id_len < 1
+        || id_len > SCAN_ENTRY_LIMIT
+    {
         return Err("录像操作参数无效".into());
     }
     let root = active_root(app)?;
@@ -926,13 +1159,22 @@ fn operate(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
     match action.as_str() {
         "collect" => destination = Some(library_dir(&root)?),
         "dispatch" => {
-            let target = request.get("target").filter(|v| v.is_object()).ok_or("请选择目标实例".to_string())?;
+            let target = request
+                .get("target")
+                .filter(|v| v.is_object())
+                .ok_or("请选择目标实例".to_string())?;
             destination = Some(center_target_dir(app, target)?);
         }
         "export" => {
             use tauri_plugin_dialog::DialogExt;
-            let picked = app.dialog().file().set_title("选择录像提取文件夹").blocking_pick_folder();
-            let Some(picked) = picked else { return Ok(Value::Null) };
+            let picked = app
+                .dialog()
+                .file()
+                .set_title("选择录像提取文件夹")
+                .blocking_pick_folder();
+            let Some(picked) = picked else {
+                return Ok(Value::Null);
+            };
             destination = Some(picked.into_path().map_err(|e| e.to_string())?);
         }
         _ => {}
@@ -949,14 +1191,23 @@ fn import(app: &tauri::AppHandle) -> Result<Value, String> {
         .set_title("导入录像到集中收藏")
         .add_filter("ReplayMod / Flashback", &["mcpr", "zip"])
         .blocking_pick_files();
-    let Some(picked) = picked else { return Ok(Value::Null) };
+    let Some(picked) = picked else {
+        return Ok(Value::Null);
+    };
     let destination = library_dir(&root)?;
     let mut items: Vec<Stored> = Vec::new();
     for raw in picked {
         let file = raw.into_path().map_err(|e| e.to_string())?;
         let meta = stat_of(&file)?;
-        let kind = if file.to_string_lossy().to_lowercase().ends_with(".mcpr") { "replaymod" } else { "flashback" };
-        let rel = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let kind = if file.to_string_lossy().to_lowercase().ends_with(".mcpr") {
+            "replaymod"
+        } else {
+            "flashback"
+        };
+        let rel = file
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let parent = file.parent().map(|p| p.to_path_buf()).unwrap_or_default();
         let mut entry = Map::new();
         entry.insert("id".into(), json!(file.to_string_lossy().into_owned()));
@@ -965,15 +1216,31 @@ fn import(app: &tauri::AppHandle) -> Result<Value, String> {
         entry.insert("size".into(), json!(meta.len()));
         entry.insert("modified".into(), json!(mtime_ms(&meta)));
         entry.insert("source".into(), json!("导入"));
-        entry.insert("directory".into(), json!(parent.to_string_lossy().into_owned()));
+        entry.insert(
+            "directory".into(),
+            json!(parent.to_string_lossy().into_owned()),
+        );
         entry.insert("library".into(), json!(false));
-        items.push(Stored { entry: Value::Object(entry), source: Source { folder: None, root: parent, label: "导入".into(), library: false }, rel });
+        items.push(Stored {
+            entry: Value::Object(entry),
+            source: Source {
+                folder: None,
+                root: parent,
+                label: "导入".into(),
+                library: false,
+            },
+            rel,
+        });
     }
     run(app, items, "collect", Some(&destination))
 }
 
 fn open_directory(dir: &Path) -> Result<(), String> {
-    let mut command = if cfg!(windows) { std::process::Command::new("explorer.exe") } else { std::process::Command::new("xdg-open") };
+    let mut command = if cfg!(windows) {
+        std::process::Command::new("explorer.exe")
+    } else {
+        std::process::Command::new("xdg-open")
+    };
     command.arg(dir.as_os_str());
     command.spawn().map_err(|e| e.to_string())?;
     Ok(())
@@ -991,10 +1258,17 @@ fn reveal_item(path: &Path) -> Result<(), String> {
 }
 
 fn open(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
-    let id = args.first().and_then(|v| v.as_str()).filter(|v| !v.is_empty()).map(str::to_string);
+    let id = args
+        .first()
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
     match id {
         Some(id) => {
-            let item = selected_items(app, &json!([id]))?.into_iter().next().ok_or("请选择录像文件".to_string())?;
+            let item = selected_items(app, &json!([id]))?
+                .into_iter()
+                .next()
+                .ok_or("请选择录像文件".to_string())?;
             reveal_item(&current_file(&item)?)?;
         }
         None => {
@@ -1006,9 +1280,21 @@ fn open(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
 }
 
 fn mod_versions(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
-    let kind = args.first().and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let mc = args.get(1).and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let loader = args.get(2).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let kind = args
+        .first()
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let mc = args
+        .get(1)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let loader = args
+        .get(2)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     installer::run_blocking(|| recording_mod_versions(app, &kind, &mc, &loader)).map(Value::Array)
 }
 
@@ -1029,14 +1315,20 @@ fn handle_drag(app: &tauri::AppHandle, args: &[Value]) {
                 return Err("录像已变化，请刷新后重试".into());
             }
         }
-        Err(format!("原生文件拖出暂不可用{COLON}请使用「提取到文件夹」或「收集到当前文件夹收藏」"))
+        Err(format!(
+            "原生文件拖出暂不可用{COLON}请使用「提取到文件夹」或「收集到当前文件夹收藏」"
+        ))
     })();
     if let Err(e) = outcome {
         installer::emit_event(app, "files:dragError", &Value::String(e));
     }
 }
 
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         "recordings:list" => Some(list(app)),
         "recordings:operate" => Some(operate(app, args)),

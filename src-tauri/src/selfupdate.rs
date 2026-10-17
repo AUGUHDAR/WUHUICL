@@ -28,7 +28,11 @@ fn check(app: &tauri::AppHandle, force: bool) -> Value {
     let Ok(data) = resp.json::<Value>() else {
         return json!({ "ok": false, "hasUpdate": false, "reason": "响应解析失败" });
     };
-    let tag = data["tag_name"].as_str().unwrap_or("").trim_start_matches(['v', 'V']).to_string();
+    let tag = data["tag_name"]
+        .as_str()
+        .unwrap_or("")
+        .trim_start_matches(['v', 'V'])
+        .to_string();
     let has_update = is_newer(&tag, &current_version());
     let assets: Vec<Value> = data["assets"]
         .as_array()
@@ -65,7 +69,13 @@ fn check(app: &tauri::AppHandle, force: bool) -> Value {
 fn is_newer(tag: &str, current: &str) -> bool {
     let parse = |s: &str| -> Vec<u64> {
         s.split('.')
-            .map(|p| p.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0))
+            .map(|p| {
+                p.chars()
+                    .filter(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse()
+                    .unwrap_or(0)
+            })
             .collect()
     };
     let (a, b) = (parse(tag), parse(current));
@@ -103,7 +113,9 @@ fn list_releases() -> Value {
     if !resp.status().is_success() {
         return json!([]);
     }
-    let Ok(data) = resp.json::<Value>() else { return json!([]) };
+    let Ok(data) = resp.json::<Value>() else {
+        return json!([]);
+    };
     Value::Array(
         data.as_array()
             .cloned()
@@ -136,7 +148,11 @@ pub fn startup_check(app: &tauri::AppHandle) {
 }
 
 /// 统一入口
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         "update:check" => Some(Ok(check(
             app,
@@ -164,12 +180,18 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
-            std::fs::write(&path, serde_json::to_vec_pretty(&def).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            std::fs::write(
+                &path,
+                serde_json::to_vec_pretty(&def).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
             Ok(Value::Null)
         })()),
         // 更新事务与替换助手未移植：这里如实说明。WUHUICL 交付形态就是便携单文件，
         // 所以不能套用原版那句"当前运行形态不支持自更新（仅便携版）"。
-        "update:start" | "update:apply" | "update:applyLocal" | "update:restoreBackup" => Some(Err("更新器未移植".into())),
+        "update:start" | "update:apply" | "update:applyLocal" | "update:restoreBackup" => {
+            Some(Err("更新器未移植".into()))
+        }
         // 没有已就绪的更新时，原版 applyPendingIfAny() 恒返回 false
         "update:applyPending" => Some(Ok(Value::Bool(false))),
         "update:pickLocalFile" => Some(Ok(Value::Null)),

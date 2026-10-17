@@ -29,7 +29,13 @@ pub const DEGRADED_AFTER_FAILURES: u32 = 8;
 pub const DEGRADED_DELAY_MS: u64 = 30000;
 pub const HTTP_TIMEOUT_MS: u64 = 10_000;
 
-pub const FATAL_CODES: [&str; 5] = ["ROOM_NOT_FOUND", "ROOM_EXPIRED", "ROOM_CLOSED", "ROOM_EVICTED", "INVALID_TOKEN"];
+pub const FATAL_CODES: [&str; 5] = [
+    "ROOM_NOT_FOUND",
+    "ROOM_EXPIRED",
+    "ROOM_CLOSED",
+    "ROOM_EVICTED",
+    "INVALID_TOKEN",
+];
 
 pub fn now_ms() -> f64 {
     SystemTime::now()
@@ -79,7 +85,13 @@ pub fn fmt_number(v: f64) -> String {
 pub fn signal_key(signal: &SignalMsg) -> String {
     match &signal.id {
         Some(id) => id.clone(),
-        None => format!("{}|{}|{}|{}", signal.from, signal.rtype, fmt_number(signal.timestamp), signal.data.to_string()),
+        None => format!(
+            "{}|{}|{}|{}",
+            signal.from,
+            signal.rtype,
+            fmt_number(signal.timestamp),
+            signal.data.to_string()
+        ),
     }
 }
 
@@ -120,7 +132,9 @@ impl SeenSet {
 
 /// 心跳间隔：服务端 heartbeatInterval（秒）钳到 1..30 秒，缺省 5 秒（session.ts:110）
 pub fn heartbeat_delay_ms(info: Option<&Value>) -> u64 {
-    let raw = info.and_then(|v| v.get("heartbeatInterval")).and_then(|v| v.as_f64());
+    let raw = info
+        .and_then(|v| v.get("heartbeatInterval"))
+        .and_then(|v| v.as_f64());
     match raw {
         Some(sec) if sec.is_finite() && sec > 0.0 => ((sec * 1000.0) as u64).clamp(1000, 30000),
         _ => HEARTBEAT_BASE_MS,
@@ -145,7 +159,11 @@ pub struct ApiFailure {
 
 impl ApiFailure {
     pub fn plain(message: &str) -> Self {
-        ApiFailure { code: String::new(), message: message.to_string(), status: 0 }
+        ApiFailure {
+            code: String::new(),
+            message: message.to_string(),
+            status: 0,
+        }
     }
 
     /// APIError 的 message 本身就是 `"<code>: <message>"`（api.ts:4），普通 Error 只有文案
@@ -161,7 +179,9 @@ impl ApiFailure {
 /// 对应 session.ts:39-50：过滤缺 type 或非对象 data 的信号
 pub fn parse_signals(value: &Value) -> Vec<SignalMsg> {
     let mut out = Vec::new();
-    let Some(list) = value.get("s").and_then(|v| v.as_array()) else { return out };
+    let Some(list) = value.get("s").and_then(|v| v.as_array()) else {
+        return out;
+    };
     for item in list {
         let rtype = match item.get("type").and_then(|v| v.as_str()) {
             Some(t) => t.to_string(),
@@ -171,17 +191,21 @@ pub fn parse_signals(value: &Value) -> Vec<SignalMsg> {
             continue;
         }
         out.push(SignalMsg {
-            id: item
-                .get("id")
-                .filter(|v| !v.is_null())
-                .map(|v| match v {
-                    Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                }),
-            from: item.get("from").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+            id: item.get("id").filter(|v| !v.is_null()).map(|v| match v {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            }),
+            from: item
+                .get("from")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
             rtype,
             data: item.get("data").cloned().unwrap_or(Value::Null),
-            timestamp: item.get("timestamp").and_then(|v| v.as_f64()).unwrap_or_default(),
+            timestamp: item
+                .get("timestamp")
+                .and_then(|v| v.as_f64())
+                .unwrap_or_default(),
             to: item.get("to").and_then(|v| v.as_str()).map(str::to_string),
         });
     }
@@ -200,7 +224,11 @@ pub fn signal_to_json(signal: &SignalMsg) -> Value {
 }
 
 enum Outbound {
-    Call { id: u64, frame: String, reply: Sender<Result<Value, ApiFailure>> },
+    Call {
+        id: u64,
+        frame: String,
+        reply: Sender<Result<Value, ApiFailure>>,
+    },
     Shutdown,
 }
 
@@ -246,7 +274,11 @@ impl VoxlinkSession {
     ) -> Self {
         VoxlinkSession {
             supervisor: Arc::new(Supervisor {
-                shared: Arc::new(Mutex::new(Shared { since: now_ms(), next_id: 1, ..Default::default() })),
+                shared: Arc::new(Mutex::new(Shared {
+                    since: now_ms(),
+                    next_id: 1,
+                    ..Default::default()
+                })),
                 base_url,
                 sink: Arc::new(Mutex::new(None)),
                 payload_base: json!({ "code": code, "token": token, "isHost": is_host }),
@@ -257,7 +289,10 @@ impl VoxlinkSession {
                 .user_agent(format!("WUHUICL-App/{}", version))
                 .default_headers({
                     let mut h = reqwest::header::HeaderMap::new();
-                    h.insert("X-VoxLink-Version", reqwest::header::HeaderValue::from_str(&version).expect("版本号可用"));
+                    h.insert(
+                        "X-VoxLink-Version",
+                        reqwest::header::HeaderValue::from_str(&version).expect("版本号可用"),
+                    );
                     h
                 })
                 .build()
@@ -315,8 +350,16 @@ impl VoxlinkSession {
                 st.next_id = st.next_id.wrapping_add(1);
                 id
             };
-            let frame = json!({ "id": id, "route": route, "method": "POST", "body": body }).to_string();
-            if tx.send(Outbound::Call { id, frame, reply: reply_tx }).is_ok() {
+            let frame =
+                json!({ "id": id, "route": route, "method": "POST", "body": body }).to_string();
+            if tx
+                .send(Outbound::Call {
+                    id,
+                    frame,
+                    reply: reply_tx,
+                })
+                .is_ok()
+            {
                 return match reply_rx.recv_timeout(Duration::from_millis(RESPONSE_TIMEOUT_MS)) {
                     Ok(result) => result,
                     Err(_) => Err(ApiFailure::plain("信令响应超时")),
@@ -330,8 +373,19 @@ impl VoxlinkSession {
     pub fn http_post(&self, route: &str, body: &Value) -> Result<Value, ApiFailure> {
         let base = (self.supervisor.base_url)();
         let mut url = match url::Url::parse(&base) {
-            Ok(u) if matches!(u.scheme(), "http" | "https") && !u.host_str().unwrap_or_default().is_empty() => u,
-            _ => return Err(ApiFailure { code: "NETWORK".into(), message: "服务器地址无效".into(), status: 0 }),
+            Ok(u)
+                if matches!(u.scheme(), "http" | "https")
+                    && !u.host_str().unwrap_or_default().is_empty() =>
+            {
+                u
+            }
+            _ => {
+                return Err(ApiFailure {
+                    code: "NETWORK".into(),
+                    message: "服务器地址无效".into(),
+                    status: 0,
+                })
+            }
         };
         url.query_pairs_mut().append_pair("route", route);
         let reply = self
@@ -342,28 +396,64 @@ impl VoxlinkSession {
             .send();
         let reply = match reply {
             Ok(r) => r,
-            Err(e) => return Err(ApiFailure { code: "NETWORK".into(), message: e.to_string(), status: 0 }),
+            Err(e) => {
+                return Err(ApiFailure {
+                    code: "NETWORK".into(),
+                    message: e.to_string(),
+                    status: 0,
+                })
+            }
         };
         let status = reply.status().as_u16();
         let bytes = match reply.bytes() {
             Ok(b) => b,
-            Err(e) => return Err(ApiFailure { code: "NETWORK".into(), message: e.to_string(), status }),
+            Err(e) => {
+                return Err(ApiFailure {
+                    code: "NETWORK".into(),
+                    message: e.to_string(),
+                    status,
+                })
+            }
         };
         if bytes.len() > MAX_PAYLOAD {
-            return Err(ApiFailure { code: "RESPONSE_LIMIT".into(), message: "服务器响应过大".into(), status });
+            return Err(ApiFailure {
+                code: "RESPONSE_LIMIT".into(),
+                message: "服务器响应过大".into(),
+                status,
+            });
         }
         let envelope: Value = match serde_json::from_slice(&bytes) {
             Ok(v) => v,
-            Err(_) => return Err(ApiFailure { code: format!("HTTP_{}", status), message: "服务器未返回有效 JSON".into(), status }),
+            Err(_) => {
+                return Err(ApiFailure {
+                    code: format!("HTTP_{}", status),
+                    message: "服务器未返回有效 JSON".into(),
+                    status,
+                })
+            }
         };
-        if !(200..=299).contains(&status) || envelope.get("success").and_then(|v| v.as_bool()) != Some(true) {
+        if !(200..=299).contains(&status)
+            || envelope.get("success").and_then(|v| v.as_bool()) != Some(true)
+        {
             let code = envelope
                 .get("error")
                 .and_then(|v| v.as_str())
                 .map(str::to_string)
-                .unwrap_or(if status == 429 { "RATE_LIMITED".to_string() } else { format!("HTTP_{}", status) });
-            let message = envelope.get("message").and_then(|v| v.as_str()).unwrap_or("请求失败").to_string();
-            return Err(ApiFailure { code, message, status });
+                .unwrap_or(if status == 429 {
+                    "RATE_LIMITED".to_string()
+                } else {
+                    format!("HTTP_{}", status)
+                });
+            let message = envelope
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("请求失败")
+                .to_string();
+            return Err(ApiFailure {
+                code,
+                message,
+                status,
+            });
         }
         Ok(envelope.get("data").cloned().unwrap_or(Value::Null))
     }
@@ -532,7 +622,9 @@ fn accept_signals(ctx: &Arc<Supervisor>, value: &Value) {
     }
     if let Some(s) = ctx.sink.lock().unwrap().as_ref() {
         for signal in fresh {
-            let _ = s.event.send(json!({ "type": "engineSignal", "signal": signal }));
+            let _ = s
+                .event
+                .send(json!({ "type": "engineSignal", "signal": signal }));
         }
     }
 }
@@ -544,7 +636,10 @@ enum Round {
 }
 
 fn supervise(ctx: Arc<Supervisor>, rx: std::sync::mpsc::Receiver<Outbound>) {
-    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
         Ok(r) => r,
         Err(_) => return,
     };
@@ -567,8 +662,14 @@ fn supervise(ctx: Arc<Supervisor>, rx: std::sync::mpsc::Receiver<Outbound>) {
             std::thread::sleep(Duration::from_millis((reconnect_at - now) as u64));
         }
         let base = (ctx.base_url)();
-        let Some(url) = signaling_url(&base) else { return };
-        let config = WebSocketConfig { max_message_size: Some(MAX_PAYLOAD), max_frame_size: Some(MAX_PAYLOAD), ..Default::default() };
+        let Some(url) = signaling_url(&base) else {
+            return;
+        };
+        let config = WebSocketConfig {
+            max_message_size: Some(MAX_PAYLOAD),
+            max_frame_size: Some(MAX_PAYLOAD),
+            ..Default::default()
+        };
         let connected = runtime.block_on(tokio::time::timeout(
             Duration::from_millis(HANDSHAKE_TIMEOUT_MS),
             connect_async_with_config(url.as_str(), Some(config), false),
@@ -589,7 +690,12 @@ fn supervise(ctx: Arc<Supervisor>, rx: std::sync::mpsc::Receiver<Outbound>) {
         // 对应 session.ts:77：连上先补一次轮询，补回离线期间漏掉的信号
         let since = ctx.shared.lock().unwrap().since;
         let frame = request_frame(&ctx, "/signal/poll", &json!({ "since": since }));
-        let outcome = runtime.block_on(session_round(ctx.clone(), session, &mut bridge_rx, Some(frame)));
+        let outcome = runtime.block_on(session_round(
+            ctx.clone(),
+            session,
+            &mut bridge_rx,
+            Some(frame),
+        ));
         {
             let mut st = ctx.shared.lock().unwrap();
             st.ws_open = false;
@@ -617,7 +723,10 @@ fn request_frame(ctx: &Arc<Supervisor>, route: &str, extra: &Value) -> (u64, Str
         st.next_id = st.next_id.wrapping_add(1);
         id
     };
-    (id, json!({ "id": id, "route": route, "method": "POST", "body": body }).to_string())
+    (
+        id,
+        json!({ "id": id, "route": route, "method": "POST", "body": body }).to_string(),
+    )
 }
 
 fn schedule_reconnect(ctx: &Arc<Supervisor>, unavailable: bool) {
@@ -625,7 +734,11 @@ fn schedule_reconnect(ctx: &Arc<Supervisor>, unavailable: bool) {
     if st.finished {
         return;
     }
-    let wait = if unavailable { backoff_wait(st.backoff) } else { 0 };
+    let wait = if unavailable {
+        backoff_wait(st.backoff)
+    } else {
+        0
+    };
     if unavailable {
         st.backoff = (st.backoff + 1).min(2);
     }
@@ -649,7 +762,10 @@ async fn session_round(
     let mut signal_only: std::collections::HashSet<u64> = std::collections::HashSet::new();
     if let Some((id, frame)) = initial {
         signal_only.insert(id);
-        deadlines.push((Instant::now() + Duration::from_millis(RESPONSE_TIMEOUT_MS), id));
+        deadlines.push((
+            Instant::now() + Duration::from_millis(RESPONSE_TIMEOUT_MS),
+            id,
+        ));
         if write.send(Message::Text(frame)).await.is_err() {
             return Round::Reconnect;
         }
@@ -704,11 +820,18 @@ async fn session_round(
 }
 
 /// 对应 session.ts:83-93：id===0 是服务端推送，否则结算挂起请求
-fn handle_text(ctx: &Arc<Supervisor>, text: &str, pending: &mut HashMap<u64, Sender<Result<Value, ApiFailure>>>, signal_only: &mut std::collections::HashSet<u64>) {
+fn handle_text(
+    ctx: &Arc<Supervisor>,
+    text: &str,
+    pending: &mut HashMap<u64, Sender<Result<Value, ApiFailure>>>,
+    signal_only: &mut std::collections::HashSet<u64>,
+) {
     if text.as_bytes().len() > MAX_PAYLOAD {
         return;
     }
-    let Ok(frame) = serde_json::from_str::<Value>(text) else { return };
+    let Ok(frame) = serde_json::from_str::<Value>(text) else {
+        return;
+    };
     match frame.get("id").and_then(|v| v.as_u64()) {
         Some(0) => {
             if let Some(data) = frame.get("data") {
@@ -725,19 +848,32 @@ fn handle_text(ctx: &Arc<Supervisor>, text: &str, pending: &mut HashMap<u64, Sen
                 }
                 return;
             }
-            let Some(reply) = pending.remove(&id) else { return };
+            let Some(reply) = pending.remove(&id) else {
+                return;
+            };
             if frame.get("success").and_then(|v| v.as_bool()) == Some(true) {
                 let _ = reply.send(Ok(frame.get("data").cloned().unwrap_or(Value::Null)));
             } else {
-                let code = frame.get("error").and_then(|v| v.as_str()).unwrap_or("SIGNAL").to_string();
-                let message = frame.get("message").and_then(|v| v.as_str()).unwrap_or("请求失败").to_string();
-                let _ = reply.send(Err(ApiFailure { code, message, status: 0 }));
+                let code = frame
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("SIGNAL")
+                    .to_string();
+                let message = frame
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("请求失败")
+                    .to_string();
+                let _ = reply.send(Err(ApiFailure {
+                    code,
+                    message,
+                    status: 0,
+                }));
             }
         }
         None => {}
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -746,21 +882,51 @@ mod tests {
     #[test]
     fn ws_url_follows_original_derivation() {
         // 对应 session.ts:55：协议换壳、pathname 强制 /ws、search 丢弃
-        assert_eq!(signaling_url("https://p2p.wuhui.icu/api?x=1").unwrap(), "wss://p2p.wuhui.icu/ws");
-        assert_eq!(signaling_url("http://127.0.0.1:8080/").unwrap(), "ws://127.0.0.1:8080/ws");
-        assert_eq!(signaling_url("https://h.example:9443/deep/path").unwrap(), "wss://h.example:9443/ws");
+        assert_eq!(
+            signaling_url("https://p2p.wuhui.icu/api?x=1").unwrap(),
+            "wss://p2p.wuhui.icu/ws"
+        );
+        assert_eq!(
+            signaling_url("http://127.0.0.1:8080/").unwrap(),
+            "ws://127.0.0.1:8080/ws"
+        );
+        assert_eq!(
+            signaling_url("https://h.example:9443/deep/path").unwrap(),
+            "wss://h.example:9443/ws"
+        );
         assert!(signaling_url("ftp://h.example").is_none());
         assert!(signaling_url("不是地址").is_none());
     }
 
     #[test]
     fn signal_key_prefers_id_and_falls_back_to_tuple() {
-        let with_id = SignalMsg { id: Some("7".into()), from: "a".into(), rtype: "t".into(), data: json!({"k":1}), timestamp: 5.0, to: None };
+        let with_id = SignalMsg {
+            id: Some("7".into()),
+            from: "a".into(),
+            rtype: "t".into(),
+            data: json!({"k":1}),
+            timestamp: 5.0,
+            to: None,
+        };
         assert_eq!(signal_key(&with_id), "7");
-        let no_id = SignalMsg { id: None, from: "a".into(), rtype: "t".into(), data: json!({"k":1}), timestamp: 5.0, to: None };
+        let no_id = SignalMsg {
+            id: None,
+            from: "a".into(),
+            rtype: "t".into(),
+            data: json!({"k":1}),
+            timestamp: 5.0,
+            to: None,
+        };
         assert_eq!(signal_key(&no_id), "a|t|5|{\"k\":1}");
         // 整数时间戳不能写成 5.0（那是 Rust 默认格式化，与 JS 不同）
-        let frac = SignalMsg { id: None, from: "a".into(), rtype: "t".into(), data: json!(null), timestamp: 5.5, to: None };
+        let frac = SignalMsg {
+            id: None,
+            from: "a".into(),
+            rtype: "t".into(),
+            data: json!(null),
+            timestamp: 5.5,
+            to: None,
+        };
         assert_eq!(signal_key(&frac), "a|t|5.5|null");
     }
 
@@ -797,10 +963,22 @@ mod tests {
     fn heartbeat_interval_clamps() {
         assert_eq!(heartbeat_delay_ms(None), 5000);
         assert_eq!(heartbeat_delay_ms(Some(&json!({}))), 5000);
-        assert_eq!(heartbeat_delay_ms(Some(&json!({ "heartbeatInterval": 0 }))), 5000);
-        assert_eq!(heartbeat_delay_ms(Some(&json!({ "heartbeatInterval": 0.2 }))), 1000);
-        assert_eq!(heartbeat_delay_ms(Some(&json!({ "heartbeatInterval": 3 }))), 3000);
-        assert_eq!(heartbeat_delay_ms(Some(&json!({ "heartbeatInterval": 900 }))), 30000);
+        assert_eq!(
+            heartbeat_delay_ms(Some(&json!({ "heartbeatInterval": 0 }))),
+            5000
+        );
+        assert_eq!(
+            heartbeat_delay_ms(Some(&json!({ "heartbeatInterval": 0.2 }))),
+            1000
+        );
+        assert_eq!(
+            heartbeat_delay_ms(Some(&json!({ "heartbeatInterval": 3 }))),
+            3000
+        );
+        assert_eq!(
+            heartbeat_delay_ms(Some(&json!({ "heartbeatInterval": 900 }))),
+            30000
+        );
     }
 
     #[test]
@@ -817,13 +995,27 @@ mod tests {
     #[test]
     fn failure_text_matches_error_shapes() {
         // APIError 的 message 本身就是 "CODE: 文案"；普通 Error 只有文案
-        assert_eq!(ApiFailure { code: "ROOM_NOT_FOUND".into(), message: "房间不存在".into(), status: 404 }.text(), "ROOM_NOT_FOUND: 房间不存在");
+        assert_eq!(
+            ApiFailure {
+                code: "ROOM_NOT_FOUND".into(),
+                message: "房间不存在".into(),
+                status: 404
+            }
+            .text(),
+            "ROOM_NOT_FOUND: 房间不存在"
+        );
         assert_eq!(ApiFailure::plain("信令响应超时").text(), "信令响应超时");
     }
 
     #[test]
     fn payload_merges_over_identity_fields() {
-        let session = VoxlinkSession::new("ABCDEF".into(), "tok".into(), true, Arc::new(|| "https://p2p.wuhui.icu".into()), "0.0.0".into());
+        let session = VoxlinkSession::new(
+            "ABCDEF".into(),
+            "tok".into(),
+            true,
+            Arc::new(|| "https://p2p.wuhui.icu".into()),
+            "0.0.0".into(),
+        );
         let merged = session.payload(&json!({ "since": 12, "isHost": false }));
         assert_eq!(merged["code"].as_str(), Some("ABCDEF"));
         assert_eq!(merged["token"].as_str(), Some("tok"));
@@ -834,7 +1026,13 @@ mod tests {
 
     #[test]
     fn stop_is_idempotent_and_blocks_requests() {
-        let session = VoxlinkSession::new("ABCDEF".into(), "tok".into(), false, Arc::new(|| "https://invalid.invalid".into()), "0.0.0".into());
+        let session = VoxlinkSession::new(
+            "ABCDEF".into(),
+            "tok".into(),
+            false,
+            Arc::new(|| "https://invalid.invalid".into()),
+            "0.0.0".into(),
+        );
         assert!(!session.is_done());
         session.stop();
         session.stop();
@@ -845,7 +1043,13 @@ mod tests {
 
     #[test]
     fn http_fallback_rejects_bad_server_url_without_network() {
-        let session = VoxlinkSession::new("ABCDEF".into(), "tok".into(), false, Arc::new(|| "javascript:alert(1)".into()), "0.0.0".into());
+        let session = VoxlinkSession::new(
+            "ABCDEF".into(),
+            "tok".into(),
+            false,
+            Arc::new(|| "javascript:alert(1)".into()),
+            "0.0.0".into(),
+        );
         let err = session.http_post("/room/list", &json!({})).unwrap_err();
         assert_eq!(err.code, "NETWORK");
         assert_eq!(err.message, "服务器地址无效");

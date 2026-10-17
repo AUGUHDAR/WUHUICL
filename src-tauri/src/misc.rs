@@ -7,7 +7,8 @@ use std::path::PathBuf;
 
 // ---------------- 默认按键（keybindings.ts） ----------------
 
-const BIND_RE_OK: fn(&str) -> bool = |v| v.starts_with("key.keyboard.") || v.starts_with("key.mouse.");
+const BIND_RE_OK: fn(&str) -> bool =
+    |v| v.starts_with("key.keyboard.") || v.starts_with("key.mouse.");
 
 // 对应原版 shared/keybindings.ts 的 VANILLA_KEYBINDS（id 与 defaultBind 逐条照抄，顺序同原版）
 const VANILLA_KEYBINDS: &[(&str, &str)] = &[
@@ -46,7 +47,7 @@ const VANILLA_KEYBINDS: &[(&str, &str)] = &[
     ("key_key.playerlist", "key.keyboard.tab"),
     ("key_key.saveToolbarActivator", "key.keyboard.unknown"),
     ("key_key.loadToolbarActivator", "key.keyboard.unknown"),
-    ("key_key.spectatorOutlines", "key.keyboard.unknown")
+    ("key_key.spectatorOutlines", "key.keyboard.unknown"),
 ];
 
 fn default_keys_file(app: &tauri::AppHandle) -> PathBuf {
@@ -64,7 +65,10 @@ fn default_keys(app: &tauri::AppHandle) -> Value {
     let stored = read_stored_keys(app);
     let mut out = serde_json::Map::new();
     for (id, def) in VANILLA_KEYBINDS {
-        let v = stored[*id].as_str().filter(|s| BIND_RE_OK(s)).unwrap_or(def);
+        let v = stored[*id]
+            .as_str()
+            .filter(|s| BIND_RE_OK(s))
+            .unwrap_or(def);
         out.insert(id.to_string(), json!(v));
     }
     Value::Object(out)
@@ -116,7 +120,9 @@ fn mascot_state(app: &tauri::AppHandle) -> Value {
     std::fs::read(mascots_file(app))
         .ok()
         .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
-        .unwrap_or_else(|| json!({ "counts": {}, "order": [], "sound": { "muted": false, "volume": 0.5 } }))
+        .unwrap_or_else(
+            || json!({ "counts": {}, "order": [], "sound": { "muted": false, "volume": 0.5 } }),
+        )
 }
 
 fn save_mascots(app: &tauri::AppHandle, state: &Value) {
@@ -168,10 +174,15 @@ fn list_plugins(app: &tauri::AppHandle) -> Value {
                 continue;
             }
             let manifest_path = e.path().join("plugin.json");
-            let Ok(raw) = std::fs::read(&manifest_path) else { continue };
-            let Ok(mut info) = serde_json::from_slice::<Value>(&raw) else { continue };
+            let Ok(raw) = std::fs::read(&manifest_path) else {
+                continue;
+            };
+            let Ok(mut info) = serde_json::from_slice::<Value>(&raw) else {
+                continue;
+            };
             if let Some(obj) = info.as_object_mut() {
-                obj.entry("id".to_string()).or_insert_with(|| json!(e.file_name().to_string_lossy()));
+                obj.entry("id".to_string())
+                    .or_insert_with(|| json!(e.file_name().to_string_lossy()));
                 obj.insert("dir".to_string(), json!(e.path().to_string_lossy()));
             }
             out.push(info);
@@ -182,7 +193,11 @@ fn list_plugins(app: &tauri::AppHandle) -> Value {
 
 // ---------------- 通道分发 ----------------
 
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         // 默认按键
         "keys:getDefault" => Some(Ok(default_keys(app))),
@@ -210,19 +225,30 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
 
         // 默认游戏选项：形状与校验语义对齐原版 defaultGameOptions.ts
         "gameOptions:get" => Some(Ok(crate::gameoptions::get(app))),
-        "gameOptions:set" => Some(crate::gameoptions::set(app, &args.first().cloned().unwrap_or(json!({})))),
+        "gameOptions:set" => Some(crate::gameoptions::set(
+            app,
+            &args.first().cloned().unwrap_or(json!({})),
+        )),
 
         // 默认资源包
         "defaultPacks:get" => Some(Ok(Value::Array(load_packs(app)))),
         "defaultPacks:import" => Some((|| {
-            let files = args.first().and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let files = args
+                .first()
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
             let mut list = load_packs(app);
             let packs_root = crate::settings::user_data_dir(app).join("default-resource-packs");
             let _ = std::fs::create_dir_all(&packs_root);
             for f in files {
                 let Some(src) = f.as_str() else { continue };
                 let src_path = PathBuf::from(src);
-                let name = src_path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default().to_string();
+                let name = src_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy())
+                    .unwrap_or_default()
+                    .to_string();
                 let id = format!("pack-{}", &crate::accounts::uuid_v4()[..8]);
                 let dest = packs_root.join(&name);
                 std::fs::copy(&src_path, &dest).map_err(|e| e.to_string())?;
@@ -287,20 +313,42 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         "mascots:state" => Some(Ok(mascot_state(app))),
         "mascots:batch" => Some((|| {
             let mut state = mascot_state(app);
-            let hits = args.first().and_then(|v| v.get("hits")).and_then(|h| h.as_array()).cloned().unwrap_or_default();
+            let hits = args
+                .first()
+                .and_then(|v| v.get("hits"))
+                .and_then(|h| h.as_array())
+                .cloned()
+                .unwrap_or_default();
             let counts = state["counts"].as_object_mut().ok_or("玩偶状态损坏")?;
             for h in hits {
                 let id = h.as_str().unwrap_or("kamu").to_string();
-                *counts.entry(id).or_insert(json!(0)) = json!(counts.get(&h.as_str().unwrap_or("kamu").to_string()).and_then(|v| v.as_i64()).unwrap_or(0) + 1);
+                *counts.entry(id).or_insert(json!(0)) = json!(
+                    counts
+                        .get(&h.as_str().unwrap_or("kamu").to_string())
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0)
+                        + 1
+                );
             }
             save_mascots(app, &state);
             Ok(state)
         })()),
         "mascots:slap" => Some((|| {
-            let id = args.first().and_then(|v| v.as_str()).unwrap_or("kamu").to_string();
+            let id = args
+                .first()
+                .and_then(|v| v.as_str())
+                .unwrap_or("kamu")
+                .to_string();
             let mut state = mascot_state(app);
             let counts = state["counts"].as_object_mut().ok_or("玩偶状态损坏")?;
-            *counts.entry(id).or_insert(json!(0)) = json!(counts.values().filter_map(|v| v.as_i64()).sum::<i64>().max(0) + 1);
+            *counts.entry(id).or_insert(json!(0)) = json!(
+                counts
+                    .values()
+                    .filter_map(|v| v.as_i64())
+                    .sum::<i64>()
+                    .max(0)
+                    + 1
+            );
             save_mascots(app, &state);
             Ok(state)
         })()),
@@ -344,8 +392,14 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         "plugins:list" => Some(Ok(list_plugins(app))),
         "plugins:install" => Some((|| {
             use tauri_plugin_dialog::DialogExt;
-            let picked = app.dialog().file().add_filter("插件脚本", &["js"]).blocking_pick_file();
-            let Some(path) = picked else { return Ok(list_plugins(app)) };
+            let picked = app
+                .dialog()
+                .file()
+                .add_filter("插件脚本", &["js"])
+                .blocking_pick_file();
+            let Some(path) = picked else {
+                return Ok(list_plugins(app));
+            };
             let code = std::fs::read_to_string(path.to_string()).map_err(|e| e.to_string())?;
             // plugin.json：脚本首行 // name: xxx 或文件名
             let name = code
@@ -371,9 +425,16 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             let id = args.first().and_then(|v| v.as_str()).unwrap_or("");
             let enabled = args.get(1).and_then(|v| v.as_bool()).unwrap_or(false);
             let manifest = plugins_root(app).join(id).join("plugin.json");
-            let mut info: Value = std::fs::read(&manifest).ok().and_then(|r| serde_json::from_slice(&r).ok()).unwrap_or(json!({}));
+            let mut info: Value = std::fs::read(&manifest)
+                .ok()
+                .and_then(|r| serde_json::from_slice(&r).ok())
+                .unwrap_or(json!({}));
             info["enabled"] = json!(enabled);
-            std::fs::write(&manifest, serde_json::to_vec_pretty(&info).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            std::fs::write(
+                &manifest,
+                serde_json::to_vec_pretty(&info).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
             Ok(list_plugins(app))
         })()),
         "plugins:remove" => Some((|| {
@@ -384,17 +445,24 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         "plugins:readCode" => Some((|| {
             let id = args.first().and_then(|v| v.as_str()).unwrap_or("");
             let manifest = plugins_root(app).join(id).join("plugin.json");
-            let info: Value = std::fs::read(&manifest).ok().and_then(|r| serde_json::from_slice(&r).ok()).unwrap_or(json!({}));
+            let info: Value = std::fs::read(&manifest)
+                .ok()
+                .and_then(|r| serde_json::from_slice(&r).ok())
+                .unwrap_or(json!({}));
             if info["enabled"] != true {
                 return Err("仅启用的插件可读取代码".into());
             }
-            let code = std::fs::read_to_string(plugins_root(app).join(id).join("main.js")).map_err(|e| e.to_string())?;
+            let code = std::fs::read_to_string(plugins_root(app).join(id).join("main.js"))
+                .map_err(|e| e.to_string())?;
             Ok(json!(code))
         })()),
         "plugins:openDir" => Some((|| {
             let dir = plugins_root(app);
             let _ = std::fs::create_dir_all(&dir);
-            std::process::Command::new("explorer.exe").arg(dir.as_os_str()).spawn().map_err(|e| e.to_string())?;
+            std::process::Command::new("explorer.exe")
+                .arg(dir.as_os_str())
+                .spawn()
+                .map_err(|e| e.to_string())?;
             Ok(Value::Null)
         })()),
 
@@ -412,7 +480,11 @@ fn import_packs_from(app: &tauri::AppHandle, files: Vec<Value>) -> Result<Value,
     for f in files {
         let Some(src) = f.as_str() else { continue };
         let src_path = PathBuf::from(src);
-        let name = src_path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default().to_string();
+        let name = src_path
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default()
+            .to_string();
         let id = format!("pack-{}", &crate::accounts::uuid_v4()[..8]);
         let dest = packs_root.join(&name);
         std::fs::copy(&src_path, &dest).map_err(|e| e.to_string())?;

@@ -15,7 +15,11 @@ use tauri_plugin_dialog::DialogExt;
 const MAX_LOG_BYTES: u64 = 16 * 1024 * 1024;
 
 /// 返回 None 表示本模块不认识该通道（由路由继续分发）；Some(result) 即最终结果。
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         "launch:exportLogs" => Some(export_logs(app, args)),
         _ => None,
@@ -35,7 +39,8 @@ fn export_logs(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
         .filter(|f| !f.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| installer::folder_of_version(app, &version_id));
-    export_launch_logs(app, &version_id, &folder).map(|path| path.map(|p| json!(p)).unwrap_or(Value::Null))
+    export_launch_logs(app, &version_id, &folder)
+        .map(|path| path.map(|p| json!(p)).unwrap_or(Value::Null))
 }
 
 // ---------------- 脱敏（diagnostics.ts） ----------------
@@ -55,18 +60,23 @@ fn redact_text(input: &str, known_secrets: &[String]) -> String {
         .to_string();
     // "token-ish key": "value" / token-ish key: value
     let token_keys = r"(?:access[_-]?token|refresh[_-]?token|client[_-]?token|session[_-]?(?:id|key)|password|authorization)";
-    out = regex::Regex::new(&format!(r#"(?i)("?{}"?\s*[:=]\s*")([^"\r\n]+)(")"#, token_keys))
-        .unwrap()
-        .replace_all(&out, "${1}<redacted>${3}")
-        .to_string();
+    out = regex::Regex::new(&format!(
+        r#"(?i)("?{}"?\s*[:=]\s*")([^"\r\n]+)(")"#,
+        token_keys
+    ))
+    .unwrap()
+    .replace_all(&out, "${1}<redacted>${3}")
+    .to_string();
     out = regex::Regex::new(&format!(r"(?i)({}\s*[:=]\s*)([^\s,;]+)", token_keys))
         .unwrap()
         .replace_all(&out, "${1}<redacted>")
         .to_string();
-    out = regex::Regex::new(r#"(?i)(--accessToken|--clientId|--xuid|--userProperties)\s+("[^"]*"|\S+)"#)
-        .unwrap()
-        .replace_all(&out, "$1 <redacted>")
-        .to_string();
+    out = regex::Regex::new(
+        r#"(?i)(--accessToken|--clientId|--xuid|--userProperties)\s+("[^"]*"|\S+)"#,
+    )
+    .unwrap()
+    .replace_all(&out, "$1 <redacted>")
+    .to_string();
     out = regex::Regex::new(r#"(?i)(--username|--uuid)\s+("[^"]*"|\S+)"#)
         .unwrap()
         .replace_all(&out, "$1 <redacted-user>")
@@ -97,7 +107,13 @@ fn redact_path(value: &str, secrets: &[String]) -> String {
 fn safe_file_part(value: &str) -> String {
     let cleaned: String = value
         .chars()
-        .map(|c| if "<>:\"/\\|?*".contains(c) || (c as u32) < 0x20 { '_' } else { c })
+        .map(|c| {
+            if "<>:\"/\\|?*".contains(c) || (c as u32) < 0x20 {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     let cleaned = cleaned.trim().to_string();
     if cleaned.is_empty() {
@@ -149,7 +165,10 @@ fn read_text_tail(file: &Path) -> Result<(String, u64, bool, String), String> {
     let modified_at = stat
         .modified()
         .ok()
-        .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+        .map(|t| {
+            chrono::DateTime::<chrono::Utc>::from(t)
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        })
         .unwrap_or_default();
     Ok((text, stat.len(), truncated, modified_at))
 }
@@ -194,7 +213,11 @@ fn add_sanitized_log(
                 let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
                 if zip.start_file(spec.archive_path.as_str(), options).is_ok() {
                     let _ = zip.write_all(
-                        format!("[WUHUICL] 此项{}；请查看 manifest.json。\n", if missing { "不存在" } else { "无法读取" }).as_bytes(),
+                        format!(
+                            "[WUHUICL] 此项{}；请查看 manifest.json。\n",
+                            if missing { "不存在" } else { "无法读取" }
+                        )
+                        .as_bytes(),
                     );
                 }
             }
@@ -214,7 +237,10 @@ fn newest_crash_report(dir: &Path) -> Option<PathBuf> {
         }
         if let Ok(meta) = entry.metadata() {
             if meta.is_file() {
-                files.push((entry.path(), meta.modified().unwrap_or(std::time::UNIX_EPOCH)));
+                files.push((
+                    entry.path(),
+                    meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+                ));
             }
         }
     }
@@ -251,11 +277,22 @@ fn java_summary(java_path: &str, secrets: &[String]) -> Value {
                 .unwrap()
                 .captures(&text)
                 .and_then(|c| c.get(1).map(|m| m.as_str().to_string()))
-                .or_else(|| text.lines().next().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()))
+                .or_else(|| {
+                    text.lines()
+                        .next()
+                        .map(|l| l.trim().to_string())
+                        .filter(|l| !l.is_empty())
+                })
                 .unwrap_or_else(|| "（未知）".into());
-            let architecture = if regex::Regex::new(r"(?i)64-Bit|x86_64|aarch64").unwrap().is_match(&text) {
+            let architecture = if regex::Regex::new(r"(?i)64-Bit|x86_64|aarch64")
+                .unwrap()
+                .is_match(&text)
+            {
                 "64-bit"
-            } else if regex::Regex::new(r"(?i)32-Bit|i[3-6]86|x86").unwrap().is_match(&text) {
+            } else if regex::Regex::new(r"(?i)32-Bit|i[3-6]86|x86")
+                .unwrap()
+                .is_match(&text)
+            {
                 "32-bit"
             } else {
                 "（未知）"
@@ -295,7 +332,10 @@ fn summary_text(m: &Value) -> String {
     let lines = vec![
         "================ WUHUICL 启动失败诊断摘要 ================".to_string(),
         format!("导出时间: {}", m["exportedAt"].as_str().unwrap_or("")),
-        format!("WUHUICL: {}", m["launcher"]["version"].as_str().unwrap_or("")),
+        format!(
+            "WUHUICL: {}",
+            m["launcher"]["version"].as_str().unwrap_or("")
+        ),
         format!(
             "操作系统: {} {} ({})",
             m["operatingSystem"]["platform"].as_str().unwrap_or(""),
@@ -308,16 +348,26 @@ fn summary_text(m: &Value) -> String {
             m["instance"]["name"].as_str().unwrap_or(""),
             m["instance"]["id"].as_str().unwrap_or("")
         ),
-        format!("Minecraft: {}", m["instance"]["minecraftVersion"].as_str().unwrap_or("")),
+        format!(
+            "Minecraft: {}",
+            m["instance"]["minecraftVersion"].as_str().unwrap_or("")
+        ),
         format!(
             "Loader: {}{}",
             m["instance"]["loader"].as_str().unwrap_or("vanilla"),
             loader_version
         ),
-        format!("实例目录: {}", m["instance"]["directory"].as_str().unwrap_or("")),
+        format!(
+            "实例目录: {}",
+            m["instance"]["directory"].as_str().unwrap_or("")
+        ),
         format!(
             "版本隔离: {}",
-            if m["instance"]["isolated"].as_bool().unwrap_or(false) { "开启" } else { "关闭" }
+            if m["instance"]["isolated"].as_bool().unwrap_or(false) {
+                "开启"
+            } else {
+                "关闭"
+            }
         ),
         String::new(),
         format!(
@@ -327,11 +377,23 @@ fn summary_text(m: &Value) -> String {
         ),
         format!("Java 路径: {}", m["java"]["path"].as_str().unwrap_or("")),
         format!("进程 PID: {}", pid),
-        format!("启动时间: {}", m["process"]["startedAt"].as_str().unwrap_or("（未知）")),
-        format!("退出时间: {}", m["process"]["endedAt"].as_str().unwrap_or("（未知）")),
+        format!(
+            "启动时间: {}",
+            m["process"]["startedAt"].as_str().unwrap_or("（未知）")
+        ),
+        format!(
+            "退出时间: {}",
+            m["process"]["endedAt"].as_str().unwrap_or("（未知）")
+        ),
         format!("退出码: {}", exit_code),
-        format!("进程错误: {}", m["process"]["spawnError"].as_str().unwrap_or("（无记录）")),
-        format!("启动参数摘要: {}", m["process"]["command"].as_str().unwrap_or("（尚未生成）")),
+        format!(
+            "进程错误: {}",
+            m["process"]["spawnError"].as_str().unwrap_or("（无记录）")
+        ),
+        format!(
+            "启动参数摘要: {}",
+            m["process"]["command"].as_str().unwrap_or("（尚未生成）")
+        ),
         String::new(),
         "每个日志的来源、缺失与截断情况见 manifest.json。".to_string(),
     ];
@@ -339,18 +401,26 @@ fn summary_text(m: &Value) -> String {
 }
 
 /// exportLogs.ts exportLaunchLogs：收集 crash-report + latest.log 等写入诊断 ZIP
-pub fn export_launch_logs(app: &AppHandle, version_id: &str, folder: &str) -> Result<Option<String>, String> {
+pub fn export_launch_logs(
+    app: &AppHandle,
+    version_id: &str,
+    folder: &str,
+) -> Result<Option<String>, String> {
     // 扫描同时建立“版本 -> 游戏文件夹”映射，避免活动目录切换后收错实例日志
     let installed = crate::versions::scan_folder_public(folder, true);
     let last = crate::launch::last_launch();
     let vid = if version_id.is_empty() {
-        last.as_ref().and_then(|l| l["versionId"].as_str()).unwrap_or("unknown").to_string()
+        last.as_ref()
+            .and_then(|l| l["versionId"].as_str())
+            .unwrap_or("unknown")
+            .to_string()
     } else {
         version_id.to_string()
     };
-    let item = installed
-        .iter()
-        .find(|v| v["id"].as_str() == Some(vid.as_str()) && installer::same_path(v["folder"].as_str().unwrap_or(""), folder));
+    let item = installed.iter().find(|v| {
+        v["id"].as_str() == Some(vid.as_str())
+            && installer::same_path(v["folder"].as_str().unwrap_or(""), folder)
+    });
     let mut directory_state = match &item {
         Some(i) => json!({
             "path": i["gameDirectory"].as_str().unwrap_or(folder),
@@ -366,15 +436,25 @@ pub fn export_launch_logs(app: &AppHandle, version_id: &str, folder: &str) -> Re
         .map(|l| l["versionId"].as_str() == Some(vid.as_str()) && l["effectiveGameDir"].is_string())
         .unwrap_or(false)
     {
-        last.as_ref().unwrap()["effectiveGameDir"].as_str().unwrap_or("").to_string()
+        last.as_ref().unwrap()["effectiveGameDir"]
+            .as_str()
+            .unwrap_or("")
+            .to_string()
     } else {
-        directory_state["path"].as_str().unwrap_or(folder).to_string()
+        directory_state["path"]
+            .as_str()
+            .unwrap_or(folder)
+            .to_string()
     };
     let isolated = directory_state["isolated"].as_bool().unwrap_or(false);
     let now_local = chrono::Local::now();
     let def_name = format!(
         "WUHUICL-Diagnostic-{}-{}.zip",
-        safe_file_part(item.as_ref().and_then(|i| i["mcVersion"].as_str()).unwrap_or(&vid)),
+        safe_file_part(
+            item.as_ref()
+                .and_then(|i| i["mcVersion"].as_str())
+                .unwrap_or(&vid)
+        ),
         fmt_stamp(now_local)
     );
 
@@ -393,11 +473,16 @@ pub fn export_launch_logs(app: &AppHandle, version_id: &str, folder: &str) -> Re
     let secrets: Vec<String> = account
         .as_ref()
         .map(|a| {
-            ["accessToken", "refreshToken", "clientToken", "loginIdentifier"]
-                .iter()
-                .filter_map(|k| a[*k].as_str().map(str::to_string))
-                .filter(|s| !s.is_empty())
-                .collect()
+            [
+                "accessToken",
+                "refreshToken",
+                "clientToken",
+                "loginIdentifier",
+            ]
+            .iter()
+            .filter_map(|k| a[*k].as_str().map(str::to_string))
+            .filter(|s| !s.is_empty())
+            .collect()
         })
         .unwrap_or_default();
 
@@ -405,7 +490,10 @@ pub fn export_launch_logs(app: &AppHandle, version_id: &str, folder: &str) -> Re
         .as_ref()
         .map(|l| {
             l["versionId"].as_str() == Some(vid.as_str())
-                && l["effectiveGameDir"].as_str().map(|d| installer::same_path(d, &effective_game_dir)).unwrap_or(false)
+                && l["effectiveGameDir"]
+                    .as_str()
+                    .map(|d| installer::same_path(d, &effective_game_dir))
+                    .unwrap_or(false)
         })
         .unwrap_or(false)
     {
@@ -414,12 +502,20 @@ pub fn export_launch_logs(app: &AppHandle, version_id: &str, folder: &str) -> Re
         None
     };
 
-    let os_arch = if cfg!(target_arch = "aarch64") { "aarch64" } else { "x86_64" };
+    let os_arch = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x86_64"
+    };
     let java_path_owned: String = current_launch
         .as_ref()
         .and_then(|l| l["javaPath"].as_str())
         .map(str::to_string)
-        .or_else(|| item.as_ref().and_then(|i| i["javaPath"].as_str()).map(str::to_string))
+        .or_else(|| {
+            item.as_ref()
+                .and_then(|i| i["javaPath"].as_str())
+                .map(str::to_string)
+        })
         .unwrap_or_else(|| {
             crate::settings::get(app)["javaPath"]
                 .as_str()
@@ -462,24 +558,37 @@ pub fn export_launch_logs(app: &AppHandle, version_id: &str, folder: &str) -> Re
         .and_then(|l| l["logDir"].as_str())
         .map(PathBuf::from)
         .unwrap_or_else(|| Path::new(folder).join("kamucl-logs"));
-    let launcher_log = crate::settings::user_data_dir(app).join("logs").join("launcher-current.log");
+    let launcher_log = crate::settings::user_data_dir(app)
+        .join("logs")
+        .join("launcher-current.log");
     let mut sources = vec![
         DiagnosticSource {
             archive_path: match &crash {
-                Some(c) => format!("crash-reports/{}", c.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()),
+                Some(c) => format!(
+                    "crash-reports/{}",
+                    c.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                ),
                 None => "crash-reports/latest.txt".into(),
             },
-            source: crash.clone().unwrap_or_else(|| Path::new(&effective_game_dir).join("crash-reports")),
+            source: crash
+                .clone()
+                .unwrap_or_else(|| Path::new(&effective_game_dir).join("crash-reports")),
             missing_placeholder: crash.is_none(),
         },
         DiagnosticSource {
             archive_path: "minecraft/latest.log".into(),
-            source: Path::new(&effective_game_dir).join("logs").join("latest.log"),
+            source: Path::new(&effective_game_dir)
+                .join("logs")
+                .join("latest.log"),
             missing_placeholder: true,
         },
         DiagnosticSource {
             archive_path: "minecraft/debug.log".into(),
-            source: Path::new(&effective_game_dir).join("logs").join("debug.log"),
+            source: Path::new(&effective_game_dir)
+                .join("logs")
+                .join("debug.log"),
             missing_placeholder: true,
         },
         DiagnosticSource {
@@ -529,7 +638,8 @@ pub fn export_launch_logs(app: &AppHandle, version_id: &str, folder: &str) -> Re
         }
     }
 
-    write_diagnostic_archive(app, &destination, manifest, sources, &secrets).map(|_| Ok(Some(destination.to_string_lossy().to_string())))?
+    write_diagnostic_archive(app, &destination, manifest, sources, &secrets)
+        .map(|_| Ok(Some(destination.to_string_lossy().to_string())))?
 }
 
 /// diagnosticArchive.ts writeDiagnosticArchive：任一打包错误删除未完成目标
@@ -590,7 +700,11 @@ fn write_diagnostic_archive(
     if write_err.is_none() && zip.start_file("manifest.json", options).is_err() {
         write_err = Some("zip 写入失败".into());
     } else if write_err.is_none() {
-        let _ = zip.write_all(serde_json::to_vec_pretty(&manifest).unwrap_or_default().as_slice());
+        let _ = zip.write_all(
+            serde_json::to_vec_pretty(&manifest)
+                .unwrap_or_default()
+                .as_slice(),
+        );
     }
     let finish_result = zip.finish().map_err(|e| e.to_string());
     if let Err(e) = finish_result {

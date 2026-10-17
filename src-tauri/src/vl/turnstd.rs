@@ -75,11 +75,19 @@ pub struct TurnMessage {
 
 impl TurnMessage {
     pub fn new(msg_type: u16) -> Self {
-        TurnMessage { msg_type, id: random_id(), attrs: Vec::new() }
+        TurnMessage {
+            msg_type,
+            id: random_id(),
+            attrs: Vec::new(),
+        }
     }
 
     pub fn with_id(msg_type: u16, id: [u8; 12]) -> Self {
-        TurnMessage { msg_type, id, attrs: Vec::new() }
+        TurnMessage {
+            msg_type,
+            id,
+            attrs: Vec::new(),
+        }
     }
 
     /// 属性按 4 字节对齐补零（RFC 5389）
@@ -110,7 +118,8 @@ impl TurnMessage {
             out.extend_from_slice(&self.attrs);
             return out;
         };
-        let mut prefix_for_mi = header_bytes(self.msg_type, (self.attrs.len() + 24) as u16, &self.id);
+        let mut prefix_for_mi =
+            header_bytes(self.msg_type, (self.attrs.len() + 24) as u16, &self.id);
         prefix_for_mi.extend_from_slice(&self.attrs);
         let mi = hmac_sha1(key, &prefix_for_mi);
         let mut integrity = vec![0u8; 24];
@@ -163,7 +172,10 @@ impl ParsedTurnMessage {
 
 /// 对应 parseTurnMessage：类号必须是 0x00/0x01 段、长度 4 对齐、属性数 ≤64
 pub fn parse_turn_message(b: &[u8]) -> Option<ParsedTurnMessage> {
-    if b.len() < 20 || (b[0] & 0xc0) != 0 || u32::from_be_bytes([b[4], b[5], b[6], b[7]]) != TURN_COOKIE {
+    if b.len() < 20
+        || (b[0] & 0xc0) != 0
+        || u32::from_be_bytes([b[4], b[5], b[6], b[7]]) != TURN_COOKIE
+    {
         return None;
     }
     let end = 20 + u16::from_be_bytes([b[2], b[3]]) as usize;
@@ -196,7 +208,12 @@ pub fn parse_turn_message(b: &[u8]) -> Option<ParsedTurnMessage> {
         Some((_, v)) if v.len() >= 4 => ((v[2] & 7) as u16) * 100 + v[3] as u16,
         _ => 0,
     };
-    Some(ParsedTurnMessage { msg_type: u16::from_be_bytes([b[0], b[1]]), id, attrs, error_code })
+    Some(ParsedTurnMessage {
+        msg_type: u16::from_be_bytes([b[0], b[1]]),
+        id,
+        attrs,
+        error_code,
+    })
 }
 
 fn ip_bytes(address: &str) -> Option<Vec<u8>> {
@@ -231,7 +248,9 @@ pub fn decode_xor_address(b: Option<&Vec<u8>>, id: &[u8]) -> Option<RudpTarget> 
         return None;
     }
     let mask = [u32_bytes(TURN_COOKIE), id[..12].to_vec()].concat();
-    let bytes: Vec<u8> = (0..if ipv6 { 16 } else { 4 }).map(|i| b[4 + i] ^ mask[i]).collect();
+    let bytes: Vec<u8> = (0..if ipv6 { 16 } else { 4 })
+        .map(|i| b[4 + i] ^ mask[i])
+        .collect();
     let address = if ipv6 {
         let mut octets = [0u8; 16];
         octets.copy_from_slice(&bytes);
@@ -239,7 +258,10 @@ pub fn decode_xor_address(b: Option<&Vec<u8>>, id: &[u8]) -> Option<RudpTarget> 
     } else {
         IpAddr::from(<[u8; 4]>::try_from(bytes.as_slice()).ok()?).to_string()
     };
-    Some(RudpTarget { address, port: u16::from_be_bytes([b[2], b[3]]) ^ (TURN_COOKIE >> 16) as u16 })
+    Some(RudpTarget {
+        address,
+        port: u16::from_be_bytes([b[2], b[3]]) ^ (TURN_COOKIE >> 16) as u16,
+    })
 }
 
 /// 长时凭证密钥：md5(username:realm:password)
@@ -267,7 +289,9 @@ pub struct StdTurnCodec {
 
 impl Default for StdTurnCodec {
     fn default() -> Self {
-        StdTurnCodec { channel: TURN_CHANNEL }
+        StdTurnCodec {
+            channel: TURN_CHANNEL,
+        }
     }
 }
 
@@ -365,14 +389,21 @@ impl StdTurnSession {
 
     /// 对应 transact()：Java 侧收超时 200ms，故每轮 min(rto,200,剩余)，rto 每轮 ×3。
     /// 非对端报文与 id 不匹配的报文只是忽略，不消耗重传轮次（原版是事件监听，靠定时器换轮）。
-    fn transact(&self, request: &TurnMessage, budget_ms: u64, cancelled: &AtomicBool) -> Result<ParsedTurnMessage, String> {
+    fn transact(
+        &self,
+        request: &TurnMessage,
+        budget_ms: u64,
+        cancelled: &AtomicBool,
+    ) -> Result<ParsedTurnMessage, String> {
         let key = self.key.lock().unwrap().clone();
         let packet = request.build(key.as_deref());
         let target = match (self.target.address.as_str(), self.target.port).to_socket_addrs() {
             Ok(list) => list.collect::<Vec<_>>().into_iter().next(),
             Err(_) => None,
         };
-        let Some(target) = target else { return Err("标准 TURN 地址无效".into()) };
+        let Some(target) = target else {
+            return Err("标准 TURN 地址无效".into());
+        };
         let deadline = Instant::now() + Duration::from_millis(budget_ms);
         let mut round = 0u32;
         let mut rto = TURN_TX_RTO;
@@ -409,7 +440,9 @@ impl StdTurnSession {
                             }
                         }
                     }
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {}
+                    Err(ref e)
+                        if e.kind() == std::io::ErrorKind::WouldBlock
+                            || e.kind() == std::io::ErrorKind::TimedOut => {}
                     Err(_) => return Err("标准 TURN 连接已关闭".into()),
                 }
             }
@@ -417,17 +450,26 @@ impl StdTurnSession {
     }
 
     /// 对应 allocate()：先无凭证拿 401 挑战，再带 HMAC 重新 Allocate
-    pub fn allocate(cred: &TurnCredential, cancelled: &Arc<AtomicBool>, timeout_ms: u64) -> Result<StdTurnSession, String> {
+    pub fn allocate(
+        cred: &TurnCredential,
+        cancelled: &Arc<AtomicBool>,
+        timeout_ms: u64,
+    ) -> Result<StdTurnSession, String> {
         let target = match (cred.host.as_str(), cred.port).to_socket_addrs() {
             Ok(list) => list.collect::<Vec<_>>().into_iter().next(),
             Err(_) => None,
         };
-        let Some(target) = target else { return Err("标准 TURN 地址无法解析".into()) };
+        let Some(target) = target else {
+            return Err("标准 TURN 地址无法解析".into());
+        };
         let socket = Arc::new(UdpSocket::bind("0.0.0.0:0").map_err(|e| e.to_string())?);
         let mut session = StdTurnSession {
             state: Arc::new(StdTurnState {
                 socket,
-                target: RudpTarget { address: target.ip().to_string(), port: target.port() },
+                target: RudpTarget {
+                    address: target.ip().to_string(),
+                    port: target.port(),
+                },
                 username: cred.username.clone(),
                 key: Mutex::new(None),
                 realm: Mutex::new(String::new()),
@@ -435,14 +477,19 @@ impl StdTurnSession {
                 peer: Mutex::new(None),
                 ended: AtomicBool::new(false),
             }),
-            relay: RudpTarget { address: String::new(), port: 0 },
+            relay: RudpTarget {
+                address: String::new(),
+                port: 0,
+            },
             lifetime: TURN_LIFETIME,
             codec: StdTurnCodec::default(),
         };
         let challenge = {
             let mut got: Option<ParsedTurnMessage> = None;
             for _ in 0..3 {
-                let request = TurnMessage::new(MSG_ALLOCATE).number(ATTR_TRANSPORT, 17 << 24).put(ATTR_SOFTWARE, b"voxlink");
+                let request = TurnMessage::new(MSG_ALLOCATE)
+                    .number(ATTR_TRANSPORT, 17 << 24)
+                    .put(ATTR_SOFTWARE, b"voxlink");
                 match session.transact(&request, timeout_ms.min(3000), cancelled) {
                     Ok(parsed) => {
                         got = Some(parsed);
@@ -460,13 +507,23 @@ impl StdTurnSession {
         let Some(challenge) = challenge else {
             return Err("标准 TURN 未返回有效鉴权挑战".into());
         };
-        if challenge.msg_type != MSG_ALLOCATE_ERR || challenge.error_code != 401 || !challenge.has(ATTR_REALM) || !challenge.has(ATTR_NONCE) {
+        if challenge.msg_type != MSG_ALLOCATE_ERR
+            || challenge.error_code != 401
+            || !challenge.has(ATTR_REALM)
+            || !challenge.has(ATTR_NONCE)
+        {
             return Err("标准 TURN 未返回有效鉴权挑战".into());
         }
-        *session.realm.lock().unwrap() = String::from_utf8_lossy(challenge.attr(ATTR_REALM).unwrap()).to_string();
-        *session.nonce.lock().unwrap() = String::from_utf8_lossy(challenge.attr(ATTR_NONCE).unwrap()).to_string();
+        *session.realm.lock().unwrap() =
+            String::from_utf8_lossy(challenge.attr(ATTR_REALM).unwrap()).to_string();
+        *session.nonce.lock().unwrap() =
+            String::from_utf8_lossy(challenge.attr(ATTR_NONCE).unwrap()).to_string();
         // 长时密钥固定为 MD5(username:realm:password)（stdTurn.ts:62）
-        *session.key.lock().unwrap() = Some(turn_long_term_key(&cred.username, &session.realm.lock().unwrap(), &cred.password));
+        *session.key.lock().unwrap() = Some(turn_long_term_key(
+            &cred.username,
+            &session.realm.lock().unwrap(),
+            &cred.password,
+        ));
         let request = TurnMessage::with_id(MSG_ALLOCATE, random_id())
             .number(ATTR_TRANSPORT, 17 << 24)
             .put(ATTR_USERNAME, cred.username.as_bytes())
@@ -482,7 +539,8 @@ impl StdTurnSession {
             }
         };
         let relay = decode_xor_address(reply.attr(ATTR_RELAY), &reply.id);
-        if reply.msg_type != MSG_ALLOCATE_OK || relay.as_ref().map(|r| r.port == 0).unwrap_or(true) {
+        if reply.msg_type != MSG_ALLOCATE_OK || relay.as_ref().map(|r| r.port == 0).unwrap_or(true)
+        {
             session.close();
             return Err(match reply.error_code {
                 0 => "标准 TURN 分配失败".into(),
@@ -503,13 +561,24 @@ impl StdTurnSession {
     }
 
     /// 对应 bind()：先 CreatePermission，再 ChannelBind 到 0x4000
-    pub fn bind(&self, peer: &RudpTarget, cancelled: &AtomicBool, timeout_ms: u64) -> Result<(), String> {
-        if peer.address.parse::<IpAddr>().is_err() || !valid_turn_endpoint(Some(&peer.address), Some(peer.port as f64)) {
+    pub fn bind(
+        &self,
+        peer: &RudpTarget,
+        cancelled: &AtomicBool,
+        timeout_ms: u64,
+    ) -> Result<(), String> {
+        if peer.address.parse::<IpAddr>().is_err()
+            || !valid_turn_endpoint(Some(&peer.address), Some(peer.port as f64))
+        {
             return Err("对端 TURN 地址无效".into());
         }
-        let permission = self
-            .auth(MSG_CREATE_PERMISSION)
-            .address(ATTR_PEER, &RudpTarget { address: peer.address.clone(), port: 0 })?;
+        let permission = self.auth(MSG_CREATE_PERMISSION).address(
+            ATTR_PEER,
+            &RudpTarget {
+                address: peer.address.clone(),
+                port: 0,
+            },
+        )?;
         let reply = self.transact(&permission, timeout_ms, cancelled)?;
         if reply.msg_type != MSG_PERMISSION_OK {
             return Err("标准 TURN 权限建立失败".into());
@@ -546,7 +615,9 @@ impl StdTurnSession {
                     .put(ATTR_NONCE, nonce.as_bytes())
                     .number(ATTR_LIFETIME, TURN_LIFETIME);
                 quiet(&state, &refresh);
-                let Some(peer_target) = state.peer.lock().unwrap().clone() else { continue };
+                let Some(peer_target) = state.peer.lock().unwrap().clone() else {
+                    continue;
+                };
                 let request = TurnMessage::new(MSG_CHANNEL_BIND)
                     .put(ATTR_USERNAME, state.username.as_bytes())
                     .put(ATTR_REALM, realm.as_bytes())
@@ -593,12 +664,18 @@ mod tests {
     fn crc32_matches_known_vectors() {
         assert_eq!(crc32(b""), 0);
         assert_eq!(crc32(b"123456789"), 0xcbf4_3926);
-        assert_eq!(crc32(b"The quick brown fox jumps over the lazy dog"), 0x414f_a339);
+        assert_eq!(
+            crc32(b"The quick brown fox jumps over the lazy dog"),
+            0x414f_a339
+        );
     }
 
     #[test]
     fn xor_address_roundtrip_v4_and_v6() {
-        let target = RudpTarget { address: "203.0.113.9".into(), port: 12345 };
+        let target = RudpTarget {
+            address: "203.0.113.9".into(),
+            port: 12345,
+        };
         let encoded = encode_xor_address(&target, &id()).unwrap();
         assert_eq!(encoded[1], 1);
         assert_eq!(encoded.len(), 8, "XOR-ADDRESS = 4 字节头 + 4 字节 IPv4");
@@ -608,7 +685,10 @@ mod tests {
         assert_eq!(back.address, "203.0.113.9");
         assert_eq!(back.port, 12345);
 
-        let v6 = RudpTarget { address: "2001:db8::1".into(), port: 40000 };
+        let v6 = RudpTarget {
+            address: "2001:db8::1".into(),
+            port: 40000,
+        };
         let encoded = encode_xor_address(&v6, &id()).unwrap();
         assert_eq!(encoded[1], 2);
         assert_eq!(encoded.len(), 20);
@@ -619,7 +699,14 @@ mod tests {
         assert!(decode_xor_address(None, &id()).is_none());
         // 域名不是 IP 字面量，原版在 ipBytes 抛「无效的 TURN 地址」
         assert_eq!(
-            encode_xor_address(&RudpTarget { address: "turn.example.com".into(), port: 3478 }, &id()).unwrap_err(),
+            encode_xor_address(
+                &RudpTarget {
+                    address: "turn.example.com".into(),
+                    port: 3478
+                },
+                &id()
+            )
+            .unwrap_err(),
             "无效的 TURN 地址"
         );
     }
@@ -628,9 +715,14 @@ mod tests {
     fn message_build_adds_integrity_then_fingerprint() {
         let key = turn_long_term_key("user", "realm", "pass");
         assert_eq!(key.len(), 16, "md5 摘要固定 16 字节");
-        let request = TurnMessage::with_id(MSG_ALLOCATE, id()).number(ATTR_TRANSPORT, 17 << 24).put(ATTR_USERNAME, b"user");
+        let request = TurnMessage::with_id(MSG_ALLOCATE, id())
+            .number(ATTR_TRANSPORT, 17 << 24)
+            .put(ATTR_USERNAME, b"user");
         let plain = request.build(None);
-        assert_eq!(u16::from_be_bytes([plain[2], plain[3]]) as usize, plain.len() - 20);
+        assert_eq!(
+            u16::from_be_bytes([plain[2], plain[3]]) as usize,
+            plain.len() - 20
+        );
         let signed = request.build(Some(&key));
         let parsed = parse_turn_message(&signed).unwrap();
         assert_eq!(parsed.msg_type, MSG_ALLOCATE);
@@ -703,14 +795,22 @@ mod tests {
     /// 校验客户端发出的 MESSAGE-INTEGRITY 与 FINGERPRINT。
     /// 这是关键一环：HMAC 的输入必须用「属性长度+24」重写头部，写错长度真服务器会全部拒收。
     fn signed_ok(raw: &[u8], key: &[u8]) -> bool {
-        let Some(parsed) = parse_turn_message(raw) else { return false };
-        let Some(mi) = parsed.attr(ATTR_INTEGRITY) else { return false };
-        let Some(fp) = parsed.attr(ATTR_FINGERPRINT) else { return false };
+        let Some(parsed) = parse_turn_message(raw) else {
+            return false;
+        };
+        let Some(mi) = parsed.attr(ATTR_INTEGRITY) else {
+            return false;
+        };
+        let Some(fp) = parsed.attr(ATTR_FINGERPRINT) else {
+            return false;
+        };
         if mi.len() != 20 || fp.len() != 4 {
             return false;
         }
         // 尾部依次是 MESSAGE-INTEGRITY(24) + FINGERPRINT(8)
-        let Some(head) = raw.strip_suffix(fp_attr_bytes(fp).as_slice()) else { return false };
+        let Some(head) = raw.strip_suffix(fp_attr_bytes(fp).as_slice()) else {
+            return false;
+        };
         let attrs_len = head.len() - 20 - 24;
         let mut prefix = header_bytes(parsed.msg_type, (attrs_len + 24) as u16, &parsed.id);
         prefix.extend_from_slice(&raw[20..20 + attrs_len]);
@@ -718,7 +818,12 @@ mod tests {
             return false;
         }
         // 指纹值在整包最后 4 字节，CRC 覆盖的是去掉尾部 FINGERPRINT 属性之后的全部字节
-        u32::from_be_bytes([raw[raw.len() - 4], raw[raw.len() - 3], raw[raw.len() - 2], raw[raw.len() - 1]]) == crc32(head) ^ 0x5354_554e
+        u32::from_be_bytes([
+            raw[raw.len() - 4],
+            raw[raw.len() - 3],
+            raw[raw.len() - 2],
+            raw[raw.len() - 1],
+        ]) == crc32(head) ^ 0x5354_554e
     }
 
     fn fp_attr_bytes(value: &[u8]) -> Vec<u8> {
@@ -741,7 +846,9 @@ mod tests {
             let mut buf = [0u8; 2048];
             while let Ok((size, from)) = socket.recv_from(&mut buf) {
                 let raw = &buf[..size];
-                let Some(request) = parse_turn_message(raw) else { continue };
+                let Some(request) = parse_turn_message(raw) else {
+                    continue;
+                };
                 if request.has(ATTR_INTEGRITY) {
                     // 签名不成立就当没听见，让用例走超时而不是假装通过
                     if !signed_ok(raw, &key) {
@@ -761,9 +868,15 @@ mod tests {
                 } else {
                     let extra = match request.msg_type {
                         MSG_ALLOCATE => {
-                            let target = RudpTarget { address: relay_ip.clone(), port: relay_port };
+                            let target = RudpTarget {
+                                address: relay_ip.clone(),
+                                port: relay_port,
+                            };
                             let xor = encode_xor_address(&target, &request.id).unwrap();
-                            vec![attr_bytes(ATTR_LIFETIME, &600u32.to_be_bytes()), attr_bytes(ATTR_RELAY, &xor)]
+                            vec![
+                                attr_bytes(ATTR_LIFETIME, &600u32.to_be_bytes()),
+                                attr_bytes(ATTR_RELAY, &xor),
+                            ]
                         }
                         MSG_CREATE_PERMISSION | MSG_CHANNEL_BIND | MSG_REFRESH => Vec::new(),
                         _ => continue,
@@ -804,7 +917,14 @@ mod tests {
         assert_eq!(session.lifetime, 600);
         // 权限 + ChannelBind 两步都必须过
         session
-            .bind(&RudpTarget { address: "203.0.113.5".into(), port: 25565 }, &cancelled, 4000)
+            .bind(
+                &RudpTarget {
+                    address: "203.0.113.5".into(),
+                    port: 25565,
+                },
+                &cancelled,
+                4000,
+            )
             .expect("bind 应成功");
         assert!(session.peer.lock().unwrap().is_some());
         // 节点侧应当只收到 4 个报文：裸 Allocate → 401 → 带签名 Allocate → Permission → ChannelBind
@@ -817,9 +937,16 @@ mod tests {
     #[test]
     fn fingerprint_covers_everything_before_itself() {
         let key = turn_long_term_key("user", "realm", "pass");
-        let packet = TurnMessage::with_id(MSG_ALLOCATE, id()).put(ATTR_USERNAME, b"user").build(Some(&key));
+        let packet = TurnMessage::with_id(MSG_ALLOCATE, id())
+            .put(ATTR_USERNAME, b"user")
+            .build(Some(&key));
         let head = &packet[..packet.len() - 8];
-        let value = u32::from_be_bytes([packet[packet.len() - 4], packet[packet.len() - 3], packet[packet.len() - 2], packet[packet.len() - 1]]);
+        let value = u32::from_be_bytes([
+            packet[packet.len() - 4],
+            packet[packet.len() - 3],
+            packet[packet.len() - 2],
+            packet[packet.len() - 1],
+        ]);
         // 指纹覆盖"除自身以外的整包"，取值放在整包最后 4 字节
         assert_eq!(value, crc32(head) ^ 0x5354_554e);
     }
@@ -827,7 +954,9 @@ mod tests {
     #[test]
     fn signed_packet_verifies_only_with_derived_key() {
         let key = turn_long_term_key("user", "realm", "pass");
-        let packet = TurnMessage::with_id(MSG_ALLOCATE, id()).put(ATTR_USERNAME, b"user").build(Some(&key));
+        let packet = TurnMessage::with_id(MSG_ALLOCATE, id())
+            .put(ATTR_USERNAME, b"user")
+            .build(Some(&key));
         assert!(signed_ok(&packet, &key));
         assert!(!signed_ok(&packet, b"wrong-key"));
         // 篡改属性值：HMAC 与 FINGERPRINT 都必须失效
@@ -842,7 +971,13 @@ mod tests {
         let listener = UdpSocket::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         drop(listener);
-        let cred = TurnCredential { host: "127.0.0.1".into(), port, username: "u".into(), password: "p".into(), expire: 0.0 };
+        let cred = TurnCredential {
+            host: "127.0.0.1".into(),
+            port,
+            username: "u".into(),
+            password: "p".into(),
+            expire: 0.0,
+        };
         let cancelled = Arc::new(AtomicBool::new(false));
         let err = StdTurnSession::allocate(&cred, &cancelled, 1200).unwrap_err();
         assert_eq!(err, "标准 TURN 未返回有效鉴权挑战");
@@ -863,7 +998,14 @@ mod tests {
         let cancelled = Arc::new(AtomicBool::new(false));
         let session = StdTurnSession::allocate(&cred, &cancelled, 4000).unwrap();
         let err = session
-            .bind(&RudpTarget { address: "不是地址".into(), port: 25565 }, &cancelled, 2000)
+            .bind(
+                &RudpTarget {
+                    address: "不是地址".into(),
+                    port: 25565,
+                },
+                &cancelled,
+                2000,
+            )
             .unwrap_err();
         assert_eq!(err, "对端 TURN 地址无效");
         session.close();

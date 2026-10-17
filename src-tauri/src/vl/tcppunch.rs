@@ -65,7 +65,12 @@ fn sleep_cancellable(total: Duration, cancelled: &AtomicBool) -> bool {
 }
 
 /// 对应 tcpSimOpen。`cancelled` 等价于原版的 AbortSignal。
-pub fn tcp_sim_open(ip: &str, port: u16, host: bool, cancelled: &AtomicBool) -> Result<TcpStream, String> {
+pub fn tcp_sim_open(
+    ip: &str,
+    port: u16,
+    host: bool,
+    cancelled: &AtomicBool,
+) -> Result<TcpStream, String> {
     let Ok(remote_ip) = ip.parse::<IpAddr>() else {
         return Err("TCP 打洞地址无效".into());
     };
@@ -80,8 +85,16 @@ pub fn tcp_sim_open(ip: &str, port: u16, host: bool, cancelled: &AtomicBool) -> 
         if cancelled.load(Ordering::SeqCst) {
             return Err("TCP 打洞已取消".into());
         }
-        let budget = TCP_PUNCH_CONNECT_MS.min(deadline.saturating_duration_since(Instant::now()).as_millis() as u64);
-        match connect_from_local(SocketAddr::new(remote_ip, port), port, Duration::from_millis(budget)) {
+        let budget = TCP_PUNCH_CONNECT_MS.min(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis() as u64,
+        );
+        match connect_from_local(
+            SocketAddr::new(remote_ip, port),
+            port,
+            Duration::from_millis(budget),
+        ) {
             Ok(stream) => {
                 if cancelled.load(Ordering::SeqCst) {
                     drop(stream);
@@ -97,7 +110,10 @@ pub fn tcp_sim_open(ip: &str, port: u16, host: bool, cancelled: &AtomicBool) -> 
             }
         }
         let jitter = rand::Rng::random_range(&mut rand::rng(), 0..TCP_PUNCH_RETRY_SPAN_MS);
-        if !sleep_cancellable(Duration::from_millis(TCP_PUNCH_RETRY_MIN_MS + jitter), cancelled) {
+        if !sleep_cancellable(
+            Duration::from_millis(TCP_PUNCH_RETRY_MIN_MS + jitter),
+            cancelled,
+        ) {
             return Err("TCP 打洞已取消".into());
         }
     }
@@ -134,7 +150,9 @@ pub fn tcp_sim_open(ip: &str, port: u16, host: bool, cancelled: &AtomicBool) -> 
                 let _ = stream.set_nodelay(true);
                 return Ok(stream);
             }
-            Err(err) if err.kind() == ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
+            Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(10))
+            }
             Err(err) => {
                 drop(listener);
                 return Err(err.to_string());
@@ -145,18 +163,26 @@ pub fn tcp_sim_open(ip: &str, port: u16, host: bool, cancelled: &AtomicBool) -> 
 
 /// 一次性把 socket 走完"绑本地端口 → 非阻塞 connect → select 等结果"
 #[cfg(windows)]
-fn connect_from_local(addr: SocketAddr, local_port: u16, timeout: Duration) -> Result<TcpStream, String> {
+fn connect_from_local(
+    addr: SocketAddr,
+    local_port: u16,
+    timeout: Duration,
+) -> Result<TcpStream, String> {
     use std::os::windows::io::{FromRawSocket, RawSocket};
     use windows_sys::core::PSTR;
     use windows_sys::Win32::Networking::WinSock::{
-        bind, closesocket, connect, getsockopt, ioctlsocket, select, socket, WSAGetLastError, FD_SET, IN6_ADDR, IN6_ADDR_0, IN_ADDR, IN_ADDR_0, INVALID_SOCKET, IPPROTO_TCP,
-        SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6, SOCKADDR_IN6_0, SOCKET_ERROR, SOCK_STREAM, TIMEVAL, AF_INET, AF_INET6, FIONBIO, SOL_SOCKET, SO_ERROR, WSAEWOULDBLOCK,
+        bind, closesocket, connect, getsockopt, ioctlsocket, select, socket, WSAGetLastError,
+        AF_INET, AF_INET6, FD_SET, FIONBIO, IN6_ADDR, IN6_ADDR_0, INVALID_SOCKET, IN_ADDR,
+        IN_ADDR_0, IPPROTO_TCP, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6, SOCKADDR_IN6_0, SOCKET_ERROR,
+        SOCK_STREAM, SOL_SOCKET, SO_ERROR, TIMEVAL, WSAEWOULDBLOCK,
     };
 
     let af = if addr.is_ipv6() { AF_INET6 } else { AF_INET };
     let sock = unsafe { socket(af as i32, SOCK_STREAM, IPPROTO_TCP as i32) };
     if sock == INVALID_SOCKET {
-        return Err(format!("TCP 打洞套接字创建失败 ({})", unsafe { WSAGetLastError() }));
+        return Err(format!("TCP 打洞套接字创建失败 ({})", unsafe {
+            WSAGetLastError()
+        }));
     }
     // 本地端口的意义就在于它等于对端端口，这一步失败就没有同时打开可言
     let bound = unsafe {
@@ -165,20 +191,32 @@ fn connect_from_local(addr: SocketAddr, local_port: u16, timeout: Duration) -> R
                 let local = SOCKADDR_IN {
                     sin_family: AF_INET,
                     sin_port: local_port.to_be(),
-                    sin_addr: IN_ADDR { S_un: IN_ADDR_0 { S_addr: 0 } },
+                    sin_addr: IN_ADDR {
+                        S_un: IN_ADDR_0 { S_addr: 0 },
+                    },
                     sin_zero: [0; 8],
                 };
-                bind(sock, &local as *const SOCKADDR_IN as *const SOCKADDR, std::mem::size_of::<SOCKADDR_IN>() as i32)
+                bind(
+                    sock,
+                    &local as *const SOCKADDR_IN as *const SOCKADDR,
+                    std::mem::size_of::<SOCKADDR_IN>() as i32,
+                )
             }
             SocketAddr::V6(_) => {
                 let local = SOCKADDR_IN6 {
                     sin6_family: AF_INET6,
                     sin6_port: local_port.to_be(),
                     sin6_flowinfo: 0,
-                    sin6_addr: IN6_ADDR { u: IN6_ADDR_0 { Byte: [0; 16] } },
+                    sin6_addr: IN6_ADDR {
+                        u: IN6_ADDR_0 { Byte: [0; 16] },
+                    },
                     Anonymous: SOCKADDR_IN6_0 { sin6_scope_id: 0 },
                 };
-                bind(sock, &local as *const SOCKADDR_IN6 as *const SOCKADDR, std::mem::size_of::<SOCKADDR_IN6>() as i32)
+                bind(
+                    sock,
+                    &local as *const SOCKADDR_IN6 as *const SOCKADDR,
+                    std::mem::size_of::<SOCKADDR_IN6>() as i32,
+                )
             }
         }
     };
@@ -196,29 +234,62 @@ fn connect_from_local(addr: SocketAddr, local_port: u16, timeout: Duration) -> R
                 let remote = SOCKADDR_IN {
                     sin_family: AF_INET,
                     sin_port: addr.port().to_be(),
-                    sin_addr: IN_ADDR { S_un: IN_ADDR_0 { S_addr: u32::from_ne_bytes(v4.ip().octets()) } },
+                    sin_addr: IN_ADDR {
+                        S_un: IN_ADDR_0 {
+                            S_addr: u32::from_ne_bytes(v4.ip().octets()),
+                        },
+                    },
                     sin_zero: [0; 8],
                 };
-                connect(sock, &remote as *const SOCKADDR_IN as *const SOCKADDR, std::mem::size_of::<SOCKADDR_IN>() as i32)
+                connect(
+                    sock,
+                    &remote as *const SOCKADDR_IN as *const SOCKADDR,
+                    std::mem::size_of::<SOCKADDR_IN>() as i32,
+                )
             }
             SocketAddr::V6(v6) => {
                 let remote = SOCKADDR_IN6 {
                     sin6_family: AF_INET6,
                     sin6_port: addr.port().to_be(),
                     sin6_flowinfo: 0,
-                    sin6_addr: IN6_ADDR { u: IN6_ADDR_0 { Byte: v6.ip().octets() } },
+                    sin6_addr: IN6_ADDR {
+                        u: IN6_ADDR_0 {
+                            Byte: v6.ip().octets(),
+                        },
+                    },
                     Anonymous: SOCKADDR_IN6_0 { sin6_scope_id: 0 },
                 };
-                connect(sock, &remote as *const SOCKADDR_IN6 as *const SOCKADDR, std::mem::size_of::<SOCKADDR_IN6>() as i32)
+                connect(
+                    sock,
+                    &remote as *const SOCKADDR_IN6 as *const SOCKADDR,
+                    std::mem::size_of::<SOCKADDR_IN6>() as i32,
+                )
             }
         }
     };
     if rc == SOCKET_ERROR && unsafe { WSAGetLastError() } == WSAEWOULDBLOCK {
         let ms = timeout.as_millis() as u64;
-        let tv = TIMEVAL { tv_sec: (ms / 1000) as i32, tv_usec: ((ms % 1000) * 1000) as i32 };
-        let mut write_set = FD_SET { fd_count: 1, fd_array: [sock; 64] };
-        let mut except_set = FD_SET { fd_count: 1, fd_array: [sock; 64] };
-        rc = unsafe { select(0, std::ptr::null_mut(), &mut write_set, &mut except_set, &tv) };
+        let tv = TIMEVAL {
+            tv_sec: (ms / 1000) as i32,
+            tv_usec: ((ms % 1000) * 1000) as i32,
+        };
+        let mut write_set = FD_SET {
+            fd_count: 1,
+            fd_array: [sock; 64],
+        };
+        let mut except_set = FD_SET {
+            fd_count: 1,
+            fd_array: [sock; 64],
+        };
+        rc = unsafe {
+            select(
+                0,
+                std::ptr::null_mut(),
+                &mut write_set,
+                &mut except_set,
+                &tv,
+            )
+        };
         if rc == 0 {
             unsafe { closesocket(sock) };
             return Err("TCP 同时打开超时".into());
@@ -230,7 +301,15 @@ fn connect_from_local(addr: SocketAddr, local_port: u16, timeout: Duration) -> R
         }
         let mut so_error = 0i32;
         let mut len = std::mem::size_of::<i32>() as i32;
-        unsafe { getsockopt(sock, SOL_SOCKET, SO_ERROR, &mut so_error as *mut i32 as PSTR, &mut len) };
+        unsafe {
+            getsockopt(
+                sock,
+                SOL_SOCKET,
+                SO_ERROR,
+                &mut so_error as *mut i32 as PSTR,
+                &mut len,
+            )
+        };
         if so_error != 0 {
             unsafe { closesocket(sock) };
             return Err(format!("TCP 同时打开已关闭 ({})", so_error));
@@ -247,7 +326,11 @@ fn connect_from_local(addr: SocketAddr, local_port: u16, timeout: Duration) -> R
 
 /// 非 Windows 平台不发布，这里保留可用的普通连接（不钉本地端口）
 #[cfg(not(windows))]
-fn connect_from_local(addr: SocketAddr, _local_port: u16, timeout: Duration) -> Result<TcpStream, String> {
+fn connect_from_local(
+    addr: SocketAddr,
+    _local_port: u16,
+    timeout: Duration,
+) -> Result<TcpStream, String> {
     TcpStream::connect_timeout(&addr, timeout).map_err(|e| e.to_string())
 }
 
@@ -270,7 +353,10 @@ fn stop_punched(inner: &Arc<PunchedInner>) {
     if let Some(listener) = inner.listener.lock().unwrap().take() {
         drop(listener);
     }
-    for socket in [inner.peer.lock().unwrap().take(), inner.local.lock().unwrap().take()] {
+    for socket in [
+        inner.peer.lock().unwrap().take(),
+        inner.local.lock().unwrap().take(),
+    ] {
         if let Some(socket) = socket {
             let _ = socket.shutdown(std::net::Shutdown::Both);
         }
@@ -285,7 +371,12 @@ fn pair_punched(inner: &Arc<PunchedInner>, socket: TcpStream) {
         return;
     }
     let _ = socket.set_nodelay(true);
-    let peer = inner.peer.lock().unwrap().as_ref().and_then(|peer| peer.try_clone().ok());
+    let peer = inner
+        .peer
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|peer| peer.try_clone().ok());
     let Some(peer) = peer else {
         drop(socket);
         stop_punched(inner);
@@ -350,7 +441,10 @@ impl PunchedBridge {
 
 impl std::fmt::Debug for PunchedBridge {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PunchedBridge").field("address", &self.address).field("stopped", &self.inner.stopped.load(Ordering::SeqCst)).finish()
+        f.debug_struct("PunchedBridge")
+            .field("address", &self.address)
+            .field("stopped", &self.inner.stopped.load(Ordering::SeqCst))
+            .finish()
     }
 }
 
@@ -360,8 +454,14 @@ fn set_punch_keepalive(socket: &TcpStream) {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsRawSocket;
-        use windows_sys::Win32::Networking::WinSock::{tcp_keepalive, WSAIoctl, SIO_KEEPALIVE_VALS};
-        let mut value = tcp_keepalive { onoff: 1, keepalivetime: TCP_PUNCH_KEEPALIVE_MS as u32, keepaliveinterval: 1000 };
+        use windows_sys::Win32::Networking::WinSock::{
+            tcp_keepalive, WSAIoctl, SIO_KEEPALIVE_VALS,
+        };
+        let mut value = tcp_keepalive {
+            onoff: 1,
+            keepalivetime: TCP_PUNCH_KEEPALIVE_MS as u32,
+            keepaliveinterval: 1000,
+        };
         let mut returned = 0u32;
         unsafe {
             WSAIoctl(
@@ -385,7 +485,11 @@ fn set_punch_keepalive(socket: &TcpStream) {
 
 /// hostPort 有值＝主动连本地游戏；否则在 127.0.0.1 临时端口等游戏连进来。
 /// 原版这里不给 peer 设 nodelay——那一步在 tcpSimOpen 成功时已经做过。
-pub fn bridge_punched_socket(peer: TcpStream, host_port: Option<u16>, on_down: DownCb) -> Result<PunchedBridge, String> {
+pub fn bridge_punched_socket(
+    peer: TcpStream,
+    host_port: Option<u16>,
+    on_down: DownCb,
+) -> Result<PunchedBridge, String> {
     set_punch_keepalive(&peer);
     let inner = Arc::new(PunchedInner {
         peer: std::sync::Mutex::new(Some(peer)),
@@ -399,7 +503,10 @@ pub fn bridge_punched_socket(peer: TcpStream, host_port: Option<u16>, on_down: D
         match connect_timeout(address, Duration::from_millis(TCP_PUNCH_LOCAL_MS)) {
             Ok(local) => {
                 pair_punched(&inner, local);
-                Ok(PunchedBridge { address: String::new(), inner })
+                Ok(PunchedBridge {
+                    address: String::new(),
+                    inner,
+                })
             }
             Err(error) => {
                 stop_punched(&inner);
@@ -428,14 +535,19 @@ pub fn bridge_punched_socket(peer: TcpStream, host_port: Option<u16>, on_down: D
                     let _ = socket.set_nonblocking(false);
                     pair_punched(&scanning, socket);
                 }
-                Err(err) if err.kind() == ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
                 Err(_) => {
                     stop_punched(&scanning);
                     break;
                 }
             }
         });
-        Ok(PunchedBridge { address: format!("127.0.0.1:{port}"), inner })
+        Ok(PunchedBridge {
+            address: format!("127.0.0.1:{port}"),
+            inner,
+        })
     }
 }
 
@@ -497,15 +609,27 @@ mod tests {
     #[test]
     fn sim_open_rejects_bad_arguments_before_any_socket() {
         let cancelled = AtomicBool::new(false);
-        assert_eq!(tcp_sim_open("不是一个地址", 25565, true, &cancelled).unwrap_err(), "TCP 打洞地址无效");
-        assert_eq!(tcp_sim_open("127.0.0.1", 80, true, &cancelled).unwrap_err(), "TCP 打洞地址无效");
+        assert_eq!(
+            tcp_sim_open("不是一个地址", 25565, true, &cancelled).unwrap_err(),
+            "TCP 打洞地址无效"
+        );
+        assert_eq!(
+            tcp_sim_open("127.0.0.1", 80, true, &cancelled).unwrap_err(),
+            "TCP 打洞地址无效"
+        );
     }
 
     #[test]
     fn sim_open_checks_cancellation_first() {
         let cancelled = AtomicBool::new(true);
-        assert_eq!(tcp_sim_open("127.0.0.1", 25565, true, &cancelled).unwrap_err(), "TCP 打洞已取消");
-        assert_eq!(tcp_sim_open("127.0.0.1", 25565, false, &cancelled).unwrap_err(), "TCP 打洞已取消");
+        assert_eq!(
+            tcp_sim_open("127.0.0.1", 25565, true, &cancelled).unwrap_err(),
+            "TCP 打洞已取消"
+        );
+        assert_eq!(
+            tcp_sim_open("127.0.0.1", 25565, false, &cancelled).unwrap_err(),
+            "TCP 打洞已取消"
+        );
     }
 
     #[test]
@@ -515,8 +639,17 @@ mod tests {
         let local_port = choose_tcp_punch_port().unwrap();
         let accepted = std::thread::spawn(move || listener.accept());
         let remote = "127.0.0.1".parse::<IpAddr>().unwrap();
-        let stream = connect_from_local(SocketAddr::new(remote, remote_port), local_port, Duration::from_secs(3)).expect("按指定本地端口连接应当成功");
-        assert_eq!(stream.local_addr().unwrap().port(), local_port, "本地端口必须是被钉住的那个，否则谈不上同时打开");
+        let stream = connect_from_local(
+            SocketAddr::new(remote, remote_port),
+            local_port,
+            Duration::from_secs(3),
+        )
+        .expect("按指定本地端口连接应当成功");
+        assert_eq!(
+            stream.local_addr().unwrap().port(),
+            local_port,
+            "本地端口必须是被钉住的那个，否则谈不上同时打开"
+        );
         let (_peer, from) = accepted.join().unwrap().unwrap();
         assert_eq!(from.port(), local_port, "对端看到的来源端口也要是同一个");
     }
@@ -542,8 +675,14 @@ mod tests {
         let error = tcp_sim_open("192.0.2.1", port, false, &cancelled).unwrap_err();
         let _ = dialer.join();
         assert_eq!(error, "TCP 打洞未命中");
-        assert!(reached.load(Ordering::SeqCst), "回退阶段应当真的在本机监听同一个端口");
-        assert!(started.elapsed() >= Duration::from_millis(TCP_PUNCH_HIT_MS), "命中窗口是 10 秒，不能提前收工");
+        assert!(
+            reached.load(Ordering::SeqCst),
+            "回退阶段应当真的在本机监听同一个端口"
+        );
+        assert!(
+            started.elapsed() >= Duration::from_millis(TCP_PUNCH_HIT_MS),
+            "命中窗口是 10 秒，不能提前收工"
+        );
     }
 
     #[test]
@@ -551,9 +690,17 @@ mod tests {
         let (peer, _remote) = loopback_pair();
         let down = Arc::new(AtomicBool::new(false));
         let flag = down.clone();
-        let error = bridge_punched_socket(peer, Some(closed_port()), Arc::new(move || flag.store(true, Ordering::SeqCst))).unwrap_err();
+        let error = bridge_punched_socket(
+            peer,
+            Some(closed_port()),
+            Arc::new(move || flag.store(true, Ordering::SeqCst)),
+        )
+        .unwrap_err();
         assert!(!error.is_empty(), "原版把 socket 错误原样抛出");
-        assert!(down.load(Ordering::SeqCst), "失败路径同样要 stop() → onDown");
+        assert!(
+            down.load(Ordering::SeqCst),
+            "失败路径同样要 stop() → onDown"
+        );
     }
 
     #[test]
@@ -577,7 +724,10 @@ mod tests {
     fn guest_bridge_only_pairs_the_first_local_connection() {
         let (peer, mut remote) = loopback_pair();
         let bridge = bridge_punched_socket(peer, None, Arc::new(|| {})).unwrap();
-        assert!(bridge.address.starts_with("127.0.0.1:"), "guest 侧要给出可连的本地地址");
+        assert!(
+            bridge.address.starts_with("127.0.0.1:"),
+            "guest 侧要给出可连的本地地址"
+        );
         let mut game = TcpStream::connect(bridge.address.as_str()).unwrap();
         remote.write_all(b"up").unwrap();
         let mut buf = [0u8; 2];
@@ -585,9 +735,14 @@ mod tests {
         assert_eq!(&buf, b"up");
         // 第二条本地连接必须被拆掉：local 槽位只有一个
         let mut extra = TcpStream::connect(bridge.address.as_str()).unwrap();
-        extra.set_read_timeout(Some(Duration::from_millis(1500))).unwrap();
+        extra
+            .set_read_timeout(Some(Duration::from_millis(1500)))
+            .unwrap();
         let mut probe = [0u8; 1];
-        assert!(!matches!(extra.read(&mut probe), Ok(1)), "多余的本地连接不该收到数据");
+        assert!(
+            !matches!(extra.read(&mut probe), Ok(1)),
+            "多余的本地连接不该收到数据"
+        );
         // 主通道不受影响
         game.write_all(b"down").unwrap();
         remote.read_exact(&mut buf).unwrap();
@@ -599,15 +754,22 @@ mod tests {
         let (peer, remote) = loopback_pair();
         let hits = Arc::new(AtomicUsize::new(0));
         let counter = hits.clone();
-        let bridge = bridge_punched_socket(peer, None, Arc::new(move || {
-            counter.fetch_add(1, Ordering::SeqCst);
-        }))
+        let bridge = bridge_punched_socket(
+            peer,
+            None,
+            Arc::new(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+            }),
+        )
         .unwrap();
         let _game = TcpStream::connect(bridge.address.as_str()).unwrap();
         bridge.stop();
         bridge.stop();
         assert_eq!(hits.load(Ordering::SeqCst), 1, "stop 必须幂等");
-        assert!(TcpStream::connect(bridge.address.as_str()).is_err(), "stop 之后本地监听要收掉");
+        assert!(
+            TcpStream::connect(bridge.address.as_str()).is_err(),
+            "stop 之后本地监听要收掉"
+        );
         drop(remote);
     }
 
@@ -616,10 +778,14 @@ mod tests {
         let (peer, remote) = loopback_pair();
         let down = Arc::new(AtomicBool::new(false));
         let flag = down.clone();
-        let bridge = bridge_punched_socket(peer, None, Arc::new(move || flag.store(true, Ordering::SeqCst))).unwrap();
+        let bridge = bridge_punched_socket(
+            peer,
+            None,
+            Arc::new(move || flag.store(true, Ordering::SeqCst)),
+        )
+        .unwrap();
         let _game = TcpStream::connect(bridge.address.as_str()).unwrap();
         drop(remote);
         assert!(until(&down, 3000), "任一方向先结束即停（tcpPunch.ts:36）");
     }
 }
-

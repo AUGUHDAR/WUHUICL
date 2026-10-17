@@ -239,14 +239,19 @@ impl TcpBridge {
                     let pump = inner.clone();
                     std::thread::spawn(move || pump_inner(&pump, &socket));
                 }
-                Err(ref err) if err.kind() == ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(10)),
+                Err(ref err) if err.kind() == ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10))
+                }
                 Err(_) => {
                     stop_inner(&inner);
                     break;
                 }
             }
         });
-        Ok(GuestBridge { addr: format!("127.0.0.1:{port}"), bridge })
+        Ok(GuestBridge {
+            addr: format!("127.0.0.1:{port}"),
+            bridge,
+        })
     }
 }
 
@@ -265,7 +270,8 @@ pub fn start_host_lazy_bridge(rc: Arc<RudpConn>, port: u16, log: LogFn) {
     let target = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     while rc.is_connected() && now_millis() < deadline {
         let attempt = (|| -> std::io::Result<TcpStream> {
-            let socket = TcpStream::connect_timeout(&target, Duration::from_millis(BRIDGE_DIAL_TIMEOUT_MS))?;
+            let socket =
+                TcpStream::connect_timeout(&target, Duration::from_millis(BRIDGE_DIAL_TIMEOUT_MS))?;
             let bridge = TcpBridge::new(rc.clone(), None);
             bridge.set_conn(&socket)?;
             send(&socket, &first[..length])?;
@@ -391,7 +397,10 @@ pub struct ConnectionLog {
 const TOKEN_KEYS: &str = "(?:access[_-]?token|refresh[_-]?token|client[_-]?token|session[_-]?(?:id|key)|password|authorization)";
 
 fn replace_re(text: &str, pattern: &str, with: &str) -> String {
-    regex::Regex::new(pattern).expect("脱敏规则可用").replace_all(text, with).to_string()
+    regex::Regex::new(pattern)
+        .expect("脱敏规则可用")
+        .replace_all(text, with)
+        .to_string()
 }
 
 /// diagnostics.ts:25 —— os.homedir()，win32 走 USERPROFILE
@@ -413,15 +422,43 @@ pub fn redact_diagnostic_text(input: &str, known_secrets: &[String]) -> String {
         }
         out = out.replace(secret.as_str(), "<redacted>");
     }
-    out = replace_re(&out, r"(?i)(Authorization\s*:\s*Bearer\s+)[^\s,;]+", "${1}<redacted>");
-    out = replace_re(&out, &format!(r#"(?i)("?{}"?\s*[:=]\s*")([^"\r\n]+)(")"#, TOKEN_KEYS), "${1}<redacted>${3}");
-    out = replace_re(&out, &format!(r"(?i)({}\s*[:=]\s*)([^\s,;]+)", TOKEN_KEYS), "${1}<redacted>");
-    out = replace_re(&out, r#"(?i)(--accessToken|--clientId|--xuid|--userProperties)\s+("[^"]*"|\S+)"#, "$1 <redacted>");
-    out = replace_re(&out, r#"(?i)(--username|--uuid)\s+("[^"]*"|\S+)"#, "$1 <redacted-user>");
-    out = replace_re(&out, r"(?i)([?&](?:access_token|refresh_token|token|key)=)[^&#\s]+", "${1}<redacted>");
+    out = replace_re(
+        &out,
+        r"(?i)(Authorization\s*:\s*Bearer\s+)[^\s,;]+",
+        "${1}<redacted>",
+    );
+    out = replace_re(
+        &out,
+        &format!(r#"(?i)("?{}"?\s*[:=]\s*")([^"\r\n]+)(")"#, TOKEN_KEYS),
+        "${1}<redacted>${3}",
+    );
+    out = replace_re(
+        &out,
+        &format!(r"(?i)({}\s*[:=]\s*)([^\s,;]+)", TOKEN_KEYS),
+        "${1}<redacted>",
+    );
+    out = replace_re(
+        &out,
+        r#"(?i)(--accessToken|--clientId|--xuid|--userProperties)\s+("[^"]*"|\S+)"#,
+        "$1 <redacted>",
+    );
+    out = replace_re(
+        &out,
+        r#"(?i)(--username|--uuid)\s+("[^"]*"|\S+)"#,
+        "$1 <redacted-user>",
+    );
+    out = replace_re(
+        &out,
+        r"(?i)([?&](?:access_token|refresh_token|token|key)=)[^&#\s]+",
+        "${1}<redacted>",
+    );
     let home = home_dir();
     if !home.is_empty() {
-        out = replace_re(&out, &format!("(?i){}", regex::escape(&home)), "%USERPROFILE%");
+        out = replace_re(
+            &out,
+            &format!("(?i){}", regex::escape(&home)),
+            "%USERPROFILE%",
+        );
     }
     out = replace_re(&out, r#"[A-Za-z]:\\Users\\[^\\\s"']+"#, "%USERPROFILE%");
     out = replace_re(&out, r#"/(?:Users|home)/[^/\s"']+"#, "$$HOME");
@@ -454,7 +491,9 @@ fn gzip_payload(text: &str) -> Vec<u8> {
         .mtime(0)
         .operating_system(LOG_GZIP_OS_WINDOWS)
         .write(Vec::new(), Compression::new(LOG_GZIP_LEVEL));
-    encoder.write_all(text.as_bytes()).expect("写内存缓冲不会失败");
+    encoder
+        .write_all(text.as_bytes())
+        .expect("写内存缓冲不会失败");
     encoder.finish().expect("gzip 收尾不会失败")
 }
 
@@ -471,7 +510,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// 已有 route 就地替换（保持原位置）并删掉重复项，没有才追加到末尾
 fn route_url(base: &str, route: &str) -> Option<String> {
     let mut parsed = url::Url::parse(base).ok()?;
-    let pairs: Vec<(String, String)> = parsed.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect();
+    let pairs: Vec<(String, String)> = parsed
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
     let replaced = pairs.iter().any(|(k, _)| k.as_str() == "route");
     let mut serializer = parsed.query_pairs_mut();
     serializer.clear();
@@ -630,7 +672,10 @@ impl ConnectionLog {
                 enabled: Arc::new(enabled),
                 secrets: Arc::new(secrets),
                 version: version.into(),
-                http: reqwest::blocking::Client::builder().no_proxy().build().expect("HTTP 客户端初始化失败"),
+                http: reqwest::blocking::Client::builder()
+                    .no_proxy()
+                    .build()
+                    .expect("HTTP 客户端初始化失败"),
                 state: Mutex::new(LogState::default()),
                 timer_seq: AtomicU64::new(0),
                 pending: Mutex::new(false),
@@ -642,7 +687,15 @@ impl ConnectionLog {
     /// connectionLog.ts:13 record
     pub fn record(&self, level: &str, text: &str) {
         let secrets = (self.inner.secrets)();
-        let line = utf16_slice(&format!("{} [{}] {}", iso_now(), level, redact_diagnostic_text(text, &secrets)), LOG_LINE_UNITS);
+        let line = utf16_slice(
+            &format!(
+                "{} [{}] {}",
+                iso_now(),
+                level,
+                redact_diagnostic_text(text, &secrets)
+            ),
+            LOG_LINE_UNITS,
+        );
         let mut st = self.inner.state.lock().unwrap();
         st.lines.push(line);
         if st.lines.len() > LOG_LINE_KEEP {
@@ -686,10 +739,15 @@ impl ConnectionLog {
                 st.failed = false;
             }
             if status == "failed" {
-                let early = st.connected != 0 && now_millis().saturating_sub(st.connected) < LOG_EARLY_MS;
+                let early =
+                    st.connected != 0 && now_millis().saturating_sub(st.connected) < LOG_EARLY_MS;
                 st.connected = 0;
                 st.failed = true;
-                delay = Some(if early { LOG_FAILED_EARLY_MS } else { LOG_FAILED_MS });
+                delay = Some(if early {
+                    LOG_FAILED_EARLY_MS
+                } else {
+                    LOG_FAILED_MS
+                });
             }
         }
         if let Some(ms) = delay {
@@ -712,8 +770,17 @@ impl ConnectionLog {
             let st = inner.state.lock().unwrap();
             (st.failed, st.connected, st.started)
         };
-        if failed || (quit && connected == 0 && now_millis().saturating_sub(started) >= LOG_QUIT_AGE_MS) {
-            log_upload(inner, if quit { LOG_QUIT_TIMEOUT_MS } else { LOG_STOP_TIMEOUT_MS });
+        if failed
+            || (quit && connected == 0 && now_millis().saturating_sub(started) >= LOG_QUIT_AGE_MS)
+        {
+            log_upload(
+                inner,
+                if quit {
+                    LOG_QUIT_TIMEOUT_MS
+                } else {
+                    LOG_STOP_TIMEOUT_MS
+                },
+            );
         }
         let mut st = inner.state.lock().unwrap();
         if epoch == st.generation {
@@ -739,7 +806,10 @@ mod tests {
         let bp = b.local_addr().unwrap();
         let ca = Arc::new(RudpConn::new(
             a.clone(),
-            Some(RudpTarget { address: ap.ip().to_string(), port: bp.port() }),
+            Some(RudpTarget {
+                address: ap.ip().to_string(),
+                port: bp.port(),
+            }),
             None,
             None,
             false,
@@ -747,7 +817,10 @@ mod tests {
         ));
         let cb = Arc::new(RudpConn::new(
             b.clone(),
-            Some(RudpTarget { address: bp.ip().to_string(), port: ap.port() }),
+            Some(RudpTarget {
+                address: bp.ip().to_string(),
+                port: ap.port(),
+            }),
             None,
             None,
             false,
@@ -785,14 +858,22 @@ mod tests {
         assert!(port > 0, "临时端口不能是 0");
         let mut game = TcpStream::connect(("127.0.0.1", port)).unwrap();
         game.write_all(b"mc-handshake").unwrap();
-        assert_eq!(read_some(&peer, 12, 6), b"mc-handshake", "上行 TCP → RUDP 必须原样搬运");
+        assert_eq!(
+            read_some(&peer, 12, 6),
+            b"mc-handshake",
+            "上行 TCP → RUDP 必须原样搬运"
+        );
         peer.write(b"mc-login").unwrap();
         let mut down = [0u8; 8];
         game.read_exact(&mut down).unwrap();
         assert_eq!(&down, b"mc-login", "下行 RUDP → TCP 必须原样搬运");
         let mut second = TcpStream::connect(("127.0.0.1", port)).unwrap();
         let mut probe = [0u8; 1];
-        assert_eq!(second.read(&mut probe).unwrap(), 0, "bridge.ts:22 只允许一条游戏连接");
+        assert_eq!(
+            second.read(&mut probe).unwrap(),
+            0,
+            "bridge.ts:22 只允许一条游戏连接"
+        );
         guest.bridge.stop();
         assert!(guest.bridge.is_stopped());
         assert!(!rc.is_connected(), "stop 必须关掉 RUDP（bridge.ts:18）");
@@ -834,7 +915,9 @@ mod tests {
         let log: LogFn = {
             let seen = seen.clone();
             Some(Arc::new(move |level: &str, message: &str| {
-                seen.lock().unwrap().push((level.to_string(), message.to_string()));
+                seen.lock()
+                    .unwrap()
+                    .push((level.to_string(), message.to_string()));
             }) as Arc<dyn Fn(&str, &str) + Send + Sync>)
         };
         let handle = {
@@ -874,7 +957,10 @@ mod tests {
         b_peer.write(b"right").unwrap();
         assert_eq!(read_some(&a_peer, 5, 6), b"right");
         stop();
-        assert!(!a.is_connected() && !b.is_connected(), "bridge.ts:48 stop 要关两端");
+        assert!(
+            !a.is_connected() && !b.is_connected(),
+            "bridge.ts:48 stop 要关两端"
+        );
         stop();
     }
 
@@ -886,7 +972,11 @@ mod tests {
     }
 
     fn header_value(item: &Captured, name: &str) -> String {
-        item.headers.iter().find(|(k, _)| k.as_str() == name).map(|(_, v)| v.clone()).unwrap_or_default()
+        item.headers
+            .iter()
+            .find(|(k, _)| k.as_str() == name)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
     }
 
     fn fake_server() -> (u16, Arc<Mutex<Vec<Captured>>>) {
@@ -907,7 +997,9 @@ mod tests {
                         Ok(0) => broken = true,
                         Ok(n) => {
                             buffer.extend_from_slice(&chunk[..n]);
-                            if let Some(pos) = buffer.windows(4).position(|w| w == b"\r\n\r\n".as_slice()) {
+                            if let Some(pos) =
+                                buffer.windows(4).position(|w| w == b"\r\n\r\n".as_slice())
+                            {
                                 head_end = Some(pos + 4);
                             }
                         }
@@ -934,9 +1026,16 @@ mod tests {
                 let mut lines = head.lines();
                 let line = lines.next().unwrap_or_default().to_string();
                 let headers = lines
-                    .filter_map(|item| item.split_once(':').map(|(k, v)| (k.trim().to_lowercase(), v.trim().to_string())))
+                    .filter_map(|item| {
+                        item.split_once(':')
+                            .map(|(k, v)| (k.trim().to_lowercase(), v.trim().to_string()))
+                    })
                     .collect();
-                late.lock().unwrap().push(Captured { line, headers, body });
+                late.lock().unwrap().push(Captured {
+                    line,
+                    headers,
+                    body,
+                });
                 let reply = "{\"success\": true}";
                 let _ = stream.write_all(
                     format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", reply.len(), reply).as_bytes(),
@@ -962,18 +1061,34 @@ mod tests {
     }
 
     fn upload_requests(items: &[Captured]) -> Vec<Captured> {
-        items.iter().filter(|i| i.line.contains("route=%2Flog%2Fupload")).cloned().collect()
+        items
+            .iter()
+            .filter(|i| i.line.contains("route=%2Flog%2Fupload"))
+            .cloned()
+            .collect()
     }
 
     #[test]
     fn recorded_line_keeps_iso_prefix_level_and_redaction() {
-        let log = ConnectionLog::new(|| "http://127.0.0.1:1/".to_string(), || false, || vec!["TOPSECRET".to_string()], "1.1.21");
-        log.record("warn", "加入 TOPSECRET https://h/p?access_token=abc12345&t=1 --username Steve");
+        let log = ConnectionLog::new(
+            || "http://127.0.0.1:1/".to_string(),
+            || false,
+            || vec!["TOPSECRET".to_string()],
+            "1.1.21",
+        );
+        log.record(
+            "warn",
+            "加入 TOPSECRET https://h/p?access_token=abc12345&t=1 --username Steve",
+        );
         let st = log.inner.state.lock().unwrap();
         assert_eq!(st.lines.len(), 1);
         let line = &st.lines[0];
-        let shape = regex::Regex::new(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z \[warn\] ").unwrap();
-        assert!(shape.is_match(line), "行首必须是 ISO8601 毫秒 + [级别]：{line}");
+        let shape =
+            regex::Regex::new(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z \[warn\] ").unwrap();
+        assert!(
+            shape.is_match(line),
+            "行首必须是 ISO8601 毫秒 + [级别]：{line}"
+        );
         assert!(!line.contains("TOPSECRET"), "已知密钥必须先整体替换");
         assert!(line.contains("access_token=<redacted>"));
         assert!(line.contains("--username <redacted-user>"));
@@ -981,12 +1096,21 @@ mod tests {
 
     #[test]
     fn line_cap_and_utf16_truncation_match_js_slice() {
-        let log = ConnectionLog::new(|| "http://127.0.0.1:1/".to_string(), || false, || Vec::new(), "1.1.21");
+        let log = ConnectionLog::new(
+            || "http://127.0.0.1:1/".to_string(),
+            || false,
+            || Vec::new(),
+            "1.1.21",
+        );
         for i in 0..1002 {
             log.record("info", &format!("#{i}"));
         }
         let mut st = log.inner.state.lock().unwrap();
-        assert_eq!(st.lines.len(), LOG_LINE_KEEP, "connectionLog.ts:15 的 shift 上限");
+        assert_eq!(
+            st.lines.len(),
+            LOG_LINE_KEEP,
+            "connectionLog.ts:15 的 shift 上限"
+        );
         assert!(st.lines[0].contains("#2"), "最旧两行应被丢掉");
         assert!(st.lines[LOG_LINE_KEEP - 1].contains("#1001"));
         st.lines.clear();
@@ -995,25 +1119,43 @@ mod tests {
         log.record("info", &text);
         let kept = log.inner.state.lock().unwrap().lines[0].clone();
         assert_eq!(kept.chars().count(), 1999, "按 UTF-16 码元截到 2000");
-        assert_eq!(kept.chars().filter(|c| *c == '😀').count(), 1, "半个代理对不保留");
+        assert_eq!(
+            kept.chars().filter(|c| *c == '😀').count(),
+            1,
+            "半个代理对不保留"
+        );
     }
 
     #[test]
     fn upload_posts_zlib_compatible_gzip_with_every_header() {
         let (port, captured) = fake_server();
-        let log = ConnectionLog::new(move || format!("http://127.0.0.1:{port}/log"), || true, || Vec::new(), "1.1.21");
+        let log = ConnectionLog::new(
+            move || format!("http://127.0.0.1:{port}/log"),
+            || true,
+            || Vec::new(),
+            "1.1.21",
+        );
         log.start("ABCDEF", true);
         log.state("failed", "通路断开");
         log.stop(false);
         let items = drain(&captured, 2, 6);
-        let status = items.iter().find(|i| i.line.contains("route=%2Flog%2Fstatus")).expect("/log/status 走 route 查询串");
+        let status = items
+            .iter()
+            .find(|i| i.line.contains("route=%2Flog%2Fstatus"))
+            .expect("/log/status 走 route 查询串");
         assert_eq!(header_value(status, "content-type"), "application/json");
-        assert_eq!(status.body, br#"{"code":"ABCDEF","role":"host","enabled":true}"#.to_vec());
+        assert_eq!(
+            status.body,
+            br#"{"code":"ABCDEF","role":"host","enabled":true}"#.to_vec()
+        );
         let uploads = upload_requests(&items);
         assert_eq!(uploads.len(), 1, "失败后只补传一次");
         let upload = &uploads[0];
         assert!(upload.line.starts_with("POST "), "必须是 POST");
-        assert_eq!(header_value(upload, "content-type"), "application/octet-stream");
+        assert_eq!(
+            header_value(upload, "content-type"),
+            "application/octet-stream"
+        );
         assert_eq!(header_value(upload, "accept"), "application/json");
         assert_eq!(header_value(upload, "user-agent"), "KAMUCL-App/1.1.21");
         assert_eq!(header_value(upload, "x-voxlink-version"), "1.1.21");
@@ -1021,11 +1163,29 @@ mod tests {
         assert_eq!(header_value(upload, "x-log-version"), "1.1.21");
         assert_eq!(header_value(upload, "x-log-role"), "host");
         assert_eq!(header_value(upload, "x-log-code"), "ABCDEF");
-        assert!(regex::Regex::new(r"^\d+$").unwrap().is_match(&header_value(upload, "x-log-duration-ms")));
-        assert_eq!(header_value(upload, "x-log-sha256"), sha256_hex(&upload.body), "摘要算的是 gzip 后的字节");
+        assert!(regex::Regex::new(r"^\d+$")
+            .unwrap()
+            .is_match(&header_value(upload, "x-log-duration-ms")));
+        assert_eq!(
+            header_value(upload, "x-log-sha256"),
+            sha256_hex(&upload.body),
+            "摘要算的是 gzip 后的字节"
+        );
         assert_eq!(
             &upload.body[..10],
-            [0x1f, 0x8b, 0x08, 0x00, 0, 0, 0, 0, 0x00, LOG_GZIP_OS_WINDOWS].as_slice(),
+            [
+                0x1f,
+                0x8b,
+                0x08,
+                0x00,
+                0,
+                0,
+                0,
+                0,
+                0x00,
+                LOG_GZIP_OS_WINDOWS
+            ]
+            .as_slice(),
             "gzip 头要逐字节等于 zlib.gzipSync 在 Windows 上的默认输出"
         );
         let mut decoder = GzDecoder::new(upload.body.as_slice());
@@ -1040,35 +1200,62 @@ mod tests {
         assert!(log.inner.state.lock().unwrap().uploaded);
         log.stop(false);
         std::thread::sleep(Duration::from_millis(200));
-        assert!(upload_requests(&take_all(&captured)).is_empty(), "uploaded 之后不再重复上传");
+        assert!(
+            upload_requests(&take_all(&captured)).is_empty(),
+            "uploaded 之后不再重复上传"
+        );
     }
 
     #[test]
     fn disabled_diagnostics_never_reach_the_socket() {
         let (port, captured) = fake_server();
-        let log = ConnectionLog::new(move || format!("http://127.0.0.1:{port}/"), || false, || Vec::new(), "1.1.21");
+        let log = ConnectionLog::new(
+            move || format!("http://127.0.0.1:{port}/"),
+            || false,
+            || Vec::new(),
+            "1.1.21",
+        );
         log.start("ABCDEF", false);
         log.state("failed", "通路断开");
         log.stop(false);
         log.upload(LOG_STOP_TIMEOUT_MS);
         log.stop(true);
         std::thread::sleep(Duration::from_millis(300));
-        assert!(captured.lock().unwrap().is_empty(), "uploadDiagnostics 关闭时一条请求都不能发出去");
-        assert_ne!(log.inner.timer_seq.load(Ordering::SeqCst), 0, "start/state 都应动过定时器");
+        assert!(
+            captured.lock().unwrap().is_empty(),
+            "uploadDiagnostics 关闭时一条请求都不能发出去"
+        );
+        assert_ne!(
+            log.inner.timer_seq.load(Ordering::SeqCst),
+            0,
+            "start/state 都应动过定时器"
+        );
     }
 
     #[test]
     fn connected_session_reschedules_instead_of_uploading() {
         let (port, captured) = fake_server();
-        let log = ConnectionLog::new(move || format!("http://127.0.0.1:{port}/"), || true, || Vec::new(), "1.1.21");
+        let log = ConnectionLog::new(
+            move || format!("http://127.0.0.1:{port}/"),
+            || true,
+            || Vec::new(),
+            "1.1.21",
+        );
         log.start("ABCDEF", true);
         log.state("success", "连接成功，请在游戏中输入下方地址");
         let seq_before = log.inner.timer_seq.load(Ordering::SeqCst);
         log.upload(500);
         assert!(!log.inner.state.lock().unwrap().uploaded, "刚连通不该补传");
-        assert_ne!(log.inner.timer_seq.load(Ordering::SeqCst), seq_before, "已连通要改排 15 秒（:35）");
+        assert_ne!(
+            log.inner.timer_seq.load(Ordering::SeqCst),
+            seq_before,
+            "已连通要改排 15 秒（:35）"
+        );
         let items = drain(&captured, 1, 6);
-        assert!(upload_requests(&items).is_empty(), "这条路径不能产生上传请求");
+        assert!(
+            upload_requests(&items).is_empty(),
+            "这条路径不能产生上传请求"
+        );
         log.stop(false);
         assert!(upload_requests(&take_all(&captured)).is_empty());
     }

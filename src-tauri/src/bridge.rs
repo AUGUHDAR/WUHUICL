@@ -97,7 +97,9 @@ fn game_dir_of(app: &tauri::AppHandle, version_id: &str) -> Result<PathBuf, Stri
 
 /// 对应原版 readDiscovery()：发现文件不存在/损坏一律返回 null（gameDirOf 的抛错也被吞掉）
 fn read_discovery(app: &tauri::AppHandle, version_id: &str) -> Option<Discovery> {
-    let file = game_dir_of(app, version_id).ok()?.join(".kamucl-bridge.json");
+    let file = game_dir_of(app, version_id)
+        .ok()?
+        .join(".kamucl-bridge.json");
     let raw = std::fs::read_to_string(&file).ok()?;
     let parsed: Value = serde_json::from_str(&raw).ok()?;
     if parsed["protocol"].as_f64() != Some(1.0) {
@@ -193,10 +195,7 @@ fn call(
     body: Option<Value>,
     timeout_ms: u64,
 ) -> Result<Value, String> {
-    let url = format!(
-        "http://127.0.0.1:{}/kamucl/v1/{}",
-        discovery.port, pathname
-    );
+    let url = format!("http://127.0.0.1:{}/kamucl/v1/{}", discovery.port, pathname);
     let timeout = Duration::from_millis(timeout_ms);
     let send = match body {
         None => crate::net::client().get(url).timeout(timeout).send(),
@@ -290,7 +289,10 @@ fn bundled_bridge_bytes(app: &tauri::AppHandle) -> Option<Vec<u8>> {
         candidates.push(dir.join("resources").join("kamucl-bridge.jar"));
         candidates.push(dir.join("kamucl-bridge.jar"));
     }
-    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+    {
         candidates.push(exe_dir.join("resources").join("kamucl-bridge.jar"));
         candidates.push(exe_dir.join("kamucl-bridge.jar"));
     }
@@ -312,7 +314,11 @@ fn bundled_bridge_bytes(app: &tauri::AppHandle) -> Option<Vec<u8>> {
     }
 }
 
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         "bridge:status" => Some(bridge_status(app, &arg_str(args, 0))),
         "bridge:manifest" => Some(bridge_manifest(app, &arg_str(args, 0))),

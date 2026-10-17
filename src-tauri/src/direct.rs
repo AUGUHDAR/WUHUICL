@@ -55,13 +55,19 @@ pub struct UpnpErr {
 
 impl From<String> for UpnpErr {
     fn from(message: String) -> Self {
-        UpnpErr { code: String::new(), message }
+        UpnpErr {
+            code: String::new(),
+            message,
+        }
     }
 }
 
 impl From<&str> for UpnpErr {
     fn from(message: &str) -> Self {
-        UpnpErr { code: String::new(), message: message.to_string() }
+        UpnpErr {
+            code: String::new(),
+            message: message.to_string(),
+        }
     }
 }
 
@@ -223,7 +229,9 @@ fn local_source_address(ip: IpAddr, port: u16) -> String {
     if sock.connect((ip, port)).is_err() {
         return String::new();
     }
-    sock.local_addr().map(|a| a.ip().to_string()).unwrap_or_default()
+    sock.local_addr()
+        .map(|a| a.ip().to_string())
+        .unwrap_or_default()
 }
 
 fn url_host(input: &str) -> String {
@@ -372,7 +380,12 @@ fn network_interfaces() -> Vec<IfaceAddr> {
         }
         let v6 = family == "inet6";
         let internal = name == "lo" || address == "::1" || address.starts_with("127.");
-        list.push(IfaceAddr { name: name.to_string(), address, v6, internal });
+        list.push(IfaceAddr {
+            name: name.to_string(),
+            address,
+            v6,
+            internal,
+        });
     }
     list
 }
@@ -450,7 +463,9 @@ fn local_router_url(input: &str, expected_host: Option<&str>) -> Result<reqwest:
         || url.password().is_some()
         || url.fragment().is_some()
         || ipv4_scope(host) != "private"
-        || expected_host.map(|expected| host != expected).unwrap_or(false)
+        || expected_host
+            .map(|expected| host != expected)
+            .unwrap_or(false)
     {
         return Err(ROUTER_ADDR_INVALID.into());
     }
@@ -500,23 +515,39 @@ fn local_request(input: &str, body: Option<&str>, action: Option<&str>) -> Resul
 
 fn service_pattern(service_type: &str) -> bool {
     static RE: OnceLock<regex::Regex> = OnceLock::new();
-    RE.get_or_init(|| regex::Regex::new(UPNP_SCOPE_RE).unwrap()).is_match(service_type)
+    RE.get_or_init(|| regex::Regex::new(UPNP_SCOPE_RE).unwrap())
+        .is_match(service_type)
 }
 
-fn soap_envelope(service_type: &str, action: &str, values: &[(&str, String)]) -> Result<String, String> {
-    if !service_pattern(service_type) || action.is_empty() || !action.chars().all(|c| c.is_ascii_alphabetic()) {
+fn soap_envelope(
+    service_type: &str,
+    action: &str,
+    values: &[(&str, String)],
+) -> Result<String, String> {
+    if !service_pattern(service_type)
+        || action.is_empty()
+        || !action.chars().all(|c| c.is_ascii_alphabetic())
+    {
         return Err("无效 UPnP 请求".into());
     }
     let mut body = String::new();
     for (key, value) in values {
-        body.push_str(&format!("<{tag}>{text}</{tag}>", tag = key, text = escape_xml(value)));
+        body.push_str(&format!(
+            "<{tag}>{text}</{tag}>",
+            tag = key,
+            text = escape_xml(value)
+        ));
     }
     Ok(format!(
         r#"<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:{action} xmlns:u="{service_type}">{body}</u:{action}></s:Body></s:Envelope>"#
     ))
 }
 
-fn gateway_action(gateway: &Gateway, action: &str, values: &[(&str, String)]) -> Result<String, UpnpErr> {
+fn gateway_action(
+    gateway: &Gateway,
+    action: &str,
+    values: &[(&str, String)],
+) -> Result<String, UpnpErr> {
     let envelope = soap_envelope(&gateway.service_type, action, values)?;
     let soap_action = format!("{}#{}", gateway.service_type, action);
     let reply = local_request(&gateway.control_url, Some(&envelope), Some(&soap_action))?;
@@ -555,7 +586,8 @@ fn parse_gateway_services(xml: &str, location: &str) -> Result<Vec<(String, Stri
     };
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
-        regex::Regex::new(r"(?i)<(?:[\w-]+:)?service\b[^>]*>([\s\S]*?)</(?:[\w-]+:)?service>").unwrap()
+        regex::Regex::new(r"(?i)<(?:[\w-]+:)?service\b[^>]*>([\s\S]*?)</(?:[\w-]+:)?service>")
+            .unwrap()
     });
     let mut out = Vec::new();
     for cap in re.captures_iter(xml) {
@@ -600,7 +632,9 @@ fn discover_locations() -> Vec<String> {
             #[cfg(windows)]
             {
                 use std::os::windows::io::AsRawSocket;
-                use windows_sys::Win32::Networking::WinSock::{setsockopt, IP_MULTICAST_IF, IPPROTO_IP};
+                use windows_sys::Win32::Networking::WinSock::{
+                    setsockopt, IPPROTO_IP, IP_MULTICAST_IF,
+                };
                 unsafe {
                     setsockopt(
                         sock.as_raw_socket() as usize,
@@ -646,7 +680,9 @@ fn discover_locations() -> Vec<String> {
                 let sender_ip = sender.ip().to_string();
                 if let Ok(url) = local_router_url(&location, Some(&sender_ip)) {
                     let mut list = found.lock().unwrap();
-                    if list.len() < SSDP_MAX_LOCATIONS && !list.iter().any(|item| item == url.as_str()) {
+                    if list.len() < SSDP_MAX_LOCATIONS
+                        && !list.iter().any(|item| item == url.as_str())
+                    {
                         list.push(url.to_string());
                     }
                 }
@@ -688,7 +724,8 @@ fn discover_gateways() -> Vec<Gateway> {
                     external_address: String::new(),
                 };
                 if let Ok(body) = gateway_action(&gateway, "GetExternalIPAddress", &[]) {
-                    gateway.external_address = xml_value(&body, "NewExternalIPAddress").unwrap_or_default();
+                    gateway.external_address =
+                        xml_value(&body, "NewExternalIPAddress").unwrap_or_default();
                     found.push(gateway);
                 }
             }
@@ -734,8 +771,13 @@ pub fn inspect_direct_network() -> Value {
         addresses.push(json!({ "name": item.name, "address": item.address, "kind": kind }));
     }
     let gateways = discover_gateways();
-    let mut messages = vec!["公网可达性需要好友从另一网络验证；本机检测无法确认运营商及防火墙是否放行。".to_string()];
-    if !addresses.iter().any(|item| item["kind"].as_str() == Some("ipv6")) {
+    let mut messages = vec![
+        "公网可达性需要好友从另一网络验证；本机检测无法确认运营商及防火墙是否放行。".to_string(),
+    ];
+    if !addresses
+        .iter()
+        .any(|item| item["kind"].as_str() == Some("ipv6"))
+    {
         messages.push("未发现公网 IPv6 地址。".to_string());
     }
     if gateways.is_empty() {
@@ -746,7 +788,9 @@ pub fn inspect_direct_network() -> Value {
         .map(|gateway| {
             let diagnosis = match ipv4_scope(&gateway.external_address) {
                 "cgnat" => "网关 WAN 地址属于 CGNAT（100.64.0.0/10），UPnP 无法穿过运营商 NAT。",
-                "private" => "网关 WAN 仍是私网地址，存在上级 NAT；仅映射本层路由器不能保证公网可达。",
+                "private" => {
+                    "网关 WAN 仍是私网地址，存在上级 NAT；仅映射本层路由器不能保证公网可达。"
+                }
                 "public" => "发现公网 IPv4；开启房间时可尝试 UPnP 映射。",
                 _ => "网关未提供可用的公网 IPv4。",
             };
@@ -757,7 +801,8 @@ pub fn inspect_direct_network() -> Value {
             })
         })
         .collect();
-    let network = json!({ "addresses": addresses, "messages": messages, "gateways": gateway_values });
+    let network =
+        json!({ "addresses": addresses, "messages": messages, "gateways": gateway_values });
     *GATEWAYS.lock().unwrap() = gateways;
     *NETWORK.lock().unwrap() = Some(network.clone());
     network
@@ -810,7 +855,10 @@ fn direct_overview(app: &AppHandle) -> Value {
     let network = inspect_direct_network();
     let mut out = Map::new();
     out.insert("network".into(), network);
-    out.insert("instances".into(), crate::versions::list_installed(&crate::settings::get(app), true));
+    out.insert(
+        "instances".into(),
+        crate::versions::list_installed(&crate::settings::get(app), true),
+    );
     out.insert("state".into(), direct_state());
     if let Some(port) = latest_lan_port() {
         out.insert("detectedPort".into(), json!(port));
@@ -844,9 +892,15 @@ fn base64url_decode(text: &str) -> Option<Vec<u8>> {
     let normalized: String = text
         .chars()
         .filter(|c| *c != '=')
-        .map(|c| match c { '+' => '-', '/' => '_', other => other })
+        .map(|c| match c {
+            '+' => '-',
+            '/' => '_',
+            other => other,
+        })
         .collect();
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(normalized).ok()
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(normalized)
+        .ok()
 }
 
 fn encode_invitation(invitation: &Value) -> String {
@@ -878,7 +932,8 @@ fn parse_invitation(input: &str, now: i64) -> Result<Value, String> {
     let raw = input.trim();
     let payload = match raw.strip_prefix(INVITE_PREFIX) {
         Some(body) => {
-            let bytes = base64url_decode(body).ok_or("无法识别邀请，请粘贴完整的 KAMUCL-DIRECT-1 邀请信息".to_string())?;
+            let bytes = base64url_decode(body)
+                .ok_or("无法识别邀请，请粘贴完整的 KAMUCL-DIRECT-1 邀请信息".to_string())?;
             String::from_utf8_lossy(&bytes).to_string()
         }
         None => raw.to_string(),
@@ -891,8 +946,12 @@ fn parse_invitation(input: &str, now: i64) -> Result<Value, String> {
     let declared_endpoints = value["endpoints"].as_array();
     let valid = value["format"].as_str() == Some("KAMUCL-DIRECT")
         && value["version"].as_i64() == Some(1)
-        && name.map(|item| !item.trim().is_empty() && item.chars().count() <= 128).unwrap_or(false)
-        && mc_version.map(|item| item.chars().count() <= 128).unwrap_or(false)
+        && name
+            .map(|item| !item.trim().is_empty() && item.chars().count() <= 128)
+            .unwrap_or(false)
+        && mc_version
+            .map(|item| item.chars().count() <= 128)
+            .unwrap_or(false)
         && declared_endpoints
             .as_ref()
             .map(|items| !items.is_empty() && items.len() <= INVITE_MAX_ENDPOINTS)
@@ -908,13 +967,21 @@ fn parse_invitation(input: &str, now: i64) -> Result<Value, String> {
     }
     let loader = value.get("loader").filter(|item| !item.is_null());
     if let Some(item) = loader {
-        if !item.as_str().map(|s| matches!(s, "forge" | "fabric" | "quilt" | "neoforge")).unwrap_or(false) {
+        if !item
+            .as_str()
+            .map(|s| matches!(s, "forge" | "fabric" | "quilt" | "neoforge"))
+            .unwrap_or(false)
+        {
             return Err("邀请的加载器信息无效".into());
         }
     }
     let loader_version = value.get("loaderVersion").filter(|item| !item.is_null());
     if let Some(item) = loader_version {
-        if !item.as_str().map(|s| s.chars().count() <= 128).unwrap_or(false) {
+        if !item
+            .as_str()
+            .map(|s| s.chars().count() <= 128)
+            .unwrap_or(false)
+        {
             return Err("邀请的加载器信息无效".into());
         }
     }
@@ -1007,8 +1074,14 @@ fn forward_connection(
         return;
     };
     let _ = upstream.set_read_timeout(Some(Duration::from_millis(FORWARD_IDLE_MS)));
-    let handles = (client.try_clone(), upstream.try_clone(), client.try_clone(), upstream.try_clone());
-    let (mut client_writer, mut upstream_reader, client_shutdown, upstream_shutdown) = match handles {
+    let handles = (
+        client.try_clone(),
+        upstream.try_clone(),
+        client.try_clone(),
+        upstream.try_clone(),
+    );
+    let (mut client_writer, mut upstream_reader, client_shutdown, upstream_shutdown) = match handles
+    {
         (Ok(a), Ok(b), Ok(c), Ok(d)) => (a, b, c, d),
         _ => {
             kill_connection(id, &streams);
@@ -1016,7 +1089,10 @@ fn forward_connection(
             return;
         }
     };
-    streams.lock().unwrap().insert(id, (client_shutdown, upstream_shutdown));
+    streams
+        .lock()
+        .unwrap()
+        .insert(id, (client_shutdown, upstream_shutdown));
     let mut client_reader = client;
     let mut upstream_writer = upstream;
     let reverse_streams = streams.clone();
@@ -1043,7 +1119,8 @@ fn create_local_forwarder(target_port: u16, listen_host: &str) -> std::io::Resul
     let stop = Arc::new(AtomicBool::new(false));
     let streams: LiveStreams = Arc::new(Mutex::new(HashMap::new()));
     let target = resolve_first("127.0.0.1", target_port);
-    let (loop_connections, loop_stop, loop_streams) = (connections.clone(), stop.clone(), streams.clone());
+    let (loop_connections, loop_stop, loop_streams) =
+        (connections.clone(), stop.clone(), streams.clone());
     std::thread::spawn(move || {
         let Some(target) = target else {
             return;
@@ -1067,7 +1144,12 @@ fn create_local_forwarder(target_port: u16, listen_host: &str) -> std::io::Resul
             }
         }
     });
-    Ok(Forwarder { port, connections, stop, streams })
+    Ok(Forwarder {
+        port,
+        connections,
+        stop,
+        streams,
+    })
 }
 
 // 对应原版 core/directUpnp.ts createMapping
@@ -1088,7 +1170,11 @@ fn mapping_key(port: u16) -> Vec<(&'static str, String)> {
     ]
 }
 
-fn mapping_values(port: u16, local_address: &str, description: &str) -> Vec<(&'static str, String)> {
+fn mapping_values(
+    port: u16,
+    local_address: &str,
+    description: &str,
+) -> Vec<(&'static str, String)> {
     let mut values = mapping_key(port);
     values.push(("NewInternalPort", port.to_string()));
     values.push(("NewInternalClient", local_address.to_string()));
@@ -1121,10 +1207,13 @@ fn create_mapping(gateway: &Gateway, port: u16, description: &str) -> Result<Map
 
 fn mapping_owned(mapping: &Mapping) -> Result<bool, String> {
     let key = mapping_key(mapping.port);
-    let data = gateway_action(&mapping.gateway, "GetSpecificPortMappingEntry", &key).map_err(|err| err.message)?;
-    Ok(xml_value(&data, "NewInternalClient")? == mapping.gateway.local_address
-        && xml_value(&data, "NewInternalPort")? == mapping.port.to_string()
-        && xml_value(&data, "NewPortMappingDescription")? == mapping.description)
+    let data = gateway_action(&mapping.gateway, "GetSpecificPortMappingEntry", &key)
+        .map_err(|err| err.message)?;
+    Ok(
+        xml_value(&data, "NewInternalClient")? == mapping.gateway.local_address
+            && xml_value(&data, "NewInternalPort")? == mapping.port.to_string()
+            && xml_value(&data, "NewPortMappingDescription")? == mapping.description,
+    )
 }
 
 fn mapping_renew(mapping: &Mapping) -> Result<(), String> {
@@ -1138,7 +1227,11 @@ fn mapping_renew(mapping: &Mapping) -> Result<(), String> {
     if !mapping.active.load(Ordering::SeqCst) {
         return Ok(());
     }
-    let values = mapping_values(mapping.port, &mapping.gateway.local_address, &mapping.description);
+    let values = mapping_values(
+        mapping.port,
+        &mapping.gateway.local_address,
+        &mapping.description,
+    );
     gateway_action(&mapping.gateway, "AddPortMapping", &values).map_err(|err| err.message)?;
     Ok(())
 }
@@ -1181,7 +1274,11 @@ fn host_build(
     ipv6_available: bool,
     mappings: &Mutex<Vec<Mapping>>,
 ) -> Result<(Vec<Value>, Vec<String>), String> {
-    let network = NETWORK.lock().unwrap().clone().unwrap_or(json!({ "addresses": [], "gateways": [], "messages": [] }));
+    let network = NETWORK
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or(json!({ "addresses": [], "gateways": [], "messages": [] }));
     let mut endpoints: Vec<Value> = network["addresses"]
         .as_array()
         .cloned()
@@ -1189,7 +1286,9 @@ fn host_build(
         .iter()
         .filter(|item| item["kind"].as_str() != Some("ipv6") || ipv6_available)
         .take(HOST_ENDPOINT_LIMIT)
-        .map(|item| json!({ "host": item["address"], "port": forwarder.port, "kind": item["kind"] }))
+        .map(
+            |item| json!({ "host": item["address"], "port": forwarder.port, "kind": item["kind"] }),
+        )
         .collect();
     let mut messages: Vec<String> = network["messages"]
         .as_array()
@@ -1210,7 +1309,13 @@ fn host_build(
             })
             .filter_map(|item| item["diagnosis"].as_str().map(str::to_string)),
     );
-    let owner = format!("KAMUCL-{}", crate::accounts::uuid_v4().chars().take(12).collect::<String>());
+    let owner = format!(
+        "KAMUCL-{}",
+        crate::accounts::uuid_v4()
+            .chars()
+            .take(12)
+            .collect::<String>()
+    );
     if request["useUpnp"] == true {
         let candidates: Vec<Gateway> = GATEWAYS
             .lock()
@@ -1225,14 +1330,20 @@ fn host_build(
             match create_mapping(&gateway, forwarder.port, &owner) {
                 Ok(mapping) => {
                     endpoints.push(json!({ "host": gateway.external_address, "port": forwarder.port, "kind": "ipv4" }));
-                    messages.push("UPnP 临时映射已建立（5 分钟租约，房间开启期间自动续租）。".to_string());
+                    messages.push(
+                        "UPnP 临时映射已建立（5 分钟租约，房间开启期间自动续租）。".to_string(),
+                    );
                     mappings.lock().unwrap().push(mapping);
                 }
                 Err(err) => messages.push(err),
             }
         }
     }
-    let public_address = request["publicAddress"].as_str().unwrap_or("").trim().to_string();
+    let public_address = request["publicAddress"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if !public_address.is_empty() {
         if ipv4_scope(&public_address) != "public" {
             return Err("手动公网 IPv4 地址格式无效".into());
@@ -1267,7 +1378,10 @@ fn start_direct_host(app: &AppHandle, request: &Value) -> Result<Value, String> 
         if op.is_some() {
             return Err("已有房间或正在创建房间，请先停止".into());
         }
-        *op = Some(Arc::new(Op { abort: abort.clone(), finished: finished.clone() }));
+        *op = Some(Arc::new(Op {
+            abort: abort.clone(),
+            finished: finished.clone(),
+        }));
     }
     let result = host_inner(app, request, &abort);
     *OPERATION.lock().unwrap() = None;
@@ -1289,7 +1403,9 @@ fn host_inner(app: &AppHandle, request: &Value, abort: &AtomicBool) -> Result<Va
     };
     let port = validate_port(&declared)?;
     if !probe_tcp("127.0.0.1", port, Some(abort)) {
-        return Err("本机世界端口未开放。请在游戏内选择“对局域网开放”，然后刷新端口或手动输入。".into());
+        return Err(
+            "本机世界端口未开放。请在游戏内选择“对局域网开放”，然后刷新端口或手动输入。".into(),
+        );
     }
     throw_if_aborted(abort)?;
     inspect_direct_network();
@@ -1309,13 +1425,14 @@ fn host_inner(app: &AppHandle, request: &Value, abort: &AtomicBool) -> Result<Va
         Err(err) => return Err(err.to_string()),
     };
     let mappings: Arc<Mutex<Vec<Mapping>>> = Arc::new(Mutex::new(Vec::new()));
-    let (endpoints, messages) = match host_build(request, abort, &forwarder, ipv6_available, &mappings) {
-        Ok(built) => built,
-        Err(err) => {
-            close_room(&forwarder, &mappings);
-            return Err(err);
-        }
-    };
+    let (endpoints, messages) =
+        match host_build(request, abort, &forwarder, ipv6_available, &mappings) {
+            Ok(built) => built,
+            Err(err) => {
+                close_room(&forwarder, &mappings);
+                return Err(err);
+            }
+        };
     let mut unique: Vec<Value> = Vec::new();
     for endpoint in endpoints {
         let address = endpoint_text(&endpoint);
@@ -1326,10 +1443,14 @@ fn host_inner(app: &AppHandle, request: &Value, abort: &AtomicBool) -> Result<Va
     }
     unique.truncate(HOST_UNIQUE_LIMIT);
     let mut messages = messages;
-    if !unique.iter().any(|item| item["kind"].as_str() != Some("lan")) {
+    if !unique
+        .iter()
+        .any(|item| item["kind"].as_str() != Some("lan"))
+    {
         messages.push("当前仅可供同一局域网加入，尚无公网房主路径。CGNAT、手机热点、校园网可能限制入站连接；你仍可以加入可达好友的世界。".to_string());
     }
-    messages.push("开启房间后需保持 WUHUICL 和游戏运行；退出或关闭局域网世界会断开直连。".to_string());
+    messages
+        .push("开启房间后需保持 WUHUICL 和游戏运行；退出或关闭局域网世界会断开直连。".to_string());
     let mut invitation = Map::new();
     invitation.insert("format".into(), json!("KAMUCL-DIRECT"));
     invitation.insert("version".into(), json!(1));
@@ -1342,13 +1463,19 @@ fn host_inner(app: &AppHandle, request: &Value, abort: &AtomicBool) -> Result<Va
         invitation.insert("loaderVersion".into(), version["loaderVersion"].clone());
     }
     invitation.insert("endpoints".into(), json!(unique.clone()));
-    invitation.insert("expiresAt".into(), json!(iso_at(now_millis() + INVITE_TTL_MS)));
+    invitation.insert(
+        "expiresAt".into(),
+        json!(iso_at(now_millis() + INVITE_TTL_MS)),
+    );
     let mut state = Map::new();
     state.insert("active".into(), json!(true));
     state.insert("connections".into(), json!(0));
     state.insert("endpoints".into(), json!(unique.clone()));
     if !unique.is_empty() {
-        state.insert("invite".into(), json!(encode_invitation(&Value::Object(invitation.clone()))));
+        state.insert(
+            "invite".into(),
+            json!(encode_invitation(&Value::Object(invitation.clone()))),
+        );
     }
     state.insert("localPort".into(), json!(port));
     state.insert("exposedPort".into(), json!(forwarder.port));
@@ -1380,7 +1507,8 @@ fn host_inner(app: &AppHandle, request: &Value, abort: &AtomicBool) -> Result<Va
                 return;
             }
             if !probe_tcp("127.0.0.1", port, None) {
-                *LAST_MESSAGES.lock().unwrap() = vec!["本机世界已关闭，房间和端口映射已停止。".to_string()];
+                *LAST_MESSAGES.lock().unwrap() =
+                    vec!["本机世界已关闭，房间和端口映射已停止。".to_string()];
                 let _ = stop_direct_host();
                 return;
             }
@@ -1398,7 +1526,9 @@ fn host_inner(app: &AppHandle, request: &Value, abort: &AtomicBool) -> Result<Va
                             .any(|item| item.as_str() == Some(err.as_str()));
                         if !exists {
                             if let Some(list) = state["messages"].as_array_mut() {
-                                list.push(json!(format!("UPnP 续租失败：{err}，IPv4 邀请可能不可达，请重新开启房间。")));
+                                list.push(json!(format!(
+                                    "UPnP 续租失败：{err}，IPv4 邀请可能不可达，请重新开启房间。"
+                                )));
                             }
                         }
                     }
@@ -1427,7 +1557,10 @@ fn probe_endpoint(endpoint: Value) -> (Value, bool) {
 
 fn resolve_direct_invitation(input: &str) -> Result<Value, String> {
     let invitation = parse_invitation(input, now_millis())?;
-    let mut ordered = invitation["endpoints"].as_array().cloned().unwrap_or_default();
+    let mut ordered = invitation["endpoints"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     ordered.sort_by_key(|item| kind_rank(item["kind"].as_str().unwrap_or("")));
     let mut handles = Vec::new();
     for endpoint in ordered {
@@ -1460,13 +1593,15 @@ fn supports_quick_play_multiplayer(version: &str) -> bool {
     static RELEASE: OnceLock<regex::Regex> = OnceLock::new();
     static SNAPSHOT: OnceLock<regex::Regex> = OnceLock::new();
     let trimmed = version.trim();
-    let release = RELEASE.get_or_init(|| regex::Regex::new(r"^(\d+)\.(\d+)(?:\.(\d+))?(?:$|[-+])").unwrap());
+    let release =
+        RELEASE.get_or_init(|| regex::Regex::new(r"^(\d+)\.(\d+)(?:\.(\d+))?(?:$|[-+])").unwrap());
     if let Some(caps) = release.captures(trimmed) {
         let major: i64 = caps[1].parse().unwrap_or(0);
         let minor: i64 = caps[2].parse().unwrap_or(0);
         return major > 1 || (major == 1 && minor >= 20);
     }
-    let snapshot = SNAPSHOT.get_or_init(|| regex::Regex::new(r"(?i)^(\d{2})w(\d{2})([a-z])$").unwrap());
+    let snapshot =
+        SNAPSHOT.get_or_init(|| regex::Regex::new(r"(?i)^(\d{2})w(\d{2})([a-z])$").unwrap());
     let Some(caps) = snapshot.captures(trimmed) else {
         return false;
     };
@@ -1493,10 +1628,17 @@ fn truthy_string(value: Option<&Value>) -> Option<String> {
     }
 }
 
-fn prepare_direct_join(app: &AppHandle, input: &str, version_id: &str, folder: &str) -> Result<Value, String> {
+fn prepare_direct_join(
+    app: &AppHandle,
+    input: &str,
+    version_id: &str,
+    folder: &str,
+) -> Result<Value, String> {
     let result = resolve_direct_invitation(input)?;
     let Some(endpoint) = result.get("endpoint").cloned() else {
-        return Err("没有可达的好友地址。请检查房主是否在线、双方 IPv6、路由器映射及入站防火墙。".into());
+        return Err(
+            "没有可达的好友地址。请检查房主是否在线、双方 IPv6、路由器映射及入站防火墙。".into(),
+        );
     };
     let invite = result["invitation"].clone();
     let version = match find_instance(app, version_id, folder) {
@@ -1529,7 +1671,9 @@ pub fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Option<Result<V
             let request = args.first().cloned().unwrap_or(json!({}));
             Some(start_direct_host(app, &request))
         }
-        "direct:resolve" => Some(resolve_direct_invitation(args.first().and_then(|item| item.as_str()).unwrap_or(""))),
+        "direct:resolve" => Some(resolve_direct_invitation(
+            args.first().and_then(|item| item.as_str()).unwrap_or(""),
+        )),
         "direct:prepareJoin" => Some(prepare_direct_join(
             app,
             args.first().and_then(|item| item.as_str()).unwrap_or(""),

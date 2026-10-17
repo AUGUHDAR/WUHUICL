@@ -37,7 +37,10 @@ fn normalize_address(address: &str) -> (String, String, Option<u16>) {
         match address.find(']') {
             Some(end) => {
                 let host = address[1..end].to_string();
-                let port = address[end + 1..].trim_start_matches(':').parse::<u16>().ok();
+                let port = address[end + 1..]
+                    .trim_start_matches(':')
+                    .parse::<u16>()
+                    .ok();
                 (host, port, port.is_some())
             }
             None => (address.trim().to_string(), None, false),
@@ -50,7 +53,11 @@ fn normalize_address(address: &str) -> (String, String, Option<u16>) {
     };
     let port = port.unwrap_or(25565);
     let normalized = if explicit && port != 25565 {
-        if host.contains(':') { format!("[{host}]:{port}") } else { format!("{host}:{port}") }
+        if host.contains(':') {
+            format!("[{host}]:{port}")
+        } else {
+            format!("{host}:{port}")
+        }
     } else {
         host.clone()
     };
@@ -88,7 +95,9 @@ fn read_var_int(stream: &mut impl Read, cap: usize) -> Result<i32, String> {
     let mut shift = 0;
     let mut byte = [0u8; 1];
     for _ in 0..5 {
-        stream.read_exact(&mut byte).map_err(|_| "连接中断".to_string())?;
+        stream
+            .read_exact(&mut byte)
+            .map_err(|_| "连接中断".to_string())?;
         len |= ((byte[0] & 0x7f) as i32) << (shift * 7);
         shift += 1;
         if byte[0] & 0x80 == 0 {
@@ -158,7 +167,9 @@ pub fn ping_server(address: &str) -> Value {
     hs.extend_from_slice(host_bytes);
     hs.extend_from_slice(&port.unwrap_or(25565).to_be_bytes());
     write_var_int(&mut hs, 1);
-    if stream.write_all(&packet(0x00, &hs)).is_err() || stream.write_all(&packet(0x00, &[])).is_err() {
+    if stream.write_all(&packet(0x00, &hs)).is_err()
+        || stream.write_all(&packet(0x00, &[])).is_err()
+    {
         return offline;
     }
     // 响应：len(packet) + packet(id=0, varint(jsonLen) + json)
@@ -193,7 +204,11 @@ pub fn ping_server(address: &str) -> Value {
     };
     {
         let motd = motd_text(&status["description"]);
-        let motd = if motd.is_empty() { "这个服务器没有介绍".to_string() } else { motd };
+        let motd = if motd.is_empty() {
+            "这个服务器没有介绍".to_string()
+        } else {
+            motd
+        };
         json!({
             "online": true,
             "players": format!("{}/{}",
@@ -208,7 +223,11 @@ pub fn ping_server(address: &str) -> Value {
 
 // ---------------- servers.dat 同步 ----------------
 
-fn servers_dat_candidates(app: &tauri::AppHandle, version_id: Option<&str>, folder: Option<&str>) -> Vec<PathBuf> {
+fn servers_dat_candidates(
+    app: &tauri::AppHandle,
+    version_id: Option<&str>,
+    folder: Option<&str>,
+) -> Vec<PathBuf> {
     let settings = crate::settings::get(app);
     let mut out = Vec::new();
     let folders: Vec<String> = match folder {
@@ -232,7 +251,11 @@ fn servers_dat_candidates(app: &tauri::AppHandle, version_id: Option<&str>, fold
             }
         }
         for root in roots {
-            let dat = root.join("saves").parent().map(|_| root.join("servers.dat")).unwrap_or(root.join("servers.dat"));
+            let dat = root
+                .join("saves")
+                .parent()
+                .map(|_| root.join("servers.dat"))
+                .unwrap_or(root.join("servers.dat"));
             let dat = root.join("servers.dat");
             if dat.exists() {
                 out.push(dat);
@@ -243,13 +266,19 @@ fn servers_dat_candidates(app: &tauri::AppHandle, version_id: Option<&str>, fold
 }
 
 /// servers:syncFromDat → ServerSyncResult（读 .dat 合并 launcher 记录）
-pub fn sync_from_dat(app: &tauri::AppHandle, version_id: Option<&str>, folder: Option<&str>) -> Value {
+pub fn sync_from_dat(
+    app: &tauri::AppHandle,
+    version_id: Option<&str>,
+    folder: Option<&str>,
+) -> Value {
     let mut list = load(app);
     let mut added = 0i64;
     let mut updated = 0i64;
     let mut errors: Vec<String> = Vec::new();
     for dat in servers_dat_candidates(app, version_id, folder) {
-        let Ok(raw) = std::fs::read(&dat) else { continue };
+        let Ok(raw) = std::fs::read(&dat) else {
+            continue;
+        };
         let Ok(root) = nbt::parse_nbt(&raw) else {
             errors.push(format!("{}：servers.dat 无法解析", dat.display()));
             continue;
@@ -261,14 +290,25 @@ pub fn sync_from_dat(app: &tauri::AppHandle, version_id: Option<&str>, folder: O
             continue;
         };
         for entry in servers {
-            let Some(comp) = nbt::as_compound(entry) else { continue };
-            let name = nbt::get(comp, "name").and_then(nbt::as_str).unwrap_or("").to_string();
-            let ip = nbt::get(comp, "ip").and_then(nbt::as_str).unwrap_or("").to_string();
+            let Some(comp) = nbt::as_compound(entry) else {
+                continue;
+            };
+            let name = nbt::get(comp, "name")
+                .and_then(nbt::as_str)
+                .unwrap_or("")
+                .to_string();
+            let ip = nbt::get(comp, "ip")
+                .and_then(nbt::as_str)
+                .unwrap_or("")
+                .to_string();
             if ip.is_empty() {
                 continue;
             }
             let (normalized, host, port) = normalize_address(&ip);
-            if let Some(existing) = list.iter_mut().find(|e| e["normalizedAddress"] == json!(normalized)) {
+            if let Some(existing) = list
+                .iter_mut()
+                .find(|e| e["normalizedAddress"] == json!(normalized))
+            {
                 existing["lastSeenAt"] = json!(chrono::Utc::now().to_rfc3339());
                 updated += 1;
             } else {
@@ -292,7 +332,12 @@ pub fn sync_from_dat(app: &tauri::AppHandle, version_id: Option<&str>, folder: O
 }
 
 /// servers:prepareLaunch → ServerLaunchPreparation
-fn prepare_launch(app: &tauri::AppHandle, id: &str, version_id: Option<&str>, folder: Option<&str>) -> Result<Value, String> {
+fn prepare_launch(
+    app: &tauri::AppHandle,
+    id: &str,
+    version_id: Option<&str>,
+    folder: Option<&str>,
+) -> Result<Value, String> {
     let list = load(app);
     let entry = list
         .iter()
@@ -319,7 +364,11 @@ fn prepare_launch(app: &tauri::AppHandle, id: &str, version_id: Option<&str>, fo
 }
 
 /// 统一入口
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         "servers:list" => Some(Ok(Value::Array(load(app)))),
         "servers:add" => Some((|| {

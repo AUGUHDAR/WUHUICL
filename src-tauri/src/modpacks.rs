@@ -17,10 +17,20 @@ const PACK_MANIFEST: &str = ".wuhuicl-pack.json";
 fn sanitize_id(name: &str) -> String {
     let cleaned: String = name
         .chars()
-        .map(|c| if "\\/:*?\"<>|".contains(c) || (c as u32) < 0x20 { '-' } else { c })
+        .map(|c| {
+            if "\\/:*?\"<>|".contains(c) || (c as u32) < 0x20 {
+                '-'
+            } else {
+                c
+            }
+        })
         .collect();
     let trimmed = cleaned.trim().trim_end_matches('.');
-    if trimmed.is_empty() { "modpack".to_string() } else { trimmed.to_string() }
+    if trimmed.is_empty() {
+        "modpack".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn unique_instance_id(base: &str, target_folder: &str) -> String {
@@ -77,7 +87,10 @@ struct Parsed {
     cf_files: Vec<(i64, i64)>,
 }
 
-fn read_zip_text(archive: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Result<String, String> {
+fn read_zip_text(
+    archive: &mut zip::ZipArchive<std::fs::File>,
+    name: &str,
+) -> Result<String, String> {
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
         if entry.name().trim_start_matches('/').replace('\\', "/") == name {
@@ -119,11 +132,15 @@ const MR_LOADERS: [(&str, &str); 4] = [
 fn parse_mrpack(archive: &mut zip::ZipArchive<std::fs::File>) -> Result<Parsed, String> {
     let text = read_zip_text(archive, "modrinth.index.json")
         .map_err(|_| "modrinth.index.json 已损坏，整合包无法解析".to_string())?;
-    let idx: Value = serde_json::from_str(&text).map_err(|_| "modrinth.index.json 已损坏，整合包无法解析".to_string())?;
+    let idx: Value = serde_json::from_str(&text)
+        .map_err(|_| "modrinth.index.json 已损坏，整合包无法解析".to_string())?;
     if idx["formatVersion"].as_i64() != Some(1) {
         return Err(format!(
             "不支持的 Modrinth 整合包格式版本：{}（当前支持 1）",
-            idx["formatVersion"].as_i64().map(|v| v.to_string()).unwrap_or_else(|| "缺失".into())
+            idx["formatVersion"]
+                .as_i64()
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "缺失".into())
         ));
     }
     if idx["game"].as_str() != Some("minecraft") {
@@ -148,12 +165,18 @@ fn parse_mrpack(archive: &mut zip::ZipArchive<std::fs::File>) -> Result<Parsed, 
     let mut files = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     for f in idx["files"].as_array().cloned().unwrap_or_default() {
-        let rel_raw = f["path"].as_str().ok_or("modrinth.index.json 包含缺少 path 的文件项")?;
+        let rel_raw = f["path"]
+            .as_str()
+            .ok_or("modrinth.index.json 包含缺少 path 的文件项")?;
         if f["env"]["client"].as_str() == Some("unsupported") {
             continue;
         }
-        let rel = rel_raw.replace('\\', "/").trim_start_matches("./").to_string();
-        safe_join(Path::new(".mrpack-path-check"), &rel).map_err(|_| format!("Modrinth 文件路径不安全：{rel_raw}"))?;
+        let rel = rel_raw
+            .replace('\\', "/")
+            .trim_start_matches("./")
+            .to_string();
+        safe_join(Path::new(".mrpack-path-check"), &rel)
+            .map_err(|_| format!("Modrinth 文件路径不安全：{rel_raw}"))?;
         let identity = rel.to_lowercase();
         if !seen.insert(identity) {
             return Err(format!("Modrinth 清单包含重复目标路径：{rel}"));
@@ -191,7 +214,12 @@ fn parse_mrpack(archive: &mut zip::ZipArchive<std::fs::File>) -> Result<Parsed, 
     }
     Ok(Parsed {
         format: "mrpack",
-        name: idx["name"].as_str().map(str::trim).filter(|s| !s.is_empty()).unwrap_or("未命名整合包").to_string(),
+        name: idx["name"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("未命名整合包")
+            .to_string(),
         pack_version: idx["versionId"].as_str().unwrap_or("").to_string(),
         mc_version,
         loader,
@@ -206,15 +234,22 @@ fn parse_mrpack(archive: &mut zip::ZipArchive<std::fs::File>) -> Result<Parsed, 
 const CF_LOADER_IDS: [&str; 4] = ["fabric", "forge", "quilt", "neoforge"];
 
 fn parse_curseforge(archive: &mut zip::ZipArchive<std::fs::File>) -> Result<Parsed, String> {
-    let text =
-        read_zip_text(archive, "manifest.json").map_err(|_| "manifest.json 已损坏，整合包无法解析".to_string())?;
-    let mf: Value = serde_json::from_str(&text).map_err(|_| "manifest.json 已损坏，整合包无法解析".to_string())?;
+    let text = read_zip_text(archive, "manifest.json")
+        .map_err(|_| "manifest.json 已损坏，整合包无法解析".to_string())?;
+    let mf: Value = serde_json::from_str(&text)
+        .map_err(|_| "manifest.json 已损坏，整合包无法解析".to_string())?;
     let mc_version = mf["minecraft"]["version"]
         .as_str()
         .ok_or("整合包清单缺少 Minecraft 版本，文件可能损坏")?
         .to_string();
-    let mod_loaders = mf["minecraft"]["modLoaders"].as_array().cloned().unwrap_or_default();
-    let primary = mod_loaders.iter().find(|l| l["primary"] == true).or_else(|| mod_loaders.first());
+    let mod_loaders = mf["minecraft"]["modLoaders"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let primary = mod_loaders
+        .iter()
+        .find(|l| l["primary"] == true)
+        .or_else(|| mod_loaders.first());
     let mut loader = None;
     let mut loader_version = None;
     if let Some(id) = primary.and_then(|l| l["id"].as_str()) {
@@ -236,7 +271,12 @@ fn parse_curseforge(archive: &mut zip::ZipArchive<std::fs::File>) -> Result<Pars
         .collect();
     Ok(Parsed {
         format: "curseforge",
-        name: mf["name"].as_str().map(str::trim).filter(|s| !s.is_empty()).unwrap_or("未命名整合包").to_string(),
+        name: mf["name"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("未命名整合包")
+            .to_string(),
         pack_version: mf["version"].as_str().unwrap_or("").to_string(),
         mc_version,
         loader,
@@ -293,7 +333,12 @@ pub fn probe_modpack(file_path: &str) -> Result<Value, String> {
 
 /// import:probe → ImportProbeResult（modpack / world / unknown 三分支；world 走 worlds.rs）
 pub fn probe_import(input_path: &str) -> Result<Value, String> {
-    if !input_path.is_empty() && Path::new(input_path).extension().map(|e| e.to_string_lossy().to_lowercase()) == Some("zip".into()) {
+    if !input_path.is_empty()
+        && Path::new(input_path)
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            == Some("zip".into())
+    {
         if let Ok(info) = crate::worlds::probe_world(input_path) {
             if !info.is_null() {
                 return Ok(json!({ "kind": "world", "info": info }));
@@ -316,22 +361,39 @@ pub fn probe_import(input_path: &str) -> Result<Value, String> {
 
 /// CurseForge fileID → 下载信息（复用 community.rs 的 CF 通道；失败报错文案一致）
 fn resolve_cf_file(app: &tauri::AppHandle, project_id: i64, file_id: i64) -> Result<Value, String> {
-    let result = crate::community::cf_fetch_public(app, &format!("/mods/{project_id}/files/{file_id}"))?;
-    let data = result.get("data").cloned().ok_or("CurseForge 文件信息获取失败")?;
+    let result =
+        crate::community::cf_fetch_public(app, &format!("/mods/{project_id}/files/{file_id}"))?;
+    let data = result
+        .get("data")
+        .cloned()
+        .ok_or("CurseForge 文件信息获取失败")?;
     let url = data["downloadUrl"]
         .as_str()
         .map(str::to_string)
         .or_else(|| {
             // CDN 兜底 URL（CurseForge 官方无 downloadUrl 时）
-            let slug = data["modId"].as_i64().map(|m| m.to_string()).unwrap_or_default();
-            let fname = data["fileName"].as_str().map(str::to_string).unwrap_or_default();
+            let slug = data["modId"]
+                .as_i64()
+                .map(|m| m.to_string())
+                .unwrap_or_default();
+            let fname = data["fileName"]
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_default();
             (!fname.is_empty()).then(|| {
                 let sid = data["modId"].as_i64().unwrap_or(0);
-                format!("https://mediafilez.forgecdn.net/files/{}/{}/{}", sid / 1000, sid % 1000, fname)
+                format!(
+                    "https://mediafilez.forgecdn.net/files/{}/{}/{}",
+                    sid / 1000,
+                    sid % 1000,
+                    fname
+                )
             })
         })
         .ok_or("该 CurseForge 文件没有可用下载地址（作者禁止分发）")?;
-    Ok(json!({ "url": url, "fileName": data["fileName"].as_str().unwrap_or(""), "sha1": data["hashes"].as_array().and_then(|hs| hs.iter().find(|h| h["algo"].as_i64() == Some(1)).and_then(|h| h["value"].as_str())).unwrap_or(""), "size": data["fileLength"].as_u64().unwrap_or(0) }))
+    Ok(
+        json!({ "url": url, "fileName": data["fileName"].as_str().unwrap_or(""), "sha1": data["hashes"].as_array().and_then(|hs| hs.iter().find(|h| h["algo"].as_i64() == Some(1)).and_then(|h| h["value"].as_str())).unwrap_or(""), "size": data["fileLength"].as_u64().unwrap_or(0) }),
+    )
 }
 
 // ---------------- 安装 ----------------
@@ -402,17 +464,29 @@ pub fn install_modpack(
         .as_str()
         .map(str::to_string)
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| settings["activeFolder"].as_str().unwrap_or_default().to_string());
+        .unwrap_or_else(|| {
+            settings["activeFolder"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        });
     if target_folder.is_empty() {
         return Err("未配置游戏目录".into());
     }
     let started = std::time::Instant::now();
     let emit = |app: &tauri::AppHandle, task_id: &str, stage: &str, progress: f64, text: &str| {
-        crate::tasks::emit_progress(app, json!({ "taskId": task_id, "taskTitle": "导入整合包", "stage": stage, "progress": progress, "text": text }));
+        crate::tasks::emit_progress(
+            app,
+            json!({ "taskId": task_id, "taskTitle": "导入整合包", "stage": stage, "progress": progress, "text": text }),
+        );
     };
 
     let mut archive = open_zip(file_path)?;
-    let name_source = if opts["nameSource"] == "inner" { "inner" } else { "file" };
+    let name_source = if opts["nameSource"] == "inner" {
+        "inner"
+    } else {
+        "file"
+    };
     let file_name = pack_file_name(file_path);
     emit(app, &rec.id, "modpack", 0.0, "解析整合包信息…");
     let format = detect_format(&mut archive)?;
@@ -428,20 +502,46 @@ pub fn install_modpack(
     let loader_text = parsed
         .loader
         .as_ref()
-        .map(|l| format!(" + {} {}", l, parsed.loader_version.clone().unwrap_or_default()))
+        .map(|l| {
+            format!(
+                " + {} {}",
+                l,
+                parsed.loader_version.clone().unwrap_or_default()
+            )
+        })
         .unwrap_or_default();
-    emit(app, &rec.id, "modpack", 0.02, &format!("{}（MC {}{}）", parsed.name, parsed.mc_version, loader_text));
+    emit(
+        app,
+        &rec.id,
+        "modpack",
+        0.02,
+        &format!("{}（MC {}{}）", parsed.name, parsed.mc_version, loader_text),
+    );
 
     // 实例命名与冲突
     let requested = sanitize_id(
-        opts["instanceName"].as_str().map(str::trim).filter(|s| !s.is_empty())
-            .unwrap_or(if name_source == "inner" { &parsed.name } else { &file_name }),
+        opts["instanceName"]
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(if name_source == "inner" {
+                &parsed.name
+            } else {
+                &file_name
+            }),
     );
     let action = opts["conflictAction"].as_str().unwrap_or("new").to_string();
     let id: String;
     if action == "update" || action == "overwrite" {
         if opts["confirmReplace"] != true {
-            return Err(format!("{}现有实例前必须在确认页明确确认", if action == "update" { "更新" } else { "覆盖" }));
+            return Err(format!(
+                "{}现有实例前必须在确认页明确确认",
+                if action == "update" {
+                    "更新"
+                } else {
+                    "覆盖"
+                }
+            ));
         }
         let existing = opts["existingId"].as_str().unwrap_or("").trim().to_string();
         id = sanitize_id(&existing);
@@ -450,7 +550,11 @@ pub fn install_modpack(
         }
     } else if action == "rename" {
         id = requested.clone();
-        if Path::new(&target_folder).join("versions").join(&id).exists() {
+        if Path::new(&target_folder)
+            .join("versions")
+            .join(&id)
+            .exists()
+        {
             return Err(format!("实例名称已存在：{id}"));
         }
     } else {
@@ -460,16 +564,24 @@ pub fn install_modpack(
 
     let result = (|| -> Result<String, String> {
         // 1) 解析下载清单
-        let mut pending: Vec<(String, String, Vec<String>, String, Option<String>, u64)> = Vec::new(); // rel/url/urls/sha1/sha512/size
+        let mut pending: Vec<(String, String, Vec<String>, String, Option<String>, u64)> =
+            Vec::new(); // rel/url/urls/sha1/sha512/size
         if parsed.format == "mrpack" {
             for f in &parsed.files {
                 let rel = f["rel"].as_str().unwrap_or_default().to_string();
-                let dest = safe_join(&inst_dir, &rel).map_err(|_| format!("整合包文件路径不安全：{rel}"))?;
+                let dest = safe_join(&inst_dir, &rel)
+                    .map_err(|_| format!("整合包文件路径不安全：{rel}"))?;
                 let _ = dest;
                 pending.push((
                     rel,
                     f["url"].as_str().unwrap_or_default().to_string(),
-                    f["urls"].as_array().cloned().unwrap_or_default().iter().filter_map(|u| u.as_str().map(str::to_string)).collect(),
+                    f["urls"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default()
+                        .iter()
+                        .filter_map(|u| u.as_str().map(str::to_string))
+                        .collect(),
                     f["sha1"].as_str().unwrap_or_default().to_string(),
                     f["sha512"].as_str().map(str::to_string),
                     f["size"].as_u64().unwrap_or(0),
@@ -503,7 +615,12 @@ pub fn install_modpack(
             parsed.loader_version.as_deref(),
             |event: &Value| {
                 let mut e = event.clone();
-                e["overall"] = json!(e["overall"].as_f64().unwrap_or_else(|| e["progress"].as_f64().unwrap_or(0.0)) * 0.42);
+                e["overall"] = json!(
+                    e["overall"]
+                        .as_f64()
+                        .unwrap_or_else(|| e["progress"].as_f64().unwrap_or(0.0))
+                        * 0.42
+                );
                 crate::tasks::emit_progress(app, e);
             },
         )?;
@@ -547,7 +664,13 @@ pub fn install_modpack(
                     opts.sha512 = Some(s.as_str());
                 }
                 opts.size = if *size > 0 { Some(*size) } else { None };
-                match crate::download::download_file(app, &std::sync::Arc::new(clone_rec(rec)), cand, &dest, &opts) {
+                match crate::download::download_file(
+                    app,
+                    &std::sync::Arc::new(clone_rec(rec)),
+                    cand,
+                    &dest,
+                    &opts,
+                ) {
                     Ok(()) => {
                         ok = true;
                         break;
@@ -565,7 +688,10 @@ pub fn install_modpack(
                 &rec.id,
                 "modpack",
                 0.45 + 0.5 * (done as f64 / total.max(1) as f64),
-                &format!("下载整合包文件 {done}/{total}（{}MB）", done_bytes / 1_048_576),
+                &format!(
+                    "下载整合包文件 {done}/{total}（{}MB）",
+                    done_bytes / 1_048_576
+                ),
             );
             let _ = DownloadDetail::default();
         }
@@ -579,17 +705,38 @@ pub fn install_modpack(
             obj["modpackVersion"] = json!(parsed.pack_version);
             obj["_gameDir"] = json!(true);
         }
-        std::fs::write(&json_path, serde_json::to_string_pretty(&instance_json).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
+        std::fs::write(
+            &json_path,
+            serde_json::to_string_pretty(&instance_json).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
         let _ = crate::installer::flatten_instance_public(&id, &target_folder);
 
         // 5) overrides 覆盖
         emit(app, &rec.id, "modpack", 0.96, "解压覆盖文件…");
-        let mut override_files = extract_overrides(&mut archive, &parsed.overrides_prefix, &inst_dir, Some(rec), &mut |done, total, name| {
-            emit(app, &rec.id, "modpack", 0.96 + 0.02 * done as f64 / total.max(1) as f64, &format!("正在写入整合包配置 {done}/{total} · {name}"));
-        })?;
+        let mut override_files = extract_overrides(
+            &mut archive,
+            &parsed.overrides_prefix,
+            &inst_dir,
+            Some(rec),
+            &mut |done, total, name| {
+                emit(
+                    app,
+                    &rec.id,
+                    "modpack",
+                    0.96 + 0.02 * done as f64 / total.max(1) as f64,
+                    &format!("正在写入整合包配置 {done}/{total} · {name}"),
+                );
+            },
+        )?;
         if let Some(client_prefix) = &parsed.client_overrides_prefix {
-            let client_files = extract_overrides(&mut archive, client_prefix, &inst_dir, Some(rec), &mut |_, _, _| {})?;
+            let client_files = extract_overrides(
+                &mut archive,
+                client_prefix,
+                &inst_dir,
+                Some(rec),
+                &mut |_, _, _| {},
+            )?;
             override_files.extend(client_files);
         }
 
@@ -603,16 +750,30 @@ pub fn install_modpack(
             "managedFiles": managed.into_iter().collect::<Vec<_>>(),
             "installedAt": chrono::Utc::now().to_rfc3339()
         });
-        std::fs::write(inst_dir.join(PACK_MANIFEST), serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
+        std::fs::write(
+            inst_dir.join(PACK_MANIFEST),
+            serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
 
-        emit(app, &rec.id, "done", 1.0, &format!("{} 安装完成", parsed.name));
+        emit(
+            app,
+            &rec.id,
+            "done",
+            1.0,
+            &format!("{} 安装完成", parsed.name),
+        );
         Ok(id)
     })();
 
     match result {
         Ok(id) => {
-            println!("[modpacks] {} → {}（{:.1}s）", file_name, id, started.elapsed().as_secs_f32());
+            println!(
+                "[modpacks] {} → {}（{:.1}s）",
+                file_name,
+                id,
+                started.elapsed().as_secs_f32()
+            );
             Ok(id)
         }
         Err(e) => {
@@ -626,7 +787,11 @@ pub fn install_modpack(
 }
 
 /// 统一入口
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         "modpack:probe" => Some(
             args.first()
@@ -641,7 +806,11 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
                 .and_then(probe_import),
         ),
         "modpack:install" => Some((|| {
-            let file_path = args.first().and_then(|v| v.as_str()).ok_or("缺少参数")?.to_string();
+            let file_path = args
+                .first()
+                .and_then(|v| v.as_str())
+                .ok_or("缺少参数")?
+                .to_string();
             let opts = args.get(1).cloned().unwrap_or(json!({}));
             let rec = crate::tasks::register_task("导入整合包", "modpack");
             let app2 = app.clone();
@@ -650,7 +819,11 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             std::thread::spawn(move || {
                 let result = install_modpack(&app2, &file2, &opts, &rec2);
                 let version_id = result.as_ref().ok().cloned();
-                let cancelled = result.as_ref().err().map(|e| e == "已取消").unwrap_or(false);
+                let cancelled = result
+                    .as_ref()
+                    .err()
+                    .map(|e| e == "已取消")
+                    .unwrap_or(false);
                 crate::tasks::task_done(
                     &app2,
                     &rec2.id,
@@ -681,7 +854,10 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             let file_id = args.get(1).and_then(|v| v.as_i64()).unwrap_or(0);
             use tauri_plugin_opener::OpenerExt;
             app.opener()
-                .open_url(format!("https://www.curseforge.com/minecraft/mc-mods/files/{file_id}"), None::<&str>)
+                .open_url(
+                    format!("https://www.curseforge.com/minecraft/mc-mods/files/{file_id}"),
+                    None::<&str>,
+                )
                 .map_err(|e| e.to_string())?;
             Ok(Value::Null)
         })()),

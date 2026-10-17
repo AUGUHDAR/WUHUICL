@@ -51,11 +51,20 @@ fn bind_loopback() -> std::io::Result<Arc<UdpSocket>> {
 }
 
 /// 对应 openTurnTcp：连接（3 秒超时）→ 两块回环 UDP → 起三个搬运线程
-pub fn open_turn_tcp(host: &str, port: u16, cancelled: &Arc<Mutex<bool>>) -> Result<TurnTcpChannel, String> {
+pub fn open_turn_tcp(
+    host: &str,
+    port: u16,
+    cancelled: &Arc<Mutex<bool>>,
+) -> Result<TurnTcpChannel, String> {
     if cancelled.lock().unwrap().to_owned() {
         return Err(TURN_TCP_TIMEOUT_CANCELLED.to_string());
     }
-    let stream = connect_with_timeout(host, port, Duration::from_millis(TURN_TCP_CONNECT_TIMEOUT_MS), cancelled)?;
+    let stream = connect_with_timeout(
+        host,
+        port,
+        Duration::from_millis(TURN_TCP_CONNECT_TIMEOUT_MS),
+        cancelled,
+    )?;
     stream.set_nodelay(true).map_err(|e| e.to_string())?;
     let client = bind_loopback().map_err(|e| e.to_string())?;
     let shim = bind_loopback().map_err(|e| e.to_string())?;
@@ -92,7 +101,9 @@ pub fn open_turn_tcp(host: &str, port: u16, cancelled: &Arc<Mutex<bool>>) -> Res
                         {
                             continue;
                         }
-                        if total.load(std::sync::atomic::Ordering::SeqCst) > TURN_TCP_BACKPRESSURE_BYTES {
+                        if total.load(std::sync::atomic::Ordering::SeqCst)
+                            > TURN_TCP_BACKPRESSURE_BYTES
+                        {
                             *closed.lock().unwrap() = true;
                             return;
                         }
@@ -105,7 +116,9 @@ pub fn open_turn_tcp(host: &str, port: u16, cancelled: &Arc<Mutex<bool>>) -> Res
                             return;
                         }
                     }
-                    Err(ref e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {}
+                    Err(ref e)
+                        if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
+                    }
                     Err(_) => return,
                 }
             }
@@ -189,7 +202,12 @@ pub fn open_turn_tcp(host: &str, port: u16, cancelled: &Arc<Mutex<bool>>) -> Res
     })
 }
 
-fn connect_with_timeout(host: &str, port: u16, timeout: Duration, cancelled: &Arc<Mutex<bool>>) -> Result<TcpStream, String> {
+fn connect_with_timeout(
+    host: &str,
+    port: u16,
+    timeout: Duration,
+    cancelled: &Arc<Mutex<bool>>,
+) -> Result<TcpStream, String> {
     let addrs: Vec<SocketAddr> = match host.parse::<IpAddr>() {
         Ok(ip) => vec![SocketAddr::new(ip, port)],
         Err(_) => match (host, port).to_socket_addrs() {
@@ -255,7 +273,8 @@ mod tests {
                                     if pending.len() < 2 {
                                         break;
                                     }
-                                    let need = u16::from_be_bytes([pending[0], pending[1]]) as usize;
+                                    let need =
+                                        u16::from_be_bytes([pending[0], pending[1]]) as usize;
                                     if pending.len() < need + 2 {
                                         break;
                                     }
@@ -274,16 +293,22 @@ mod tests {
                 });
             }
         });
-        FakeTurn { port, received, stop }
+        FakeTurn {
+            port,
+            received,
+            stop,
+        }
     }
-
 
     #[test]
     fn frames_out_with_big_endian_length_prefix() {
         let server = fake_turn_server(false);
         let cancelled = Arc::new(Mutex::new(false));
         let channel = open_turn_tcp("127.0.0.1", server.port, &cancelled).unwrap();
-        channel.socket.send_to(b"hello", ("127.0.0.1", channel.shim_port)).unwrap();
+        channel
+            .socket
+            .send_to(b"hello", ("127.0.0.1", channel.shim_port))
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(4);
         while server.received.lock().unwrap().is_empty() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
@@ -299,13 +324,23 @@ mod tests {
         let server = fake_turn_server(true);
         let cancelled = Arc::new(Mutex::new(false));
         let channel = open_turn_tcp("127.0.0.1", server.port, &cancelled).unwrap();
-        channel.socket.send_to(b"ping", ("127.0.0.1", channel.shim_port)).unwrap();
+        channel
+            .socket
+            .send_to(b"ping", ("127.0.0.1", channel.shim_port))
+            .unwrap();
         let _ = channel.keep;
         let mut buf = [0u8; 64];
-        channel.socket.set_read_timeout(Some(Duration::from_secs(4))).unwrap();
+        channel
+            .socket
+            .set_read_timeout(Some(Duration::from_secs(4)))
+            .unwrap();
         let (size, from) = channel.socket.recv_from(&mut buf).unwrap();
         assert_eq!(&buf[..size], b"ping", "TCP→UDP 拆帧必须回到 client");
-        assert_eq!(from.port(), channel.shim_port, "回程要来自 shim 端口，RUDP 才认这个对端");
+        assert_eq!(
+            from.port(),
+            channel.shim_port,
+            "回程要来自 shim 端口，RUDP 才认这个对端"
+        );
         *server.stop.lock().unwrap() = true;
         channel.close();
     }
@@ -317,12 +352,21 @@ mod tests {
         let channel = open_turn_tcp("127.0.0.1", server.port, &cancelled).unwrap();
         let other = UdpSocket::bind("127.0.0.1:0").unwrap();
         // 超过 2048 的包：原版直接 return，不转发也不关
-        other.send_to(&vec![7u8; 3000], ("127.0.0.1", channel.shim_port)).unwrap();
+        other
+            .send_to(&vec![7u8; 3000], ("127.0.0.1", channel.shim_port))
+            .unwrap();
         // 来自别的端口的包：同样忽略
-        channel.socket.send_to(b"ok?", ("127.0.0.1", channel.shim_port)).unwrap();
+        channel
+            .socket
+            .send_to(b"ok?", ("127.0.0.1", channel.shim_port))
+            .unwrap();
         std::thread::sleep(Duration::from_millis(400));
         let got = server.received.lock().unwrap().clone();
-        assert_eq!(got, vec![b"ok?".to_vec()], "只接受 client 端口发来的 1..=2048 字节包");
+        assert_eq!(
+            got,
+            vec![b"ok?".to_vec()],
+            "只接受 client 端口发来的 1..=2048 字节包"
+        );
         assert!(!channel.is_closed());
         *server.stop.lock().unwrap() = true;
         channel.close();
@@ -335,8 +379,15 @@ mod tests {
         drop(listener);
         let cancelled = Arc::new(Mutex::new(false));
         let err = open_turn_tcp("127.0.0.1", port, &cancelled).unwrap_err();
-        assert!([TURN_TCP_TIMEOUT_CONNECT, TURN_TCP_TIMEOUT_CLOSED].contains(&err.as_str()), "实际={}", err);
+        assert!(
+            [TURN_TCP_TIMEOUT_CONNECT, TURN_TCP_TIMEOUT_CLOSED].contains(&err.as_str()),
+            "实际={}",
+            err
+        );
         let flag = Arc::new(Mutex::new(true));
-        assert_eq!(open_turn_tcp("127.0.0.1", port, &flag).unwrap_err(), TURN_TCP_TIMEOUT_CANCELLED);
+        assert_eq!(
+            open_turn_tcp("127.0.0.1", port, &flag).unwrap_err(),
+            TURN_TCP_TIMEOUT_CANCELLED
+        );
     }
 }

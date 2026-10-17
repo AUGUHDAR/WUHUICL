@@ -34,7 +34,12 @@ fn with_tasks<T>(f: impl FnOnce(&mut HashMap<String, Arc<TaskRecord>>) -> T) -> 
 
 /// registerTask：id 形如 `{kind}-{millis}-{seq}`（与原版一致）
 pub fn register_task(title: &str, kind: &'static str) -> Arc<TaskRecord> {
-    let id = format!("{}-{}-{}", kind, chrono::Utc::now().timestamp_millis(), SEQ.fetch_add(1, Ordering::SeqCst) + 1);
+    let id = format!(
+        "{}-{}-{}",
+        kind,
+        chrono::Utc::now().timestamp_millis(),
+        SEQ.fetch_add(1, Ordering::SeqCst) + 1
+    );
     let rec = Arc::new(TaskRecord {
         id: id.clone(),
         title: title.to_string(),
@@ -110,7 +115,9 @@ pub fn get_task(id: &str) -> Option<Arc<TaskRecord>> {
 }
 
 pub fn task_cancelled(id: &str) -> bool {
-    get_task(id).map(|t| t.cancelled.load(Ordering::SeqCst)).unwrap_or(false)
+    get_task(id)
+        .map(|t| t.cancelled.load(Ordering::SeqCst))
+        .unwrap_or(false)
 }
 
 /// 暂停门控：在下载循环里调用，暂停时阻塞直至恢复/取消（对应原版 pauseWaiter）

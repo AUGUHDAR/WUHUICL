@@ -27,7 +27,11 @@ fn idle_snapshot() -> Value {
 }
 
 pub fn snapshot() -> Value {
-    SNAPSHOT.lock().unwrap().clone().unwrap_or_else(idle_snapshot)
+    SNAPSHOT
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(idle_snapshot)
 }
 
 fn set_snapshot(v: Value) {
@@ -36,7 +40,9 @@ fn set_snapshot(v: Value) {
 
 fn emit(payload: Value) {
     let Some(app) = APP.get() else { return };
-    let Some(win) = app.get_webview_window("main") else { return };
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
     let _ = win.emit_to("main", "vlcli:event", payload);
 }
 
@@ -52,12 +58,18 @@ pub fn fold_line(snapshot: &Value, line: &str) -> (Value, Option<Value>) {
     if let Some(ok) = parsed.get("ok").and_then(|v| v.as_bool()) {
         if ok {
             let data = parsed.get("data").cloned().unwrap_or(Value::Null);
-            return (snapshot.clone(), Some(json!({ "kind": "result", "data": data })));
+            return (
+                snapshot.clone(),
+                Some(json!({ "kind": "result", "data": data })),
+            );
         }
         let mut next = snapshot.clone();
         next["lastError"] = parsed["message"].clone();
-        return (next, Some(json!({ "kind": "error", "data": {
-            "code": parsed["code"].clone(), "message": parsed["message"].clone() } })));
+        return (
+            next,
+            Some(json!({ "kind": "error", "data": {
+            "code": parsed["code"].clone(), "message": parsed["message"].clone() } })),
+        );
     }
     match parsed["event"].as_str().unwrap_or("") {
         "session:state" => {
@@ -87,7 +99,10 @@ pub fn fold_line(snapshot: &Value, line: &str) -> (Value, Option<Value>) {
             next["logs"] = Value::Array(logs);
             (next, Some(json!({ "kind": "log", "data": parsed })))
         }
-        "signal" => (snapshot.clone(), Some(json!({ "kind": "signal", "data": parsed }))),
+        "signal" => (
+            snapshot.clone(),
+            Some(json!({ "kind": "signal", "data": parsed })),
+        ),
         _ => (snapshot.clone(), None),
     }
 }
@@ -101,7 +116,14 @@ pub fn start(bin: &Path, command: &str, payload: &str) -> Result<Value, String> 
     }
     let mut cmd = Command::new(bin);
     let mut argv: Vec<String> = command.split_whitespace().map(str::to_string).collect();
-    argv.extend(["--json".into(), payload.into(), "--events".into(), "ndjson".into(), "--timeout".into(), "0".into()]);
+    argv.extend([
+        "--json".into(),
+        payload.into(),
+        "--events".into(),
+        "ndjson".into(),
+        "--timeout".into(),
+        "0".into(),
+    ]);
     cmd.args(&argv)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -111,10 +133,14 @@ pub fn start(bin: &Path, command: &str, payload: &str) -> Result<Value, String> 
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000);
     }
-    let mut child = cmd.spawn().map_err(|e| format!("联机组件启动失败：{}", e))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("联机组件启动失败：{}", e))?;
     let stdout = child.stdout.take().ok_or("联机组件输出不可读")?;
-    set_snapshot(json!({ "state": "starting", "room": null, "connection": null,
-        "startedAt": crate::download::now_ms(), "lastError": null, "logs": [] }));
+    set_snapshot(
+        json!({ "state": "starting", "room": null, "connection": null,
+        "startedAt": crate::download::now_ms(), "lastError": null, "logs": [] }),
+    );
     ALIVE.store(true, Ordering::SeqCst);
     *CHILD.lock().unwrap() = Some(child);
 
@@ -128,7 +154,11 @@ pub fn start(bin: &Path, command: &str, payload: &str) -> Result<Value, String> 
                 *guard = Some(folded.0.clone());
                 folded
             };
-            let kind = event.as_ref().and_then(|e| e["kind"].as_str()).unwrap_or("").to_string();
+            let kind = event
+                .as_ref()
+                .and_then(|e| e["kind"].as_str())
+                .unwrap_or("")
+                .to_string();
             if let Some(event) = event {
                 emit(event);
             }
@@ -186,15 +216,20 @@ mod tests {
 
     #[test]
     fn failure_records_last_error() {
-        let (snap, event) = fold_line(&base(), r#"{"ok":false,"code":"ROOM_NOT_FOUND","message":"房号不存在"}"#);
+        let (snap, event) = fold_line(
+            &base(),
+            r#"{"ok":false,"code":"ROOM_NOT_FOUND","message":"房号不存在"}"#,
+        );
         assert_eq!(event.unwrap()["kind"], "error");
         assert_eq!(snap["lastError"], "房号不存在");
     }
 
     #[test]
     fn conn_state_exposes_local_address() {
-        let (snap, event) = fold_line(&base(),
-            r#"{"event":"conn:state","phase":"p2p","status":"success","address":"127.0.0.1:51234"}"#);
+        let (snap, event) = fold_line(
+            &base(),
+            r#"{"event":"conn:state","phase":"p2p","status":"success","address":"127.0.0.1:51234"}"#,
+        );
         assert_eq!(event.unwrap()["kind"], "conn");
         assert_eq!(snap["connection"]["address"], "127.0.0.1:51234");
         assert_eq!(snap["connection"]["status"], "success");
@@ -202,7 +237,10 @@ mod tests {
 
     #[test]
     fn session_state_updates_room() {
-        let (snap, _) = fold_line(&base(), r#"{"event":"session:state","state":"hosting","room":{"code":"123456"}}"#);
+        let (snap, _) = fold_line(
+            &base(),
+            r#"{"event":"session:state","state":"hosting","room":{"code":"123456"}}"#,
+        );
         assert_eq!(snap["state"], "hosting");
         assert_eq!(snap["room"]["code"], "123456");
     }
@@ -211,7 +249,10 @@ mod tests {
     fn log_ring_caps_at_200() {
         let mut snap = base();
         for i in 0..260 {
-            let line = format!(r#"{{"event":"net:log","level":"info","msg":"m{}","ts":{}}}"#, i, i);
+            let line = format!(
+                r#"{{"event":"net:log","level":"info","msg":"m{}","ts":{}}}"#,
+                i, i
+            );
             snap = fold_line(&snap, &line).0;
         }
         assert_eq!(snap["logs"].as_array().unwrap().len(), 200);

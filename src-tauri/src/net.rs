@@ -89,7 +89,9 @@ pub fn cf_key() -> String {
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "$2a$10$m36VLjTaHEqxr/hO3kMDE.XCDEG90rSu3iGKkoPsj0KdCPWXOASXG".to_string())
+        .unwrap_or_else(|| {
+            "$2a$10$m36VLjTaHEqxr/hO3kMDE.XCDEG90rSu3iGKkoPsj0KdCPWXOASXG".to_string()
+        })
 }
 
 /// 手动重定向的下载流（对应原版 downloadFetch.ts `downloadFetch()`）：
@@ -138,7 +140,9 @@ pub fn open_stream(
             .map(str::to_string);
         drop(resp); // 关闭 3xx 响应体（对应原版 response.body?.cancel()）
         let location = location.ok_or_else(|| "下载跳转缺少地址".to_string())?;
-        let next = target.join(&location).map_err(|_| "下载跳转缺少地址".to_string())?;
+        let next = target
+            .join(&location)
+            .map_err(|_| "下载跳转缺少地址".to_string())?;
         if !matches!(next.scheme(), "https" | "http")
             || !next.username().is_empty()
             || next.password().is_some()
@@ -184,7 +188,9 @@ pub fn verify_file(
 ) -> Result<Option<String>, String> {
     let stat = match std::fs::metadata(file) {
         Ok(s) => s,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Some("文件缺失".to_string())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Some("文件缺失".to_string()))
+        }
         Err(e) => return Err(e.to_string()),
     };
     if !stat.is_file() {
@@ -339,12 +345,18 @@ impl Sha1 {
     fn compress(state: &mut [u32; 5], block: &[u8; 64]) {
         let mut w = [0u32; 80];
         for i in 0..16 {
-            w[i] = u32::from_be_bytes([block[4 * i], block[4 * i + 1], block[4 * i + 2], block[4 * i + 3]]);
+            w[i] = u32::from_be_bytes([
+                block[4 * i],
+                block[4 * i + 1],
+                block[4 * i + 2],
+                block[4 * i + 3],
+            ]);
         }
         for i in 16..80 {
             w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
         }
-        let (mut a, mut b, mut c, mut d, mut e) = (state[0], state[1], state[2], state[3], state[4]);
+        let (mut a, mut b, mut c, mut d, mut e) =
+            (state[0], state[1], state[2], state[3], state[4]);
         for i in 0..80 {
             let (f, k) = match i {
                 0..=19 => ((b & c) | ((!b) & d), 0x5A827999u32),

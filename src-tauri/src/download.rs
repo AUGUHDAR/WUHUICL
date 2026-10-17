@@ -92,7 +92,11 @@ pub fn source_text(mirror: MirrorPref) -> &'static str {
 
 pub fn mirror_from_settings(app: &tauri::AppHandle) -> MirrorPref {
     let s = crate::settings::get(app);
-    mirror_pref_of(s.get("mirror").and_then(|v| v.as_str()).unwrap_or("official"))
+    mirror_pref_of(
+        s.get("mirror")
+            .and_then(|v| v.as_str())
+            .unwrap_or("official"),
+    )
 }
 
 static FORGECDN_FILES: OnceLock<regex::Regex> = OnceLock::new();
@@ -110,7 +114,9 @@ pub fn mirror_url(input: &str, mirror: MirrorPref) -> String {
     if mirror == MirrorPref::Official {
         return input.to_string();
     }
-    let Ok(u) = Url::parse(input) else { return input.to_string() };
+    let Ok(u) = Url::parse(input) else {
+        return input.to_string();
+    };
     if !matches!(u.scheme(), "https" | "http") {
         return input.to_string();
     }
@@ -119,7 +125,10 @@ pub fn mirror_url(input: &str, mirror: MirrorPref) -> String {
     let q = u.query().map(|v| format!("?{v}")).unwrap_or_default();
     let base = "https://bmclapi2.bangbang93.com";
     match host {
-        "piston-meta.mojang.com" | "piston-data.mojang.com" | "launchermeta.mojang.com" | "launcher.mojang.com" => {
+        "piston-meta.mojang.com"
+        | "piston-data.mojang.com"
+        | "launchermeta.mojang.com"
+        | "launcher.mojang.com" => {
             format!("{base}{p}{q}")
         }
         "resources.download.minecraft.net" => format!("{base}/assets{p}{q}"),
@@ -127,10 +136,15 @@ pub fn mirror_url(input: &str, mirror: MirrorPref) -> String {
             format!("{BMCL_MAVEN_ROOT}{}{q}", p.strip_prefix('/').unwrap_or(p))
         }
         "maven.neoforged.net" if p.starts_with("/releases/") => {
-            format!("{BMCL_MAVEN_ROOT}{}{q}", p.strip_prefix("/releases/").unwrap_or(p))
+            format!(
+                "{BMCL_MAVEN_ROOT}{}{q}",
+                p.strip_prefix("/releases/").unwrap_or(p)
+            )
         }
         "files.minecraftforge.net" if p.starts_with("/maven/") => format!("{base}{p}{q}"),
-        "cdn.modrinth.com" if modrinth_data_re().is_match(p) => format!("https://mod.mcimirror.top{p}{q}"),
+        "cdn.modrinth.com" if modrinth_data_re().is_match(p) => {
+            format!("https://mod.mcimirror.top{p}{q}")
+        }
         "edge.forgecdn.net" | "mediafilez.forgecdn.net" if forgecdn_files_re().is_match(p) => {
             format!("https://mod.mcimirror.top{p}{q}")
         }
@@ -146,7 +160,10 @@ pub fn download_candidates(urls: &[String], mirror: MirrorPref) -> Vec<String> {
         let mut variants: Vec<String> = vec![url.clone()];
         if let Ok(mut u) = Url::parse(url) {
             if u.scheme() == "https"
-                && matches!(u.host_str(), Some("edge.forgecdn.net") | Some("mediafilez.forgecdn.net"))
+                && matches!(
+                    u.host_str(),
+                    Some("edge.forgecdn.net") | Some("mediafilez.forgecdn.net")
+                )
                 && forgecdn_files_re().is_match(u.path())
             {
                 if u.set_host(Some("mediafilez.forgecdn.net")).is_ok() {
@@ -186,7 +203,9 @@ pub fn classify_http_status(status: u16) -> HttpFailureKind {
     if matches!(status, 404 | 410) {
         return HttpFailureKind::Unavailable;
     }
-    if matches!(status, 304 | 408 | 425 | 429) || ((500..600).contains(&status) && !matches!(status, 501 | 505)) {
+    if matches!(status, 304 | 408 | 425 | 429)
+        || ((500..600).contains(&status) && !matches!(status, 501 | 505))
+    {
         HttpFailureKind::Transient
     } else {
         HttpFailureKind::Fatal
@@ -223,7 +242,11 @@ fn origin_of(url: &str) -> String {
 
 fn local_time(ms: u64) -> String {
     chrono::DateTime::from_timestamp_millis(ms as i64)
-        .map(|dt| dt.with_timezone(&chrono::Local).format("%Y/%m/%d %H:%M:%S").to_string())
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y/%m/%d %H:%M:%S")
+                .to_string()
+        })
         .unwrap_or_default()
 }
 
@@ -252,7 +275,11 @@ pub fn note_host_failure(url: &str) {
     let key = origin_of(url);
     let mut m = host_failures().lock().unwrap();
     let count = m.get(&key).map(|(c, _)| *c).unwrap_or(0) + 1;
-    let until = if count < 2 { 0 } else { now_ms() + (count as u64 * 60_000).min(600_000) };
+    let until = if count < 2 {
+        0
+    } else {
+        now_ms() + (count as u64 * 60_000).min(600_000)
+    };
     m.insert(key, (count, until));
 }
 
@@ -271,18 +298,28 @@ pub fn note_hosts_recovered() {
 fn host_cooling(url: &str) -> bool {
     let key = origin_of(url);
     let now = now_ms();
-    let failures_until = host_failures().lock().unwrap().get(&key).map(|(_, u)| *u).unwrap_or(0);
-    let cooldown = server_cooldowns().lock().unwrap().get(&key).copied().unwrap_or(0);
+    let failures_until = host_failures()
+        .lock()
+        .unwrap()
+        .get(&key)
+        .map(|(_, u)| *u)
+        .unwrap_or(0);
+    let cooldown = server_cooldowns()
+        .lock()
+        .unwrap()
+        .get(&key)
+        .copied()
+        .unwrap_or(0);
     failures_until.max(cooldown) > now
 }
 
 /// 限流等待状态（对应原版 download.ts `DownloadWaitState`）。
 #[derive(Debug, Clone)]
 pub struct WaitState {
-    pub reason: String,   // "rate-limit"
-    pub source: String,   // origin
-    pub retry_at: u64,    // epoch ms
-    pub action: String,   // "waiting" | "switching"
+    pub reason: String, // "rate-limit"
+    pub source: String, // origin
+    pub retry_at: u64,  // epoch ms
+    pub action: String, // "waiting" | "switching"
     pub file: Option<String>,
 }
 
@@ -300,7 +337,11 @@ impl CooldownBudget {
     }
 
     pub fn from_paused(paused: Arc<AtomicBool>) -> Self {
-        Self { limit_ms: 30_000, st: Mutex::new((0, 0, Instant::now())), paused }
+        Self {
+            limit_ms: 30_000,
+            st: Mutex::new((0, 0, Instant::now())),
+            paused,
+        }
     }
 
     fn sample(&self) {
@@ -333,9 +374,9 @@ fn can_avoid_cooldown(url: &str, alternatives: &[String]) -> bool {
     let origin = origin_of(url);
     let now = now_ms();
     let cd = server_cooldowns().lock().unwrap();
-    alternatives
-        .iter()
-        .any(|other| origin_of(other) != origin && cd.get(&origin_of(other)).copied().unwrap_or(0) <= now)
+    alternatives.iter().any(|other| {
+        origin_of(other) != origin && cd.get(&origin_of(other)).copied().unwrap_or(0) <= now
+    })
 }
 
 /// 对应原版 download.ts `waitForServerCooldown()`：等到该源限流冷却结束；
@@ -357,7 +398,12 @@ fn wait_for_server_cooldown(
             &owned
         }
     };
-    let mut until = server_cooldowns().lock().unwrap().get(&origin_of(url)).copied().unwrap_or(0);
+    let mut until = server_cooldowns()
+        .lock()
+        .unwrap()
+        .get(&origin_of(url))
+        .copied()
+        .unwrap_or(0);
     if until <= now_ms() {
         return Ok(());
     }
@@ -378,14 +424,22 @@ fn wait_for_server_cooldown(
         if check_cancel(rec).is_err() {
             break Err(XferErr::Cancelled);
         }
-        until = server_cooldowns().lock().unwrap().get(&origin_of(url)).copied().unwrap_or(0);
+        until = server_cooldowns()
+            .lock()
+            .unwrap()
+            .get(&origin_of(url))
+            .copied()
+            .unwrap_or(0);
         state.retry_at = until;
         let remaining = until.saturating_sub(now_ms());
         if remaining == 0 {
             break Ok(());
         }
         if switching || remaining > budget.remaining() {
-            break Err(XferErr::RateLimit { url: url.to_string(), retry_at: until });
+            break Err(XferErr::RateLimit {
+                url: url.to_string(),
+                retry_at: until,
+            });
         }
         let sleep_ms = 100u64.min(remaining).min(budget.remaining().max(1));
         if abortable_delay(sleep_ms, rec).is_err() {
@@ -416,7 +470,11 @@ impl XferErr {
         match self {
             XferErr::Cancelled => "已取消".to_string(),
             XferErr::RateLimit { url, retry_at } => {
-                format!("下载源限流，可稍后重试（最早 {}）：{}", local_time(*retry_at), origin_of(url))
+                format!(
+                    "下载源限流，可稍后重试（最早 {}）：{}",
+                    local_time(*retry_at),
+                    origin_of(url)
+                )
             }
             XferErr::Http { status, url } => format!("HTTP {status}: {url}"),
             XferErr::Invalid(r) => r.clone(),
@@ -525,7 +583,13 @@ struct LimiterState {
 impl DownloadLimiter {
     pub fn new() -> Self {
         Self {
-            st: Mutex::new(LimiterState { threads: 16, kbps: 0, active: 0, tokens: 0.0, sampled_at: Instant::now() }),
+            st: Mutex::new(LimiterState {
+                threads: 16,
+                kbps: 0,
+                active: 0,
+                tokens: 0.0,
+                sampled_at: Instant::now(),
+            }),
             cv: Condvar::new(),
         }
     }
@@ -565,14 +629,19 @@ impl DownloadLimiter {
         loop {
             if st.active < st.threads {
                 st.active += 1;
-                return Ok(LimiterSlot { limiter: self.clone() });
+                return Ok(LimiterSlot {
+                    limiter: self.clone(),
+                });
             }
             if let Some(rec) = rec {
                 if rec.cancelled.load(Ordering::SeqCst) {
                     return Err("已取消".to_string());
                 }
             }
-            let (guard, _) = self.cv.wait_timeout(st, Duration::from_millis(100)).unwrap();
+            let (guard, _) = self
+                .cv
+                .wait_timeout(st, Duration::from_millis(100))
+                .unwrap();
             st = guard;
         }
     }
@@ -638,15 +707,23 @@ impl Drop for LimiterSlot {
 /// max_concurrent()/is_throttling()；写侧走 configure_limiter_from_settings。
 pub fn limiter() -> Arc<DownloadLimiter> {
     static LIMITER: OnceLock<Arc<DownloadLimiter>> = OnceLock::new();
-    LIMITER.get_or_init(|| Arc::new(DownloadLimiter::new())).clone()
+    LIMITER
+        .get_or_init(|| Arc::new(DownloadLimiter::new()))
+        .clone()
 }
 
 /// settings:set 保存线程/限速后调用（对应原版 settings.ts:256
 /// `if (patch.downloadThreads !== undefined || patch.downloadSpeedKBps !== undefined) downloadLimiter.configure(merged)`）。
 pub fn configure_limiter_from_settings(app: &tauri::AppHandle) {
     let s = crate::settings::get(app);
-    let threads = s.get("downloadThreads").and_then(|v| v.as_i64()).unwrap_or(16);
-    let kbps = s.get("downloadSpeedKBps").and_then(|v| v.as_i64()).unwrap_or(0);
+    let threads = s
+        .get("downloadThreads")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(16);
+    let kbps = s
+        .get("downloadSpeedKBps")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     // 对应原版 settings.ts:132：校验失败回落默认值
     if validate_pair(threads, kbps).is_ok() {
         let _ = limiter().configure(threads, kbps);
@@ -674,11 +751,17 @@ fn file_job_key(dest: &Path) -> String {
 }
 
 /// 同一目标文件串行（对应原版 `withFileJob`）；等待期间可取消。
-pub fn with_file_job<T>(dest: &Path, rec: Option<&TaskRecord>, action: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+pub fn with_file_job<T>(
+    dest: &Path,
+    rec: Option<&TaskRecord>,
+    action: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
     let key = file_job_key(dest);
     let slot = {
         let mut m = file_jobs().lock().unwrap();
-        m.entry(key.clone()).or_insert_with(|| Arc::new((Mutex::new(0u32), Condvar::new()))).clone()
+        m.entry(key.clone())
+            .or_insert_with(|| Arc::new((Mutex::new(0u32), Condvar::new())))
+            .clone()
     };
     let (counter, cv) = &*slot;
     {
@@ -706,7 +789,9 @@ pub fn with_file_job<T>(dest: &Path, rec: Option<&TaskRecord>, action: impl FnOn
     // 无其他持有者时清理登记（对应原版 tails.delete）
     {
         let mut m = file_jobs().lock().unwrap();
-        if Arc::strong_count(&slot) == 1 && m.get(&key).map(|s| Arc::ptr_eq(s, &slot)).unwrap_or(false) {
+        if Arc::strong_count(&slot) == 1
+            && m.get(&key).map(|s| Arc::ptr_eq(s, &slot)).unwrap_or(false)
+        {
             m.remove(&key);
         }
     }
@@ -751,11 +836,16 @@ pub type SourcePoolRef = Arc<Mutex<DownloadSourcePool>>;
 
 impl DownloadSourcePool {
     pub fn new() -> Self {
-        Self { samples: HashMap::new() }
+        Self {
+            samples: HashMap::new(),
+        }
     }
 
     fn sample_of(&self, url: &str) -> SourceSample {
-        *self.samples.get(&source_key(url)).unwrap_or(&SourceSample::default())
+        *self
+            .samples
+            .get(&source_key(url))
+            .unwrap_or(&SourceSample::default())
     }
 
     fn sample_mut(&mut self, url: &str) -> &mut SourceSample {
@@ -781,14 +871,21 @@ impl DownloadSourcePool {
                 2500.0 + s.failures as f64 * 15_000.0
             }
         };
-        let mut scored: Vec<(usize, String, SourceSample)> =
-            urls.iter().enumerate().map(|(i, u)| (i, u.clone(), self.sample_of(u))).collect();
+        let mut scored: Vec<(usize, String, SourceSample)> = urls
+            .iter()
+            .enumerate()
+            .map(|(i, u)| (i, u.clone(), self.sample_of(u)))
+            .collect();
         scored.sort_by(|a, b| {
             let a_trial = trial.as_deref() == Some(a.1.as_str());
             let b_trial = trial.as_deref() == Some(b.1.as_str());
             b_trial
                 .cmp(&a_trial)
-                .then_with(|| cost(&a.2).partial_cmp(&cost(&b.2)).unwrap_or(std::cmp::Ordering::Equal))
+                .then_with(|| {
+                    cost(&a.2)
+                        .partial_cmp(&cost(&b.2))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
                 .then_with(|| a.0.cmp(&b.0))
         });
         let winner = scored[0].1.clone();
@@ -878,7 +975,11 @@ impl DownloadProgressTracker {
             self.snapshot();
         }
         let index = self.entries.len();
-        self.entries.push(ProgressEntry { expected, transferred: 0, complete: false });
+        self.entries.push(ProgressEntry {
+            expected,
+            transferred: 0,
+            complete: false,
+        });
         if self.sealed && was_determinate {
             self.anchor_fraction = self.last_fraction;
             self.anchor_done = done_before;
@@ -941,7 +1042,8 @@ impl DownloadProgressTracker {
         } else {
             let completed_since_anchor = bytes_done.saturating_sub(self.anchor_done) as f64;
             self.anchor_fraction
-                + (1.0 - self.anchor_fraction) * (1.0f64).min(completed_since_anchor / self.anchor_remaining.unwrap() as f64)
+                + (1.0 - self.anchor_fraction)
+                    * (1.0f64).min(completed_since_anchor / self.anchor_remaining.unwrap() as f64)
         };
         self.last_fraction = self.last_fraction.max(clamp01(fraction));
         DownloadProgressSnapshot {
@@ -973,7 +1075,9 @@ impl DownloadProgressTracker {
     }
 
     fn entry(&mut self, index: usize) -> &mut ProgressEntry {
-        self.entries.get_mut(index).unwrap_or_else(|| panic!("未知下载进度项: {index}"))
+        self.entries
+            .get_mut(index)
+            .unwrap_or_else(|| panic!("未知下载进度项: {index}"))
     }
 
     fn is_determinate(&self) -> bool {
@@ -1019,14 +1123,30 @@ pub struct SmoothedSpeedEstimator {
 
 impl SmoothedSpeedEstimator {
     pub fn new() -> Self {
-        Self { points: Vec::new(), last_progress: 0.0, last: SpeedSnapshot { speed_bps: 0, eta_seconds: None } }
+        Self {
+            points: Vec::new(),
+            last_progress: 0.0,
+            last: SpeedSnapshot {
+                speed_bps: 0,
+                eta_seconds: None,
+            },
+        }
     }
 
-    pub fn sample(&mut self, bytes: u64, remaining: Option<u64>, now_ms: f64, paused: bool) -> SpeedSnapshot {
+    pub fn sample(
+        &mut self,
+        bytes: u64,
+        remaining: Option<u64>,
+        now_ms: f64,
+        paused: bool,
+    ) -> SpeedSnapshot {
         let end = self.points.last().copied();
         if paused || end.map(|(at, b)| bytes < b || now_ms < at).unwrap_or(false) {
             self.points.clear();
-            self.last = SpeedSnapshot { speed_bps: 0, eta_seconds: None };
+            self.last = SpeedSnapshot {
+                speed_bps: 0,
+                eta_seconds: None,
+            };
             return self.last;
         }
         let Some((end_at, end_bytes)) = end else {
@@ -1053,10 +1173,15 @@ impl SmoothedSpeedEstimator {
             0.0
         };
         let eta = match remaining {
-            Some(r) if r > 0 && rate > 0.0 && duration >= 3000.0 => Some((r as f64 / rate).ceil() as u64),
+            Some(r) if r > 0 && rate > 0.0 && duration >= 3000.0 => {
+                Some((r as f64 / rate).ceil() as u64)
+            }
             _ => None,
         };
-        self.last = SpeedSnapshot { speed_bps: rate.max(0.0).round() as u64, eta_seconds: eta };
+        self.last = SpeedSnapshot {
+            speed_bps: rate.max(0.0).round() as u64,
+            eta_seconds: eta,
+        };
         self.last
     }
 }
@@ -1094,7 +1219,11 @@ fn open_stream_bounded(
     let headers = headers.to_vec();
     let cancel_for_thread = cancel.clone();
     std::thread::spawn(move || {
-        let _ = tx.send(net::open_stream(&url, &headers, cancel_for_thread.as_deref()));
+        let _ = tx.send(net::open_stream(
+            &url,
+            &headers,
+            cancel_for_thread.as_deref(),
+        ));
     });
     match rx.recv_timeout(Duration::from_millis(timeout_ms)) {
         Ok(r) => r.map_err(XferErr::from_str_msg),
@@ -1115,7 +1244,17 @@ fn receive(
     has_alternative: bool,
     wait: Option<&WaitArgs<'_>>,
 ) -> Result<u64, XferErr> {
-    let result = receive_inner(url, temporary, expected, rec, progress, pool, observation_url, has_alternative, wait);
+    let result = receive_inner(
+        url,
+        temporary,
+        expected,
+        rec,
+        progress,
+        pool,
+        observation_url,
+        has_alternative,
+        wait,
+    );
     // 对应原版 catch：取消/网络/HTTP/内容错误都记为源失败（磁盘错误除外）
     if let Err(e) = &result {
         if !matches!(e, XferErr::Disk(_)) {
@@ -1146,7 +1285,9 @@ fn receive_inner(
     };
     // 跨文件（含并行分片）共享的源限流冷却
     wait_for_server_cooldown(url, rec, budget, alternatives, on_wait)?;
-    let _slot = limiter().acquire(Some(rec)).map_err(XferErr::from_str_msg)?;
+    let _slot = limiter()
+        .acquire(Some(rec))
+        .map_err(XferErr::from_str_msg)?;
 
     let mut offset: u64 = std::fs::metadata(temporary).map(|m| m.len()).unwrap_or(0);
     // 无哈希时跨源续传无法建立表示同一性（对应原版 offset = 0）
@@ -1172,7 +1313,8 @@ fn receive_inner(
         }
     }
 
-    let mut headers: Vec<(String, String)> = vec![("accept-encoding".to_string(), "identity".to_string())];
+    let mut headers: Vec<(String, String)> =
+        vec![("accept-encoding".to_string(), "identity".to_string())];
     if offset > 0 {
         headers.push(("Range".to_string(), format!("bytes={offset}-")));
     }
@@ -1195,7 +1337,12 @@ fn receive_inner(
                 cd.retain(|_, until| *until > now);
             }
         }
-        let until = retry_after_time(resp.headers().get("retry-after").and_then(|v| v.to_str().ok()), now_ms());
+        let until = retry_after_time(
+            resp.headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok()),
+            now_ms(),
+        );
         let resp_url = resp.url().to_string();
         let mut hosts = vec![origin_of(url), origin_of(&resp_url)];
         hosts.dedup();
@@ -1220,14 +1367,25 @@ fn receive_inner(
         }
     }
     if !(200..300).contains(&status) {
-        return Err(XferErr::Http { status, url: url.to_string() });
+        return Err(XferErr::Http {
+            status,
+            url: url.to_string(),
+        });
     }
 
     let mut total: u64 = required.unwrap_or(0);
     if status == 206 {
-        let cr = resp.headers().get("content-range").and_then(|v| v.to_str().ok()).unwrap_or("");
+        let cr = resp
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
         let parsed = content_range_re().captures(cr).and_then(|c| {
-            Some((c[1].parse::<u64>().ok()?, c[2].parse::<u64>().ok()?, c[3].parse::<u64>().ok()?))
+            Some((
+                c[1].parse::<u64>().ok()?,
+                c[2].parse::<u64>().ok()?,
+                c[3].parse::<u64>().ok()?,
+            ))
         });
         let Some((start, end, tot)) = parsed else {
             return Err(XferErr::Invalid("Content-Range 不正确".to_string()));
@@ -1258,7 +1416,11 @@ fn receive_inner(
     let mut file = if offset > 0 {
         std::fs::OpenOptions::new().append(true).open(temporary)
     } else {
-        std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(temporary)
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(temporary)
     }
     .map_err(|e| XferErr::Disk(e.to_string()))?;
 
@@ -1313,10 +1475,13 @@ fn receive_inner(
                     break; // EOF
                 }
                 body_ms += last_event.elapsed().as_secs_f64() * 1000.0;
-                limiter().consume(chunk.len(), Some(rec)).map_err(XferErr::from_str_msg)?;
+                limiter()
+                    .consume(chunk.len(), Some(rec))
+                    .map_err(XferErr::from_str_msg)?;
                 last_event = Instant::now();
                 wait_while_paused(rec);
-                file.write_all(&chunk).map_err(|_| XferErr::Disk("写入文件失败".to_string()))?;
+                file.write_all(&chunk)
+                    .map_err(|_| XferErr::Disk("写入文件失败".to_string()))?;
                 done += chunk.len() as u64;
                 transferred += chunk.len() as u64;
                 if total > 0 && done > total {
@@ -1350,7 +1515,9 @@ fn receive_inner(
     file.sync_data().map_err(|e| XferErr::Disk(e.to_string()))?;
     if !limiter().is_throttling() && rec.paused.load(Ordering::SeqCst) == false {
         if let Some(p) = pool {
-            p.lock().unwrap().observe(observation_url, headers_ms, body_ms, transferred);
+            p.lock()
+                .unwrap()
+                .observe(observation_url, headers_ms, body_ms, transferred);
         }
     }
     Ok(done)
@@ -1358,7 +1525,13 @@ fn receive_inner(
 
 // ---------------- 本地复用（download.ts reuse()） ----------------
 
-fn reuse(dest: &Path, expected: &Integrity, roots: &[PathBuf], files: &[PathBuf], rec: &TaskRecord) -> Result<bool, String> {
+fn reuse(
+    dest: &Path,
+    expected: &Integrity,
+    roots: &[PathBuf],
+    files: &[PathBuf],
+    rec: &TaskRecord,
+) -> Result<bool, String> {
     if !expected.has_hash() {
         return Ok(false);
     }
@@ -1404,7 +1577,10 @@ fn reuse(dest: &Path, expected: &Integrity, roots: &[PathBuf], files: &[PathBuf]
     }
     // 目录扫描：深度 8、访问上限 10000、同扩展名（对应原版 reuse() 的 roots 遍历）
     let own = dest.parent().map(normalize_path).unwrap_or_default();
-    let extension = dest.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let extension = dest
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
     let mut queue: VecDeque<(PathBuf, usize)> = roots
         .iter()
         .map(|r| (std::path::absolute(r).unwrap_or_else(|_| r.clone()), 0usize))
@@ -1431,7 +1607,10 @@ fn reuse(dest: &Path, expected: &Integrity, roots: &[PathBuf], files: &[PathBuf]
             if !ft.is_file() {
                 continue;
             }
-            let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+            let ext = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
             if ext != extension {
                 continue;
             }
@@ -1495,10 +1674,17 @@ pub fn download_file(
     dest: &Path,
     opts: &DownloadFileOpts<'_>,
 ) -> Result<(), String> {
-    with_file_job(dest, Some(rec.as_ref()), || download_file_inner(rec, url, dest, opts))
+    with_file_job(dest, Some(rec.as_ref()), || {
+        download_file_inner(rec, url, dest, opts)
+    })
 }
 
-fn download_file_inner(rec: &Arc<TaskRecord>, url: &str, dest: &Path, opts: &DownloadFileOpts<'_>) -> Result<(), String> {
+fn download_file_inner(
+    rec: &Arc<TaskRecord>,
+    url: &str,
+    dest: &Path,
+    opts: &DownloadFileOpts<'_>,
+) -> Result<(), String> {
     check_cancel(rec)?;
     let expected = Integrity {
         sha1: opts.sha1.map(str::to_string),
@@ -1507,7 +1693,11 @@ fn download_file_inner(rec: &Arc<TaskRecord>, url: &str, dest: &Path, opts: &Dow
         size: opts.size,
     };
     let temporary = part_path(dest);
-    let attempts = if opts.max_attempts == 0 { 4 } else { opts.max_attempts.clamp(1, 4) };
+    let attempts = if opts.max_attempts == 0 {
+        4
+    } else {
+        opts.max_attempts.clamp(1, 4)
+    };
     let budget = CooldownBudget::new(rec.clone());
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -1522,7 +1712,9 @@ fn download_file_inner(rec: &Arc<TaskRecord>, url: &str, dest: &Path, opts: &Dow
             return Ok(());
         }
         // 2. .part 已完整 → 采纳
-        if expected.has_hash() && verify_file(&temporary, &expected, Some(rec.cancelled.as_ref()))?.is_none() {
+        if expected.has_hash()
+            && verify_file(&temporary, &expected, Some(rec.cancelled.as_ref()))?.is_none()
+        {
             check_cancel(rec)?;
             std::fs::rename(&temporary, dest).map_err(|e| e.to_string())?;
             return Ok(());
@@ -1541,7 +1733,10 @@ fn download_file_inner(rec: &Arc<TaskRecord>, url: &str, dest: &Path, opts: &Dow
         supplied.extend(opts.alternatives.iter().cloned());
         let supplied = download_candidates(&supplied, opts.mirror);
         let mut candidates = match opts.source_pool {
-            Some(pool) => pool.lock().unwrap().order(&supplied, expected.size.unwrap_or(64 * 1024)),
+            Some(pool) => pool
+                .lock()
+                .unwrap()
+                .order(&supplied, expected.size.unwrap_or(64 * 1024)),
             None => supplied,
         };
         // 冷却中的源排后（稳定排序，对应原版 sort 键）
@@ -1557,9 +1752,21 @@ fn download_file_inner(rec: &Arc<TaskRecord>, url: &str, dest: &Path, opts: &Dow
             };
             for attempt in 0..attempts {
                 check_cancel(rec)?;
-                match receive(source, &temporary, &expected, rec, opts.progress, opts.source_pool, source, fallback, Some(&wait_args)) {
+                match receive(
+                    source,
+                    &temporary,
+                    &expected,
+                    rec,
+                    opts.progress,
+                    opts.source_pool,
+                    source,
+                    fallback,
+                    Some(&wait_args),
+                ) {
                     Ok(bytes) => {
-                        if let Some(reason) = verify_file(&temporary, &expected, Some(rec.cancelled.as_ref()))? {
+                        if let Some(reason) =
+                            verify_file(&temporary, &expected, Some(rec.cancelled.as_ref()))?
+                        {
                             if let Some(pool) = opts.source_pool {
                                 pool.lock().unwrap().fail(source);
                             }
@@ -1586,7 +1793,11 @@ fn download_file_inner(rec: &Arc<TaskRecord>, url: &str, dest: &Path, opts: &Dow
                                 let _ = std::fs::remove_file(&temporary);
                                 break;
                             }
-                            XferErr::Http { status, .. } if classify_http_status(*status) != HttpFailureKind::Transient => break,
+                            XferErr::Http { status, .. }
+                                if classify_http_status(*status) != HttpFailureKind::Transient =>
+                            {
+                                break
+                            }
                             _ => {
                                 note_host_failure(source);
                                 // 有健康替代源时先切换，不重复撞同一个连接
@@ -1679,7 +1890,14 @@ impl BatchOptions {
 }
 
 /// 对应原版 shared/assetDownloadStatus.ts `assetDownloadStatus()`（文案逐字）。
-pub fn asset_download_status(done: u64, total: u64, active_files: &[String], paused: bool, waits: &[WaitState], now: u64) -> String {
+pub fn asset_download_status(
+    done: u64,
+    total: u64,
+    active_files: &[String],
+    paused: bool,
+    waits: &[WaitState],
+    now: u64,
+) -> String {
     let base = format!("下载资源文件 {done}/{total}");
     if done >= total || paused {
         return base;
@@ -1687,7 +1905,11 @@ pub fn asset_download_status(done: u64, total: u64, active_files: &[String], pau
     if waits.iter().any(|w| w.action == "switching") {
         return format!("{base} · 下载源限流，切换备用来源");
     }
-    let waiting: Vec<u64> = waits.iter().filter(|w| w.action == "waiting" && w.retry_at > now).map(|w| w.retry_at).collect();
+    let waiting: Vec<u64> = waits
+        .iter()
+        .filter(|w| w.action == "waiting" && w.retry_at > now)
+        .map(|w| w.retry_at)
+        .collect();
     if !waiting.is_empty() {
         let min_retry = waiting.iter().copied().min().unwrap_or(now);
         let seconds = min_retry.saturating_sub(now).div_ceil(1000);
@@ -1700,7 +1922,13 @@ pub fn asset_download_status(done: u64, total: u64, active_files: &[String], pau
             .map(|name| {
                 let cleaned: String = name
                     .chars()
-                    .map(|c| if c == '\r' || c == '\n' || c == '\t' { ' ' } else { c })
+                    .map(|c| {
+                        if c == '\r' || c == '\n' || c == '\t' {
+                            ' '
+                        } else {
+                            c
+                        }
+                    })
                     .collect();
                 cleaned.chars().take(180).collect()
             })
@@ -1710,10 +1938,21 @@ pub fn asset_download_status(done: u64, total: u64, active_files: &[String], pau
     base
 }
 
-fn batch_text(kind: &BatchTextKind, completed: u64, total_files: u64, bytes_done: u64, bytes_total: Option<u64>, active: &[String], paused: bool, waits: &[WaitState]) -> String {
+fn batch_text(
+    kind: &BatchTextKind,
+    completed: u64,
+    total_files: u64,
+    bytes_done: u64,
+    bytes_total: Option<u64>,
+    active: &[String],
+    paused: bool,
+    waits: &[WaitState],
+) -> String {
     match kind {
         BatchTextKind::Libraries => format!("下载依赖库 {}/{}", completed, total_files),
-        BatchTextKind::Assets => asset_download_status(completed, total_files, active, paused, waits, now_ms()),
+        BatchTextKind::Assets => {
+            asset_download_status(completed, total_files, active, paused, waits, now_ms())
+        }
         BatchTextKind::ClientJar => format!("下载游戏本体 {}", fmt_mb(bytes_done)),
         BatchTextKind::Modpack => match bytes_total {
             Some(bt) => {
@@ -1722,7 +1961,14 @@ fn batch_text(kind: &BatchTextKind, completed: u64, total_files: u64, bytes_done
                 } else {
                     String::new()
                 };
-                format!("下载整合包文件 {}/{}（{}/{}）{}", completed, total_files, fmt_mb(bytes_done), fmt_mb(bt), suffix)
+                format!(
+                    "下载整合包文件 {}/{}（{}/{}）{}",
+                    completed,
+                    total_files,
+                    fmt_mb(bytes_done),
+                    fmt_mb(bt),
+                    suffix
+                )
             }
             None => format!("下载整合包文件 {}/{}", completed, total_files),
         },
@@ -1775,10 +2021,21 @@ struct BatchCtx<'a> {
 }
 
 impl BatchCtx<'_> {
-    fn emit(&self, fraction: Option<f64>, text: &str, speed: SpeedSnapshot, bytes_done: u64, bytes_total: Option<u64>, indeterminate: bool) {
+    fn emit(
+        &self,
+        fraction: Option<f64>,
+        text: &str,
+        speed: SpeedSnapshot,
+        bytes_done: u64,
+        bytes_total: Option<u64>,
+        indeterminate: bool,
+    ) {
         let mut ev = serde_json::Map::new();
         ev.insert("taskId".to_string(), Value::String(self.rec.id.clone()));
-        ev.insert("taskTitle".to_string(), Value::String(self.rec.title.clone()));
+        ev.insert(
+            "taskTitle".to_string(),
+            Value::String(self.rec.title.clone()),
+        );
         ev.insert("stage".to_string(), Value::String(self.stage.to_string()));
         ev.insert("progress".to_string(), json!(fraction.unwrap_or(0.0)));
         ev.insert("text".to_string(), Value::String(text.to_string()));
@@ -1791,9 +2048,15 @@ impl BatchCtx<'_> {
             ev.insert("bytesTotal".to_string(), json!(bt));
         }
         ev.insert("indeterminate".to_string(), json!(indeterminate));
-        ev.insert("source".to_string(), Value::String(self.source_text.to_string()));
+        ev.insert(
+            "source".to_string(),
+            Value::String(self.source_text.to_string()),
+        );
         if let Some((r0, r1)) = self.overall_range {
-            ev.insert("overall".to_string(), json!(r0 + (r1 - r0) * fraction.unwrap_or(0.0)));
+            ev.insert(
+                "overall".to_string(),
+                json!(r0 + (r1 - r0) * fraction.unwrap_or(0.0)),
+            );
         }
         if let Some(mf) = self.manual_files {
             ev.insert("manualFiles".to_string(), mf.clone());
@@ -1807,10 +2070,22 @@ impl BatchCtx<'_> {
         let remaining = snap.bytes_total.map(|t| t.saturating_sub(snap.bytes_done));
         let speed = {
             let mut est = self.shared.estimator.lock().unwrap();
-            est.sample(self.shared.network_bytes.load(Ordering::SeqCst), remaining, mono_ms(), paused)
+            est.sample(
+                self.shared.network_bytes.load(Ordering::SeqCst),
+                remaining,
+                mono_ms(),
+                paused,
+            )
         };
         let total_files = self.tasks.len() as u64;
-        let active: Vec<String> = self.shared.active.lock().unwrap().values().cloned().collect();
+        let active: Vec<String> = self
+            .shared
+            .active
+            .lock()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect();
         let waits: Vec<WaitState> = {
             let w = self.shared.waits.lock().unwrap();
             w.iter()
@@ -1828,24 +2103,57 @@ impl BatchCtx<'_> {
                 })
                 .collect()
         };
-        let text = batch_text(self.kind, snap.completed_files, total_files, snap.bytes_done, snap.bytes_total, &active, paused, &waits);
-        self.emit(snap.fraction, &text, speed, snap.bytes_done, snap.bytes_total, snap.indeterminate);
+        let text = batch_text(
+            self.kind,
+            snap.completed_files,
+            total_files,
+            snap.bytes_done,
+            snap.bytes_total,
+            &active,
+            paused,
+            &waits,
+        );
+        self.emit(
+            snap.fraction,
+            &text,
+            speed,
+            snap.bytes_done,
+            snap.bytes_total,
+            snap.indeterminate,
+        );
     }
 
     /// 空任务列表的完成事件（对应原版 `progress?.(0,0,0,{completedFiles:0,…,fraction:1,…})`）。
     fn emit_empty(&self) {
         let text = batch_text(self.kind, 0, 0, 0, Some(0), &[], false, &[]);
-        self.emit(Some(1.0), &text, SpeedSnapshot { speed_bps: 0, eta_seconds: None }, 0, Some(0), false);
+        self.emit(
+            Some(1.0),
+            &text,
+            SpeedSnapshot {
+                speed_bps: 0,
+                eta_seconds: None,
+            },
+            0,
+            Some(0),
+            false,
+        );
     }
 }
 
 /// 对应原版 download.ts `downloadAll()`：并行 worker 池 + 大文件优先调度 +
 /// 全局限速 + 250ms 节流汇报。任何文件失败 → 取消兄弟 worker（firstError）；
 /// 任务取消 → 返回 Err("已取消")，由调用方发 event:taskDone cancelled。
-pub fn download_all(app: &tauri::AppHandle, rec: &Arc<TaskRecord>, tasks: Vec<DownloadTask>, opts: BatchOptions) -> Result<(), String> {
+pub fn download_all(
+    app: &tauri::AppHandle,
+    rec: &Arc<TaskRecord>,
+    tasks: Vec<DownloadTask>,
+    opts: BatchOptions,
+) -> Result<(), String> {
     init_limiter_from_settings(app);
     check_cancel(rec)?;
-    let concurrency = opts.concurrency.unwrap_or_else(|| limiter().max_concurrent());
+    let concurrency = opts
+        .concurrency
+        .unwrap_or_else(|| limiter().max_concurrent());
     let workers = tasks.len().min(concurrency.max(1));
     let pool: SourcePoolRef = Arc::new(Mutex::new(DownloadSourcePool::new()));
     let shared = BatchShared::new(&tasks);
@@ -1875,12 +2183,20 @@ pub fn download_all(app: &tauri::AppHandle, rec: &Arc<TaskRecord>, tasks: Vec<Do
     order.sort_by(|&a, &b| task_size(&tasks[b]).cmp(&task_size(&tasks[a])));
     let mixed = workers >= 4 && order.iter().any(|&i| task_size(&tasks[i]) >= 1024 * 1024);
     let large: Vec<usize> = if mixed {
-        order.iter().copied().filter(|&i| task_size(&tasks[i]) >= 1024 * 1024).collect()
+        order
+            .iter()
+            .copied()
+            .filter(|&i| task_size(&tasks[i]) >= 1024 * 1024)
+            .collect()
     } else {
         order.clone()
     };
     let mut small: Vec<usize> = if mixed {
-        order.iter().copied().filter(|&i| task_size(&tasks[i]) < 1024 * 1024).collect()
+        order
+            .iter()
+            .copied()
+            .filter(|&i| task_size(&tasks[i]) < 1024 * 1024)
+            .collect()
     } else {
         Vec::new()
     };
@@ -1921,7 +2237,9 @@ pub fn download_all(app: &tauri::AppHandle, rec: &Arc<TaskRecord>, tasks: Vec<Do
             let take = &take;
             handles.push(scope.spawn(move || {
                 loop {
-                    if ctx.shared.abort.load(Ordering::SeqCst) || ctx.rec.cancelled.load(Ordering::SeqCst) {
+                    if ctx.shared.abort.load(Ordering::SeqCst)
+                        || ctx.rec.cancelled.load(Ordering::SeqCst)
+                    {
                         return;
                     }
                     wait_while_paused(ctx.rec);
@@ -1932,7 +2250,11 @@ pub fn download_all(app: &tauri::AppHandle, rec: &Arc<TaskRecord>, tasks: Vec<Do
                     let progress = move |done: u64, total: u64, wire: u64| {
                         // wire 字节只计网络传输（对应原版 networkBytes += wire）
                         ctx.shared.network_bytes.fetch_add(wire, Ordering::SeqCst);
-                        ctx.shared.tracker.lock().unwrap().record(index, done, total);
+                        ctx.shared
+                            .tracker
+                            .lock()
+                            .unwrap()
+                            .record(index, done, total);
                     };
                     let on_wait = move |state: &WaitState, active: bool| {
                         {
@@ -1940,7 +2262,11 @@ pub fn download_all(app: &tauri::AppHandle, rec: &Arc<TaskRecord>, tasks: Vec<Do
                             if active {
                                 w.push((state.clone(), index));
                             } else {
-                                w.retain(|(s, i)| !(*i == index && s.source == state.source && s.action == state.action));
+                                w.retain(|(s, i)| {
+                                    !(*i == index
+                                        && s.source == state.source
+                                        && s.action == state.action)
+                                });
                             }
                         }
                         ctx.report();
@@ -1964,14 +2290,21 @@ pub fn download_all(app: &tauri::AppHandle, rec: &Arc<TaskRecord>, tasks: Vec<Do
                     match download_file(ctx.app, ctx.rec, &task.url, &task.dest, &fopts) {
                         Ok(()) => {
                             let size = std::fs::metadata(&task.dest).map(|m| m.len()).unwrap_or(0);
-                            ctx.shared.tracker.lock().unwrap().record_complete(index, size);
+                            ctx.shared
+                                .tracker
+                                .lock()
+                                .unwrap()
+                                .record_complete(index, size);
                             ctx.shared.active.lock().unwrap().remove(&index);
                         }
                         Err(e) => {
                             ctx.shared.active.lock().unwrap().remove(&index);
                             let cancelled = ctx.rec.cancelled.load(Ordering::SeqCst);
                             // 带标签的资源文件失败加前缀（对应原版 `资源文件 ${label}：`）
-                            let failure = if task.label.is_some() && !ctx.shared.abort.load(Ordering::SeqCst) && !cancelled {
+                            let failure = if task.label.is_some()
+                                && !ctx.shared.abort.load(Ordering::SeqCst)
+                                && !cancelled
+                            {
                                 format!("资源文件 {}：{}", task.label.as_deref().unwrap_or(""), e)
                             } else {
                                 e
@@ -2034,14 +2367,24 @@ pub struct ParallelProgress {
 }
 
 impl ParallelProgress {
-    pub fn new(app: &tauri::AppHandle, rec: &Arc<TaskRecord>, lanes: &[(&str, &str, f64)], text: &str, range: (f64, f64)) -> Self {
+    pub fn new(
+        app: &tauri::AppHandle,
+        rec: &Arc<TaskRecord>,
+        lanes: &[(&str, &str, f64)],
+        text: &str,
+        range: (f64, f64),
+    ) -> Self {
         Self {
             app: app.clone(),
             task_id: rec.id.clone(),
             task_title: rec.title.clone(),
             lanes: lanes
                 .iter()
-                .map(|(id, label, weight)| Lane { id: id.to_string(), label: label.to_string(), weight: *weight })
+                .map(|(id, label, weight)| Lane {
+                    id: id.to_string(),
+                    label: label.to_string(),
+                    weight: *weight,
+                })
                 .collect(),
             events: HashMap::new(),
             completed: HashSet::new(),
@@ -2064,7 +2407,10 @@ impl ParallelProgress {
         let children_changed = parallel_children_changed(previous.as_ref(), &event);
         let stage_changed = previous.as_ref().and_then(|p| p.get("stage")) != event.get("stage");
         self.events.insert(id.to_string(), event);
-        let elapsed_ok = self.published_at.map(|t| t.elapsed().as_millis() >= 100).unwrap_or(true);
+        let elapsed_ok = self
+            .published_at
+            .map(|t| t.elapsed().as_millis() >= 100)
+            .unwrap_or(true);
         if previous.is_none() || stage_changed || children_changed || elapsed_ok {
             self.publish();
         }
@@ -2097,7 +2443,11 @@ impl ParallelProgress {
                         .unwrap_or(0.0)
                 })
                 .unwrap_or(0.0);
-            let progress = if done { 1.0 } else { 0.999f64.min(clamp01(raw)) };
+            let progress = if done {
+                1.0
+            } else {
+                0.999f64.min(clamp01(raw))
+            };
             weighted += lane.weight * progress;
             if !done {
                 if let Some(sp) = event.and_then(|e| e.get("speed")).and_then(|v| v.as_f64()) {
@@ -2119,18 +2469,32 @@ impl ParallelProgress {
                 Some(children) => {
                     for mut child in children {
                         if let Some(map) = child.as_object_mut() {
-                            let cid = map.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                            map.insert("id".to_string(), Value::String(format!("{}/{}", lane.id, cid)));
+                            let cid = map
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default()
+                                .to_string();
+                            map.insert(
+                                "id".to_string(),
+                                Value::String(format!("{}/{}", lane.id, cid)),
+                            );
                         }
                         stages.push(child);
                     }
                 }
                 None => {
-                    let ev_text = event.and_then(|e| e.get("text")).and_then(|v| v.as_str()).map(str::to_string);
+                    let ev_text = event
+                        .and_then(|e| e.get("text"))
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
                     let text = if done {
                         ev_text.unwrap_or_else(|| "已就绪".to_string())
                     } else {
-                        self.waiting_text.get(&lane.id).cloned().or(ev_text).unwrap_or_else(|| "等待准备".to_string())
+                        self.waiting_text
+                            .get(&lane.id)
+                            .cloned()
+                            .or(ev_text)
+                            .unwrap_or_else(|| "等待准备".to_string())
                     };
                     let mut stage = serde_json::Map::new();
                     stage.insert("id".to_string(), Value::String(lane.id.clone()));
@@ -2142,13 +2506,27 @@ impl ParallelProgress {
                     stage.insert("progress".to_string(), json!(progress));
                     stage.insert(
                         "state".to_string(),
-                        Value::String(if done { "done" } else if event.is_some() { "running" } else { "waiting" }.to_string()),
+                        Value::String(
+                            if done {
+                                "done"
+                            } else if event.is_some() {
+                                "running"
+                            } else {
+                                "waiting"
+                            }
+                            .to_string(),
+                        ),
                     );
                     if !done {
-                        if let Some(sp) = event.and_then(|e| e.get("speed")).filter(|v| !v.is_null()) {
+                        if let Some(sp) =
+                            event.and_then(|e| e.get("speed")).filter(|v| !v.is_null())
+                        {
                             stage.insert("speed".to_string(), sp.clone());
                         }
-                        let ind = event.and_then(|e| e.get("indeterminate")).and_then(|v| v.as_bool()).unwrap_or(false);
+                        let ind = event
+                            .and_then(|e| e.get("indeterminate"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
                         stage.insert("indeterminate".to_string(), json!(ind));
                     }
                     stages.push(Value::Object(stage));
@@ -2171,7 +2549,10 @@ impl ParallelProgress {
         }
         event.insert("parallelStages".to_string(), Value::Array(stages));
         event.insert("taskId".to_string(), Value::String(self.task_id.clone()));
-        event.insert("taskTitle".to_string(), Value::String(self.task_title.clone()));
+        event.insert(
+            "taskTitle".to_string(),
+            Value::String(self.task_title.clone()),
+        );
         if let Some(extra) = &self.extra {
             if let Some(ex) = extra.as_object() {
                 for (k, v) in ex {
@@ -2189,23 +2570,32 @@ fn parallel_children_changed(previous: Option<&Value>, next: &Value) -> bool {
         .and_then(|v| v.as_array())
         .map(|a| a.len())
         .unwrap_or(0);
-    let nlen = next.get("parallelStages").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+    let nlen = next
+        .get("parallelStages")
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
     if plen != nlen {
         return true;
     }
     match (
-        previous.and_then(|p| p.get("parallelStages")).and_then(|v| v.as_array()),
+        previous
+            .and_then(|p| p.get("parallelStages"))
+            .and_then(|v| v.as_array()),
         next.get("parallelStages").and_then(|v| v.as_array()),
     ) {
-        (Some(pa), Some(na)) => na.iter().enumerate().any(|(index, child)| match pa.get(index) {
-            Some(before) => {
-                before.get("id") != child.get("id")
-                    || before.get("stage") != child.get("stage")
-                    || before.get("state") != child.get("state")
-                    || before.get("indeterminate") != child.get("indeterminate")
-            }
-            None => true,
-        }),
+        (Some(pa), Some(na)) => na
+            .iter()
+            .enumerate()
+            .any(|(index, child)| match pa.get(index) {
+                Some(before) => {
+                    before.get("id") != child.get("id")
+                        || before.get("stage") != child.get("stage")
+                        || before.get("state") != child.get("state")
+                        || before.get("indeterminate") != child.get("indeterminate")
+                }
+                None => true,
+            }),
         _ => false,
     }
 }
@@ -2244,10 +2634,18 @@ impl WeightedProgress {
     pub fn apply(&mut self, event: Value) -> Value {
         let stage = event.get("stage").and_then(|v| v.as_str()).unwrap_or("");
         let range = version_install_stage_range(stage);
-        let stage_progress = clamp01(event.get("progress").and_then(|v| v.as_f64()).filter(|v| v.is_finite()).unwrap_or(0.0));
+        let stage_progress = clamp01(
+            event
+                .get("progress")
+                .and_then(|v| v.as_f64())
+                .filter(|v| v.is_finite())
+                .unwrap_or(0.0),
+        );
         let candidate = match event.get("overall").and_then(|v| v.as_f64()) {
             Some(o) if o.is_finite() => o,
-            _ => range.map(|(a, b)| a + (b - a) * stage_progress).unwrap_or(self.last),
+            _ => range
+                .map(|(a, b)| a + (b - a) * stage_progress)
+                .unwrap_or(self.last),
         };
         self.last = self.last.max(clamp01(candidate));
         let mut e = event;

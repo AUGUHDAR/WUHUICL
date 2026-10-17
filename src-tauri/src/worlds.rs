@@ -20,11 +20,17 @@ fn is_windows_device(part: &str) -> bool {
         || (stem.len() == 4
             && stem.starts_with("com")
             && stem[3..].chars().all(|c| c.is_ascii_digit())
-            && stem[3..].parse::<u8>().map(|d| (1..=9).contains(&d)).unwrap_or(false))
+            && stem[3..]
+                .parse::<u8>()
+                .map(|d| (1..=9).contains(&d))
+                .unwrap_or(false))
         || (stem.len() == 4
             && stem.starts_with("lpt")
             && stem[3..].chars().all(|c| c.is_ascii_digit())
-            && stem[3..].parse::<u8>().map(|d| (1..=9).contains(&d)).unwrap_or(false))
+            && stem[3..]
+                .parse::<u8>()
+                .map(|d| (1..=9).contains(&d))
+                .unwrap_or(false))
 }
 
 fn normalize_archive_path(input: &str) -> Result<String, String> {
@@ -32,17 +38,24 @@ fn normalize_archive_path(input: &str) -> Result<String, String> {
         return Err("压缩包包含空文件名或 NUL 字符".into());
     }
     let slash = input.replace('\\', "/");
-    if slash.starts_with('/') || slash.starts_with("//") || (slash.as_bytes().get(1) == Some(&b':')) {
+    if slash.starts_with('/') || slash.starts_with("//") || (slash.as_bytes().get(1) == Some(&b':'))
+    {
         return Err(format!("压缩包包含绝对路径：{input}"));
     }
-    let parts: Vec<&str> = slash.split('/').filter(|p| !p.is_empty() && *p != ".").collect();
+    let parts: Vec<&str> = slash
+        .split('/')
+        .filter(|p| !p.is_empty() && *p != ".")
+        .collect();
     if parts.is_empty() {
         return Ok(String::new());
     }
     if parts.iter().any(|p| *p == "..") {
         return Err(format!("压缩包包含路径穿越：{input}"));
     }
-    if parts.iter().any(|p| is_windows_device(p) || p.chars().any(|c| ":*?\"<>|".contains(c))) {
+    if parts
+        .iter()
+        .any(|p| is_windows_device(p) || p.chars().any(|c| ":*?\"<>|".contains(c)))
+    {
         return Err(format!("压缩包包含 Windows 非法路径：{input}"));
     }
     Ok(parts.join("/"))
@@ -52,29 +65,48 @@ fn normalize_archive_path(input: &str) -> Result<String, String> {
 
 fn approximate_version(data_version: i64) -> Option<&'static str> {
     const RANGES: [(i64, &str); 20] = [
-        (4189, "约 1.21.4 或更新"), (3953, "约 1.21–1.21.3"), (3837, "约 1.20.5–1.20.6"),
-        (3700, "约 1.20.3–1.20.4"), (3578, "约 1.20.2"), (3463, "约 1.20–1.20.1"),
-        (3337, "约 1.19.4"), (3218, "约 1.19.3"), (3105, "约 1.19–1.19.2"),
-        (2975, "约 1.18.2"), (2860, "约 1.18–1.18.1"), (2724, "约 1.17–1.17.1"),
-        (2566, "约 1.16–1.16.5"), (2225, "约 1.15–1.15.2"), (1901, "约 1.14–1.14.4"),
-        (1519, "约 1.13–1.13.2"), (1343, "约 1.12–1.12.2"), (819, "约 1.11–1.11.2"),
-        (510, "约 1.10–1.10.2"), (169, "约 1.9–1.9.4"),
+        (4189, "约 1.21.4 或更新"),
+        (3953, "约 1.21–1.21.3"),
+        (3837, "约 1.20.5–1.20.6"),
+        (3700, "约 1.20.3–1.20.4"),
+        (3578, "约 1.20.2"),
+        (3463, "约 1.20–1.20.1"),
+        (3337, "约 1.19.4"),
+        (3218, "约 1.19.3"),
+        (3105, "约 1.19–1.19.2"),
+        (2975, "约 1.18.2"),
+        (2860, "约 1.18–1.18.1"),
+        (2724, "约 1.17–1.17.1"),
+        (2566, "约 1.16–1.16.5"),
+        (2225, "约 1.15–1.15.2"),
+        (1901, "约 1.14–1.14.4"),
+        (1519, "约 1.13–1.13.2"),
+        (1343, "约 1.12–1.12.2"),
+        (819, "约 1.11–1.11.2"),
+        (510, "约 1.10–1.10.2"),
+        (169, "约 1.9–1.9.4"),
     ];
-    RANGES.iter().find(|(m, _)| data_version >= *m).map(|(_, s)| *s)
+    RANGES
+        .iter()
+        .find(|(m, _)| data_version >= *m)
+        .map(|(_, s)| *s)
 }
 
 /// metadataFromLevelDat：level.dat → WorldCandidateInfo 核心字段
 #[allow(clippy::type_complexity)]
-fn metadata_from_level_dat(
-    buffer: &[u8],
-    fallback_name: &str,
-) -> Result<(Value, usize), String> {
+fn metadata_from_level_dat(buffer: &[u8], fallback_name: &str) -> Result<(Value, usize), String> {
     let root = nbt::parse_nbt(buffer)?;
-    let data = nbt::get(&root, "Data").and_then(nbt::as_compound).unwrap_or(&root);
+    let data = nbt::get(&root, "Data")
+        .and_then(nbt::as_compound)
+        .unwrap_or(&root);
     let version = nbt::get(data, "Version").and_then(nbt::as_compound);
     let data_version = nbt::get(data, "DataVersion")
         .and_then(nbt::as_int)
-        .or_else(|| version.and_then(|v| nbt::get(v, "Id")).and_then(nbt::as_int));
+        .or_else(|| {
+            version
+                .and_then(|v| nbt::get(v, "Id"))
+                .and_then(nbt::as_int)
+        });
     let exact_version = version
         .and_then(|v| nbt::get(v, "Name"))
         .and_then(nbt::as_str)
@@ -85,7 +117,13 @@ fn metadata_from_level_dat(
         .and_then(nbt::as_compound)
         .and_then(|dp| nbt::get(dp, "Enabled"))
         .and_then(|e| match e {
-            NbtValue::List(l) => Some(l.values.iter().filter_map(nbt::as_str).filter(|n| *n != "vanilla" && *n != "minecraft").count()),
+            NbtValue::List(l) => Some(
+                l.values
+                    .iter()
+                    .filter_map(nbt::as_str)
+                    .filter(|n| *n != "vanilla" && *n != "minecraft")
+                    .count(),
+            ),
             _ => None,
         })
         .unwrap_or(0);
@@ -118,7 +156,11 @@ fn metadata_from_level_dat(
     } else {
         "approximate"
     };
-    let minecraft_version = exact_version.or_else(|| data_version.and_then(approximate_version).map(str::to_string));
+    let minecraft_version = exact_version.or_else(|| {
+        data_version
+            .and_then(approximate_version)
+            .map(str::to_string)
+    });
     let candidate = json!({
         "worldName": world_name,
         "dataVersion": data_version,
@@ -147,7 +189,9 @@ struct ZipEntryInfo {
 fn zip_entry_is_symlink(file: &zip::read::ZipFile) -> bool {
     #[cfg(unix)]
     {
-        file.unix_mode().map(|m| (m >> 16) & 0o170_000 == 0o120_000).unwrap_or(false)
+        file.unix_mode()
+            .map(|m| (m >> 16) & 0o170_000 == 0o120_000)
+            .unwrap_or(false)
     }
     #[cfg(not(unix))]
     {
@@ -182,7 +226,8 @@ fn inspect_zip(path: &Path) -> Result<(Vec<ZipEntryInfo>, Vec<String>), String> 
             return Err("压缩包解压后超过 32 GB 安全上限".into());
         }
         if entry.size() > 64 * 1024 * 1024
-            && entry.size() as f64 / std::cmp::max(1, entry.compressed_size()) as f64 > MAX_COMPRESSION_RATIO
+            && entry.size() as f64 / std::cmp::max(1, entry.compressed_size()) as f64
+                > MAX_COMPRESSION_RATIO
         {
             return Err(format!("压缩比异常，疑似解压炸弹：{name}"));
         }
@@ -195,7 +240,8 @@ fn inspect_zip(path: &Path) -> Result<(Vec<ZipEntryInfo>, Vec<String>), String> 
         });
     }
     if total_uncompressed > 64 * 1024 * 1024
-        && total_uncompressed as f64 / std::cmp::max(1, total_compressed) as f64 > MAX_COMPRESSION_RATIO
+        && total_uncompressed as f64 / std::cmp::max(1, total_compressed) as f64
+            > MAX_COMPRESSION_RATIO
     {
         return Err("压缩包整体压缩比异常，疑似解压炸弹".into());
     }
@@ -214,11 +260,15 @@ fn read_zip_entry(path: &Path, wanted: &str, limit: u64) -> Result<Vec<u8>, Stri
         if entry.size() > limit {
             return Err(format!(
                 "{} 超过安全大小限制",
-                Path::new(wanted).file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
+                Path::new(wanted)
+                    .file_name()
+                    .map(|n| n.to_string_lossy())
+                    .unwrap_or_default()
             ));
         }
         let mut out = Vec::with_capacity(entry.size() as usize);
-        std::io::Read::read_to_end(&mut entry, &mut out).map_err(|e| format!("ZIP 条目解压失败：{e}"))?;
+        std::io::Read::read_to_end(&mut entry, &mut out)
+            .map_err(|e| format!("ZIP 条目解压失败：{e}"))?;
         return Ok(out);
     }
     Err(format!("ZIP 中找不到 {wanted}"))
@@ -263,7 +313,11 @@ fn archive_resource_packs(entries: &[ZipEntryInfo], world_root: &str) -> Value {
     }
     let mut result = Vec::new();
     for f in &files {
-        if Path::new(f).file_name().map(|n| n.to_string_lossy().to_lowercase()) != Some("pack.mcmeta".into()) {
+        if Path::new(f)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            != Some("pack.mcmeta".into())
+        {
             continue;
         }
         let root = posix_dir(f);
@@ -320,7 +374,14 @@ fn zip_world_info(path: &Path) -> Result<Value, String> {
         let root = posix_dir(&level.name);
         match (|| -> Result<Value, String> {
             let buf = read_zip_entry(path, &level.name, MAX_LEVEL_DAT)?;
-            let (mut metadata, declared) = metadata_from_level_dat(&buf, &Path::new(&root).file_name().map(|n| n.to_string_lossy()).unwrap_or_default().trim(),)?;
+            let (mut metadata, declared) = metadata_from_level_dat(
+                &buf,
+                &Path::new(&root)
+                    .file_name()
+                    .map(|n| n.to_string_lossy())
+                    .unwrap_or_default()
+                    .trim(),
+            )?;
             let members: Vec<&ZipEntryInfo> = entries
                 .iter()
                 .filter(|e| !e.directory && relative_in_root(&e.name, &root).is_some())
@@ -333,7 +394,10 @@ fn zip_world_info(path: &Path) -> Result<Value, String> {
                 if rel.eq_ignore_ascii_case("resources.zip") {
                     has_world_resource_pack = true;
                 }
-                if let Some(rest) = rel.strip_prefix("datapacks/").or_else(|| rel.strip_prefix("DATAPACKS/")) {
+                if let Some(rest) = rel
+                    .strip_prefix("datapacks/")
+                    .or_else(|| rel.strip_prefix("DATAPACKS/"))
+                {
                     if let Some(dp) = rest.split('/').next() {
                         if !dp.is_empty() {
                             datapacks.insert(dp.to_string());
@@ -345,7 +409,12 @@ fn zip_world_info(path: &Path) -> Result<Value, String> {
                     has_server_config = true;
                 }
             }
-            if has_server_config && !metadata["modEvidence"].as_array().map(|a| a.iter().any(|v| v == "目录中存在模组配置痕迹")).unwrap_or(false) {
+            if has_server_config
+                && !metadata["modEvidence"]
+                    .as_array()
+                    .map(|a| a.iter().any(|v| v == "目录中存在模组配置痕迹"))
+                    .unwrap_or(false)
+            {
                 if let Some(arr) = metadata["modEvidence"].as_array_mut() {
                     let mut a = arr.clone();
                     a.push(json!("目录中存在模组配置痕迹"));
@@ -353,7 +422,11 @@ fn zip_world_info(path: &Path) -> Result<Value, String> {
                 }
             }
             let total_bytes: u64 = members.iter().map(|e| e.uncompressed_size).sum();
-            metadata["id"] = json!(if root.is_empty() { ".".to_string() } else { root.clone() });
+            metadata["id"] = json!(if root.is_empty() {
+                ".".to_string()
+            } else {
+                root.clone()
+            });
             metadata["datapackCount"] = json!(declared.max(datapacks.len()));
             metadata["resourcePacks"] = archive_resource_packs(&entries, &root);
             metadata["hasWorldResourcePack"] = json!(has_world_resource_pack);
@@ -366,7 +439,10 @@ fn zip_world_info(path: &Path) -> Result<Value, String> {
         }
     }
     if candidates.is_empty() {
-        return Err(format!("检测到 level.dat，但均无法解析：{}", parse_errors.join("；")));
+        return Err(format!(
+            "检测到 level.dat，但均无法解析：{}",
+            parse_errors.join("；")
+        ));
     }
     Ok(json!({
         "sourcePath": path.to_string_lossy(),
@@ -389,7 +465,10 @@ fn find_folder_candidates(root: &Path) -> Result<Vec<(String, PathBuf)>, String>
             }
         }
         let mut has_level = false;
-        for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        for entry in std::fs::read_dir(&dir)
+            .map_err(|e| e.to_string())?
+            .flatten()
+        {
             let is_file = entry.file_type().map(|t| t.is_file()).unwrap_or(false);
             if is_file && entry.file_name().to_string_lossy().to_lowercase() == "level.dat" {
                 has_level = true;
@@ -407,7 +486,10 @@ fn find_folder_candidates(root: &Path) -> Result<Vec<(String, PathBuf)>, String>
         if depth >= MAX_FOLDER_DEPTH {
             continue;
         }
-        for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        for entry in std::fs::read_dir(&dir)
+            .map_err(|e| e.to_string())?
+            .flatten()
+        {
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
             let is_symlink = entry.file_type().map(|t| t.is_symlink()).unwrap_or(false);
             if is_dir && !is_symlink {
@@ -426,7 +508,10 @@ fn inspect_folder_world(root: &Path) -> Result<(u64, u64, usize, bool, Vec<Strin
     let mut has_world_resource_pack = false;
     let mut has_server_config = false;
     while let Some(dir) = queue.pop() {
-        for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        for entry in std::fs::read_dir(&dir)
+            .map_err(|e| e.to_string())?
+            .flatten()
+        {
             let Ok(meta) = entry.metadata() else { continue };
             if entry.file_type().map(|t| t.is_symlink()).unwrap_or(false) {
                 continue;
@@ -461,8 +546,18 @@ fn inspect_folder_world(root: &Path) -> Result<(u64, u64, usize, bool, Vec<Strin
             }
         }
     }
-    let mod_evidence = if has_server_config { vec!["目录中存在模组配置痕迹".to_string()] } else { Vec::new() };
-    Ok((file_count, total_bytes, datapacks.len(), has_world_resource_pack, mod_evidence))
+    let mod_evidence = if has_server_config {
+        vec!["目录中存在模组配置痕迹".to_string()]
+    } else {
+        Vec::new()
+    };
+    Ok((
+        file_count,
+        total_bytes,
+        datapacks.len(),
+        has_world_resource_pack,
+        mod_evidence,
+    ))
 }
 
 fn folder_world_info(folder: &Path) -> Result<Value, String> {
@@ -474,12 +569,18 @@ fn folder_world_info(folder: &Path) -> Result<Value, String> {
     let mut warnings: Vec<String> = Vec::new();
     for (id, root) in found.iter().take(32) {
         let level_path = root.join("level.dat");
-        let Ok(stat) = std::fs::metadata(&level_path) else { continue };
+        let Ok(stat) = std::fs::metadata(&level_path) else {
+            continue;
+        };
         if stat.len() > MAX_LEVEL_DAT {
             warnings.push(format!("{id}：level.dat 超过安全大小限制"));
             continue;
         }
-        let name = root.file_name().map(|n| n.to_string_lossy()).unwrap_or_default().to_string();
+        let name = root
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default()
+            .to_string();
         let buf = match std::fs::read(&level_path) {
             Ok(b) => b,
             Err(e) => {
@@ -488,33 +589,37 @@ fn folder_world_info(folder: &Path) -> Result<Value, String> {
             }
         };
         match metadata_from_level_dat(&buf, &name) {
-            Ok((mut metadata, declared)) => {
-                match inspect_folder_world(root) {
-                    Ok((file_count, total_bytes, dp_count, has_rp, mut evidence)) => {
-                        let existing = metadata["modEvidence"].as_array().cloned().unwrap_or_default();
-                        for ev in &existing {
-                            let s = ev.as_str().unwrap_or_default().to_string();
-                            if !evidence.contains(&s) {
-                                evidence.push(s);
-                            }
+            Ok((mut metadata, declared)) => match inspect_folder_world(root) {
+                Ok((file_count, total_bytes, dp_count, has_rp, mut evidence)) => {
+                    let existing = metadata["modEvidence"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default();
+                    for ev in &existing {
+                        let s = ev.as_str().unwrap_or_default().to_string();
+                        if !evidence.contains(&s) {
+                            evidence.push(s);
                         }
-                        metadata["modEvidence"] = json!(evidence);
-                        metadata["id"] = json!(id);
-                        metadata["datapackCount"] = json!(declared.max(dp_count));
-                        metadata["resourcePacks"] = json!([]);
-                        metadata["hasWorldResourcePack"] = json!(has_rp);
-                        metadata["fileCount"] = json!(file_count);
-                        metadata["totalBytes"] = json!(total_bytes);
-                        candidates.push(metadata);
                     }
-                    Err(e) => warnings.push(format!("{id}：{e}")),
+                    metadata["modEvidence"] = json!(evidence);
+                    metadata["id"] = json!(id);
+                    metadata["datapackCount"] = json!(declared.max(dp_count));
+                    metadata["resourcePacks"] = json!([]);
+                    metadata["hasWorldResourcePack"] = json!(has_rp);
+                    metadata["fileCount"] = json!(file_count);
+                    metadata["totalBytes"] = json!(total_bytes);
+                    candidates.push(metadata);
                 }
-            }
+                Err(e) => warnings.push(format!("{id}：{e}")),
+            },
             Err(e) => warnings.push(format!("{id}：{e}")),
         }
     }
     if candidates.is_empty() {
-        return Err(format!("检测到 level.dat，但均无法解析：{}", warnings.join("；")));
+        return Err(format!(
+            "检测到 level.dat，但均无法解析：{}",
+            warnings.join("；")
+        ));
     }
     Ok(json!({
         "sourcePath": folder.to_string_lossy(),
@@ -540,7 +645,9 @@ pub fn probe_world(input: &str) -> Result<Value, String> {
     if meta.is_dir() {
         return folder_world_info(&path);
     }
-    if meta.is_file() && path.extension().map(|e| e.to_string_lossy().to_lowercase()) == Some("zip".into()) {
+    if meta.is_file()
+        && path.extension().map(|e| e.to_string_lossy().to_lowercase()) == Some("zip".into())
+    {
         return zip_world_info(&path);
     }
     Ok(Value::Null)
@@ -556,7 +663,11 @@ fn clean_leaf_name(input: &str, label: &str) -> Result<String, String> {
     if value.chars().count() > 120 {
         return Err(format!("{label}最多 120 个字符"));
     }
-    if value == "." || value == ".." || value.chars().any(|c| "\\/:*?\"<>|".contains(c)) || is_windows_device(value) {
+    if value == "."
+        || value == ".."
+        || value.chars().any(|c| "\\/:*?\"<>|".contains(c))
+        || is_windows_device(value)
+    {
         return Err(format!("{label}包含非法字符或设备名"));
     }
     Ok(value.trim_end_matches(['.', ' ']).to_string())
@@ -565,8 +676,14 @@ fn clean_leaf_name(input: &str, label: &str) -> Result<String, String> {
 fn unique_name(parent: &Path, requested: &str) -> String {
     let mut candidate = requested.to_string();
     let mut suffix = 2;
-    let ext = requested.rsplit_once('.').map(|(_, e)| format!(".{e}")).unwrap_or_default();
-    let stem = requested.strip_suffix(&ext).unwrap_or(requested).to_string();
+    let ext = requested
+        .rsplit_once('.')
+        .map(|(_, e)| format!(".{e}"))
+        .unwrap_or_default();
+    let stem = requested
+        .strip_suffix(&ext)
+        .unwrap_or(requested)
+        .to_string();
     while parent.join(&candidate).exists() {
         candidate = format!("{stem}-{suffix}{ext}");
         suffix += 1;
@@ -574,7 +691,12 @@ fn unique_name(parent: &Path, requested: &str) -> String {
     candidate
 }
 
-fn copy_folder_world(source: &Path, destination: &Path, rec: Option<&TaskRecord>, on_file: &mut impl FnMut()) -> Result<(), String> {
+fn copy_folder_world(
+    source: &Path,
+    destination: &Path,
+    rec: Option<&TaskRecord>,
+    on_file: &mut impl FnMut(),
+) -> Result<(), String> {
     let mut queue = vec![(source.to_path_buf(), destination.to_path_buf())];
     while let Some((src, dst)) = queue.pop() {
         if let Some(r) = rec {
@@ -584,10 +706,15 @@ fn copy_folder_world(source: &Path, destination: &Path, rec: Option<&TaskRecord>
             }
         }
         std::fs::create_dir_all(&dst).map_err(|e| e.to_string())?;
-        for entry in std::fs::read_dir(&src).map_err(|e| e.to_string())?.flatten() {
+        for entry in std::fs::read_dir(&src)
+            .map_err(|e| e.to_string())?
+            .flatten()
+        {
             let from = entry.path();
             let to = dst.join(entry.file_name());
-            let Ok(meta) = std::fs::symlink_metadata(&from) else { continue };
+            let Ok(meta) = std::fs::symlink_metadata(&from) else {
+                continue;
+            };
             if meta.is_symlink() {
                 continue;
             }
@@ -598,7 +725,10 @@ fn copy_folder_world(source: &Path, destination: &Path, rec: Option<&TaskRecord>
                     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 }
                 // flags: 'wx' 等价：失败即存在错误
-                std::fs::File::create_new(&to).map_err(|e| e.to_string())?.sync_all().ok();
+                std::fs::File::create_new(&to)
+                    .map_err(|e| e.to_string())?
+                    .sync_all()
+                    .ok();
                 std::fs::copy(&from, &to).map_err(|e| e.to_string())?;
                 on_file();
             }
@@ -629,8 +759,12 @@ fn extract_zip_world(
         }
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = normalize_archive_path(entry.name())?;
-        let Some(safe) = expected.get(&name) else { continue };
-        let Some(relative) = relative_in_root(&name, root) else { continue };
+        let Some(safe) = expected.get(&name) else {
+            continue;
+        };
+        let Some(relative) = relative_in_root(&name, root) else {
+            continue;
+        };
         if relative.is_empty() || safe.directory || safe.symlink {
             continue;
         }
@@ -639,7 +773,8 @@ fn extract_zip_world(
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         let mut out = Vec::with_capacity(entry.size() as usize);
-        std::io::Read::read_to_end(&mut entry, &mut out).map_err(|e| format!("ZIP 条目解压失败：{e}"))?;
+        std::io::Read::read_to_end(&mut entry, &mut out)
+            .map_err(|e| format!("ZIP 条目解压失败：{e}"))?;
         std::fs::File::create_new(&target).map_err(|e| e.to_string())?;
         std::fs::write(&target, out).map_err(|e| e.to_string())?;
         on_file();
@@ -659,7 +794,10 @@ pub fn import_world(
     if target_folder.is_empty() {
         return Err("目标游戏文件夹未在 WUHUICL 中登记".into());
     }
-    let info = probe_world(input)?.as_object().cloned().ok_or("该路径不是有效的 Minecraft 存档")?;
+    let info = probe_world(input)?
+        .as_object()
+        .cloned()
+        .ok_or("该路径不是有效的 Minecraft 存档")?;
     let candidate_id = options["candidateId"].as_str().unwrap_or("");
     let candidates = info["candidates"].as_array().cloned().unwrap_or_default();
     let candidate = candidates
@@ -668,7 +806,11 @@ pub fn import_world(
         .cloned()
         .ok_or("所选存档已变化，请重新拖入并确认")?;
     let world_name = clean_leaf_name(options["worldName"].as_str().unwrap_or(""), "存档名称")?;
-    let mut version_id = options["targetVersionId"].as_str().unwrap_or("").trim().to_string();
+    let mut version_id = options["targetVersionId"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if options["newInstance"].is_object() {
         return Err("创建新实例的存档导入尚未接入，请先安装对应版本".into());
     }
@@ -701,7 +843,9 @@ pub fn import_world(
         .join(&version_id)
         .join(format!("{version_id}.json"));
     let game_directory = if installed["isolated"] == true {
-        std::path::Path::new(&target_folder).join("versions").join(&version_id)
+        std::path::Path::new(&target_folder)
+            .join("versions")
+            .join(&version_id)
     } else {
         std::path::Path::new(&target_folder).to_path_buf()
     };
@@ -716,7 +860,11 @@ pub fn import_world(
     let file_count = candidate["fileCount"].as_u64().unwrap_or(0);
     let source_type = info["sourceType"].as_str().unwrap_or("").to_string();
     let emit_progress = |copied: u64, done: bool, app: &tauri::AppHandle, task_id: &str| {
-        let ratio = if file_count > 0 { copied as f64 / file_count as f64 } else { 1.0 };
+        let ratio = if file_count > 0 {
+            copied as f64 / file_count as f64
+        } else {
+            1.0
+        };
         crate::tasks::emit_progress(
             app,
             json!({
@@ -743,12 +891,18 @@ pub fn import_world(
                 }
             })?;
         } else {
-            extract_zip_world(&source_path, candidate_id, &staged_world, Some(rec), &mut || {
-                copied += 1;
-                if copied % 16 == 0 || copied == file_count {
-                    emit_progress(copied, false, app, &rec.id.clone());
-                }
-            })?;
+            extract_zip_world(
+                &source_path,
+                candidate_id,
+                &staged_world,
+                Some(rec),
+                &mut || {
+                    copied += 1;
+                    if copied % 16 == 0 || copied == file_count {
+                        emit_progress(copied, false, app, &rec.id.clone());
+                    }
+                },
+            )?;
         }
         std::fs::create_dir_all(&saves).map_err(|e| e.to_string())?;
         if destination.exists() {
@@ -770,7 +924,11 @@ pub fn import_world(
 }
 
 /// 统一入口
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         "world:probe" => Some(
             args.first()
@@ -790,7 +948,11 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             // invoke 契约：立即受理，完成经 event:taskDone 推送（与原版一致不阻塞）
             std::thread::spawn(move || {
                 let result = import_world(&app2, &input2, &options2, &rec);
-                let cancelled = result.as_ref().err().map(|e| e == "已取消").unwrap_or(false);
+                let cancelled = result
+                    .as_ref()
+                    .err()
+                    .map(|e| e == "已取消")
+                    .unwrap_or(false);
                 crate::tasks::task_done(
                     &app2,
                     &rec.id,

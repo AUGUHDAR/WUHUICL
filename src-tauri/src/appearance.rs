@@ -67,7 +67,8 @@ fn draft_save(app: &tauri::AppHandle, value: &Value) -> Result<Value, String> {
     if let Some(dir) = file.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    std::fs::write(&file, serde_json::to_vec(value).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::write(&file, serde_json::to_vec(value).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
     Ok(Value::Null)
 }
 
@@ -85,13 +86,21 @@ fn draft_apply(app: &tauri::AppHandle, value: &Value) -> Result<Value, String> {
 // ---------------- 受管图（appearanceAssets / appearanceAssetActions） ----------------
 
 /// 图片校验 + 复制进受管根，返回受管绝对路径（importBackground 等共用）
-fn import_managed_image(app: &tauri::AppHandle, src: &PathBuf, kind: &str) -> Result<String, String> {
+fn import_managed_image(
+    app: &tauri::AppHandle,
+    src: &PathBuf,
+    kind: &str,
+) -> Result<String, String> {
     let bytes = std::fs::read(src).map_err(|_| "图片文件不存在".to_string())?;
     if bytes.len() > 32 * 1024 * 1024 {
         return Err("图片文件过大".into());
     }
-    let format = image::guess_format(&bytes).map_err(|_| "图片无法解码（支持 PNG/JPG/WebP）".to_string())?;
-    if !matches!(format, image::ImageFormat::Png | image::ImageFormat::Jpeg | image::ImageFormat::WebP) {
+    let format =
+        image::guess_format(&bytes).map_err(|_| "图片无法解码（支持 PNG/JPG/WebP）".to_string())?;
+    if !matches!(
+        format,
+        image::ImageFormat::Png | image::ImageFormat::Jpeg | image::ImageFormat::WebP
+    ) {
         return Err("图片无法解码（支持 PNG/JPG/WebP）".into());
     }
     let root = managed_root(app).join(kind);
@@ -101,7 +110,12 @@ fn import_managed_image(app: &tauri::AppHandle, src: &PathBuf, kind: &str) -> Re
         image::ImageFormat::Jpeg => "jpg",
         _ => "webp",
     };
-    let name = format!("{}-{}.{}", chrono::Local::now().format("%Y%m%d%H%M%S"), &crate::accounts::uuid_v4()[..8], ext);
+    let name = format!(
+        "{}-{}.{}",
+        chrono::Local::now().format("%Y%m%d%H%M%S"),
+        &crate::accounts::uuid_v4()[..8],
+        ext
+    );
     let dest = root.join(&name);
     std::fs::write(&dest, bytes).map_err(|e| e.to_string())?;
     Ok(dest.to_string_lossy().to_string())
@@ -117,7 +131,10 @@ fn patch_launch_thumbnail(app: &tauri::AppHandle, patch: Value) -> Result<Value,
 
 fn pick_images(app: &tauri::AppHandle, multi: bool) -> Vec<String> {
     use tauri_plugin_dialog::DialogExt;
-    let dialog = app.dialog().file().add_filter("图片", &["png", "jpg", "jpeg", "webp"]);
+    let dialog = app
+        .dialog()
+        .file()
+        .add_filter("图片", &["png", "jpg", "jpeg", "webp"]);
     if multi {
         dialog
             .blocking_pick_files()
@@ -145,7 +162,13 @@ fn import_background(app: &tauri::AppHandle, multi: bool) -> Result<Value, Strin
     let mut bg = s["background"].clone();
     if let Some(obj) = bg.as_object_mut() {
         obj["mode"] = json!("image");
-        let mut list: Vec<String> = s["background"]["images"].as_array().cloned().unwrap_or_default().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+        let mut list: Vec<String> = s["background"]["images"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect();
         list.push(images.remove(0));
         list.extend(images);
         obj["images"] = json!(list);
@@ -156,7 +179,10 @@ fn import_background(app: &tauri::AppHandle, multi: bool) -> Result<Value, Strin
 
 /// appearance:resetBackground → Settings
 fn reset_background(app: &tauri::AppHandle) -> Result<Value, String> {
-    patch_background(app, json!({ "mode": "none", "color": "#1b2437", "image": "", "opacity": 0.5, "blur": 0, "fit": "crop" }))
+    patch_background(
+        app,
+        json!({ "mode": "none", "color": "#1b2437", "image": "", "opacity": 0.5, "blur": 0, "fit": "crop" }),
+    )
 }
 
 fn import_launch_thumbnail(app: &tauri::AppHandle) -> Result<Value, String> {
@@ -173,7 +199,11 @@ fn reset_launch_thumbnail(app: &tauri::AppHandle) -> Result<Value, String> {
 }
 
 /// 统一入口
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         "appearance:resetTheme" => Some(reset_theme(app)),
         "appearance:exportTheme" => Some(export_theme(app)),
@@ -183,9 +213,15 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             args.get(1).and_then(|v| v.as_bool()).unwrap_or(false),
         )),
         "appearance:draftRead" => Some(Ok(draft_read(app))),
-        "appearance:draftSave" => Some(draft_save(app, &args.first().cloned().unwrap_or(Value::Null))),
+        "appearance:draftSave" => Some(draft_save(
+            app,
+            &args.first().cloned().unwrap_or(Value::Null),
+        )),
         "appearance:draftDiscard" => Some(draft_discard(app)),
-        "appearance:draftApply" => Some(draft_apply(app, &args.first().cloned().unwrap_or(Value::Null))),
+        "appearance:draftApply" => Some(draft_apply(
+            app,
+            &args.first().cloned().unwrap_or(Value::Null),
+        )),
         "appearance:importBackground" => Some(import_background(app, false)),
         "appearance:importBackgroundMulti" => Some(import_background(app, true)),
         "appearance:resetBackground" => Some(reset_background(app)),

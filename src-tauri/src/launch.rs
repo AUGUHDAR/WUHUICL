@@ -252,14 +252,23 @@ fn game_launch(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
 
     let s = settings::get(app);
     let folder = requested_folder
-        .or_else(|| s["activeFolder"].as_str().map(str::to_string).filter(|f| !f.is_empty()))
+        .or_else(|| {
+            s["activeFolder"]
+                .as_str()
+                .map(str::to_string)
+                .filter(|f| !f.is_empty())
+        })
         .or_else(|| s["gameDir"].as_str().map(str::to_string))
         .ok_or("目标游戏文件夹未注册")?;
     let registered = s["folders"]
         .as_array()
         .map(|a| {
-            a.iter()
-                .any(|f| f["path"].as_str().map(|p| installer::same_path(p, &folder)).unwrap_or(false))
+            a.iter().any(|f| {
+                f["path"]
+                    .as_str()
+                    .map(|p| installer::same_path(p, &folder))
+                    .unwrap_or(false)
+            })
         })
         .unwrap_or(false);
     if !registered {
@@ -267,7 +276,9 @@ fn game_launch(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
     }
     let installed = crate::versions::scan_folder_public(&folder, true);
     let exists = installed.iter().any(|v| {
-        v["id"].as_str() == Some(version_id.as_str()) && v["failed"] != true && v["incomplete"] != true
+        v["id"].as_str() == Some(version_id.as_str())
+            && v["failed"] != true
+            && v["incomplete"] != true
     });
     if !exists {
         return Err("目标实例不存在或不完整，请刷新版本列表".into());
@@ -332,7 +343,8 @@ fn record_launch_preparation_error(version_id: &str, message: &str) {
         }
         if let Some(l) = ll.as_mut() {
             l["spawnError"] = json!(message);
-            l["endedAt"] = json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+            l["endedAt"] =
+                json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
         }
     });
 }
@@ -346,18 +358,25 @@ struct Deadline {
 
 impl Deadline {
     fn new() -> Self {
-        Self { last: Mutex::new(std::time::Instant::now()), aborted: AtomicBool::new(false) }
+        Self {
+            last: Mutex::new(std::time::Instant::now()),
+            aborted: AtomicBool::new(false),
+        }
     }
     fn touch(&self) {
         *self.last.lock().unwrap() = std::time::Instant::now();
     }
     fn check(&self) -> Result<(), String> {
         if self.aborted.load(Ordering::SeqCst) {
-            return Err("启动准备已连续 60 秒没有进展，已取消本次启动；正在收尾，请稍后重试。".into());
+            return Err(
+                "启动准备已连续 60 秒没有进展，已取消本次启动；正在收尾，请稍后重试。".into(),
+            );
         }
         if self.last.lock().unwrap().elapsed().as_millis() as u64 > DEADLINE_MS {
             self.aborted.store(true, Ordering::SeqCst);
-            return Err("启动准备已连续 60 秒没有进展，已取消本次启动；正在收尾，请稍后重试。".into());
+            return Err(
+                "启动准备已连续 60 秒没有进展，已取消本次启动；正在收尾，请稍后重试。".into(),
+            );
         }
         Ok(())
     }
@@ -414,9 +433,11 @@ struct ExitEvidence {
 
 impl ExitEvidence {
     fn observe(&self, line: &str) {
-        if regex::Regex::new(r"\[(?:Render thread|Client thread)/INFO\](?:\s*\[[^\]]+\])?:\s*Stopping!\s*$")
-            .unwrap()
-            .is_match(line)
+        if regex::Regex::new(
+            r"\[(?:Render thread|Client thread)/INFO\](?:\s*\[[^\]]+\])?:\s*Stopping!\s*$",
+        )
+        .unwrap()
+        .is_match(line)
         {
             self.stopping.store(true, Ordering::SeqCst);
         }
@@ -430,7 +451,11 @@ impl ExitEvidence {
             let r = self.reports.lock().unwrap();
             *r
         };
-        if reports > described && regex::Regex::new(r"^Description:\s*").unwrap().is_match(line) {
+        if reports > described
+            && regex::Regex::new(r"^Description:\s*")
+                .unwrap()
+                .is_match(line)
+        {
             self.reports.lock().unwrap().1 += 1;
             if self.stopping.load(Ordering::SeqCst)
                 && line.trim() == "Description: Client shutdown from post-main"
@@ -472,18 +497,28 @@ impl ExitEvidence {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Deadline) -> Result<(), String> {
+fn launch_owned(
+    app: &AppHandle,
+    inv: &Invocation,
+    token: String,
+    deadline: &Deadline,
+) -> Result<(), String> {
     let version_id: &str = &inv.version_id;
     let folder: &str = &inv.folder;
     let s = settings::get(app);
     let mirror = installer::mirror_pref(app).to_string();
 
     // 日志落盘：<folder>/.wuhuicl/logs/<uuid>/（对应原版 gameDir/kamucl-logs/<uuid>）
-    let launch_log_dir = Path::new(&folder).join(installer::DATA_DIR_NAME).join("logs").join(uuid_v4());
+    let launch_log_dir = Path::new(&folder)
+        .join(installer::DATA_DIR_NAME)
+        .join("logs")
+        .join(uuid_v4());
     let _ = std::fs::create_dir_all(&launch_log_dir);
     let sink = Arc::new(LogSink::open(&launch_log_dir));
-    let session_started_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    let effective_dir_hint = effective_game_dir(app, folder, version_id).unwrap_or_else(|_| folder.to_string());
+    let session_started_at =
+        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let effective_dir_hint =
+        effective_game_dir(app, folder, version_id).unwrap_or_else(|_| folder.to_string());
     with_globals(|gg| {
         *gg.last_launch.lock().unwrap() = Some(json!({
             "versionId": version_id,
@@ -528,7 +563,10 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
                 match cur {
                     Err(_) => {
                         if base_id_probe == *version_id {
-                            return Err(format!("版本 {} 文件丢失，请在游戏版本页重新安装", version_id));
+                            return Err(format!(
+                                "版本 {} 文件丢失，请在游戏版本页重新安装",
+                                version_id
+                            ));
                         }
                         chain_broken = true;
                         break;
@@ -551,7 +589,10 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         let jar_probe = if base_in_versions {
             installer::version_jar_path_in(folder, &base_id_probe)
         } else {
-            installer::base_version_jar_path_in(&installer::default_folder_path(app), &base_id_probe)
+            installer::base_version_jar_path_in(
+                &installer::default_folder_path(app),
+                &base_id_probe,
+            )
         };
         if chain_broken || !jar_probe.exists() {
             let own = installer::read_version_json(app, folder, version_id).ok();
@@ -561,24 +602,45 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
                 .unwrap_or(false);
             if flattened && !chain_broken {
                 // 自包含实例：仅补客户端 jar，绝不重写合并后的 json
-                emit_progress(app, json!({ "stage": "repair", "progress": 0, "text": "检测到游戏本体缺失，正在自动补全…" }));
+                emit_progress(
+                    app,
+                    json!({ "stage": "repair", "progress": 0, "text": "检测到游戏本体缺失，正在自动补全…" }),
+                );
                 repair_client_jar(app, folder, &base_id_probe, &jar_probe, &mirror, deadline)?;
-                emit_progress(app, json!({ "stage": "repair", "progress": 1, "text": "文件补全完成" }));
+                emit_progress(
+                    app,
+                    json!({ "stage": "repair", "progress": 1, "text": "文件补全完成" }),
+                );
             } else {
-                emit_progress(app, json!({ "stage": "repair", "progress": 0, "text": format!("检测到游戏文件缺失，正在自动补全 {}…", base_id_probe) }));
+                emit_progress(
+                    app,
+                    json!({ "stage": "repair", "progress": 0, "text": format!("检测到游戏文件缺失，正在自动补全 {}…", base_id_probe) }),
+                );
                 let real_id = own
                     .as_ref()
-                    .and_then(|j| j.get("_mcVersion").and_then(|v| v.as_str()).map(str::to_string))
+                    .and_then(|j| {
+                        j.get("_mcVersion")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string)
+                    })
                     .or_else(|| {
                         installer::read_version_json(app, folder, &base_id_probe)
                             .ok()
-                            .and_then(|b| b.get("_mcVersion").and_then(|v| v.as_str()).map(str::to_string))
+                            .and_then(|b| {
+                                b.get("_mcVersion")
+                                    .and_then(|v| v.as_str())
+                                    .map(str::to_string)
+                            })
                     })
                     .unwrap_or_else(|| base_id_probe.clone());
                 if !is_minecraft_version_id(&real_id) {
                     return Err("无法可靠识别实例的 Minecraft 版本，不能自动补全游戏文件；请检查版本信息或重新安装".into());
                 }
-                let dest = if base_id_probe != *version_id && !base_in_versions { "base" } else { "versions" };
+                let dest = if base_id_probe != *version_id && !base_in_versions {
+                    "base"
+                } else {
+                    "versions"
+                };
                 let rec = dummy_task_record();
                 deadline.touch();
                 // installVanilla 复用 installer.rs（自定义命名实例以 baseIdProbe 作实例名）
@@ -592,8 +654,20 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
                 let emit = move |event: &Value| {
                     emit_progress(&app3, event.clone());
                 };
-                installer::install_vanilla(app, &rec, &emit, folder, &real_id2, dest, final_name.as_deref(), false)?;
-                emit_progress(app, json!({ "stage": "repair", "progress": 1, "text": "文件补全完成" }));
+                installer::install_vanilla(
+                    app,
+                    &rec,
+                    &emit,
+                    folder,
+                    &real_id2,
+                    dest,
+                    final_name.as_deref(),
+                    false,
+                )?;
+                emit_progress(
+                    app,
+                    json!({ "stage": "repair", "progress": 1, "text": "文件补全完成" }),
+                );
             }
         }
 
@@ -606,10 +680,18 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         }
 
         // a) 版本链合并
-        emit_progress(app, json!({ "stage": "launch", "progress": 0, "text": "解析版本信息" }));
+        emit_progress(
+            app,
+            json!({ "stage": "launch", "progress": 0, "text": "解析版本信息" }),
+        );
         deadline.check()?;
         let (merged, base_id) = installer::resolve_version_chain(app, folder, version_id)?;
-        if merged.get("mainClass").and_then(|v| v.as_str()).map(|v| v.is_empty()).unwrap_or(true) {
+        if merged
+            .get("mainClass")
+            .and_then(|v| v.as_str())
+            .map(|v| v.is_empty())
+            .unwrap_or(true)
+        {
             return Err("版本 json 缺少 mainClass，文件可能损坏".into());
         }
         let instance_config = installer::read_version_json(app, folder, version_id)?;
@@ -621,7 +703,8 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         let client_jar = installer::client_jar_path(app, folder, &base_id);
 
         // b) 账号（mslogin.rs 全量账号，含 accessToken）
-        let account = crate::mslogin::selected_full(app).ok_or("尚未选择账号，请先在账号页添加并选择一个账号")?;
+        let account = crate::mslogin::selected_full(app)
+            .ok_or("尚未选择账号，请先在账号页添加并选择一个账号")?;
         let valid_account = crate::mslogin::get_valid_account(app, account.clone())?;
         set_launch_account(valid_account.clone());
 
@@ -636,7 +719,10 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
             if client_jar.exists() {
                 if let Ok(actual) = installer::sha1_file_hex(&client_jar) {
                     if actual != sha1.to_lowercase() {
-                        emit_progress(app, json!({ "stage": "repair", "progress": 0, "text": "修复游戏本体" }));
+                        emit_progress(
+                            app,
+                            json!({ "stage": "repair", "progress": 0, "text": "修复游戏本体" }),
+                        );
                         repair_client_jar(app, folder, &base_id, &client_jar, &mirror, deadline)?;
                     }
                 }
@@ -649,12 +735,24 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         deadline.touch();
 
         // c) Java（launch.ts Java 环境）
-        emit_progress(app, json!({ "stage": "java", "progress": 0, "text": "检查 Java 环境" }));
+        emit_progress(
+            app,
+            json!({ "stage": "java", "progress": 0, "text": "检查 Java 环境" }),
+        );
         deadline.check()?;
-        let java_path = resolve_launch_java(app, &merged, &instance_config, &instance_mc_version, deadline)?;
+        let java_path = resolve_launch_java(
+            app,
+            &merged,
+            &instance_config,
+            &instance_mc_version,
+            deadline,
+        )?;
 
         // d) classpath 与 natives 解压
-        emit_progress(app, json!({ "stage": "launch", "progress": 0.5, "text": "准备运行库与 natives" }));
+        emit_progress(
+            app,
+            json!({ "stage": "launch", "progress": 0.5, "text": "准备运行库与 natives" }),
+        );
         deadline.check()?;
         let natives_path = installer::natives_dir_in(folder, version_id);
         std::fs::create_dir_all(&natives_path).map_err(|e| e.to_string())?;
@@ -662,7 +760,11 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         repair_missing_libraries(app, &merged, &mirror, deadline)?;
         extract_natives(&natives, &natives_path)?;
         let mut classpath_entries: Vec<String> = Vec::new();
-        for p in artifacts.iter().chain(natives.iter()).chain(std::iter::once(&client_jar)) {
+        for p in artifacts
+            .iter()
+            .chain(natives.iter())
+            .chain(std::iter::once(&client_jar))
+        {
             let key = p.to_string_lossy().to_lowercase();
             if !classpath_entries.iter().any(|e| e.to_lowercase() == key) {
                 classpath_entries.push(p.to_string_lossy().to_string());
@@ -680,11 +782,17 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
             .unwrap_or("legacy")
             .to_string();
         let game_assets = if index_id == "legacy" || index_id == "pre-1.6" {
-            installer::virtual_legacy_dir(app).to_string_lossy().to_string()
+            installer::virtual_legacy_dir(app)
+                .to_string_lossy()
+                .to_string()
         } else {
             String::new()
         };
-        log(format!("[WUHUICL] 游戏资源：{}；索引：{}", assets_root.display(), index_id));
+        log(format!(
+            "[WUHUICL] 游戏资源：{}；索引：{}",
+            assets_root.display(),
+            index_id
+        ));
 
         // 变量表（launch.ts vars）：供 ${...} 替换
         let launcher_version = app.package_info().version.to_string();
@@ -711,25 +819,33 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         let mem: u64 = if s["memoryAuto"].as_bool().unwrap_or(true) {
             auto_memory_mb(total_mem_mb)
         } else {
-            ((s["memoryMB"].as_i64().unwrap_or(4096).max(512)) as i64).min(total_mem_mb as i64).max(0) as u64
+            ((s["memoryMB"].as_i64().unwrap_or(4096).max(512)) as i64)
+                .min(total_mem_mb as i64)
+                .max(0) as u64
         };
         let user_jvm = split_args(s["jvmArgs"].as_str().unwrap_or(""));
         let client_jar_name = client_jar
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
-        let json_jvm_args: Vec<String> = expand_entries(merged.get("arguments").and_then(|a| a.get("jvm")).and_then(|v| v.as_array()))
-            .into_iter()
-            .map(|a| a.trim().to_string())
-            .map(|a| {
-                // forge ignoreList 需精确匹配 -cp 上的原版客户端 jar 文件名
-                if a.starts_with("-DignoreList=") && !a.split(',').any(|x| x.trim() == client_jar_name) {
-                    format!("{},{}", a, client_jar_name)
-                } else {
-                    a
-                }
-            })
-            .collect();
+        let json_jvm_args: Vec<String> = expand_entries(
+            merged
+                .get("arguments")
+                .and_then(|a| a.get("jvm"))
+                .and_then(|v| v.as_array()),
+        )
+        .into_iter()
+        .map(|a| a.trim().to_string())
+        .map(|a| {
+            // forge ignoreList 需精确匹配 -cp 上的原版客户端 jar 文件名
+            if a.starts_with("-DignoreList=") && !a.split(',').any(|x| x.trim() == client_jar_name)
+            {
+                format!("{},{}", a, client_jar_name)
+            } else {
+                a
+            }
+        })
+        .collect();
         let json_has = |prefix: &str| json_jvm_args.iter().any(|a| a.starts_with(prefix));
         let json_has_cp = json_jvm_args.iter().any(|a| a == "-cp");
         let natives_str = natives_path.to_string_lossy().to_string();
@@ -754,7 +870,10 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         jvm_args.extend(user_jvm.iter().cloned());
 
         // 游戏参数（新版 arguments.game / 旧版 minecraftArguments）
-        let game_arr = merged.get("arguments").and_then(|a| a.get("game")).and_then(|v| v.as_array());
+        let game_arr = merged
+            .get("arguments")
+            .and_then(|a| a.get("game"))
+            .and_then(|v| v.as_array());
         let mut game_args: Vec<String> = if game_arr.map(|a| !a.is_empty()).unwrap_or(false) {
             expand_entries(game_arr)
         } else if let Some(ma) = merged.get("minecraftArguments").and_then(|v| v.as_str()) {
@@ -764,7 +883,10 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         };
 
         // e2) 实例覆盖 > 全局设置；maximized 使用当前显示器工作区
-        let instance_res = instance_config.get("_resolution").filter(|v| v.is_object()).cloned();
+        let instance_res = instance_config
+            .get("_resolution")
+            .filter(|v| v.is_object())
+            .cloned();
         let resolution = resolve_game_resolution(s.get("resolution"), instance_res.as_ref())?;
         let work_area = if resolution["mode"].as_str() == Some("maximized") {
             work_area_size()
@@ -778,11 +900,19 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         let mut singleplayer_world: Option<String> = None;
         if inv.create_command_world {
             let world = create_command_world(&effective_dir, &client_jar)?;
-            log(format!("[WUHUICL] 已新建允许命令的创造测试世界：{}", world.1));
+            log(format!(
+                "[WUHUICL] 已新建允许命令的创造测试世界：{}",
+                world.1
+            ));
             singleplayer_world = Some(world.0);
         }
         if let Some(world) = &singleplayer_world {
-            if !Path::new(&effective_dir).join("saves").join(world).join("level.dat").exists() {
+            if !Path::new(&effective_dir)
+                .join("saves")
+                .join(world)
+                .join("level.dat")
+                .exists()
+            {
                 return Err("待进入的测试世界不存在，未创建重复世界".into());
             }
             game_args.push("--quickPlaySingleplayer".into());
@@ -792,7 +922,10 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
                 game_args.push("--quickPlayMultiplayer".into());
                 game_args.push(addr.clone());
             } else {
-                log(format!("[WUHUICL] Minecraft {} 不支持 Quick Play，已仅启动实例", instance_mc_version));
+                log(format!(
+                    "[WUHUICL] Minecraft {} 不支持 Quick Play，已仅启动实例",
+                    instance_mc_version
+                ));
             }
         }
 
@@ -802,17 +935,35 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
             args.push("-cp".into());
             args.push(classpath.clone());
         }
-        args.push(merged.get("mainClass").and_then(|v| v.as_str()).unwrap_or("").to_string());
+        args.push(
+            merged
+                .get("mainClass")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        );
         args.extend(game_args.iter().cloned());
 
         // 日志脱敏（accessToken / clientToken / userProperties / prefetched 元数据）
-        let access_token = valid_account.get("accessToken").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let client_token = valid_account.get("clientToken").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let access_token = valid_account
+            .get("accessToken")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let client_token = valid_account
+            .get("clientToken")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let user_properties = serialize_user_properties(valid_account.get("userProperties"));
-        let private_values: Vec<String> = [access_token.clone(), client_token.clone(), user_properties.clone()]
-            .into_iter()
-            .filter(|v| !v.is_empty())
-            .collect();
+        let private_values: Vec<String> = [
+            access_token.clone(),
+            client_token.clone(),
+            user_properties.clone(),
+        ]
+        .into_iter()
+        .filter(|v| !v.is_empty())
+        .collect();
         let log_args: Vec<String> = args
             .iter()
             .map(|a| {
@@ -831,7 +982,11 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         let command_summary = format!(
             "{} {}",
             java_path,
-            log_args.iter().map(|a| windows_quote(a)).collect::<Vec<_>>().join(" ")
+            log_args
+                .iter()
+                .map(|a| windows_quote(a))
+                .collect::<Vec<_>>()
+                .join(" ")
         );
         log(format!(
             "[WUHUICL] 游戏窗口: mode={}{}",
@@ -842,7 +997,10 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
             }
         ));
         log(format!("[WUHUICL] 启动命令: {}", command_summary));
-        emit_progress(app, json!({ "stage": "launch", "progress": 1, "text": "启动游戏进程" }));
+        emit_progress(
+            app,
+            json!({ "stage": "launch", "progress": 1, "text": "启动游戏进程" }),
+        );
         deadline.touch();
 
         // g) 启动进程（脱离式：Tauri/Rust 子进程不在 Job Object 内，天然与启动器生命周期解耦）
@@ -984,7 +1142,9 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
                 if let Some(l) = ll.as_mut() {
                     if l["pid"].as_u64() == Some(proc.pid as u64) {
                         l["exitCode"] = json!(code);
-                        l["endedAt"] = json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+                        l["endedAt"] =
+                            json!(chrono::Utc::now()
+                                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
                     }
                 }
             });
@@ -992,7 +1152,9 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
             let intentional_restart = take_intentional_restart(&launch_id2);
             let intentional = {
                 let entry = find_session(&token2);
-                let stopping = entry.map(|e| e.intentional_stop.load(Ordering::SeqCst)).unwrap_or(false);
+                let stopping = entry
+                    .map(|e| e.intentional_stop.load(Ordering::SeqCst))
+                    .unwrap_or(false);
                 stopping || intentional_restart
             };
             let exit_kind = ev2.classify(code, intentional);
@@ -1033,12 +1195,20 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
     if !spawned {
         release_session(&token);
     }
-    let _ = log(format!("[WUHUICL] 启动准备结束（{}ms）", pipeline_started.elapsed().as_millis()));
+    let _ = log(format!(
+        "[WUHUICL] 启动准备结束（{}ms）",
+        pipeline_started.elapsed().as_millis()
+    ));
     result
 }
 
 fn take_intentional_restart(launch_id: &str) -> bool {
-    RESTARTING.lock().unwrap().take().map(|id| id == launch_id).unwrap_or(false)
+    RESTARTING
+        .lock()
+        .unwrap()
+        .take()
+        .map(|id| id == launch_id)
+        .unwrap_or(false)
 }
 
 // ---------------- 会话操作 ----------------
@@ -1062,7 +1232,14 @@ fn reserve_session(inv: &Invocation) -> String {
 }
 
 fn find_session(token: &str) -> Option<Arc<SessionEntry>> {
-    with_globals(|gg| gg.sessions.lock().unwrap().iter().find(|s| s.token == token).cloned())
+    with_globals(|gg| {
+        gg.sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| s.token == token)
+            .cloned()
+    })
 }
 
 fn attach_session(token: &str, proc: &Arc<ChildProc>) {
@@ -1112,15 +1289,26 @@ fn dummy_task_record() -> Arc<tasks::TaskRecord> {
 
 /// javaCompatibility.ts releaseJavaMajor：Mojang 官方发行带
 fn release_java_major(id: &str) -> Option<i64> {
-    if regex::Regex::new(r"^26\.1(?:\.\d+)?$").unwrap().is_match(id) {
+    if regex::Regex::new(r"^26\.1(?:\.\d+)?$")
+        .unwrap()
+        .is_match(id)
+    {
         return Some(25);
     }
-    if regex::Regex::new(r"^(?:[ab]\d|c\d|rd-|inf-)").unwrap().is_match(id) {
+    if regex::Regex::new(r"^(?:[ab]\d|c\d|rd-|inf-)")
+        .unwrap()
+        .is_match(id)
+    {
         return Some(8);
     }
-    let caps = regex::Regex::new(r"^1\.(\d+)(?:\.(\d+))?$").unwrap().captures(id)?;
+    let caps = regex::Regex::new(r"^1\.(\d+)(?:\.(\d+))?$")
+        .unwrap()
+        .captures(id)?;
     let minor: i64 = caps.get(1)?.as_str().parse().ok()?;
-    let patch: i64 = caps.get(2).map(|m| m.as_str().parse().unwrap_or(0)).unwrap_or(0);
+    let patch: i64 = caps
+        .get(2)
+        .map(|m| m.as_str().parse().unwrap_or(0))
+        .unwrap_or(0);
     if minor > 21 {
         return None;
     }
@@ -1146,13 +1334,21 @@ fn declared_java_major(json: &Value) -> Option<i64> {
 }
 
 /// launch.ts resolveJavaRequirement 的移植（模组/ASM 约束为 TODO 钩子）
-fn resolve_java_requirement(merged: &Value, mc_version: &str, instance_config: &Value) -> Result<(i64, Option<i64>), String> {
+fn resolve_java_requirement(
+    merged: &Value,
+    mc_version: &str,
+    instance_config: &Value,
+) -> Result<(i64, Option<i64>), String> {
     let major = declared_java_major(merged)
         .or_else(|| release_java_major(mc_version))
         .or_else(|| declared_java_major(instance_config));
     match major {
         Some(major) => {
-            let libs = merged.get("libraries").and_then(|l| l.as_array()).cloned().unwrap_or_default();
+            let libs = merged
+                .get("libraries")
+                .and_then(|l| l.as_array())
+                .cloned()
+                .unwrap_or_default();
             let replacement_bootstrap = libs.iter().any(|l| {
                 l.get("name")
                     .and_then(|v| v.as_str())
@@ -1189,10 +1385,18 @@ fn resolve_launch_java(
 ) -> Result<String, String> {
     let s = settings::get(app);
     let (need, maximum) = resolve_java_requirement(merged, mc_version, instance_config)?;
-    let version_java = instance_config.get("_javaPath").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let automatic = instance_config.get("_javaAuto").and_then(|v| v.as_bool()).unwrap_or(false)
+    let version_java = instance_config
+        .get("_javaPath")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let automatic = instance_config
+        .get("_javaAuto")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
         || (version_java.is_empty()
-            && (s["javaAuto"].as_bool().unwrap_or(true) || s["javaPath"].as_str().unwrap_or("").is_empty()));
+            && (s["javaAuto"].as_bool().unwrap_or(true)
+                || s["javaPath"].as_str().unwrap_or("").is_empty()));
     let arch = host_arch();
     let ensure = |need: i64| -> Result<String, String> {
         // 自动管理：从本机扫描选择（Adoptium 自动下载运行时为 TODO 钩子）
@@ -1206,25 +1410,44 @@ fn resolve_launch_java(
         }
     };
     let java_path: String;
-    if instance_config.get("_javaAuto").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if instance_config
+        .get("_javaAuto")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         java_path = ensure(need)?;
-        emit_progress(app, json!({ "stage": "java", "progress": 1, "text": format!("使用自动管理的 Java {}", need) }));
+        emit_progress(
+            app,
+            json!({ "stage": "java", "progress": 1, "text": format!("使用自动管理的 Java {}", need) }),
+        );
     } else if !version_java.is_empty() {
         if !Path::new(&version_java).exists() {
-            return Err(format!("该版本指定的 Java 不存在（{}），请在版本设置中重新选择", version_java));
+            return Err(format!(
+                "该版本指定的 Java 不存在（{}），请在版本设置中重新选择",
+                version_java
+            ));
         }
         java_path = version_java;
-        emit_progress(app, json!({ "stage": "java", "progress": 1, "text": "使用该版本指定的 Java" }));
+        emit_progress(
+            app,
+            json!({ "stage": "java", "progress": 1, "text": "使用该版本指定的 Java" }),
+        );
     } else if s["javaAuto"].as_bool().unwrap_or(true) {
         java_path = ensure(need)?;
-        emit_progress(app, json!({ "stage": "java", "progress": 1, "text": format!("使用自动管理的 Java {}", need) }));
+        emit_progress(
+            app,
+            json!({ "stage": "java", "progress": 1, "text": format!("使用自动管理的 Java {}", need) }),
+        );
     } else if !s["javaPath"].as_str().unwrap_or("").is_empty() {
         let p = s["javaPath"].as_str().unwrap_or("").to_string();
         if !Path::new(&p).exists() {
             return Err("手动指定的 Java 路径不存在，请在设置中重新选择".into());
         }
         java_path = p;
-        emit_progress(app, json!({ "stage": "java", "progress": 1, "text": "使用手动指定的 Java" }));
+        emit_progress(
+            app,
+            json!({ "stage": "java", "progress": 1, "text": "使用手动指定的 Java" }),
+        );
     } else {
         let list = crate::javaman::scan_quick(app, false);
         let found = list
@@ -1232,7 +1455,11 @@ fn resolve_launch_java(
             .find(|j| {
                 j["major"].as_i64() == Some(need)
                     && j["is64Bit"].as_bool().unwrap_or(false)
-                    && (arch.is_empty() || j["architecture"].as_str().map(|a| a == arch).unwrap_or(false))
+                    && (arch.is_empty()
+                        || j["architecture"]
+                            .as_str()
+                            .map(|a| a == arch)
+                            .unwrap_or(false))
             })
             .map(|j| j["path"].as_str().unwrap_or("").to_string());
         match found {
@@ -1257,16 +1484,33 @@ fn resolve_launch_java(
         None => Some("Java 无法正常运行".to_string()),
     };
     if let Some(err) = incompatibility {
-        return Err(format!("所选 Java 不适配：{}；请修改实例设置或开启自动管理", err));
+        return Err(format!(
+            "所选 Java 不适配：{}；请修改实例设置或开启自动管理",
+            err
+        ));
     }
     Ok(java_path)
 }
 
-fn java_compatibility_error(info: &Value, need: i64, maximum: Option<i64>, arch: &str, automatic: bool) -> Option<String> {
+fn java_compatibility_error(
+    info: &Value,
+    need: i64,
+    maximum: Option<i64>,
+    arch: &str,
+    automatic: bool,
+) -> Option<String> {
     if !info["is64Bit"].as_bool().unwrap_or(false)
-        || (!arch.is_empty() && info["architecture"].as_str().map(|a| a != arch).unwrap_or(true))
+        || (!arch.is_empty()
+            && info["architecture"]
+                .as_str()
+                .map(|a| a != arch)
+                .unwrap_or(true))
     {
-        return Some(if arch.is_empty() { "需要 64 位 Java".into() } else { format!("需要 64 位 {} Java", arch) });
+        return Some(if arch.is_empty() {
+            "需要 64 位 Java".into()
+        } else {
+            format!("需要 64 位 {} Java", arch)
+        });
     }
     let major = info["major"].as_i64().unwrap_or(0);
     if major < need {
@@ -1274,11 +1518,17 @@ fn java_compatibility_error(info: &Value, need: i64, maximum: Option<i64>, arch:
     }
     if let Some(max) = maximum {
         if major > max {
-            return Some(format!("旧版 Forge 需要 Java {}，当前为 Java {}", max, major));
+            return Some(format!(
+                "旧版 Forge 需要 Java {}，当前为 Java {}",
+                max, major
+            ));
         }
     }
     if automatic && major != need {
-        return Some(format!("自动管理需要推荐的 Java {}，当前为 Java {}", need, major));
+        return Some(format!(
+            "自动管理需要推荐的 Java {}，当前为 Java {}",
+            need, major
+        ));
     }
     None
 }
@@ -1304,7 +1554,10 @@ fn resolved_libraries(app: &AppHandle, merged: &Value) -> (Vec<PathBuf>, Vec<Pat
         }
     };
     let empty = Vec::new();
-    let libs = merged.get("libraries").and_then(|l| l.as_array()).unwrap_or(&empty);
+    let libs = merged
+        .get("libraries")
+        .and_then(|l| l.as_array())
+        .unwrap_or(&empty);
     for lib in libs {
         if !installer::rules_allow(lib.get("rules")) {
             continue;
@@ -1317,7 +1570,11 @@ fn resolved_libraries(app: &AppHandle, merged: &Value) -> (Vec<PathBuf>, Vec<Pat
         {
             push(rel, false);
         }
-        if let Some(key) = lib.get("natives").and_then(|n| n.get("windows")).and_then(|v| v.as_str()) {
+        if let Some(key) = lib
+            .get("natives")
+            .and_then(|n| n.get("windows"))
+            .and_then(|v| v.as_str())
+        {
             let key = key.replace("${arch}", "64");
             if let Some(rel) = downloads
                 .and_then(|d| d.get("classifiers"))
@@ -1333,7 +1590,12 @@ fn resolved_libraries(app: &AppHandle, merged: &Value) -> (Vec<PathBuf>, Vec<Pat
 }
 
 /// 缺失依赖库补全（对应 launch.ts 启动前 repair 阶段）
-fn repair_missing_libraries(app: &AppHandle, merged: &Value, mirror: &str, deadline: &Deadline) -> Result<(), String> {
+fn repair_missing_libraries(
+    app: &AppHandle,
+    merged: &Value,
+    mirror: &str,
+    deadline: &Deadline,
+) -> Result<(), String> {
     let all = installer::library_tasks(app, merged);
     let total = all.len();
     let items: Vec<installer::DownloadItem> = {
@@ -1359,7 +1621,10 @@ fn repair_missing_libraries(app: &AppHandle, merged: &Value, mirror: &str, deadl
     if items.is_empty() {
         return Ok(());
     }
-    emit_progress(app, json!({ "stage": "repair", "progress": 0, "text": format!("修复依赖库 0/{}", items.len()) }));
+    emit_progress(
+        app,
+        json!({ "stage": "repair", "progress": 0, "text": format!("修复依赖库 0/{}", items.len()) }),
+    );
     let app2 = app.clone();
     let progress = move |d: usize, t: usize, _speed: f64, _detail: &installer::DownloadDetail| {
         emit_progress(
@@ -1388,10 +1653,20 @@ fn repair_client_jar(
         .ok()
         .and_then(|j| j.get("downloads").and_then(|d| d.get("client")).cloned())
         .unwrap_or(Value::Null);
-    let Some(url) = client.get("url").and_then(|v| v.as_str()).map(str::to_string) else {
-        return Err(format!("无法自动补全游戏本体：版本 {} 缺少下载地址", base_id));
+    let Some(url) = client
+        .get("url")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    else {
+        return Err(format!(
+            "无法自动补全游戏本体：版本 {} 缺少下载地址",
+            base_id
+        ));
     };
-    let sha1 = client.get("sha1").and_then(|v| v.as_str()).map(str::to_string);
+    let sha1 = client
+        .get("sha1")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let size = client.get("size").and_then(|v| v.as_u64());
     let app2 = app.clone();
     let progress = move |done: u64, total: Option<u64>| {
@@ -1410,7 +1685,19 @@ fn repair_client_jar(
     let jar2 = jar.to_path_buf();
     let mirror2 = mirror.to_string();
     installer::run_blocking(move || {
-        installer::download_file(app, None, None, &url, &jar2, sha1.as_deref(), size, &mirror2, Some(&progress), &[], &[])
+        installer::download_file(
+            app,
+            None,
+            None,
+            &url,
+            &jar2,
+            sha1.as_deref(),
+            size,
+            &mirror2,
+            Some(&progress),
+            &[],
+            &[],
+        )
     })?;
     deadline.touch();
     Ok(())
@@ -1451,7 +1738,9 @@ fn split_args(s: &str) -> Vec<String> {
         return Vec::new();
     }
     let re = regex::Regex::new(r#""[^"]*"|[^\s"]+"#).unwrap();
-    re.find_iter(s).map(|m| m.as_str().trim_matches('"').to_string()).collect()
+    re.find_iter(s)
+        .map(|m| m.as_str().trim_matches('"').to_string())
+        .collect()
 }
 
 /// yggdrasilProvider.ts serializeYggdrasilUserProperties
@@ -1483,7 +1772,11 @@ fn set_launch_account(account: Value) {
 }
 
 fn account_value() -> Value {
-    LAUNCH_ACCOUNT.lock().unwrap().clone().unwrap_or(Value::Null)
+    LAUNCH_ACCOUNT
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or(Value::Null)
 }
 
 /// ${...} 替换（launch.ts sub）：账号变量 + 全局变量表
@@ -1491,7 +1784,10 @@ fn substitute(input: &str) -> String {
     let account = account_value();
     let empty = serde_json::Map::new();
     let vars_guard = LAUNCH_VARS.lock().unwrap();
-    let vars = vars_guard.as_ref().and_then(|v| v.as_object()).unwrap_or(&empty);
+    let vars = vars_guard
+        .as_ref()
+        .and_then(|v| v.as_object())
+        .unwrap_or(&empty);
     let re = regex::Regex::new(r"\$\{([^}]+)\}").unwrap();
     let out = re
         .replace_all(input, |caps: &regex::Captures| {
@@ -1506,7 +1802,9 @@ fn substitute(input: &str) -> String {
                         uuid.to_string()
                     }
                 }
-                "auth_access_token" | "auth_session" => account["accessToken"].as_str().unwrap_or("").to_string(),
+                "auth_access_token" | "auth_session" => {
+                    account["accessToken"].as_str().unwrap_or("").to_string()
+                }
                 "user_type" => {
                     if account["type"].as_str() == Some("microsoft") {
                         "msa".to_string()
@@ -1515,12 +1813,20 @@ fn substitute(input: &str) -> String {
                     }
                 }
                 "user_properties" => serialize_user_properties(account.get("userProperties")),
-                "version_name" => vars.get("version_name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                "version_name" => vars
+                    .get("version_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
                 _ => vars
                     .get(k)
                     .and_then(|v| v.as_str())
                     .map(str::to_string)
-                    .unwrap_or_else(|| caps.get(0).map(|m| m.as_str().to_string()).unwrap_or_default()),
+                    .unwrap_or_else(|| {
+                        caps.get(0)
+                            .map(|m| m.as_str().to_string())
+                            .unwrap_or_default()
+                    }),
             }
         })
         .to_string();
@@ -1563,7 +1869,10 @@ struct WindowArgs {
 }
 
 /// gameWindow.ts resolveGameResolution：实例覆盖全局 + 归一化 + 校验
-fn resolve_game_resolution(global: Option<&Value>, instance: Option<&Value>) -> Result<Value, String> {
+fn resolve_game_resolution(
+    global: Option<&Value>,
+    instance: Option<&Value>,
+) -> Result<Value, String> {
     let fallback = json!({ "width": GAME_WIDTH_MIN, "height": GAME_HEIGHT_MIN, "mode": "windowed", "fullscreen": false });
     let global_norm = normalize_resolution(global, &fallback);
     let resolved = match instance {
@@ -1576,9 +1885,16 @@ fn resolve_game_resolution(global: Option<&Value>, instance: Option<&Value>) -> 
 
 fn normalize_resolution(value: Option<&Value>, fallback: &Value) -> Value {
     let legacy_fullscreen = value
-        .map(|v| v.get("fullscreen").and_then(|f| f.as_bool()).unwrap_or(false))
+        .map(|v| {
+            v.get("fullscreen")
+                .and_then(|f| f.as_bool())
+                .unwrap_or(false)
+        })
         .unwrap_or(false);
-    let raw_mode = value.and_then(|v| v.get("mode")).and_then(|m| m.as_str()).unwrap_or("");
+    let raw_mode = value
+        .and_then(|v| v.get("mode"))
+        .and_then(|m| m.as_str())
+        .unwrap_or("");
     let mode = if ["windowed", "maximized", "fullscreen"].contains(&raw_mode) {
         raw_mode.to_string()
     } else if legacy_fullscreen {
@@ -1607,10 +1923,16 @@ fn resolution_validation_error(res: &Value) -> Result<(), String> {
     let width = res["width"].as_i64().unwrap_or(0);
     let height = res["height"].as_i64().unwrap_or(0);
     if width < GAME_WIDTH_MIN || width > GAME_WIDTH_MAX {
-        return Err(format!("窗口宽度必须是 {}–{} 之间的整数", GAME_WIDTH_MIN, GAME_WIDTH_MAX));
+        return Err(format!(
+            "窗口宽度必须是 {}–{} 之间的整数",
+            GAME_WIDTH_MIN, GAME_WIDTH_MAX
+        ));
     }
     if height < GAME_HEIGHT_MIN || height > GAME_HEIGHT_MAX {
-        return Err(format!("窗口高度必须是 {}–{} 之间的整数", GAME_HEIGHT_MIN, GAME_HEIGHT_MAX));
+        return Err(format!(
+            "窗口高度必须是 {}–{} 之间的整数",
+            GAME_HEIGHT_MIN, GAME_HEIGHT_MAX
+        ));
     }
     Ok(())
 }
@@ -1622,8 +1944,17 @@ fn work_area_size() -> Option<(i64, i64)> {
     use windows_sys::Win32::UI::WindowsAndMessaging::{SystemParametersInfoW, SPI_GETWORKAREA};
     let mut rect: RECT = unsafe { std::mem::zeroed() };
     unsafe {
-        if SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut rect as *mut RECT as *mut core::ffi::c_void, 0) != 0 {
-            Some(((rect.right - rect.left) as i64, (rect.bottom - rect.top) as i64))
+        if SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            &mut rect as *mut RECT as *mut core::ffi::c_void,
+            0,
+        ) != 0
+        {
+            Some((
+                (rect.right - rect.left) as i64,
+                (rect.bottom - rect.top) as i64,
+            ))
         } else {
             None
         }
@@ -1631,7 +1962,11 @@ fn work_area_size() -> Option<(i64, i64)> {
 }
 
 /// gameWindow.ts buildGameWindowArguments：先清掉版本元数据自带窗口参数，再写权威值
-fn build_game_window_arguments(base: Vec<String>, resolution: &Value, work_area: Option<&(i64, i64)>) -> WindowArgs {
+fn build_game_window_arguments(
+    base: Vec<String>,
+    resolution: &Value,
+    work_area: Option<&(i64, i64)>,
+) -> WindowArgs {
     let mut args = Vec::new();
     let mut i = 0;
     while i < base.len() {
@@ -1649,7 +1984,12 @@ fn build_game_window_arguments(base: Vec<String>, resolution: &Value, work_area:
     }
     if resolution["mode"].as_str() == Some("fullscreen") {
         args.push("--fullscreen".into());
-        return WindowArgs { args, mode: "fullscreen".into(), width: None, height: None };
+        return WindowArgs {
+            args,
+            mode: "fullscreen".into(),
+            width: None,
+            height: None,
+        };
     }
     let use_work_area = resolution["mode"].as_str() == Some("maximized")
         && work_area.map(|(w, h)| *w > 0 && *h > 0).unwrap_or(false);
@@ -1669,15 +2009,25 @@ fn build_game_window_arguments(base: Vec<String>, resolution: &Value, work_area:
     args.push(height.to_string());
     WindowArgs {
         args,
-        mode: resolution["mode"].as_str().unwrap_or("windowed").to_string(),
+        mode: resolution["mode"]
+            .as_str()
+            .unwrap_or("windowed")
+            .to_string(),
         width: Some(width),
         height: Some(height),
     }
 }
 
 /// 保存窗口化尺寸（rememberGameWindowSize；实例覆盖优先于全局设置）
-fn commit_window_size(app: &AppHandle, folder: &str, version_id: &str, width: i64, height: i64) -> Result<(), String> {
-    let normalized = json!({ "width": width, "height": height, "mode": "windowed", "fullscreen": false });
+fn commit_window_size(
+    app: &AppHandle,
+    folder: &str,
+    version_id: &str,
+    width: i64,
+    height: i64,
+) -> Result<(), String> {
+    let normalized =
+        json!({ "width": width, "height": height, "mode": "windowed", "fullscreen": false });
     match installer::read_version_json(app, folder, version_id) {
         Ok(mut j) if j.get("_resolution").is_some() => {
             j["_resolution"] = normalized;
@@ -1705,7 +2055,11 @@ fn read_owned_game_window(pid: u32) -> Option<(i64, i64)> {
         let ctx = &mut *(lparam as *mut Ctx);
         let mut out_pid: u32 = 0;
         GetWindowThreadProcessId(hwnd, &mut out_pid);
-        if out_pid != ctx.pid || IsWindowVisible(hwnd) == 0 || IsIconic(hwnd) != 0 || IsZoomed(hwnd) != 0 {
+        if out_pid != ctx.pid
+            || IsWindowVisible(hwnd) == 0
+            || IsIconic(hwnd) != 0
+            || IsZoomed(hwnd) != 0
+        {
             return 1;
         }
         let mut name = [0u16; 256];
@@ -1725,12 +2079,18 @@ fn read_owned_game_window(pid: u32) -> Option<(i64, i64)> {
         let mut out_pid2: u32 = 0;
         GetWindowThreadProcessId(hwnd, &mut out_pid2);
         if out_pid2 == ctx.pid {
-            ctx.matches.push(((rect.right - rect.left) as i64, (rect.bottom - rect.top) as i64));
+            ctx.matches.push((
+                (rect.right - rect.left) as i64,
+                (rect.bottom - rect.top) as i64,
+            ));
         }
         1
     }
 
-    let mut ctx = Ctx { pid, matches: Vec::new() };
+    let mut ctx = Ctx {
+        pid,
+        matches: Vec::new(),
+    };
     unsafe {
         EnumWindows(Some(callback), &mut ctx as *mut Ctx as LPARAM);
     }
@@ -1810,20 +2170,32 @@ mod nbt {
 fn world_generation(seed: i64, split_format: bool) -> nbt::Tag {
     let noise = |dimension: &str, biome: &str| {
         nbt::Tag::Compound(vec![
-            ("type".into(), nbt::Tag::Str(format!("minecraft:{}", dimension))),
+            (
+                "type".into(),
+                nbt::Tag::Str(format!("minecraft:{}", dimension)),
+            ),
             (
                 "generator".into(),
                 nbt::Tag::Compound(vec![
                     ("type".into(), nbt::Tag::Str("minecraft:noise".into())),
-                    ("settings".into(), nbt::Tag::Str(format!("minecraft:{}", biome))),
+                    (
+                        "settings".into(),
+                        nbt::Tag::Str(format!("minecraft:{}", biome)),
+                    ),
                     (
                         "biome_source".into(),
                         if biome == "end" {
-                            nbt::Tag::Compound(vec![("type".into(), nbt::Tag::Str("minecraft:the_end".into()))])
+                            nbt::Tag::Compound(vec![(
+                                "type".into(),
+                                nbt::Tag::Str("minecraft:the_end".into()),
+                            )])
                         } else {
                             nbt::Tag::Compound(vec![
                                 ("type".into(), nbt::Tag::Str("minecraft:multi_noise".into())),
-                                ("preset".into(), nbt::Tag::Str(format!("minecraft:{}", biome))),
+                                (
+                                    "preset".into(),
+                                    nbt::Tag::Str(format!("minecraft:{}", biome)),
+                                ),
                             ])
                         },
                     ),
@@ -1834,14 +2206,21 @@ fn world_generation(seed: i64, split_format: bool) -> nbt::Tag {
     nbt::Tag::Compound(vec![
         ("seed".into(), nbt::Tag::Long(seed)),
         (
-            if split_format { "generate_structures".into() } else { "generate_features".into() },
+            if split_format {
+                "generate_structures".into()
+            } else {
+                "generate_features".into()
+            },
             nbt::Tag::Byte(1),
         ),
         ("bonus_chest".into(), nbt::Tag::Byte(0)),
         (
             "dimensions".into(),
             nbt::Tag::Compound(vec![
-                ("minecraft:overworld".into(), noise("overworld", "overworld")),
+                (
+                    "minecraft:overworld".into(),
+                    noise("overworld", "overworld"),
+                ),
                 ("minecraft:the_nether".into(), noise("the_nether", "nether")),
                 ("minecraft:the_end".into(), noise("the_end", "end")),
             ]),
@@ -1857,7 +2236,10 @@ fn rand_bytes(n: usize) -> Vec<u8> {
 }
 
 /// commandWorld.ts createCommandWorld：只新建世界（游戏自己生成地形并应用实例模组）
-fn create_command_world(game_directory: &str, client_jar: &Path) -> Result<(String, String), String> {
+fn create_command_world(
+    game_directory: &str,
+    client_jar: &Path,
+) -> Result<(String, String), String> {
     let file = std::fs::File::open(client_jar).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
     let version: Value = {
@@ -1868,7 +2250,11 @@ fn create_command_world(game_directory: &str, client_jar: &Path) -> Result<(Stri
         entry.read_to_string(&mut text).map_err(|e| e.to_string())?;
         serde_json::from_str(&text).map_err(|_| "客户端 version.json 不是有效 JSON".to_string())?
     };
-    let version_id = version.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let version_id = version
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     if !supports_quick_play_multiplayer(&version_id) {
         return Err("此 Minecraft 版本不支持官方单人 Quick Play（需要 1.20+）；请在游戏内新建世界并开启命令".into());
     }
@@ -1876,11 +2262,20 @@ fn create_command_world(game_directory: &str, client_jar: &Path) -> Result<(Stri
         Some(v) if v >= 0 => v,
         _ => return Err("客户端缺少真实世界数据版本，未创建存档".into()),
     };
-    let stable = version.get("stable").and_then(|v| v.as_bool()).unwrap_or(true);
-    let series = version.get("series_id").and_then(|v| v.as_str()).unwrap_or("main").to_string();
+    let stable = version
+        .get("stable")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let series = version
+        .get("series_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("main")
+        .to_string();
     let id = format!(
         "WUHUICL-Test-{}-{}",
-        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true).replace([':', '.'], "-"),
+        chrono::Utc::now()
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+            .replace([':', '.'], "-"),
         hex::encode(rand_bytes(3))
     );
     let destination = Path::new(game_directory).join("saves").join(&id);
@@ -1900,10 +2295,16 @@ fn create_command_world(game_directory: &str, client_jar: &Path) -> Result<(Stri
         .map(|bytes| bytes.windows(13).any(|w| w == b"SavedDataType"))
         .unwrap_or(false);
     let seed = i64::from_be_bytes(rand_bytes(8).try_into().unwrap());
-    let level_name = format!("命令测试 {}", chrono::Local::now().format("%Y/%m/%d %H:%M:%S"));
+    let level_name = format!(
+        "命令测试 {}",
+        chrono::Local::now().format("%Y/%m/%d %H:%M:%S")
+    );
     let now_ms = chrono::Utc::now().timestamp_millis();
     let mut data_fields = vec![
-        ("DataVersion".to_string(), nbt::Tag::Int(world_version as i32)),
+        (
+            "DataVersion".to_string(),
+            nbt::Tag::Int(world_version as i32),
+        ),
         (
             "Version".to_string(),
             nbt::Tag::Compound(vec![
@@ -1919,7 +2320,11 @@ fn create_command_world(game_directory: &str, client_jar: &Path) -> Result<(Stri
         ("allowCommands".into(), nbt::Tag::Byte(1)),
         ("hardcore".into(), nbt::Tag::Byte(0)),
         (
-            if split_format { "difficulty_settings".into() } else { "Difficulty".into() },
+            if split_format {
+                "difficulty_settings".into()
+            } else {
+                "Difficulty".into()
+            },
             if split_format {
                 nbt::Tag::Compound(vec![
                     ("difficulty".into(), nbt::Tag::Str("easy".into())),
@@ -1936,7 +2341,10 @@ fn create_command_world(game_directory: &str, client_jar: &Path) -> Result<(Stri
         (
             "DataPacks".into(),
             nbt::Tag::Compound(vec![
-                ("Enabled".into(), nbt::Tag::List(8, vec![nbt::Tag::Str("vanilla".into())])),
+                (
+                    "Enabled".into(),
+                    nbt::Tag::List(8, vec![nbt::Tag::Str("vanilla".into())]),
+                ),
                 ("Disabled".into(), nbt::Tag::List(8, Vec::new())),
             ]),
         ),
@@ -1955,7 +2363,11 @@ fn create_command_world(game_directory: &str, client_jar: &Path) -> Result<(Stri
         ));
     }
     let root = nbt::Tag::Compound(vec![("Data".into(), nbt::Tag::Compound(data_fields))]);
-    std::fs::write(destination.join("level.dat"), gzip_bytes(&nbt::encode(&root))).map_err(|e| e.to_string())?;
+    std::fs::write(
+        destination.join("level.dat"),
+        gzip_bytes(&nbt::encode(&root)),
+    )
+    .map_err(|e| e.to_string())?;
     if split_format {
         let data_dir = destination.join("data").join("minecraft");
         std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
@@ -1963,8 +2375,11 @@ fn create_command_world(game_directory: &str, client_jar: &Path) -> Result<(Stri
             ("DataVersion".into(), nbt::Tag::Int(world_version as i32)),
             ("data".into(), world_generation(seed, true)),
         ]);
-        std::fs::write(data_dir.join("world_gen_settings.dat"), gzip_bytes(&nbt::encode(&saved)))
-            .map_err(|e| e.to_string())?;
+        std::fs::write(
+            data_dir.join("world_gen_settings.dat"),
+            gzip_bytes(&nbt::encode(&saved)),
+        )
+        .map_err(|e| e.to_string())?;
     }
     Ok((id, destination.to_string_lossy().to_string()))
 }
@@ -1980,12 +2395,18 @@ fn gzip_bytes(data: &[u8]) -> Vec<u8> {
 /// serverUtils.ts supportsQuickPlayMultiplayer（1.20+ / 23w14a+）
 fn supports_quick_play_multiplayer(version: &str) -> bool {
     let v = version.trim();
-    if let Some(caps) = regex::Regex::new(r"^(\d+)\.(\d+)(?:\.(\d+))?(?:$|[-+])").unwrap().captures(v) {
+    if let Some(caps) = regex::Regex::new(r"^(\d+)\.(\d+)(?:\.(\d+))?(?:$|[-+])")
+        .unwrap()
+        .captures(v)
+    {
         let major: i64 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
         let minor: i64 = caps.get(2).unwrap().as_str().parse().unwrap_or(0);
         return major > 1 || (major == 1 && minor >= 20);
     }
-    if let Some(caps) = regex::Regex::new(r"^(\d{2})w(\d{2})([a-z])$").unwrap().captures(&v.to_lowercase()) {
+    if let Some(caps) = regex::Regex::new(r"^(\d{2})w(\d{2})([a-z])$")
+        .unwrap()
+        .captures(&v.to_lowercase())
+    {
         let year: i64 = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
         let week: i64 = caps.get(2).unwrap().as_str().parse().unwrap_or(0);
         let revision = caps.get(3).unwrap().as_str();
@@ -2015,7 +2436,9 @@ fn host_arch() -> String {
 }
 
 fn total_mem_mb() -> u64 {
-    crate::sysinfo::system_info()["totalMemMB"].as_u64().unwrap_or(4096)
+    crate::sysinfo::system_info()["totalMemMB"]
+        .as_u64()
+        .unwrap_or(4096)
 }
 
 /// shared/memory.ts autoMemoryMB：物理内存 25% 取 0.5GB 整，2GB~8GB 钳制
@@ -2026,7 +2449,10 @@ fn auto_memory_mb(total_mem_mb: u64) -> u64 {
 
 // ---------------- 工具 ----------------
 
-fn spawn_reader<R: std::io::Read + Send + 'static>(stream: Option<R>, sink: impl Fn(String) + Send + 'static) {
+fn spawn_reader<R: std::io::Read + Send + 'static>(
+    stream: Option<R>,
+    sink: impl Fn(String) + Send + 'static,
+) {
     let Some(stream) = stream else { return };
     std::thread::spawn(move || {
         let reader = BufReader::new(stream);
@@ -2178,9 +2604,12 @@ fn kill_game(args: &[Value]) -> Result<Value, String> {
     entry.stopping.store(true, Ordering::SeqCst);
     let proc = entry.child.lock().unwrap().clone();
     let result = (|| -> Result<Value, String> {
-        let Some(proc) = proc else { return Err("游戏仍在准备启动，请稍后重试".into()) };
+        let Some(proc) = proc else {
+            return Err("游戏仍在准备启动，请稍后重试".into());
+        };
         request_game_window_close(proc.pid);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(GRACEFUL_STOP_MS);
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_millis(GRACEFUL_STOP_MS);
         while std::time::Instant::now() < deadline {
             if child_exited(&proc) {
                 return Ok(json!({ "requiresForce": false }));
@@ -2240,7 +2669,9 @@ fn restart_game(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
             return Err("已有重启请求正在处理".into());
         }
         let matches = match (&invocation, &target_token) {
-            (Some(inv), Some(_)) => inv.version_id == version_id && installer::same_path(&inv.folder, &folder),
+            (Some(inv), Some(_)) => {
+                inv.version_id == version_id && installer::same_path(&inv.folder, &folder)
+            }
             _ => false,
         };
         if !matches {
@@ -2251,7 +2682,8 @@ fn restart_game(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
             let proc = entry.child.lock().unwrap().clone();
             if let Some(proc) = proc {
                 request_game_window_close(proc.pid);
-                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(GRACEFUL_STOP_MS);
+                let deadline =
+                    std::time::Instant::now() + std::time::Duration::from_millis(GRACEFUL_STOP_MS);
                 let mut exited = false;
                 while std::time::Instant::now() < deadline {
                     if child_exited(&proc) {

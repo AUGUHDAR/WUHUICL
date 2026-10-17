@@ -45,7 +45,8 @@ fn write_meta(app: &tauri::AppHandle, meta: &Value) {
 
 /// 解析最新发布号与校验值；失败返回 Err，调用方可退回缓存。
 pub fn resolve_latest() -> Result<(String, String), String> {
-    let page = crate::net::get_text(LATEST_API, 12_000).map_err(|e| format!("版本查询失败：{}", e))?;
+    let page =
+        crate::net::get_text(LATEST_API, 12_000).map_err(|e| format!("版本查询失败：{}", e))?;
     let v: Value = serde_json::from_str(&page).map_err(|_| "版本接口返回异常".to_string())?;
     let tag = v["tag_name"].as_str().unwrap_or("").trim().to_string();
     if tag.is_empty() {
@@ -78,7 +79,9 @@ pub fn sha256_of(path: &Path) -> Result<String, String> {
     let mut buf = vec![0u8; 1 << 16];
     let mut reader = std::io::BufReader::new(file);
     loop {
-        let n = reader.read(&mut buf).map_err(|e| format!("读取失败：{}", e))?;
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("读取失败：{}", e))?;
         if n == 0 {
             break;
         }
@@ -88,9 +91,13 @@ pub fn sha256_of(path: &Path) -> Result<String, String> {
 }
 
 fn emit_progress(app: &tauri::AppHandle, stage: &str, done: u64, total: Option<u64>, text: &str) {
-    let _ = app.emit_to("main", "vlcli:progress", json!({
-        "stage": stage, "bytes": done, "total": total, "text": text,
-    }));
+    let _ = app.emit_to(
+        "main",
+        "vlcli:progress",
+        json!({
+            "stage": stage, "bytes": done, "total": total, "text": text,
+        }),
+    );
 }
 
 /// 确保本地有可用的 CLI；force=true 时即使版本一致也重下。
@@ -117,9 +124,12 @@ pub fn ensure(app: &tauri::AppHandle, force: bool) -> Value {
     if !force && cached_version == tag && target.is_file() {
         match sha256_of(&target) {
             Ok(actual) if actual == sha => {
-                write_meta(app, &json!({ "version": tag, "sha256": sha,
+                write_meta(
+                    app,
+                    &json!({ "version": tag, "sha256": sha,
                     "updatedAt": meta["updatedAt"].clone(), "checkedAt": crate::download::now_ms(),
-                    "bytes": meta["bytes"].clone() }));
+                    "bytes": meta["bytes"].clone() }),
+                );
                 return json!({ "ok": true, "version": tag, "cached": true, "path": target.to_string_lossy() });
             }
             Ok(_) => {
@@ -130,12 +140,18 @@ pub fn ensure(app: &tauri::AppHandle, force: bool) -> Value {
     }
 
     emit_progress(app, "download", 0, None, "正在准备联机组件…");
-    let urls = vec![format!("{}{}/{}", GH_ASSET, tag, ASSET), format!("{}{}/{}", GITEE_ASSET, tag, ASSET)];
+    let urls = vec![
+        format!("{}{}/{}", GH_ASSET, tag, ASSET),
+        format!("{}{}/{}", GITEE_ASSET, tag, ASSET),
+    ];
     match fetch(&urls, &target, &sha, app) {
         Ok(bytes) => {
-            write_meta(app, &json!({ "version": tag, "sha256": sha, "updatedAt": crate::download::now_ms(),
+            write_meta(
+                app,
+                &json!({ "version": tag, "sha256": sha, "updatedAt": crate::download::now_ms(),
                 "checkedAt": crate::download::now_ms(),
-                "bytes": bytes }));
+                "bytes": bytes }),
+            );
             emit_progress(app, "ready", bytes, Some(bytes), "联机组件就绪");
             json!({ "ok": true, "version": tag, "path": target.to_string_lossy(), "downloaded": true })
         }
@@ -162,7 +178,12 @@ fn fetch(urls: &[String], target: &Path, sha: &str, app: &tauri::AppHandle) -> R
     Err(last)
 }
 
-fn download_one(url: &str, target: &Path, sha: &str, app: &tauri::AppHandle) -> Result<u64, String> {
+fn download_one(
+    url: &str,
+    target: &Path,
+    sha: &str,
+    app: &tauri::AppHandle,
+) -> Result<u64, String> {
     let resp = crate::net::open_stream(url, &[], None)?;
     let total = resp
         .headers()
@@ -181,7 +202,9 @@ fn download_one(url: &str, target: &Path, sha: &str, app: &tauri::AppHandle) -> 
     let mut last_emit = 0u64;
     let mut buf = [0u8; 1 << 16];
     loop {
-        let n = stream.read(&mut buf).map_err(|e| format!("下载中断：{}", e))?;
+        let n = stream
+            .read(&mut buf)
+            .map_err(|e| format!("下载中断：{}", e))?;
         if n == 0 {
             break;
         }
@@ -213,7 +236,11 @@ pub fn probe(app: &tauri::AppHandle) -> Value {
     if !target.is_file() {
         return json!({ "ok": false, "error": "组件尚未就绪" });
     }
-    match crate::vlcli::cmd::run(&target, &["--version".into()], std::time::Duration::from_secs(8)) {
+    match crate::vlcli::cmd::run(
+        &target,
+        &["--version".into()],
+        std::time::Duration::from_secs(8),
+    ) {
         Ok(v) => v,
         Err(e) => json!({ "ok": false, "error": e.message }),
     }

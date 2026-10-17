@@ -25,7 +25,7 @@ use serde_json::{Map, Number, Value};
 use std::sync::Arc;
 
 use crate::vl::punchprofiles::{
-    AGGRESSIVE, DEFAULT, EASY_SYM_DUAL, FAST_LANE, HARDSYM, PunchProfile, V100,
+    PunchProfile, AGGRESSIVE, DEFAULT, EASY_SYM_DUAL, FAST_LANE, HARDSYM, V100,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
@@ -88,7 +88,11 @@ pub fn select_strategy(
         _ => return PunchStrategy::DIRECT_WITH_REVERSE_PARALLEL,
     };
     if local == NatClass::UNKNOWN || remote == NatClass::UNKNOWN {
-        let other = if local == NatClass::UNKNOWN { remote } else { local };
+        let other = if local == NatClass::UNKNOWN {
+            remote
+        } else {
+            local
+        };
         return if symmetric(other) {
             PunchStrategy::REVERSE_FIRST
         } else {
@@ -289,21 +293,32 @@ pub fn next_params(
     if let Some(failure) = failure {
         match failure {
             FailureReason::NO_RESPONSE => {
-                p.port_range = js_min(p.port_range * TUNER.port_range_multiplier, TUNER.max_port_range);
-                p.timeout_ms = js_min(p.timeout_ms + TUNER.timeout_increment_ms, TUNER.max_timeout_ms);
+                p.port_range = js_min(
+                    p.port_range * TUNER.port_range_multiplier,
+                    TUNER.max_port_range,
+                );
+                p.timeout_ms = js_min(
+                    p.timeout_ms + TUNER.timeout_increment_ms,
+                    TUNER.max_timeout_ms,
+                );
                 p.send_min_rounds = 3.0;
                 p.send_min_pass = 3.0;
             }
             FailureReason::PREDICTION_OFF => {
                 p = from_profile(&HARDSYM);
-                p.port_range = js_min(p.port_range * TUNER.port_range_multiplier, TUNER.max_port_range);
+                p.port_range = js_min(
+                    p.port_range * TUNER.port_range_multiplier,
+                    TUNER.max_port_range,
+                );
                 p.send_min_rounds = 3.0;
                 p.send_min_pass = 3.0;
             }
             FailureReason::RESPONSE_NO_ACK => {
                 // 夹住下限 punchPolicy.ts:90
-                p.send_interval =
-                    js_max((p.send_interval / TUNER.send_interval_divisor).trunc(), TUNER.min_send_interval_ms);
+                p.send_interval = js_max(
+                    (p.send_interval / TUNER.send_interval_divisor).trunc(),
+                    TUNER.min_send_interval_ms,
+                );
                 p.send_min_pass = 3.0;
             }
             FailureReason::FIREWALL_DETECTED => p.skip_direct_punch = true,
@@ -326,8 +341,7 @@ pub fn next_params(
         if let Some(result) = result {
             if result.elapsed_ms > 0.0 {
                 if result.elapsed_ms > 10000.0 {
-                    p.timeout_ms =
-                        js_min((p.timeout_ms * 3.0 / 2.0).trunc(), TUNER.max_timeout_ms);
+                    p.timeout_ms = js_min((p.timeout_ms * 3.0 / 2.0).trunc(), TUNER.max_timeout_ms);
                 } else if result.elapsed_ms < 3000.0 && failure == FailureReason::NO_RESPONSE {
                     p.port_range = js_min(
                         p.port_range * TUNER.port_range_multiplier,
@@ -339,8 +353,10 @@ pub fn next_params(
     }
     // 末期收紧超时 punchPolicy.ts:107
     if cycle >= max_cycles - 2.0 && p.timeout_ms > TUNER.late_cycle_timeout_ms {
-        p.timeout_ms =
-            js_max((p.timeout_ms * 3.0 / 4.0).trunc(), TUNER.late_cycle_timeout_ms);
+        p.timeout_ms = js_max(
+            (p.timeout_ms * 3.0 / 4.0).trunc(),
+            TUNER.late_cycle_timeout_ms,
+        );
     }
     p
 }
@@ -420,15 +436,15 @@ pub fn delta_predict(ports: &[f64]) -> f64 {
     if ports.len() < 2 {
         return -1.0;
     }
-    let mut sorted: Vec<f64> = ports[1..].iter().enumerate().map(|(i, p)| *p - ports[i]).collect();
+    let mut sorted: Vec<f64> = ports[1..]
+        .iter()
+        .enumerate()
+        .map(|(i, p)| *p - ports[i])
+        .collect();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let trim = (sorted.len() as f64 / 4.0).trunc() as usize;
     let end = sorted.len().saturating_sub(trim);
-    let values: &[f64] = if trim < end {
-        &sorted[trim..end]
-    } else {
-        &[]
-    };
+    let values: &[f64] = if trim < end { &sorted[trim..end] } else { &[] };
     let mut ema = match values.first() {
         Some(value) => *value,
         None => f64::NAN,
@@ -562,7 +578,10 @@ impl PunchRounds {
             return self.profile.fallback_cycles as f64;
         }
         if symmetric(self.local) {
-            js_max(2.0, js_min(self.reachable, self.profile.max_sym_cycles as f64))
+            js_max(
+                2.0,
+                js_min(self.reachable, self.profile.max_sym_cycles as f64),
+            )
         } else {
             js_max(1.0, js_min(self.reachable, self.profile.max_cycles as f64))
         }
@@ -756,7 +775,9 @@ fn js_number_value(real: f64) -> Value {
     if real.fract() == 0.0 && real.abs() < 9_007_199_254_740_992.0 {
         return Value::from(real as i64);
     }
-    Number::from_f64(real).map(Value::Number).unwrap_or(Value::Null)
+    Number::from_f64(real)
+        .map(Value::Number)
+        .unwrap_or(Value::Null)
 }
 
 fn ser_f64<S: Serializer>(value: &f64, serializer: S) -> Result<S::Ok, S::Error> {
@@ -769,9 +790,8 @@ fn ser_f64_list_opt<S: Serializer>(
 ) -> Result<S::Ok, S::Error> {
     match value {
         None => serializer.serialize_none(),
-        Some(items) => {
-            Value::Array(items.iter().map(|item| js_number_value(*item)).collect()).serialize(serializer)
-        }
+        Some(items) => Value::Array(items.iter().map(|item| js_number_value(*item)).collect())
+            .serialize(serializer),
     }
 }
 
@@ -807,7 +827,11 @@ fn js_number_text(value: f64) -> String {
     if value.is_nan() {
         "NaN".to_string()
     } else if value.is_infinite() {
-        if value > 0.0 { "Infinity".to_string() } else { "-Infinity".to_string() }
+        if value > 0.0 {
+            "Infinity".to_string()
+        } else {
+            "-Infinity".to_string()
+        }
     } else if value == 0.0 {
         "0".to_string()
     } else if value.fract() == 0.0 && value.abs() < 9_007_199_254_740_992.0 {
@@ -832,7 +856,16 @@ mod tests {
         profile_name(profile)
     }
 
-    fn result(sockets_tried: f64, punch: f64, ack: f64, delta: f64, elapsed: f64, firewall: bool, prediction: bool, success: bool) -> PunchResult {
+    fn result(
+        sockets_tried: f64,
+        punch: f64,
+        ack: f64,
+        delta: f64,
+        elapsed: f64,
+        firewall: bool,
+        prediction: bool,
+        success: bool,
+    ) -> PunchResult {
         PunchResult {
             sockets_tried,
             sockets_received_punch: punch,
@@ -848,7 +881,12 @@ mod tests {
     // 区分：16 格 NAT 组合的判定先后（UNKNOWN 短路 / 双对称 / CONE×CONE / 单侧对称回落）
     #[test]
     fn recommend_profile_matrix() {
-        let rows = [NatClass::UNKNOWN, NatClass::CONE, NatClass::EASY_SYM, NatClass::HARD_SYM];
+        let rows = [
+            NatClass::UNKNOWN,
+            NatClass::CONE,
+            NatClass::EASY_SYM,
+            NatClass::HARD_SYM,
+        ];
         let expect = [
             ["AGGRESSIVE", "AGGRESSIVE", "AGGRESSIVE", "AGGRESSIVE"],
             ["AGGRESSIVE", "FAST_LANE", "V100", "AGGRESSIVE"],
@@ -917,10 +955,22 @@ mod tests {
         }
         // 区分：legacy 短路优先级高于空值与已知识别
         assert_eq!(select_strategy(None, None, 0.0, true), DIRECT_ONLY);
-        assert_eq!(select_strategy(Some(CONE), Some(CONE), 0.0, true), DIRECT_ONLY);
-        assert_eq!(select_strategy(None, Some(CONE), 0.0, false), DIRECT_WITH_REVERSE_PARALLEL);
-        assert_eq!(select_strategy(Some(CONE), None, 0.0, false), DIRECT_WITH_REVERSE_PARALLEL);
-        assert_eq!(select_strategy(Some(HARD_SYM), Some(CONE), -1.0, false), REVERSE_THEN_FORWARD);
+        assert_eq!(
+            select_strategy(Some(CONE), Some(CONE), 0.0, true),
+            DIRECT_ONLY
+        );
+        assert_eq!(
+            select_strategy(None, Some(CONE), 0.0, false),
+            DIRECT_WITH_REVERSE_PARALLEL
+        );
+        assert_eq!(
+            select_strategy(Some(CONE), None, 0.0, false),
+            DIRECT_WITH_REVERSE_PARALLEL
+        );
+        assert_eq!(
+            select_strategy(Some(HARD_SYM), Some(CONE), -1.0, false),
+            REVERSE_THEN_FORWARD
+        );
     }
 
     // 区分：PREDICTION_OFF 前置三条件与 firewall 抑制、delta 阈值 100 是 > 不是 >=、
@@ -937,11 +987,15 @@ mod tests {
             FailureReason::FIREWALL_DETECTED
         );
         assert_eq!(
-            classify_failure(Some(&result(1.0, 1.0, 0.0, 101.0, 0.0, false, false, false))),
+            classify_failure(Some(&result(
+                1.0, 1.0, 0.0, 101.0, 0.0, false, false, false
+            ))),
             FailureReason::PREDICTION_OFF
         );
         assert_eq!(
-            classify_failure(Some(&result(1.0, 1.0, 0.0, 100.0, 0.0, false, false, false))),
+            classify_failure(Some(&result(
+                1.0, 1.0, 0.0, 100.0, 0.0, false, false, false
+            ))),
             FailureReason::RESPONSE_NO_ACK
         );
         assert_eq!(
@@ -997,7 +1051,13 @@ mod tests {
         assert_eq!(p.send_min_rounds, 0.0);
 
         // PREDICTION_OFF 整包换成 HARDSYM：portRange min(500*2,500)=500、timeout 不 +4000
-        let p = next_params(&DEFAULT, 0.0, 8.0, Some(FailureReason::PREDICTION_OFF), None);
+        let p = next_params(
+            &DEFAULT,
+            0.0,
+            8.0,
+            Some(FailureReason::PREDICTION_OFF),
+            None,
+        );
         assert_eq!(p.port_range, 500.0);
         assert_eq!(p.timeout_ms, 30000.0);
         assert_eq!(p.send_interval, 150.0);
@@ -1007,29 +1067,65 @@ mod tests {
         assert_eq!(p.send_min_pass, 3.0);
 
         // RESPONSE_NO_ACK：trunc(200/2)=100；FAST_LANE 100/2=50 恰落下限；再小也被夹住
-        let p = next_params(&DEFAULT, 0.0, 8.0, Some(FailureReason::RESPONSE_NO_ACK), None);
+        let p = next_params(
+            &DEFAULT,
+            0.0,
+            8.0,
+            Some(FailureReason::RESPONSE_NO_ACK),
+            None,
+        );
         assert_eq!(p.send_interval, 100.0);
         assert_eq!(p.send_min_pass, 3.0);
         assert_eq!(p.send_min_rounds, 0.0);
-        let p = next_params(&FAST_LANE, 0.0, 8.0, Some(FailureReason::RESPONSE_NO_ACK), None);
+        let p = next_params(
+            &FAST_LANE,
+            0.0,
+            8.0,
+            Some(FailureReason::RESPONSE_NO_ACK),
+            None,
+        );
         assert_eq!(p.send_interval, 50.0);
         assert_eq!(p.port_range, 20.0);
 
-        let p = next_params(&DEFAULT, 0.0, 8.0, Some(FailureReason::FIREWALL_DETECTED), None);
+        let p = next_params(
+            &DEFAULT,
+            0.0,
+            8.0,
+            Some(FailureReason::FIREWALL_DETECTED),
+            None,
+        );
         assert!(p.skip_direct_punch);
         assert_eq!(p.port_range, 100.0);
         assert_eq!(p.timeout_ms, 12000.0);
 
         let hit = result(1.0, 1.0, 1.0, 100.0, 0.0, false, false, true);
-        let p = next_params(&DEFAULT, 0.0, 8.0, Some(FailureReason::PARTIAL_SUCCESS), Some(&hit));
+        let p = next_params(
+            &DEFAULT,
+            0.0,
+            8.0,
+            Some(FailureReason::PARTIAL_SUCCESS),
+            Some(&hit),
+        );
         assert!(p.reuse_successful_sockets);
         assert_eq!(p.successful_port_range, Some(vec![95.0, 105.0]));
         let zero = result(1.0, 1.0, 1.0, 0.0, 0.0, false, false, true);
-        let p = next_params(&DEFAULT, 0.0, 8.0, Some(FailureReason::PARTIAL_SUCCESS), Some(&zero));
+        let p = next_params(
+            &DEFAULT,
+            0.0,
+            8.0,
+            Some(FailureReason::PARTIAL_SUCCESS),
+            Some(&zero),
+        );
         assert!(!p.reuse_successful_sockets);
         assert_eq!(p.successful_port_range, None);
         let half = result(1.0, 1.0, 1.0, 0.5, 0.0, false, false, true);
-        let p = next_params(&DEFAULT, 0.0, 8.0, Some(FailureReason::PARTIAL_SUCCESS), Some(&half));
+        let p = next_params(
+            &DEFAULT,
+            0.0,
+            8.0,
+            Some(FailureReason::PARTIAL_SUCCESS),
+            Some(&half),
+        );
         assert_eq!(p.successful_port_range, Some(vec![-4.5, 5.5]));
 
         let p = next_params(&DEFAULT, 0.0, 8.0, Some(FailureReason::ACK_TIMEOUT), None);
@@ -1039,25 +1135,61 @@ mod tests {
 
         // elapsed>10000：timeout=min(trunc(16000*3/2),30000)=24000
         let slow = result(1.0, 0.0, 0.0, 0.0, 12000.0, false, false, false);
-        let p = next_params(&DEFAULT, 0.0, 8.0, Some(FailureReason::NO_RESPONSE), Some(&slow));
+        let p = next_params(
+            &DEFAULT,
+            0.0,
+            8.0,
+            Some(FailureReason::NO_RESPONSE),
+            Some(&slow),
+        );
         assert_eq!(p.timeout_ms, 24000.0);
         assert_eq!(p.port_range, 200.0);
         // elapsed<3000 且仅 NO_RESPONSE：portRange 连乘两次 100→200→400
         let fast = result(1.0, 0.0, 0.0, 0.0, 2000.0, false, false, false);
-        let p = next_params(&DEFAULT, 0.0, 8.0, Some(FailureReason::NO_RESPONSE), Some(&fast));
+        let p = next_params(
+            &DEFAULT,
+            0.0,
+            8.0,
+            Some(FailureReason::NO_RESPONSE),
+            Some(&fast),
+        );
         assert_eq!(p.port_range, 400.0);
         assert_eq!(p.timeout_ms, 16000.0);
-        let p = next_params(&HARDSYM, 0.0, 8.0, Some(FailureReason::NO_RESPONSE), Some(&fast));
+        let p = next_params(
+            &HARDSYM,
+            0.0,
+            8.0,
+            Some(FailureReason::NO_RESPONSE),
+            Some(&fast),
+        );
         assert_eq!(p.port_range, 500.0);
-        let p = next_params(&DEFAULT, 0.0, 8.0, Some(FailureReason::ACK_TIMEOUT), Some(&fast));
+        let p = next_params(
+            &DEFAULT,
+            0.0,
+            8.0,
+            Some(FailureReason::ACK_TIMEOUT),
+            Some(&fast),
+        );
         assert_eq!(p.port_range, 100.0);
         // HARDSYM 30000*3/2=45000 夹到 30000
-        let p = next_params(&HARDSYM, 0.0, 8.0, Some(FailureReason::NO_RESPONSE), Some(&slow));
+        let p = next_params(
+            &HARDSYM,
+            0.0,
+            8.0,
+            Some(FailureReason::NO_RESPONSE),
+            Some(&slow),
+        );
         assert_eq!(p.timeout_ms, 30000.0);
         assert_eq!(p.port_range, 500.0);
         // elapsed=0 不进自适应
         let idle = result(1.0, 0.0, 0.0, 0.0, 0.0, false, false, false);
-        let p = next_params(&DEFAULT, 0.0, 8.0, Some(FailureReason::NO_RESPONSE), Some(&idle));
+        let p = next_params(
+            &DEFAULT,
+            0.0,
+            8.0,
+            Some(FailureReason::NO_RESPONSE),
+            Some(&idle),
+        );
         assert_eq!(p.port_range, 200.0);
         assert_eq!(p.timeout_ms, 16000.0);
     }
@@ -1129,7 +1261,10 @@ mod tests {
         assert_eq!(linear_regression_predict(&[1000.0, 1000.0, 1000.0]), 1000.0);
         assert_eq!(linear_regression_predict(&[5000.0, 5000.0, 5000.0]), 5000.0);
         assert_eq!(linear_regression_predict(&[1000.0, 1100.0]), 1200.0);
-        assert_eq!(linear_regression_predict(&[25565.0, 25565.0, 25566.0]), 25566.0);
+        assert_eq!(
+            linear_regression_predict(&[25565.0, 25565.0, 25566.0]),
+            25566.0
+        );
         assert_eq!(linear_regression_predict(&[1000.0, 900.0, 800.0]), 700.0);
     }
 
@@ -1139,11 +1274,20 @@ mod tests {
         assert_eq!(delta_predict(&[]), -1.0);
         assert_eq!(delta_predict(&[1000.0]), -1.0);
         assert_eq!(delta_predict(&[1000.0, 1100.0, 1200.0]), 1300.0);
-        assert_eq!(delta_predict(&[1000.0, 1010.0, 1020.0, 1030.0, 1040.0]), 1050.0);
+        assert_eq!(
+            delta_predict(&[1000.0, 1010.0, 1020.0, 1030.0, 1040.0]),
+            1050.0
+        );
         // 排序后 [-50,10,10,100] 修剪成 [10,10] → 1070+10；不排序或漏修剪会得 1044 / 1103
-        assert_eq!(delta_predict(&[1000.0, 1100.0, 1050.0, 1060.0, 1070.0]), 1080.0);
+        assert_eq!(
+            delta_predict(&[1000.0, 1100.0, 1050.0, 1060.0, 1070.0]),
+            1080.0
+        );
         assert_eq!(delta_predict(&[1000.0, 1000.0]), 1000.0);
-        assert_eq!(delta_predict(&[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0]), 110.0);
+        assert_eq!(
+            delta_predict(&[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0]),
+            110.0
+        );
     }
 
     // 区分：两支都正才加权、range 三档阈值的 >=、65535/1024 双向夹取、
@@ -1171,9 +1315,13 @@ mod tests {
         assert_eq!(p.range, 100.0);
         let p = predict(&[1000.0, 1025.0, 1050.0, 1075.0, 1100.0]);
         assert_eq!(p.range, 64.0);
-        let p = predict(&[1000.0, 1020.0, 1040.0, 1060.0, 1080.0, 1100.0, 1120.0, 1140.0, 1160.0]);
+        let p = predict(&[
+            1000.0, 1020.0, 1040.0, 1060.0, 1080.0, 1100.0, 1120.0, 1140.0, 1160.0,
+        ]);
         assert_eq!(p.range, 64.0);
-        let p = predict(&[1000.0, 1020.0, 1040.0, 1060.0, 1080.0, 1100.0, 1120.0, 1140.0, 1160.0, 1180.0]);
+        let p = predict(&[
+            1000.0, 1020.0, 1040.0, 1060.0, 1080.0, 1100.0, 1120.0, 1140.0, 1160.0, 1180.0,
+        ]);
         assert_eq!(p.range, 32.0);
         let p = predict(&[70000.0, 70100.0, 70200.0]);
         assert_eq!(p.predicted_port, 65535.0);
@@ -1194,15 +1342,24 @@ mod tests {
         );
         assert_eq!(generate_target_ports(25565.0, 0.0), vec![25565.0]);
         assert_eq!(generate_target_ports(25565.0, -1.0), vec![25565.0]);
-        assert_eq!(generate_target_ports(1024.0, 2.0), vec![1024.0, 1025.0, 1026.0]);
-        assert_eq!(generate_target_ports(65535.0, 2.0), vec![65535.0, 65534.0, 65533.0]);
+        assert_eq!(
+            generate_target_ports(1024.0, 2.0),
+            vec![1024.0, 1025.0, 1026.0]
+        );
+        assert_eq!(
+            generate_target_ports(65535.0, 2.0),
+            vec![65535.0, 65534.0, 65533.0]
+        );
         let wide = generate_target_ports(10.0, 1000.0);
         assert_eq!(wide.len(), 1001);
         assert_eq!(wide.first(), Some(&10.0));
         assert_eq!(wide.last(), Some(&1010.0));
         assert_eq!(wide[1], 11.0);
         // 下探一侧被 lo 全部挡住（10-offset < 1024），上探一侧仍逐格铺到 hi
-        assert_eq!(generate_target_ports(1025.0, 2.0), vec![1025.0, 1026.0, 1024.0, 1027.0]);
+        assert_eq!(
+            generate_target_ports(1025.0, 2.0),
+            vec![1025.0, 1026.0, 1024.0, 1027.0]
+        );
     }
 
     // 区分：重试延迟 punchRetryDelayMs*2^(attempt-1) 的自增时机（attempt++）、
@@ -1403,7 +1560,11 @@ mod tests {
         let mut params = from_profile(&DEFAULT);
         params.successful_port_range = Some(vec![95.0, 105.0]);
         let text = serde_json::to_string(&params).unwrap();
-        assert!(text.contains("\"successfulPortRange\":[95,105]"), "{}", text);
+        assert!(
+            text.contains("\"successfulPortRange\":[95,105]"),
+            "{}",
+            text
+        );
         let back: PunchParams = serde_json::from_str(&text).unwrap();
         assert_eq!(back, params);
         assert_eq!(

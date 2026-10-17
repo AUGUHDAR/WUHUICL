@@ -53,7 +53,11 @@ pub fn valid_turn_endpoint(host: Option<&str>, port: Option<f64>) -> bool {
         return false;
     }
     match port {
-        Some(value) if value.is_finite() && value == value.trunc() && value > 0.0 && value <= 65535.0 => true,
+        Some(value)
+            if value.is_finite() && value == value.trunc() && value > 0.0 && value <= 65535.0 =>
+        {
+            true
+        }
         _ => false,
     }
 }
@@ -102,7 +106,11 @@ fn exchange(
     if socket.send_to(packet, target).is_err() {
         return Err("中继连接已关闭".into());
     }
-    let mut next_repeat = if repeat_ms > 0 { Some(Instant::now() + Duration::from_millis(repeat_ms)) } else { None };
+    let mut next_repeat = if repeat_ms > 0 {
+        Some(Instant::now() + Duration::from_millis(repeat_ms))
+    } else {
+        None
+    };
     let mut sent = 1u32;
     let mut buf = vec![0u8; 4096];
     loop {
@@ -124,7 +132,9 @@ fn exchange(
                 next_repeat = Some(at + Duration::from_millis(repeat_ms));
             }
         }
-        let left = deadline.saturating_duration_since(Instant::now()).min(Duration::from_millis(50));
+        let left = deadline
+            .saturating_duration_since(Instant::now())
+            .min(Duration::from_millis(50));
         let _ = socket.set_read_timeout(Some(left));
         match socket.recv_from(&mut buf) {
             Ok((size, from)) => {
@@ -136,7 +146,9 @@ fn exchange(
                     return Ok(packet_in);
                 }
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {}
+            Err(ref e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut => {}
             Err(_) => return Err("中继连接已关闭".into()),
         }
     }
@@ -166,9 +178,11 @@ pub fn probe_turn_nodes(nodes: &[TurnNode], cancelled: &Arc<AtomicBool>) -> Vec<
             rand::RngCore::fill_bytes(&mut rand::rng(), &mut nonce);
             packet[4..8].copy_from_slice(&nonce);
             packet[8..16].copy_from_slice(&(now_ms() as i64).to_be_bytes());
-            let left = TURN_PROBE_ROUND_TIMEOUT_MS.min((deadline - Instant::now()).as_millis() as u64);
+            let left =
+                TURN_PROBE_ROUND_TIMEOUT_MS.min((deadline - Instant::now()).as_millis() as u64);
             let start = now_ms();
-            let accept = |p: &[u8]| -> bool { is_packet(p, TURN_TYPE_PONG, 24) && p[4..8] == packet[4..8] };
+            let accept =
+                |p: &[u8]| -> bool { is_packet(p, TURN_TYPE_PONG, 24) && p[4..8] == packet[4..8] };
             match exchange(&socket, target, &packet, &accept, left, 0, cancelled) {
                 Ok(_) => {
                     let sample = now_ms() - start;
@@ -264,7 +278,10 @@ impl TurnSession {
         }
         let packet = self.control_packet(rtype);
         let target = SocketAddr::new(
-            self.target.address.parse().unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
+            self.target
+                .address
+                .parse()
+                .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
             self.target.port,
         );
         let _ = self.socket.send_to(&packet, target);
@@ -333,7 +350,10 @@ pub fn turn_session_bind(
     packet[21..23].copy_from_slice(&(ticket.len() as u16).to_be_bytes());
     packet[23..].copy_from_slice(ticket.as_bytes());
 
-    let session_target = RudpTarget { address: target_addr.ip().to_string(), port: target_addr.port() };
+    let session_target = RudpTarget {
+        address: target_addr.ip().to_string(),
+        port: target_addr.port(),
+    };
     let bound = Arc::new(AtomicBool::new(false));
     let closed = Arc::new(AtomicBool::new(false));
     let tcp_slot: Arc<Mutex<Option<TurnTcpChannel>>> = Arc::new(Mutex::new(None));
@@ -343,9 +363,23 @@ pub fn turn_session_bind(
         let accept = |p: &[u8]| -> bool {
             is_packet(p, TURN_TYPE_BOUND, 22) && p[4..20] == session && p[20] == role
         };
-        match exchange(sock, peer, &packet, &accept, TURN_BIND_TIMEOUT_MS, TURN_BIND_REPEAT_MS, cancelled) {
+        match exchange(
+            sock,
+            peer,
+            &packet,
+            &accept,
+            TURN_BIND_TIMEOUT_MS,
+            TURN_BIND_REPEAT_MS,
+            cancelled,
+        ) {
             // ROLE_CONFLICT(4) 在上游语义里是"绑定成功但首包丢了"
-            Ok(result) => if result[21] == 4 { 0 } else { result[21] },
+            Ok(result) => {
+                if result[21] == 4 {
+                    0
+                } else {
+                    result[21]
+                }
+            }
             Err(_) => 5,
         }
     };
@@ -370,7 +404,11 @@ pub fn turn_session_bind(
     }
     if code == 5 {
         // 4600ms×3 轮仍无响应：换 TCP 隧道（turnTcp）
-        let channel = match open_turn_tcp(host, port, &Arc::new(Mutex::new(cancelled.load(Ordering::SeqCst)))) {
+        let channel = match open_turn_tcp(
+            host,
+            port,
+            &Arc::new(Mutex::new(cancelled.load(Ordering::SeqCst))),
+        ) {
             Ok(channel) => channel,
             Err(_) => {
                 return Err("中继绑定失败（UDP 与 TCP 均不可用）".into());
@@ -392,9 +430,12 @@ pub fn turn_session_bind(
             }
         }
         if code == 0 {
-                let session = TurnSession {
+            let session = TurnSession {
                 socket: tcp_socket,
-                target: RudpTarget { address: "127.0.0.1".into(), port: shim.port() },
+                target: RudpTarget {
+                    address: "127.0.0.1".into(),
+                    port: shim.port(),
+                },
                 codec,
                 role,
                 closed,
@@ -476,7 +517,10 @@ mod tests {
         lying[22..24].copy_from_slice(&[0, 9]);
         assert!(codec.decode(&lying).is_none());
         assert!(TurnCodec::new("不是十六进制", 1).is_err());
-        assert_eq!(TurnCodec::new("不是十六进制", 1).unwrap_err(), "中继会话标识无效");
+        assert_eq!(
+            TurnCodec::new("不是十六进制", 1).unwrap_err(),
+            "中继会话标识无效"
+        );
     }
 
     #[test]
@@ -530,7 +574,15 @@ mod tests {
     fn bind_succeeds_and_reports_the_relay_target() {
         let node = fake_node(0);
         let cancelled = Arc::new(AtomicBool::new(false));
-        let session = turn_session_bind(&session_hex(), "127.0.0.1", node.port, "ticket-1", 1, &cancelled).unwrap();
+        let session = turn_session_bind(
+            &session_hex(),
+            "127.0.0.1",
+            node.port,
+            "ticket-1",
+            1,
+            &cancelled,
+        )
+        .unwrap();
         assert_eq!(session.target.address, "127.0.0.1");
         assert_eq!(session.target.port, node.port);
         assert!(*node.hits.lock().unwrap() >= 1);
@@ -542,7 +594,14 @@ mod tests {
         // 上游语义：code 4 = 绑定成功但首个回包丢了
         let node = fake_node(4);
         let cancelled = Arc::new(AtomicBool::new(false));
-        let session = turn_session_bind(&session_hex(), "127.0.0.1", node.port, "ticket-2", 2, &cancelled);
+        let session = turn_session_bind(
+            &session_hex(),
+            "127.0.0.1",
+            node.port,
+            "ticket-2",
+            2,
+            &cancelled,
+        );
         assert!(session.is_ok(), "ROLE_CONFLICT 应当视为绑定成功");
         session.unwrap().close();
     }
@@ -550,9 +609,14 @@ mod tests {
     #[test]
     fn explicit_failure_codes_map_to_the_original_texts() {
         let cancelled = Arc::new(AtomicBool::new(false));
-        for (code, text) in [(1u8, "中继凭据无效"), (2, "中继凭据过期"), (3, "中继会话已满")] {
+        for (code, text) in [
+            (1u8, "中继凭据无效"),
+            (2, "中继凭据过期"),
+            (3, "中继会话已满"),
+        ] {
             let node = fake_node(code);
-            let err = turn_session_bind(&session_hex(), "127.0.0.1", node.port, "t", 1, &cancelled).unwrap_err();
+            let err = turn_session_bind(&session_hex(), "127.0.0.1", node.port, "t", 1, &cancelled)
+                .unwrap_err();
             assert_eq!(err, text, "code={}", code);
         }
     }
@@ -564,12 +628,19 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         drop(listener);
         let cancelled = Arc::new(AtomicBool::new(false));
-        let err = turn_session_bind(&session_hex(), "127.0.0.1", port, "t", 1, &cancelled).unwrap_err();
+        let err =
+            turn_session_bind(&session_hex(), "127.0.0.1", port, "t", 1, &cancelled).unwrap_err();
         assert_eq!(err, "中继绑定失败（UDP 与 TCP 均不可用）");
     }
 
     fn node(id: &str, port: u16) -> TurnNode {
-        TurnNode { id: id.into(), name: None, host: "127.0.0.1".into(), port, std_turn_port: None }
+        TurnNode {
+            id: id.into(),
+            name: None,
+            host: "127.0.0.1".into(),
+            port,
+            std_turn_port: None,
+        }
     }
 
     #[test]
@@ -596,7 +667,8 @@ mod tests {
         packet[0..4].copy_from_slice(&header(TURN_TYPE_PING));
         packet[4..8].copy_from_slice(&[1, 2, 3, 4]);
         let cancelled = AtomicBool::new(false);
-        let accept = |p: &[u8]| -> bool { is_packet(p, TURN_TYPE_PONG, 24) && p[4..8] == [1, 2, 3, 4] };
+        let accept =
+            |p: &[u8]| -> bool { is_packet(p, TURN_TYPE_PONG, 24) && p[4..8] == [1, 2, 3, 4] };
         let got = exchange(&probe, target, &packet, &accept, 1500, 0, &cancelled);
         assert!(got.is_ok(), "exchange(repeat=0) 失败：{:?}", got.err());
     }
@@ -621,7 +693,11 @@ mod tests {
         let cancelled = Arc::new(AtomicBool::new(false));
         let probed = probe_turn_nodes(&[node("live", live_port)], &cancelled);
         assert_eq!(probed.len(), 1);
-        assert!(probed[0].1 >= 0.0, "在线节点必须测出 RTT，实测 {}", probed[0].1);
+        assert!(
+            probed[0].1 >= 0.0,
+            "在线节点必须测出 RTT，实测 {}",
+            probed[0].1
+        );
     }
 
     #[test]
@@ -637,12 +713,19 @@ mod tests {
     #[test]
     fn offline_nodes_sort_last() {
         // 排序口径：rtt<0 视作 Infinity 排最后，其余升序
-        let mut results = vec![("dead".to_string(), -1.0f64), ("fast".to_string(), 12.0), ("slow".to_string(), 80.0)];
+        let mut results = vec![
+            ("dead".to_string(), -1.0f64),
+            ("fast".to_string(), 12.0),
+            ("slow".to_string(), 80.0),
+        ];
         results.sort_by(|a, b| {
             let ka = if a.1 < 0.0 { f64::INFINITY } else { a.1 };
             let kb = if b.1 < 0.0 { f64::INFINITY } else { b.1 };
             ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
         });
-        assert_eq!(results.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), vec!["fast", "slow", "dead"]);
+        assert_eq!(
+            results.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(),
+            vec!["fast", "slow", "dead"]
+        );
     }
 }

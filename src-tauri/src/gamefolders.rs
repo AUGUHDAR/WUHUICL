@@ -17,7 +17,10 @@ use tauri::AppHandle;
 
 /// 去重（pathIdentity）+ 保证恰好一个 isDefault
 fn normalized_folders(app: &AppHandle) -> Vec<Value> {
-    let current = settings::get(app)["folders"].as_array().cloned().unwrap_or_default();
+    let current = settings::get(app)["folders"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut result: Vec<Value> = Vec::new();
     for folder in current {
@@ -54,9 +57,12 @@ fn persist_folders(app: &AppHandle, folders: Vec<Value>, active: Option<&str>) -
     let active_folder = active
         .map(str::to_string)
         .unwrap_or_else(|| current["activeFolder"].as_str().unwrap_or("").to_string());
-    let selected = folders
-        .iter()
-        .find(|f| f["path"].as_str().map(|p| path_identity(p) == path_identity(&active_folder)).unwrap_or(false));
+    let selected = folders.iter().find(|f| {
+        f["path"]
+            .as_str()
+            .map(|p| path_identity(p) == path_identity(&active_folder))
+            .unwrap_or(false)
+    });
     let fallback = folders
         .iter()
         .find(|f| f["isDefault"] == true)
@@ -85,7 +91,10 @@ pub fn list_game_folders(app: &AppHandle) -> Value {
         .find(|f| {
             f["path"]
                 .as_str()
-                .map(|p| path_identity(p) == path_identity(current["activeFolder"].as_str().unwrap_or("")))
+                .map(|p| {
+                    path_identity(p)
+                        == path_identity(current["activeFolder"].as_str().unwrap_or(""))
+                })
                 .unwrap_or(false)
         })
         .cloned();
@@ -100,7 +109,12 @@ pub fn list_game_folders(app: &AppHandle) -> Value {
                 .and_then(|f| f["path"].as_str())
                 .map(str::to_string)
         })
-        .or_else(|| folders.first().and_then(|f| f["path"].as_str()).map(str::to_string))
+        .or_else(|| {
+            folders
+                .first()
+                .and_then(|f| f["path"].as_str())
+                .map(str::to_string)
+        })
         .unwrap_or_default();
     let changed = folders.len() != current["folders"].as_array().map(|a| a.len()).unwrap_or(0)
         || active != current["activeFolder"].as_str().unwrap_or("")
@@ -123,12 +137,20 @@ pub fn list_game_folders(app: &AppHandle) -> Value {
 
 /// 对应原版 assertWritableDownloadFolder：存在性 + 写探测
 fn assert_writable_download_folder(folder: &str) -> Result<(), String> {
-    let meta = std::fs::metadata(folder).map_err(|_| "下载文件夹已不存在，请重新选择".to_string())?;
+    let meta =
+        std::fs::metadata(folder).map_err(|_| "下载文件夹已不存在，请重新选择".to_string())?;
     if !meta.is_dir() {
         return Err("下载文件夹已不存在，请重新选择".into());
     }
-    let probe = Path::new(folder).join(format!(".{}-write-test-{}", DATA_DIR_NAME.trim_start_matches('.'), crate::accounts::uuid_v4()));
-    let write = std::fs::OpenOptions::new().write(true).create_new(true).open(&probe);
+    let probe = Path::new(folder).join(format!(
+        ".{}-write-test-{}",
+        DATA_DIR_NAME.trim_start_matches('.'),
+        crate::accounts::uuid_v4()
+    ));
+    let write = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe);
     match write {
         Ok(_) => {
             let _ = std::fs::remove_file(&probe);
@@ -153,9 +175,12 @@ fn clean_name(value: &str) -> Result<String, String> {
 }
 
 fn find_by_identity<'a>(folders: &'a [Value], input: &str) -> Option<&'a Value> {
-    folders
-        .iter()
-        .find(|f| f["path"].as_str().map(|p| path_identity(p) == path_identity(input)).unwrap_or(false))
+    folders.iter().find(|f| {
+        f["path"]
+            .as_str()
+            .map(|p| path_identity(p) == path_identity(input))
+            .unwrap_or(false)
+    })
 }
 
 // ---------------- 通道实现（对应原版 gameFolders.ts 各导出函数） ----------------
@@ -184,19 +209,34 @@ pub fn add_game_folder(app: &AppHandle, input: &str) -> Result<Value, String> {
 }
 
 /// folders:rename：只改显示名（cleanName 校验）
-pub fn rename_game_folder(app: &AppHandle, input: &str, display_name: &str) -> Result<Value, String> {
+pub fn rename_game_folder(
+    app: &AppHandle,
+    input: &str,
+    display_name: &str,
+) -> Result<Value, String> {
     let identity = path_identity(input);
     let name = clean_name(display_name)?;
     let current = list_game_folders(app);
     let folders = current["folders"].as_array().cloned().unwrap_or_default();
-    if find_by_identity(&folders, input).is_none() && !folders.iter().any(|f| f["path"].as_str().map(|p| path_identity(p) == identity).unwrap_or(false)) {
+    if find_by_identity(&folders, input).is_none()
+        && !folders.iter().any(|f| {
+            f["path"]
+                .as_str()
+                .map(|p| path_identity(p) == identity)
+                .unwrap_or(false)
+        })
+    {
         return Err("文件夹未登记".into());
     }
     let next: Vec<Value> = folders
         .iter()
         .map(|f| {
             let mut f = f.clone();
-            if f["path"].as_str().map(|p| path_identity(p) == identity).unwrap_or(false) {
+            if f["path"]
+                .as_str()
+                .map(|p| path_identity(p) == identity)
+                .unwrap_or(false)
+            {
                 f["name"] = json!(name);
             }
             f
@@ -213,12 +253,22 @@ pub fn remove_game_folder(app: &AppHandle, input: &str) -> Result<Value, String>
     let folders = current["folders"].as_array().cloned().unwrap_or_default();
     let target = folders
         .iter()
-        .find(|f| f["path"].as_str().map(|p| path_identity(p) == identity).unwrap_or(false))
+        .find(|f| {
+            f["path"]
+                .as_str()
+                .map(|p| path_identity(p) == identity)
+                .unwrap_or(false)
+        })
         .cloned()
         .ok_or("文件夹未登记")?;
     let mut next: Vec<Value> = folders
         .iter()
-        .filter(|f| f["path"].as_str().map(|p| path_identity(p) != identity).unwrap_or(true))
+        .filter(|f| {
+            f["path"]
+                .as_str()
+                .map(|p| path_identity(p) != identity)
+                .unwrap_or(true)
+        })
         .cloned()
         .collect();
     if next.is_empty() {
@@ -249,14 +299,19 @@ pub fn set_default_game_folder(app: &AppHandle, input: &str) -> Result<Value, St
     let identity = path_identity(input);
     let current = list_game_folders(app);
     let folders = current["folders"].as_array().cloned().unwrap_or_default();
-    let selected = find_by_identity(&folders, input).cloned().ok_or("文件夹未登记")?;
+    let selected = find_by_identity(&folders, input)
+        .cloned()
+        .ok_or("文件夹未登记")?;
     let selected_path = selected["path"].as_str().unwrap_or("").to_string();
     assert_writable_download_folder(&selected_path)?;
     let next: Vec<Value> = folders
         .iter()
         .map(|f| {
             let mut f = f.clone();
-            f["isDefault"] = json!(f["path"].as_str().map(|p| path_identity(p) == identity).unwrap_or(false));
+            f["isDefault"] = json!(f["path"]
+                .as_str()
+                .map(|p| path_identity(p) == identity)
+                .unwrap_or(false));
             f
         })
         .collect();
@@ -284,7 +339,10 @@ pub fn set_download_game_folder(app: &AppHandle, input: &str) -> Result<Value, S
         .iter()
         .map(|f| {
             let mut f = f.clone();
-            f["isDefault"] = json!(f["path"].as_str().map(|p| path_identity(p) == identity).unwrap_or(false));
+            f["isDefault"] = json!(f["path"]
+                .as_str()
+                .map(|p| path_identity(p) == identity)
+                .unwrap_or(false));
             f
         })
         .collect();
@@ -315,9 +373,7 @@ pub fn scan_game_folder(app: &AppHandle, input: &str) -> Result<Value, String> {
     let folder = find_by_identity(&folders, input)
         .or_else(|| {
             // 允许精确路径匹配（renderer 传回的是登记时的原始路径）
-            folders
-                .iter()
-                .find(|f| f["path"].as_str() == Some(input))
+            folders.iter().find(|f| f["path"].as_str() == Some(input))
         })
         .cloned()
         .ok_or("文件夹未登记")?;
@@ -374,13 +430,16 @@ fn scan_installed_folder_with_errors(app: &AppHandle, root: &str) -> (Vec<Value>
         if !scanned_ids.contains(&name) {
             // 损坏条目不会静默消失：以 incomplete 条目 + errors 返回
             if !json_path.exists() {
-                versions.push(json!({ "id": name, "mcVersion": "未知", "folder": root, "incomplete": true }));
+                versions.push(
+                    json!({ "id": name, "mcVersion": "未知", "folder": root, "incomplete": true }),
+                );
                 errors.push(format!("{}：缺少版本描述 {}.json", name, name));
             } else {
                 match std::fs::read(&json_path)
                     .map_err(|e| e.to_string())
-                    .and_then(|raw| serde_json::from_slice::<Value>(&raw).map_err(|e| e.to_string()))
-                {
+                    .and_then(|raw| {
+                        serde_json::from_slice::<Value>(&raw).map_err(|e| e.to_string())
+                    }) {
                     Err(e) => {
                         versions.push(json!({ "id": name, "mcVersion": "未知", "folder": root, "incomplete": true }));
                         errors.push(format!("{}：版本描述损坏（{}）", name, e));
@@ -398,13 +457,19 @@ fn scan_installed_folder_with_errors(app: &AppHandle, root: &str) -> (Vec<Value>
             .and_then(|raw| serde_json::from_slice::<Value>(&raw).map_err(|e| e.to_string()))
         {
             if let Some(parent) = j.get("inheritsFrom").and_then(|v| v.as_str()) {
-                let parent_local = Path::new(root).join("versions").join(parent).join(format!("{}.json", parent));
+                let parent_local = Path::new(root)
+                    .join("versions")
+                    .join(parent)
+                    .join(format!("{}.json", parent));
                 let parent_base = crate::installer::base_version_json_path_in(
                     &crate::installer::default_folder_path(app),
                     parent,
                 );
                 if !parent_local.exists() && !parent_base.exists() {
-                    if let Some(item) = versions.iter_mut().find(|v| v["id"].as_str() == Some(name.as_str())) {
+                    if let Some(item) = versions
+                        .iter_mut()
+                        .find(|v| v["id"].as_str() == Some(name.as_str()))
+                    {
                         item["incomplete"] = json!(true);
                     }
                     errors.push(format!("{}：继承的版本 {} 缺失或损坏", name, parent));
@@ -418,7 +483,11 @@ fn scan_installed_folder_with_errors(app: &AppHandle, root: &str) -> (Vec<Value>
 // ---------------- invoke 入口 ----------------
 
 /// 统一入口（PORT_CONVENTIONS 铁律 2）：返回 None 表示本模块不认识该通道
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         "folders:list" => Some(Ok(list_game_folders(app))),
         "folders:add" => Some(
@@ -477,7 +546,12 @@ fn folders_open(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
     let folders = state["folders"].as_array().cloned().unwrap_or_default();
     let target = folders
         .iter()
-        .find(|f| f["path"].as_str().map(|fp| same_path(fp, p)).unwrap_or(false))
+        .find(|f| {
+            f["path"]
+                .as_str()
+                .map(|fp| same_path(fp, p))
+                .unwrap_or(false)
+        })
         .cloned()
         .ok_or("文件夹未登记")?;
     let path = target["path"].as_str().unwrap_or("").to_string();

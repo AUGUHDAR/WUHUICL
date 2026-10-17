@@ -39,7 +39,10 @@ pub fn validate(id: &str, value: &Value) -> Result<(), String> {
         None => return Err("未知游戏选项".into()),
     };
     if let Some(choices) = d.get("choices") {
-        if !choices.as_array().map_or(false, |c| c.iter().any(|v| v == value)) {
+        if !choices
+            .as_array()
+            .map_or(false, |c| c.iter().any(|v| v == value))
+        {
             return Err("游戏选项值无效".into());
         }
     } else {
@@ -137,8 +140,11 @@ pub fn set(app: &tauri::AppHandle, change: &Value) -> Result<Value, String> {
         let _ = std::fs::create_dir_all(dir);
     }
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    std::fs::write(
+        &tmp,
+        serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
     Ok(state)
 }

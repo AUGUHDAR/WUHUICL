@@ -17,7 +17,11 @@ pub struct Failure {
 
 impl Failure {
     pub fn of(code: &str, message: impl Into<String>) -> Self {
-        Self { code: code.to_string(), message: message.into(), usage: false }
+        Self {
+            code: code.to_string(),
+            message: message.into(),
+            usage: false,
+        }
     }
 }
 
@@ -48,10 +52,18 @@ pub fn interpret(code: Option<i32>, stdout: &str) -> Result<Value, Failure> {
                 .or(parsed["error"].as_str())
                 .unwrap_or("命令不被支持")
                 .to_string();
-            return Err(Failure { code: "USAGE".into(), message: text, usage: true });
+            return Err(Failure {
+                code: "USAGE".into(),
+                message: text,
+                usage: true,
+            });
         }
         let text = line.unwrap_or(stdout.trim()).chars().take(200).collect();
-        return Err(Failure { code: "USAGE".into(), message: text, usage: true });
+        return Err(Failure {
+            code: "USAGE".into(),
+            message: text,
+            usage: true,
+        });
     }
     let Some(line) = line else {
         return Err(Failure::of("CLI_OUTPUT", "联机组件没有返回内容"));
@@ -62,16 +74,27 @@ pub fn interpret(code: Option<i32>, stdout: &str) -> Result<Value, Failure> {
     if parsed["ok"].as_bool() == Some(true) {
         return Ok(parsed.get("data").cloned().unwrap_or(Value::Null));
     }
-    let api_code = parsed["code"].as_str().or(parsed["error"].as_str()).unwrap_or("CLI_ERROR");
+    let api_code = parsed["code"]
+        .as_str()
+        .or(parsed["error"].as_str())
+        .unwrap_or("CLI_ERROR");
     let message = parsed["message"]
         .as_str()
         .or(parsed["error"].as_str())
         .unwrap_or("联机操作未完成")
         .to_string();
     if api_code == "USAGE" {
-        return Err(Failure { code: api_code.into(), message, usage: true });
+        return Err(Failure {
+            code: api_code.into(),
+            message,
+            usage: true,
+        });
     }
-    Err(Failure { code: api_code.into(), message, usage: false })
+    Err(Failure {
+        code: api_code.into(),
+        message,
+        usage: false,
+    })
 }
 
 pub fn run(bin: &Path, args: &[String], timeout: Duration) -> Result<Value, Failure> {
@@ -151,7 +174,8 @@ mod tests {
 
     #[test]
     fn usage_envelope_keeps_readable_message() {
-        let out = r#"{"ok":false,"code":"USAGE","message":"invalid value \"2\" for flag -timeout"}"#;
+        let out =
+            r#"{"ok":false,"code":"USAGE","message":"invalid value \"2\" for flag -timeout"}"#;
         let e = interpret(Some(2), out).unwrap_err();
         assert!(e.usage);
         assert_eq!(e.code, "USAGE");
@@ -166,7 +190,11 @@ mod tests {
     #[test]
     fn payload_drops_nulls() {
         let v = Value::from(25565);
-        let s = json_payload(&[("name", None), ("hostPort", Some(&v)), ("password", Some(&Value::Null))]);
+        let s = json_payload(&[
+            ("name", None),
+            ("hostPort", Some(&v)),
+            ("password", Some(&Value::Null)),
+        ]);
         assert_eq!(s, r#"{"hostPort":25565}"#);
     }
 }

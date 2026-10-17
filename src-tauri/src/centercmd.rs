@@ -13,7 +13,9 @@ fn validate_instance_name(name: &str) -> Result<(), String> {
         || name.len() > 80
         || name == "."
         || name == ".."
-        || name.chars().any(|c| "\\/:*?\"<>|".contains(c) || (c as u32) < 0x20)
+        || name
+            .chars()
+            .any(|c| "\\/:*?\"<>|".contains(c) || (c as u32) < 0x20)
     {
         return Err("实例名称无效".into());
     }
@@ -21,7 +23,10 @@ fn validate_instance_name(name: &str) -> Result<(), String> {
 }
 
 /// centerTarget：登记校验 + 版本 json + 目录状态（隔离/共享）
-pub(crate) fn center_target(app: &tauri::AppHandle, target: &Value) -> Result<(PathBuf, PathBuf, Value, bool), String> {
+pub(crate) fn center_target(
+    app: &tauri::AppHandle,
+    target: &Value,
+) -> Result<(PathBuf, PathBuf, Value, bool), String> {
     let id = target["id"].as_str().unwrap_or("");
     validate_instance_name(id)?;
     let folder = target["folder"].as_str().unwrap_or("");
@@ -34,7 +39,9 @@ pub(crate) fn center_target(app: &tauri::AppHandle, target: &Value) -> Result<(P
         return Err("游戏文件夹尚未登记".into());
     }
     let base = PathBuf::from(folder);
-    let json = crate::installer::read_version_json_from(&base.join("versions").join(id).join(format!("{id}.json")))?;
+    let json = crate::installer::read_version_json_from(
+        &base.join("versions").join(id).join(format!("{id}.json")),
+    )?;
     let isolated = json["isolated"] == true
         || json["_gameDir"] == true
         || base.join("versions").join(id).join("saves").exists();
@@ -69,7 +76,9 @@ fn assert_instance_idle(app: &tauri::AppHandle, dir: &Path) -> Result<(), String
             continue;
         };
         let folder = v["folder"].as_str().unwrap_or("").to_string();
-        let Ok(json) = crate::installer::read_version_json(app, &folder, vid) else { continue };
+        let Ok(json) = crate::installer::read_version_json(app, &folder, vid) else {
+            continue;
+        };
         let isolated = json["isolated"] == true || json["_gameDir"] == true;
         let d = if isolated {
             PathBuf::from(&folder).join("versions").join(vid)
@@ -88,17 +97,36 @@ pub fn overview(app: &tauri::AppHandle, target: &Value) -> Result<Value, String>
     let (base, dir, json, isolated) = center_target(app, target)?;
     let id = target["id"].as_str().unwrap_or("");
     let mc_version = json["inheritsFrom"].as_str().unwrap_or(id).to_string();
-    let loader = ["forge", "fabric", "quilt", "neoforge"].iter().find(|l| {
-        id.to_lowercase().contains(*l) || json["libraries"].as_array().map(|libs| libs.iter().any(|lib| lib["name"].as_str().unwrap_or("").to_lowercase().contains(*l))).unwrap_or(false)
-    }).map(|l| l.to_string());
+    let loader = ["forge", "fabric", "quilt", "neoforge"]
+        .iter()
+        .find(|l| {
+            id.to_lowercase().contains(*l)
+                || json["libraries"]
+                    .as_array()
+                    .map(|libs| {
+                        libs.iter().any(|lib| {
+                            lib["name"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_lowercase()
+                                .contains(*l)
+                        })
+                    })
+                    .unwrap_or(false)
+        })
+        .map(|l| l.to_string());
     let running = assert_instance_idle(app, &dir).is_err();
     let mut roots = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
             let lower = name.to_lowercase();
-            if name.starts_with(".wuhuicl-") || name.starts_with(".kamucl-") || name.ends_with(".exe") || name.ends_with(".dll")
-                || name == format!("{id}.json") || name == format!("{id}.jar")
+            if name.starts_with(".wuhuicl-")
+                || name.starts_with(".kamucl-")
+                || name.ends_with(".exe")
+                || name.ends_with(".dll")
+                || name == format!("{id}.json")
+                || name == format!("{id}.jar")
             {
                 continue;
             }
@@ -118,7 +146,10 @@ fn small_image(path: &Path) -> Option<String> {
     if bytes.len() > 64 * 1024 * 1024 || bytes[0..4] != [0x89, 0x50, 0x4e, 0x47] {
         return None;
     }
-    Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes)))
+    Some(format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(&bytes)
+    ))
 }
 
 /// center:worlds → InstanceWorld[]（level.dat 元数据 + 最近游玩排序）
@@ -137,16 +168,30 @@ pub fn worlds(_app: &tauri::AppHandle, target: &Value) -> Result<Value, String> 
             match std::fs::read(&level) {
                 Ok(buf) if buf.len() <= 32 * 1024 * 1024 => match nbt::parse_nbt(&buf) {
                     Ok(root) => {
-                        let data = nbt::get(&root, "Data").and_then(nbt::as_compound).map(|c| c.clone()).unwrap_or(root.clone());
+                        let data = nbt::get(&root, "Data")
+                            .and_then(nbt::as_compound)
+                            .map(|c| c.clone())
+                            .unwrap_or(root.clone());
                         if let Some(name) = nbt::get(&data, "LevelName").and_then(nbt::as_str) {
                             row["name"] = json!(name);
                         }
-                        if let Some(v) = nbt::get(&data, "Version").and_then(nbt::as_compound).and_then(|v| nbt::get(v, "Name")).and_then(nbt::as_str) {
+                        if let Some(v) = nbt::get(&data, "Version")
+                            .and_then(nbt::as_compound)
+                            .and_then(|v| nbt::get(v, "Name"))
+                            .and_then(nbt::as_str)
+                        {
                             row["version"] = json!(v);
                         }
-                        let game_type = nbt::get(&data, "GameType").and_then(nbt::as_int).unwrap_or(0);
-                        row["mode"] = json!(["生存", "创造", "冒险", "旁观"].get(game_type as usize).copied().unwrap_or("生存"));
-                        let last_played = nbt::get(&data, "LastPlayed").and_then(nbt::as_int).unwrap_or(0);
+                        let game_type = nbt::get(&data, "GameType")
+                            .and_then(nbt::as_int)
+                            .unwrap_or(0);
+                        row["mode"] = json!(["生存", "创造", "冒险", "旁观"]
+                            .get(game_type as usize)
+                            .copied()
+                            .unwrap_or("生存"));
+                        let last_played = nbt::get(&data, "LastPlayed")
+                            .and_then(nbt::as_int)
+                            .unwrap_or(0);
                         row["lastPlayed"] = json!(last_played);
                         if let Some(icon) = small_image(&e.path().join("icon.png")) {
                             row["icon"] = json!(icon);
@@ -171,7 +216,12 @@ pub fn screenshots(_app: &tauri::AppHandle, target: &Value, page: i64) -> Result
     let mut names: Vec<String> = std::fs::read_dir(&shot_dir)
         .map(|rd| {
             rd.flatten()
-                .filter(|e| e.file_name().to_string_lossy().to_lowercase().ends_with(".png"))
+                .filter(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .to_lowercase()
+                        .ends_with(".png")
+                })
                 .map(|e| e.file_name().to_string_lossy().to_string())
                 .collect()
         })
@@ -233,7 +283,11 @@ fn backup_instance(app: &tauri::AppHandle, target: &Value, op: &Value) -> Result
     let title = op["name"].as_str().unwrap_or("实例手动备份");
     let store = backups_dir(&dir);
     std::fs::create_dir_all(&store).map_err(|e| e.to_string())?;
-    let backup_id = format!("{}-{}", chrono::Local::now().format("%Y%m%d-%H%M%S"), &crate::accounts::uuid_v4()[..8]);
+    let backup_id = format!(
+        "{}-{}",
+        chrono::Local::now().format("%Y%m%d-%H%M%S"),
+        &crate::accounts::uuid_v4()[..8]
+    );
     let zip_path = store.join(format!("{backup_id}.zip"));
     let file = std::fs::File::create(&zip_path).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
@@ -246,7 +300,8 @@ fn backup_instance(app: &tauri::AppHandle, target: &Value, op: &Value) -> Result
         if src.is_dir() {
             continue;
         }
-        zip.start_file(rel_s.clone(), options).map_err(|e| e.to_string())?;
+        zip.start_file(rel_s.clone(), options)
+            .map_err(|e| e.to_string())?;
         let bytes = std::fs::read(&src).map_err(|e| e.to_string())?;
         std::io::Write::write_all(&mut zip, &bytes).map_err(|e| e.to_string())?;
         count += 1;
@@ -257,8 +312,15 @@ fn backup_instance(app: &tauri::AppHandle, target: &Value, op: &Value) -> Result
         "title": title, "automatic": false, "source": id,
         "files": manifest_entries, "metadata": { "type": "instance", "target": target }
     });
-    zip.start_file(".wuhuicl-backup-manifest.json", options).map_err(|e| e.to_string())?;
-    std::io::Write::write_all(&mut zip, serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?.as_slice()).map_err(|e| e.to_string())?;
+    zip.start_file(".wuhuicl-backup-manifest.json", options)
+        .map_err(|e| e.to_string())?;
+    std::io::Write::write_all(
+        &mut zip,
+        serde_json::to_vec_pretty(&manifest)
+            .map_err(|e| e.to_string())?
+            .as_slice(),
+    )
+    .map_err(|e| e.to_string())?;
     zip.finish().map_err(|e| e.to_string())?;
     Ok(json!({ "kind": "backup", "id": backup_id, "files": count }))
 }
@@ -270,7 +332,12 @@ fn walk_collect(root: &Path, dir: &Path) -> Result<Vec<Value>, String> {
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().to_string();
         let lower = name.to_lowercase();
-        if name.starts_with(".wuhuicl-") || name.starts_with(".kamucl-") || lower.ends_with(".exe") || lower.ends_with(".dll") || lower.ends_with(".log") {
+        if name.starts_with(".wuhuicl-")
+            || name.starts_with(".kamucl-")
+            || lower.ends_with(".exe")
+            || lower.ends_with(".dll")
+            || lower.ends_with(".log")
+        {
             continue;
         }
         let rel = e
@@ -295,7 +362,9 @@ fn clone_instance(app: &tauri::AppHandle, target: &Value, op: &Value) -> Result<
     assert_instance_idle(app, &dir)?;
     let name = op["name"].as_str().unwrap_or("");
     validate_instance_name(name)?;
-    let destination = op["destinationFolder"].as_str().unwrap_or(base.to_str().unwrap_or(""));
+    let destination = op["destinationFolder"]
+        .as_str()
+        .unwrap_or(base.to_str().unwrap_or(""));
     let dest = PathBuf::from(destination).join("versions").join(name);
     if dest.exists() {
         return Err("目标实例已存在，请更换名称".into());
@@ -323,8 +392,11 @@ fn clone_instance(app: &tauri::AppHandle, target: &Value, op: &Value) -> Result<
         obj.remove("inheritsFrom");
         obj.remove("gameDirectory");
     }
-    std::fs::write(dest.join(format!("{name}.json")), serde_json::to_string_pretty(&new_json).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    std::fs::write(
+        dest.join(format!("{name}.json")),
+        serde_json::to_string_pretty(&new_json).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     // jar
     let id = target["id"].as_str().unwrap_or("");
     let jar = dir.join(format!("{id}.jar"));
@@ -386,29 +458,47 @@ fn operation(app: &tauri::AppHandle, op: &Value) -> Result<Value, String> {
 }
 
 /// center:file：读取 world/screenshot/preview 文件为 dataURL 或打开目录
-fn center_file(app: &tauri::AppHandle, target: &Value, kind: &str, id: &str) -> Result<Value, String> {
+fn center_file(
+    app: &tauri::AppHandle,
+    target: &Value,
+    kind: &str,
+    id: &str,
+) -> Result<Value, String> {
     let (_, dir, _, _) = center_target(app, target)?;
     let path = match kind {
         "world" => dir.join("saves").join(id),
         "screenshot" => dir.join("screenshots").join(id),
         "preview" => dir.join(id),
         "directory" => {
-            std::process::Command::new("explorer.exe").arg(dir.as_os_str()).spawn().map_err(|e| e.to_string())?;
+            std::process::Command::new("explorer.exe")
+                .arg(dir.as_os_str())
+                .spawn()
+                .map_err(|e| e.to_string())?;
             return Ok(Value::Null);
         }
         other => return Err(format!("未知文件类型：{other}")),
     };
     if kind == "world" {
         // 存档目录打开
-        std::process::Command::new("explorer.exe").arg(path.as_os_str()).spawn().map_err(|e| e.to_string())?;
+        std::process::Command::new("explorer.exe")
+            .arg(path.as_os_str())
+            .spawn()
+            .map_err(|e| e.to_string())?;
         return Ok(Value::Null);
     }
     let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-    Ok(json!(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes))))
+    Ok(json!(format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )))
 }
 
 /// 统一入口
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     let target = || args.first().cloned().unwrap_or(Value::Null);
     match channel {
         "center:overview" => Some(overview(app, &target())),
@@ -419,7 +509,10 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             args.get(1).and_then(|v| v.as_i64()).unwrap_or(0),
         )),
         "center:backups" => Some(backups(app, &target())),
-        "center:operation" => Some(operation(app, &args.first().cloned().unwrap_or(Value::Null))),
+        "center:operation" => Some(operation(
+            app,
+            &args.first().cloned().unwrap_or(Value::Null),
+        )),
         "center:file" => Some(center_file(
             app,
             &target(),

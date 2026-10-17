@@ -11,7 +11,10 @@ use std::sync::{Mutex, OnceLock};
 
 const MAX_METADATA: usize = 64 * 1024;
 
-type Cache = (HashMap<PathBuf, (String, Option<String>)>, VecDeque<PathBuf>);
+type Cache = (
+    HashMap<PathBuf, (String, Option<String>)>,
+    VecDeque<PathBuf>,
+);
 
 enum Parsed {
     /// 解析走到目录尾部：结果（可为无版本证据）进入缓存
@@ -100,13 +103,20 @@ fn parse_evidence(path: &Path, size: u64) -> Result<Parsed, ()> {
             i -= 1;
         }
     }
-    if !found || u16_at(&tail, end + 4).unwrap_or(1) != 0 || u16_at(&tail, end + 6).unwrap_or(1) != 0 {
+    if !found
+        || u16_at(&tail, end + 4).unwrap_or(1) != 0
+        || u16_at(&tail, end + 6).unwrap_or(1) != 0
+    {
         return Ok(Parsed::Skip);
     }
     let count = u16_at(&tail, end + 10).unwrap_or(0) as usize;
     let length = u32_at(&tail, end + 12).unwrap_or(0xffff_ffff);
     let mut cursor = u32_at(&tail, end + 16).unwrap_or(0xffff_ffff) as u64;
-    if count == 0xffff || length == 0xffff_ffff || cursor == 0xffff_ffff || cursor + length as u64 > size {
+    if count == 0xffff
+        || length == 0xffff_ffff
+        || cursor == 0xffff_ffff
+        || cursor + length as u64 > size
+    {
         return Ok(Parsed::Skip);
     }
     let limit = cursor + length as u64;
@@ -117,14 +127,16 @@ fn parse_evidence(path: &Path, size: u64) -> Result<Parsed, ()> {
             return Err(());
         }
         let name_size = u16_at(&central, 28).unwrap_or(0) as usize;
-        let next = cursor + 46
+        let next = cursor
+            + 46
             + name_size as u64
             + u16_at(&central, 30).unwrap_or(0) as u64
             + u16_at(&central, 32).unwrap_or(0) as u64;
         if next > limit {
             return Err(());
         }
-        let name = String::from_utf8_lossy(&reader.read(cursor as i64 + 46, name_size)?).to_string();
+        let name =
+            String::from_utf8_lossy(&reader.read(cursor as i64 + 46, name_size)?).to_string();
         cursor = next;
         if name != "version.json" {
             continue;
@@ -146,11 +158,15 @@ fn parse_evidence(path: &Path, size: u64) -> Result<Parsed, ()> {
         }
         let local_name_size = u16_at(&local, 26).unwrap_or(0) as usize;
         let local_extra = u16_at(&local, 28).unwrap_or(0) as usize;
-        let local_name = String::from_utf8_lossy(&reader.read(offset + 30, local_name_size)?).to_string();
+        let local_name =
+            String::from_utf8_lossy(&reader.read(offset + 30, local_name_size)?).to_string();
         if local_name != name {
             break;
         }
-        let body = reader.read(offset + 30 + local_name_size as i64 + local_extra as i64, compressed)?;
+        let body = reader.read(
+            offset + 30 + local_name_size as i64 + local_extra as i64,
+            compressed,
+        )?;
         let data = if method == 8 {
             let mut inflated = Vec::new();
             DeflateDecoder::new(&body[..])
@@ -165,7 +181,8 @@ fn parse_evidence(path: &Path, size: u64) -> Result<Parsed, ()> {
             break;
         }
         let text = String::from_utf8_lossy(&data).to_string();
-        let parsed = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')).map_err(|_| ())?;
+        let parsed =
+            serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')).map_err(|_| ())?;
         let id = parsed.get("id").and_then(Value::as_str).map(str::to_string);
         if super::instance_metadata::is_minecraft_version_id(id.as_deref()) {
             version = id;
@@ -185,10 +202,13 @@ pub fn read_client_version_evidence(path: &Path) -> Option<String> {
     }
     let current = identity(&md);
     let previous = cache().lock().ok().and_then(|mut guard| {
-        guard
-            .0
-            .get(path)
-            .and_then(|(cached, version)| if cached == &current { Some(version.clone()) } else { None })
+        guard.0.get(path).and_then(|(cached, version)| {
+            if cached == &current {
+                Some(version.clone())
+            } else {
+                None
+            }
+        })
     });
     if let Some(hit) = previous {
         return hit;
@@ -201,7 +221,9 @@ pub fn read_client_version_evidence(path: &Path) -> Option<String> {
                         entry.0.remove(&oldest);
                     }
                 }
-                entry.0.insert(path.to_path_buf(), (current, version.clone()));
+                entry
+                    .0
+                    .insert(path.to_path_buf(), (current, version.clone()));
                 entry.1.push_back(path.to_path_buf());
             }
             version
@@ -232,21 +254,31 @@ pub fn cached_client_version_evidence(chain: &[Value], roots: &[PathBuf]) -> Opt
         if !visited.insert(root.to_string_lossy().to_lowercase()) {
             continue;
         }
-        let Ok(entries) = std::fs::read_dir(root) else { continue };
+        let Ok(entries) = std::fs::read_dir(root) else {
+            continue;
+        };
         for entry in entries.flatten() {
-            let Ok(file_type) = entry.file_type() else { continue };
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
             if !file_type.is_dir() || file_type.is_symlink() {
                 continue;
             }
             let name = entry.file_name().to_string_lossy().to_string();
             let file = entry.path().join(format!("{name}.json"));
-            let Ok(md) = std::fs::symlink_metadata(&file) else { continue };
+            let Ok(md) = std::fs::symlink_metadata(&file) else {
+                continue;
+            };
             if md.is_symlink() {
                 continue;
             }
-            let Ok(raw) = std::fs::read(&file) else { continue };
+            let Ok(raw) = std::fs::read(&file) else {
+                continue;
+            };
             let text = String::from_utf8_lossy(&raw).to_string();
-            let Ok(j) = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) else { continue };
+            let Ok(j) = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')) else {
+                continue;
+            };
             let falsy = |key: &str| {
                 !j.get(key)
                     .and_then(Value::as_str)

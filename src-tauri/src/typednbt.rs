@@ -171,7 +171,9 @@ impl NbtTag {
             NbtPayload::Long(v) => Value::from(*v),
             NbtPayload::Float(v) => json_float(*v as f64),
             NbtPayload::Double(v) => json_float(*v),
-            NbtPayload::ByteArray(v) => Value::Array(v.iter().map(|b| Value::from(*b as i64)).collect()),
+            NbtPayload::ByteArray(v) => {
+                Value::Array(v.iter().map(|b| Value::from(*b as i64)).collect())
+            }
             NbtPayload::String(v) => Value::String(v.clone()),
             NbtPayload::List(v) => Value::Array(v.iter().map(|t| t.to_json()).collect()),
             NbtPayload::Compound(v) => {
@@ -181,7 +183,9 @@ impl NbtTag {
                 }
                 Value::Object(map)
             }
-            NbtPayload::IntArray(v) => Value::Array(v.iter().map(|n| Value::from(*n as i64)).collect()),
+            NbtPayload::IntArray(v) => {
+                Value::Array(v.iter().map(|n| Value::from(*n as i64)).collect())
+            }
             NbtPayload::LongArray(v) => Value::Array(v.iter().map(|n| Value::from(*n)).collect()),
         }
     }
@@ -352,15 +356,9 @@ fn string_from_units(units: &[u16]) -> String {
             && (0xdc00..0xe000).contains(&units[i + 1])
         {
             let pair = 0x1_0000 + (((u as u32 - 0xd800) << 10) | (units[i + 1] as u32 - 0xdc00));
-            (
-                char::from_u32(pair).unwrap_or('\u{fffd}'),
-                2usize,
-            )
+            (char::from_u32(pair).unwrap_or('\u{fffd}'), 2usize)
         } else {
-            (
-                char::from_u32(u as u32).unwrap_or('\u{fffd}'),
-                1usize,
-            )
+            (char::from_u32(u as u32).unwrap_or('\u{fffd}'), 1usize)
         };
         out.push(ch);
         i += step;
@@ -711,9 +709,7 @@ pub fn read_gzip(bytes: &[u8]) -> Result<Vec<u8>, String> {
 
 pub fn gzip(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let mut encoder = GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder
-        .write_all(bytes)
-        .map_err(|e| e.to_string())?;
+    encoder.write_all(bytes).map_err(|e| e.to_string())?;
     encoder.finish().map_err(|e| e.to_string())
 }
 

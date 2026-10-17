@@ -33,7 +33,10 @@ pub fn parse_version_catalog(data: &Value) -> Result<Vec<Value>, String> {
     for value in entries {
         let id = value.get("id").and_then(|v| v.as_str()).unwrap_or("");
         let vtype = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        let release_time = value.get("releaseTime").and_then(|v| v.as_str()).unwrap_or("");
+        let release_time = value
+            .get("releaseTime")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let url = value.get("url").and_then(|v| v.as_str()).unwrap_or("");
         let type_ok = ["release", "snapshot", "old_beta", "old_alpha"].contains(&vtype);
         let time_ok = chrono::DateTime::parse_from_rfc3339(release_time).is_ok()
@@ -61,8 +64,11 @@ fn release_time_ms(v: &Value) -> i64 {
         .and_then(|t| {
             chrono::DateTime::parse_from_rfc3339(t)
                 .ok()
-                .or_else(|| chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S%.fZ").ok()
-                    .map(|n| n.and_utc().fixed_offset()))
+                .or_else(|| {
+                    chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M:%S%.fZ")
+                        .ok()
+                        .map(|n| n.and_utc().fixed_offset())
+                })
                 .map(|d| d.timestamp_millis())
         })
         .unwrap_or(0)
@@ -125,7 +131,10 @@ pub fn fetch_version_catalog(app: &AppHandle, refresh: bool) -> Result<Value, St
         .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
         .and_then(|raw| {
             let versions = parse_version_catalog(&raw).ok()?;
-            let checked_at = raw["checkedAt"].as_i64().or_else(|| raw["fetchedAt"].as_i64()).unwrap_or(0);
+            let checked_at = raw["checkedAt"]
+                .as_i64()
+                .or_else(|| raw["fetchedAt"].as_i64())
+                .unwrap_or(0);
             Some(json!({
                 "versions": versions,
                 "checkedAt": checked_at,
@@ -152,9 +161,15 @@ pub fn fetch_version_catalog(app: &AppHandle, refresh: bool) -> Result<Value, St
             .iter()
             .map(|url| s.spawn(move || fetch_source(url)))
             .collect();
-        handles.into_iter().map(|h| h.join().unwrap_or(Err("线程崩溃".into()))).collect()
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap_or(Err("线程崩溃".into())))
+            .collect()
     });
-    let valid: Vec<Vec<Value>> = results.iter().filter_map(|r| r.as_ref().ok().cloned()).collect();
+    let valid: Vec<Vec<Value>> = results
+        .iter()
+        .filter_map(|r| r.as_ref().ok().cloned())
+        .collect();
     if valid.is_empty() {
         if let Some(c) = cached {
             // 镜像中断期保留已知版本，标记 stale
@@ -196,10 +211,20 @@ pub fn fetch_version_manifest(app: &AppHandle, refresh: bool) -> Result<Value, S
 }
 
 /// 统一入口（PORT_CONVENTIONS 铁律 2）
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
-        "versions:catalog" => Some(fetch_version_catalog(app, args.first().and_then(|v| v.as_bool()).unwrap_or(false))),
-        "versions:manifest" => Some(fetch_version_manifest(app, args.first().and_then(|v| v.as_bool()).unwrap_or(false))),
+        "versions:catalog" => Some(fetch_version_catalog(
+            app,
+            args.first().and_then(|v| v.as_bool()).unwrap_or(false),
+        )),
+        "versions:manifest" => Some(fetch_version_manifest(
+            app,
+            args.first().and_then(|v| v.as_bool()).unwrap_or(false),
+        )),
         _ => None,
     }
 }
