@@ -3,7 +3,7 @@
 //! 状态流：splash ready → 显示玻璃层并推送 boot:state；
 //! 主渲染层逐阶段上报 boot:stage → 全部完成且 renderer-ready 且 painted 且 assembled → reveal。
 
-use super::AppState;
+use crate::app::AppState;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 
