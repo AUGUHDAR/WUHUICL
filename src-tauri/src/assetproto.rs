@@ -37,8 +37,11 @@ pub fn handle<R: tauri::Runtime>(
 
     let candidate = PathBuf::from(&path_param);
     let root = managed_root(app);
+    // 实例自定义图标目录（默认文件夹/.wuhuicl/icons）也在授权范围：
+    // versions:uploadIcon 落在这里，前端 versionIconUrl 走本协议读取
+    let icons_root = crate::installer::icons_dir_generic(app);
     let authorized = normalize(&candidate).ok().and_then(|p| {
-        if p.starts_with(&root) {
+        if p.starts_with(&root) || p.starts_with(&icons_root) {
             Some(p)
         } else {
             None

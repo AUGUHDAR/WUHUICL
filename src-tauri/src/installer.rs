@@ -360,6 +360,31 @@ pub fn icons_dir(app: &AppHandle) -> PathBuf {
     Path::new(&default_folder_path(app)).join(DATA_DIR_NAME).join("icons")
 }
 
+/// 泛型 AppHandle 版本（assetproto 的 UriSchemeContext 里拿到的是 &AppHandle<R>）
+pub fn icons_dir_generic<R: tauri::Runtime>(app: &AppHandle<R>) -> PathBuf {
+    Path::new(&default_folder_path_generic(app))
+        .join(DATA_DIR_NAME)
+        .join("icons")
+}
+
+/// default_folder_path 的泛型版本
+pub fn default_folder_path_generic<R: tauri::Runtime>(app: &AppHandle<R>) -> String {
+    let s = settings::get(app);
+    s["folders"]
+        .as_array()
+        .and_then(|a| a.iter().find(|f| f["isDefault"] == true))
+        .and_then(|f| f["path"].as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            s["activeFolder"]
+                .as_str()
+                .filter(|f| !f.is_empty())
+                .or_else(|| s["gameDir"].as_str())
+                .unwrap_or("")
+                .to_string()
+        })
+}
+
 pub fn instance_thumbnails_dir(folder: &str) -> PathBuf {
     Path::new(folder).join(DATA_DIR_NAME).join("thumbnails")
 }

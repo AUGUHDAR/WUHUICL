@@ -12,6 +12,60 @@ const HISTORY_LIMIT: usize = 30;
 fn skins_dir(app: &tauri::AppHandle) -> PathBuf {
     crate::settings::user_data_dir(app).join("skins")
 }
+
+/// 内置史蒂夫皮肤（classic；嵌入资源随编译期打包，素材取自 PCL Images/Skins/Steve.png）
+static DEFAULT_STEVE_PNG: &[u8] = include_bytes!("../resources/skins/steve.png");
+
+/// 无自定义皮肤的离线账号 → 内置史蒂夫档案条目（与官方 profile 的 skins[0] 同构）
+fn default_steve_skin() -> Option<Value> {
+    Some(json!({
+        "variant": "classic",
+        "dataUrl": format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(DEFAULT_STEVE_PNG)),
+        "name": "Steve（默认）",
+        "builtin": true,
+        "appliedAt": 0
+    }))
+}
+
+// ---------------- 离线皮肤模型选择（PCL McLoginLegacyUuidWithCustomSkin 同款） ----------------
+//
+// 游戏对离线 UUID 的皮肤模型：uuid 32 位 hex 的第 8/16/24/32 位（0 基下标 7/15/23/31）
+// 四个 nibble 异或，奇数 = Alex、偶数 = Steve（PCL McSkinSex）。
+// 想强制某模型就微调 uuid 尾部 5 位 hex“抽卡”，直到抽到目标模型——这是 PCL 的实现方式，
+// 优点是仍保留用户名确定性（同用户名每次算出同一 uuid）。
+
+/// PCL McSkinSex：uuid（去横线 32 位）→ "Steve" | "Alex"
+pub fn skin_sex(uuid_hex: &str) -> &'static str {
+    let h = uuid_hex.replace('-', "");
+    if h.len() != 32 {
+        return "Steve";
+    }
+    let nib = |i: usize| u32::from_str_radix(&h[i..i + 1], 16).unwrap_or(0);
+    if (nib(7) ^ nib(15) ^ nib(23) ^ nib(31)) % 2 == 1 {
+        "Alex"
+    } else {
+        "Steve"
+    }
+}
+
+/// 微调 uuid 尾部 5 位十六进制，直到皮肤模型为目标（PCL 同款“抽卡”；
+/// 结果仍由用户名确定性决定——每次对同一用户名得到同一 uuid）
+pub fn adjust_uuid_for_skin(uuid: &str, want: &str) -> String {
+    let want_steve = want.eq_ignore_ascii_case("steve");
+    let mut h = uuid.replace('-', "");
+    if h.len() != 32 {
+        return uuid.to_string();
+    }
+    let mut tail = u32::from_str_radix(&h[27..], 16).unwrap_or(0);
+    for _ in 0..0xF_FFFF {
+        if (skin_sex(&h) == "Steve") == want_steve {
+            return format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32]);
+        }
+        tail = (tail + 1) & 0xF_FFFF;
+        h.replace_range(27.., &format!("{tail:05X}"));
+    }
+    uuid.to_string()
+}
 fn history_file(app: &tauri::AppHandle) -> PathBuf {
     crate::settings::user_data_dir(app).join("skins.json")
 }
@@ -109,12 +163,15 @@ pub fn get_profile(app: &tauri::AppHandle, refresh: bool, account_id: Option<&st
 fn fetch_profile(app: &tauri::AppHandle, account: &Value, _refresh: bool) -> Result<Value, String> {
     match account["type"].as_str() {
         Some("offline") => {
-            // 离线：本地皮肤库（userData/offline-skins/<accountId>.json）
+            // 离线：本地皮肤库（userData/offline-skins/<accountId>.json）；
+            // 没有自定义皮肤时回退内置史蒂夫（64x64 经典模型，素材同 PCL Images/Skins/Steve.png），
+            // 让头像与皮肤预览有真实默认形象，而不是空白/字母兜底
             let store = crate::settings::user_data_dir(app).join("offline-skins");
             let file = store.join(format!("{}.json", account["id"].as_str().unwrap_or("")));
             let skin = std::fs::read(&file)
                 .ok()
-                .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok());
+                .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
+                .or_else(default_steve_skin);
             Ok(json!({
                 "username": account["username"],
                 "skins": skin.map(|s| Value::Array(vec![s])).unwrap_or_default(),
@@ -503,5 +560,41 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             args.get(2).and_then(|v| v.as_str()).unwrap_or(""),
         )),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn steve_png_is_embedded_and_valid() {
+        assert!(DEFAULT_STEVE_PNG.len() > 100);
+        assert_eq!(&DEFAULT_STEVE_PNG[..8], b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn skin_sex_matches_pcl_parity_rule() {
+        // Tester 离线 uuid f3d28cb0-7225-3cb1-baeb-2dadd2be89ae：
+        // nibbles 0,1,d,e → xor = 2（偶）→ Steve（与实测一致）
+        assert_eq!(skin_sex("f3d28cb0-7225-3cb1-baeb-2dadd2be89ae"), "Steve");
+        // 全 f（奇偶 4 个 f xor = 0，偶）→ Steve
+        assert_eq!(skin_sex("ffffffffffffffffffffffffffffffff"), "Steve");
+    }
+
+    #[test]
+    fn adjust_uuid_reaches_target_skin_and_stays_deterministic() {
+        let base = "f3d28cb0-7225-3cb1-baeb-2dadd2be89ae"; // Steve
+        // 抽到 Alex
+        let alex = adjust_uuid_for_skin(base, "Alex");
+        assert_eq!(skin_sex(&alex), "Alex");
+        assert_ne!(alex, base);
+        // 再抽回 Steve：与原不同但模型正确（尾部微调）
+        let back = adjust_uuid_for_skin(&alex, "Steve");
+        assert_eq!(skin_sex(&back), "Steve");
+        // 确定性：同一输入两次结果一致
+        assert_eq!(adjust_uuid_for_skin(base, "Alex"), alex);
+        // 无横线形式同样可用
+        assert_eq!(skin_sex("f3d28cb072253cb1baeb2dadd2be89ae"), "Steve");
     }
 }

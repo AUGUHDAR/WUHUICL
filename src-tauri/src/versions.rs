@@ -179,6 +179,14 @@ fn scan_folder(root: &str, default_folder: Option<&str>, active_root: Option<&st
                 item[to] = json!(value);
             }
         }
+        // 默认图标：加载器实例用真实加载器 logo，原版用草方块（用户自定义 _icon 优先；
+        // 对应 PCL ModMinecraft.vb:786-800 的按加载器选图逻辑，图标文件来自 HMCL 官方同款素材）
+        if text(&j, "_icon").is_none() {
+            item["icon"] = json!(match resolved.loader {
+                Some(loader @ ("forge" | "fabric" | "quilt" | "neoforge")) => format!("logo:{loader}"),
+                _ => "logo:grass".to_string(),
+            });
+        }
         if j.get("_javaAuto") == Some(&Value::Bool(true)) {
             item["javaAuto"] = json!(true);
         }

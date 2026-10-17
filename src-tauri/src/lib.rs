@@ -35,6 +35,7 @@ pub mod projections;
 pub mod catalog;
 pub mod centercmd;
 pub mod community;
+pub mod crashanalyzer;
 pub mod gate;
 pub mod gamefolders;
 pub mod installer;

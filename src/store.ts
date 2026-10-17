@@ -23,6 +23,7 @@ import {
     acknowledgeExitHistory,
     clearExitHistory
 } from './api';
+import { managedImageUrl } from './managedAssets';
 
 export type ViewName =
     | 'home'
@@ -516,17 +517,19 @@ export function displayVersionSub(v: InstalledVersion): string {
     return v.id;
 }
 
-/** 实例图标 URL：内置 mob 头像走渲染包静态资源；自定义图标走 file://（空 = 默认图标） */
+/** 实例图标 URL：加载器 logo / 内置 mob 头像走渲染包静态资源；自定义图标走 file://（空 = 默认图标） */
 export function versionIconUrl(v: InstalledVersion): string {
     const icon = v.icon;
     if (!icon) return '';
+    if (icon.startsWith('logo:')) return `loaders/${icon.slice(5)}.png`;
     if (icon.startsWith('mob:')) return `mobs/${icon.slice(4)}.png`;
     if (icon.startsWith('file:')) {
         const def =
             store.settings?.folders.find((f) => f.isDefault)?.path ?? store.settings?.gameDir ?? '';
         if (!def) return '';
-        const p = `${def}/.kamucl/icons/${icon.slice(5)}`.replace(/\\/g, '/');
-        return 'file:///' + p.replace(/^\/+/, '');
+        // 自定义图标在默认文件夹的受管 icons 目录，走 kamucl-asset 协议（file:// 在 Tauri 页面里不可读）
+        const p = `${def}\\.wuhuicl\\icons\\${icon.slice(5)}`;
+        return managedImageUrl(p);
     }
     return '';
 }

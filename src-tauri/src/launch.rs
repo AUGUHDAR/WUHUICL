@@ -12,6 +12,7 @@
 //! 句柄继承（bInheritHandles）语义由 OS 管道继承自动完成：只有写端进入子进程。
 
 use crate::accounts::uuid_v4;
+use crate::crashanalyzer;
 use crate::installer;
 use crate::settings;
 use crate::tasks;
@@ -409,11 +410,24 @@ struct ExitEvidence {
     stopping: AtomicBool,
     shutdown_watchdog: AtomicBool,
     other_failure: AtomicBool,
+    /// 加载器级致命错误（FormattedException / ModResolutionException 等）：
+    /// 实测 Fabric 0.20 打出这类错误后进程挂住不退出，看门狗据此收尸
+    fatal_bootstrap: AtomicBool,
+    /// 看门狗已收尸（退出文本标注用）
+    killed_by_watchdog: AtomicBool,
     reports: Mutex<(u32, u32)>, // (reports, describedReports)
 }
 
 impl ExitEvidence {
     fn observe(&self, line: &str) {
+        if regex::Regex::new(
+            r"net\.fabricmc\.loader\.impl\.FormattedException|ModResolutionException|Mod discovery failed!|org\.spongepowered\.asm\.mixin\.transformer\.MixinTransformerError",
+        )
+        .unwrap()
+        .is_match(line)
+        {
+            self.fatal_bootstrap.store(true, Ordering::SeqCst);
+        }
         if regex::Regex::new(r"\[(?:Render thread|Client thread)/INFO\](?:\s*\[[^\]]+\])?:\s*Stopping!\s*$")
             .unwrap()
             .is_match(line)
@@ -514,6 +528,8 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         move |line: String| send_log(&line, 0)
     };
     let evidence = Arc::new(ExitEvidence::default());
+    // 游戏输出尾行环形缓冲（崩溃分析用，PCL Watcher 的最近 501 行语义）
+    let out_tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 
     let mut spawned = false;
     let pipeline_started = std::time::Instant::now();
@@ -913,21 +929,62 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         attach_session(&token, &proc);
         spawned = true;
 
-        // stdout/stderr 按行转发（launch.ts makeLinePusher）
+        // stdout/stderr 按行转发（launch.ts makeLinePusher）+ 尾行环形缓冲
         let ev = evidence.clone();
         let pipe = send_log.clone();
+        let tail = out_tail.clone();
         spawn_reader(stdout, move |line| {
             ev.observe(&line);
             pipe(&line, 1);
             pipe(&line, 0);
+            {
+                let mut t = tail.lock().unwrap();
+                t.push(line);
+                if t.len() > 500 {
+                    t.remove(0);
+                }
+            }
         });
         let ev = evidence.clone();
         let pipe = send_log.clone();
+        let tail = out_tail.clone();
         spawn_reader(stderr, move |line| {
             ev.observe(&line);
             pipe(&line, 2);
             pipe(&line, 0);
+            {
+                let mut t = tail.lock().unwrap();
+                t.push(line);
+                if t.len() > 500 {
+                    t.remove(0);
+                }
+            }
         });
+
+        // 启动挂死看门狗（美西螈 15s 初始化超时的放宽版）：加载器打出致命错误后
+        // 部分版本会挂住不退出（实测 Fabric 0.20 Mod discovery failed!），
+        // 20 秒后仍在运行即收尸并走崩溃分析
+        {
+            let ev_wd = evidence.clone();
+            let proc_wd = proc.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(20));
+                if !ev_wd.fatal_bootstrap.load(Ordering::SeqCst) {
+                    return;
+                }
+                // 还活着才收尸
+                let alive = {
+                    let mut guard = proc_wd.child.lock().unwrap();
+                    guard.try_wait().map(|s| s.is_none()).unwrap_or(false)
+                };
+                if !alive {
+                    return;
+                }
+                ev_wd.killed_by_watchdog.store(true, Ordering::SeqCst);
+                let mut guard = proc_wd.child.lock().unwrap();
+                let _ = guard.kill();
+            });
+        }
 
         with_globals(|gg| {
             *gg.last_launch.lock().unwrap() = Some(json!({
@@ -1009,6 +1066,8 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         let latest2 = latest_size.clone();
         let stop2 = watcher_stop.clone();
         let crash_dir2 = effective_dir.clone();
+        let out_tail2 = out_tail.clone();
+        let send_log2 = send_log.clone();
         std::thread::spawn(move || {
             // 轮询等待退出（对应 DetachedGameProcess.waitForExit 的 250ms 零超时探测；
             // 不长期持有 child 锁，保证 kill/强杀路径能随时进入）
@@ -1057,9 +1116,33 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
             } else {
                 format!("游戏已退出 (code={})", code)
             };
-            // 崩溃判定增强：新崩溃报告优先给原因（PCL CrashAnalyzer 的轻量版）
+            let mut crash_analysis: Option<Value> = None;
+            // 崩溃分析（PCL ModCrash.vb 移植）：新崩溃报告/最新日志/输出尾行 → 规则表归因
             if exit_kind == "abnormal" {
-                if let Some(desc) = describe_new_crash(&crash_dir2, &crash_before) {
+                let crash_path = newest_new_crash(&crash_dir2, &crash_before);
+                let tail_lines = out_tail2.lock().unwrap().clone();
+                let reasons =
+                    crashanalyzer::analyze(Path::new(&crash_dir2), crash_path.as_deref(), &tail_lines);
+                let reasons = if reasons.is_empty()
+                    || (reasons.len() == 1 && reasons[0].title == crashanalyzer::REASON_NONE)
+                {
+                    Vec::new()
+                } else {
+                    reasons
+                };
+                if !reasons.is_empty() {
+                    let top = crashanalyzer::reason_text(&reasons[0]);
+                    let suffix = if ev2.killed_by_watchdog.load(Ordering::SeqCst) {
+                        "（加载器启动失败后进程无响应，已由启动器结束）"
+                    } else {
+                        ""
+                    };
+                    text = format!("游戏崩溃：{}{}", top, suffix);
+                    crash_analysis = Some(crashanalyzer::to_json(&reasons));
+                    for r in &reasons {
+                        send_log2(&format!("[WUHUICL] 崩溃分析：{}", crashanalyzer::reason_text(r)), 0);
+                    }
+                } else if let Some(desc) = crash_path.as_deref().and_then(crash_description) {
                     text = format!("游戏崩溃：{}", desc);
                 } else if ev2.other_failure.load(Ordering::SeqCst) {
                     text = format!("游戏异常退出（疑似崩溃，code={}，日志已保留）", code);
@@ -1074,6 +1157,7 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
                     "intentionalRestart": intentional_restart,
                     "intentionalStop": intentional,
                     "text": text,
+                    "crashAnalysis": crash_analysis,
                     "versionId": version2,
                     "folder": folder2,
                     "launchId": launch_id2
@@ -1120,41 +1204,55 @@ fn snapshot_crash_reports(game_dir: &str) -> CrashSnapshot {
     out
 }
 
-/// 退出后发现新崩溃报告 → 读出 Description 行，拼成人话
-fn describe_new_crash(game_dir: &str, before: &CrashSnapshot) -> Option<String> {
+/// 退出后发现新崩溃报告 → 返回其路径
+fn newest_new_crash(game_dir: &str, before: &CrashSnapshot) -> Option<PathBuf> {
     let dir = Path::new(game_dir).join("crash-reports");
-    let mut newest: Option<(String, u64)> = None;
-    if let Ok(rd) = std::fs::read_dir(&dir) {
-        for e in rd.flatten() {
-            let p = e.path();
-            if !p.is_file() {
-                continue;
-            }
-            let Ok(meta) = e.metadata() else { continue };
-            let name = e.file_name().to_string_lossy().to_string();
-            let mtime = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let known = before.iter().any(|(n, size, t)| *n == name && *size == meta.len() && *t == mtime);
-            if known {
-                continue;
-            }
-            if newest.as_ref().map(|(_, t)| mtime > *t).unwrap_or(true) {
-                newest = Some((name, mtime));
-            }
+    let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
+    for e in std::fs::read_dir(&dir).ok()?.flatten() {
+        let p = e.path();
+        if !p.is_file() {
+            continue;
+        }
+        let name = e.file_name().to_string_lossy().to_string();
+        let meta = e.metadata().ok()?;
+        let mtime = meta.modified().ok()?;
+        let known = before
+            .iter()
+            .any(|(n, size, t)| {
+                *n == name
+                    && *size == meta.len()
+                    && mtime
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() == *t)
+                        .unwrap_or(false)
+            });
+        if known {
+            continue;
+        }
+        if newest.as_ref().map(|(t, _)| mtime > *t).unwrap_or(true) {
+            newest = Some((mtime, p));
         }
     }
-    let (name, _) = newest?;
-    let text = std::fs::read_to_string(dir.join(&name)).ok()?;
-    let desc = text
-        .lines()
+    newest.map(|(_, p)| p)
+}
+
+/// 崩溃报告的 Description 行
+fn crash_description(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    text.lines()
         .find(|l| l.trim_start().starts_with("Description: "))
         .map(|l| l.trim_start()["Description: ".len()..].trim().to_string())
-        .unwrap_or_else(|| "未标注原因".to_string());
-    Some(format!("{}（崩溃报告 {}）", desc, name))
+}
+
+/// 兼容旧调用：最新新报告的 Description
+fn describe_new_crash(game_dir: &str, before: &CrashSnapshot) -> Option<String> {
+    let path = newest_new_crash(game_dir, before)?;
+    let desc = crash_description(&path)?;
+    Some(format!(
+        "{}（崩溃报告 {}）",
+        desc,
+        path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+    ))
 }
 
 // ---------------- 会话操作 ----------------

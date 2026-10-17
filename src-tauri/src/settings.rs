@@ -199,7 +199,7 @@ pub fn defaults() -> Value {
 }
 
 /// 读取设置（内存缓存 → 文件 → 默认值），合并规则照抄 getSettings()
-pub fn get(app: &tauri::AppHandle) -> Value {
+pub fn get<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Value {
     if let Some(cached) = CACHE.lock().unwrap().as_ref() {
         return cached.clone();
     }
