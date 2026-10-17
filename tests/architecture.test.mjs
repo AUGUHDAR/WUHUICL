@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { copyFile } from 'node:fs/promises';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -24,6 +25,20 @@ async function createFixture(t, files) {
 
 function runChecker(root) {
     return spawnSync(process.execPath, [checkerPath, '--root', root], {
+        encoding: 'utf8',
+        timeout: 15000
+    });
+}
+
+function runStrictChecker(root) {
+    return spawnSync(process.execPath, [checkerPath, '--root', root, '--strict-allowlist'], {
+        encoding: 'utf8',
+        timeout: 15000
+    });
+}
+
+function runBaselineChecker(root, allowlist) {
+    return spawnSync(process.execPath, [checkerPath, '--root', root, '--allowlist', allowlist], {
         encoding: 'utf8',
         timeout: 15000
     });
@@ -143,4 +158,54 @@ test('fails when the requested root does not exist', async (t) => {
 
     assert.equal(result.status, 2, output(result));
     assert.match(result.stderr, /root directory does not exist/);
+});
+
+test('strict allowlist mode reports stale migration entries', async (t) => {
+    const root = await createFixture(t, {
+        'scripts/legacy-source-allowlist.json': JSON.stringify({
+            legacySourceFiles: ['src/components/MovedPanel.vue'],
+            legacyWindowKamuclAccesses: ['src/features/settings/ui/View.vue:10']
+        }),
+        'src/App.vue': '<template><main /></template>\n'
+    });
+
+    const result = runStrictChecker(root);
+    const diagnostics = output(result);
+
+    assert.equal(result.status, 1, diagnostics);
+    assert.match(diagnostics, /allowlist-entry.*src\/components\/MovedPanel\.vue/);
+    assert.match(diagnostics, /allowlist-entry.*src\/features\/settings\/ui\/View\.vue:10/);
+});
+
+test('supports an external allowlist path for a fixture root', async (t) => {
+    const root = await mkdtemp(path.join(tmpdir(), 'wuhuicl-repository-baseline-'));
+    t.after(() => rm(root, { force: true, recursive: true }));
+    await mkdir(path.join(root, 'src'), { recursive: true });
+    const allowlistName = 'allowlist.json';
+    await copyFile(
+        path.join(repositoryRoot, 'scripts', 'legacy-source-allowlist.json'),
+        path.join(root, allowlistName)
+    );
+    await writeFile(path.join(root, 'src', 'App.vue'), '<template><main /></template>\n', 'utf8');
+
+    const result = runBaselineChecker(root, allowlistName);
+
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+});
+
+test('fails with a source location when a Vue script block cannot be parsed', async (t) => {
+    const root = await createFixture(t, {
+        'src/features/settings/ui/Broken.vue': [
+            '<script setup lang="ts">',
+            'const broken: = 1;',
+            '</script>',
+            ''
+        ].join('\n')
+    });
+
+    const result = runChecker(root);
+    const diagnostics = output(result);
+
+    assert.equal(result.status, 1, diagnostics);
+    assert.match(diagnostics, /Broken\.vue:2:1 .*source-parse-error/);
 });

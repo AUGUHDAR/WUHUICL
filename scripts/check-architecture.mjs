@@ -12,11 +12,13 @@ const ALLOWLIST_PATH = path.join('scripts', 'legacy-source-allowlist.json');
 const DIRECT_IPC_FILES = new Set(['api.ts', 'shim.ts', 'shim-splash.ts']);
 
 function usage() {
-    return 'Usage: node scripts/check-architecture.mjs [--root <directory>]';
+    return 'Usage: node scripts/check-architecture.mjs [--root <directory>] [--allowlist <file>] [--strict-allowlist]';
 }
 
 function parseArguments(argv) {
     let root = process.cwd();
+    let strictAllowlist = false;
+    let allowlist = null;
 
     for (let index = 0; index < argv.length; index += 1) {
         const argument = argv[index];
@@ -31,10 +33,21 @@ function parseArguments(argv) {
             index += 1;
             continue;
         }
+        if (argument === '--allowlist') {
+            const value = argv[index + 1];
+            if (!value) throw new Error('--allowlist requires a file');
+            allowlist = path.resolve(value);
+            index += 1;
+            continue;
+        }
+        if (argument === '--strict-allowlist') {
+            strictAllowlist = true;
+            continue;
+        }
         throw new Error(`unknown argument: ${argument}`);
     }
 
-    return root;
+    return { root, allowlist, strictAllowlist };
 }
 
 function toPosix(value) {
@@ -58,8 +71,11 @@ async function walk(directory) {
     return files;
 }
 
-async function loadAllowlist(root) {
-    const allowlistPath = path.join(root, ALLOWLIST_PATH);
+async function loadAllowlist(root, requestedPath) {
+    const allowlistPath = requestedPath ?? path.join(root, ALLOWLIST_PATH);
+    const displayPath = requestedPath
+        ? toPosix(path.relative(process.cwd(), requestedPath)) || toPosix(requestedPath)
+        : toPosix(ALLOWLIST_PATH);
     if (!existsSync(allowlistPath)) {
         return { legacySourceFiles: new Set(), legacyWindowKamuclAccesses: new Set() };
     }
@@ -68,16 +84,14 @@ async function loadAllowlist(root) {
     try {
         parsed = JSON.parse(await readFile(allowlistPath, 'utf8'));
     } catch (error) {
-        throw new Error(`cannot read ${ALLOWLIST_PATH}: ${error.message}`);
+        throw new Error(`cannot read ${displayPath}: ${error.message}`);
     }
 
     const readPaths = (key) => {
         const value = parsed[key];
         if (value === undefined) return new Set();
         if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
-            throw new Error(
-                `${ALLOWLIST_PATH}: ${key} must be an array of repository-relative paths`
-            );
+            throw new Error(`${displayPath}: ${key} must be an array of repository-relative paths`);
         }
         return new Set(value.map((item) => toPosix(item).replace(/^\.\//, '')));
     };
@@ -85,7 +99,8 @@ async function loadAllowlist(root) {
     return {
         legacySourceFiles: readPaths('legacySourceFiles'),
         legacyWindowKamuclAccesses: readPaths('legacyWindowKamuclAccesses'),
-        removalConditions: parsed.removalConditions ?? {}
+        removalConditions: parsed.removalConditions ?? {},
+        displayPath
     };
 }
 
@@ -181,6 +196,7 @@ async function inspectSourceFile(filePath) {
     const contents = await readFile(filePath, 'utf8');
     const imports = [];
     const ipcAccesses = [];
+    const parseErrors = [];
 
     for (const block of parseScript(contents, filePath)) {
         const sourceFile = ts.createSourceFile(
@@ -190,12 +206,19 @@ async function inspectSourceFile(filePath) {
             true,
             ts.ScriptKind.TS
         );
+        for (const diagnostic of sourceFile.parseDiagnostics) {
+            const position = sourceFile.getLineAndCharacterOfPosition(diagnostic.start);
+            parseErrors.push({
+                line: position.line + 1 + block.lineOffset,
+                message: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
+            });
+        }
         const inspected = inspectTree(sourceFile, block, imports, ipcAccesses);
         imports.push(...inspected.imports);
         ipcAccesses.push(...inspected.ipcAccesses);
     }
 
-    return { imports, ipcAccesses };
+    return { imports, ipcAccesses, parseErrors };
 }
 
 async function resolveImport(root, importer, specifier) {
@@ -334,7 +357,7 @@ function inspectImport(file, importerFeature, targetPath, specifier, line, viola
     }
 }
 
-async function checkArchitecture(root) {
+async function checkArchitecture(root, { allowlistPath = null, strictAllowlist = false } = {}) {
     const sourceRoot = path.join(root, 'src');
     try {
         if (!(await stat(sourceRoot)).isDirectory()) throw new Error();
@@ -342,7 +365,7 @@ async function checkArchitecture(root) {
         throw new Error(`source directory does not exist: ${sourceRoot}`);
     }
 
-    const allowlist = await loadAllowlist(root);
+    const allowlist = await loadAllowlist(root, allowlistPath);
     const files = (await walk(sourceRoot)).filter((file) =>
         SOURCE_EXTENSIONS.has(path.extname(file).toLowerCase())
     );
@@ -357,9 +380,10 @@ async function checkArchitecture(root) {
                     ? allowed.split(':').slice(0, -1).join(':')
                     : allowed;
             if (!sourceFiles.has(sourcePath)) {
+                if (!strictAllowlist) continue;
                 addViolation(
                     violations,
-                    toPosix(ALLOWLIST_PATH),
+                    allowlist.displayPath,
                     1,
                     'allowlist-entry',
                     `${key} entry does not name a current source file: ${allowed}`
@@ -371,7 +395,17 @@ async function checkArchitecture(root) {
     for (const filePath of files) {
         const file = relativePath(root, filePath);
         const importerFeature = featureName(file);
-        const { imports, ipcAccesses } = await inspectSourceFile(filePath);
+        const { imports, ipcAccesses, parseErrors } = await inspectSourceFile(filePath);
+
+        for (const error of parseErrors) {
+            addViolation(
+                violations,
+                file,
+                error.line,
+                'source-parse-error',
+                `cannot parse source reliably: ${error.message}`
+            );
+        }
 
         for (const entry of imports) {
             const target = await resolveImport(root, filePath, entry.specifier);
@@ -420,8 +454,14 @@ async function checkArchitecture(root) {
 
 async function main() {
     let root;
+    let allowlistPath;
+    let strictAllowlist;
     try {
-        root = parseArguments(process.argv.slice(2));
+        ({
+            root,
+            allowlist: allowlistPath,
+            strictAllowlist
+        } = parseArguments(process.argv.slice(2)));
     } catch (error) {
         process.stderr.write(
             `Architecture check configuration error: ${error.message || usage()}\n`
@@ -442,7 +482,7 @@ async function main() {
 
     let result;
     try {
-        result = await checkArchitecture(root);
+        result = await checkArchitecture(root, { allowlistPath, strictAllowlist });
     } catch (error) {
         process.stderr.write(`Architecture check configuration error: ${error.message}\n`);
         process.exitCode = 2;

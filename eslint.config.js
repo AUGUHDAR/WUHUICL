@@ -3,6 +3,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 const vueRules = {
+    'vue/html-end-tags': 'off',
     'vue/attributes-order': 'off',
     'vue/attribute-hyphenation': 'off',
     'vue/block-order': 'off',
@@ -24,6 +25,7 @@ const vueRules = {
     'vue/require-explicit-emits': 'off',
     'vue/require-prop-types': 'off',
     'vue/require-v-for-key': 'off',
+    'vue/valid-v-else-if': 'off',
     'vue/singleline-html-element-content-newline': 'off'
 };
 
