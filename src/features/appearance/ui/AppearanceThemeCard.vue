@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import ThemeEditor from './ThemeEditor.vue';
+import type { Settings } from '@shared/types';
+
+const props = defineProps<{
+    updateSettings: (patch: Partial<Settings>) => Promise<unknown>;
+}>();
 </script>
 <template>
     <details
@@ -17,7 +22,7 @@ import ThemeEditor from './ThemeEditor.vue';
             ></span>
         </summary>
         <div data-ui="SettingsView:23fb0346fede" class="collapse-body">
-            <ThemeEditor />
+            <ThemeEditor :update-settings="props.updateSettings" />
         </div>
     </details>
 </template>

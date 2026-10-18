@@ -11,7 +11,6 @@ import {
     carouselDuration,
     MAX_CAROUSEL_IMAGES
 } from '@shared/appearancePolicy';
-import { updateSettings } from '../../settings';
 import {
     errText,
     getSystemInfo,
@@ -24,6 +23,10 @@ import { platform } from '../../../core/ipc';
 import { store, toast } from '../../../store';
 import { managedImageUrl } from '../../../managedAssets';
 import type { BackgroundSettings, ImageFit, Settings } from '@shared/types';
+
+const props = defineProps<{
+    updateSettings: (patch: Partial<Settings>) => Promise<unknown>;
+}>();
 
 const reducedTransparency = ref(false);
 function refreshNativeMaterial() {
@@ -41,7 +44,7 @@ onMounted(() => {
 onUnmounted(() => window.removeEventListener('focus', refreshNativeMaterial));
 
 function save(patch: Partial<Settings>) {
-    void updateSettings(patch).catch((e) => toast('保存失败：' + errText(e), 'error'));
+    void props.updateSettings(patch).catch((e) => toast('保存失败：' + errText(e), 'error'));
 }
 
 // ---------------- 背景 ----------------
@@ -88,7 +91,7 @@ async function deleteThumbnail() {
     removingThumbnail.value = true;
     const next = images.value.filter((image) => image !== removeThumbnail.value);
     try {
-        await updateSettings({
+        await props.updateSettings({
             launchThumbnail: {
                 ...store.settings.launchThumbnail,
                 images: next,

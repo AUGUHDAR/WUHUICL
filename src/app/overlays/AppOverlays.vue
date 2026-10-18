@@ -15,9 +15,9 @@ import { formatSpeed } from '../../core/ipc';
 import { dismissTask, stageLabel } from '../state';
 import SupplementalModsResult from '../../components/SupplementalModsResult.vue';
 import LaunchNotice from '../../components/LaunchNotice.vue';
-import InstanceCenter from '../../components/InstanceCenter.vue';
 const shell = inject(APP_SHELL_CONTEXT)!;
 const {
+    InstanceCenter,
     store,
     noticeOpen,
     fmtNoticeTime,

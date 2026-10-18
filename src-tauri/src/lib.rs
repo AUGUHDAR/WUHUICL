@@ -41,7 +41,7 @@ pub mod voxlink;
 pub mod windowctl;
 pub mod worlds;
 
-pub use app::run;
+pub use app::{run, AppState};
 
 pub mod installer {
     pub use crate::features::library::version_installer::*;

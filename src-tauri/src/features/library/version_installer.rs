@@ -68,8 +68,9 @@ pub fn run_blocking<T: Send>(job: impl FnOnce() -> T + Send) -> T {
 
 // ---------------- 通用工具 ----------------
 
-pub(crate) use probe::{
-    basename_of, canonical_path, path_identity, resolve_minecraft_root, resolve_norm, same_path,
+pub(crate) use probe::resolve_norm;
+pub use probe::{
+    basename_of, canonical_path, path_identity, resolve_minecraft_root, same_path,
     strip_device_prefix,
 };
 

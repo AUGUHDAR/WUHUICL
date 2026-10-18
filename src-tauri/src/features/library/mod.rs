@@ -3,6 +3,7 @@
 mod archive;
 mod fingerprint;
 mod library;
+pub mod metadata;
 pub mod mods;
 mod planning;
 mod scan;

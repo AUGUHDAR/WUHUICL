@@ -39,7 +39,7 @@ npm run format          # 需要时统一格式
 
 ## 代码结构
 
-前端新代码放在 `src/app/`、`src/core/`、`src/features/<功能>/` 或 `src/shared/`。功能之间只从对方的 `index.ts` 公共入口导入，不直接引 `ui/` 或 `data/` 内部文件。`core` 和 `shared` 不反向依赖功能或应用壳；Tauri 桥接调用统一走 `src/core/ipc/`。迁移期间的临时例外记录在 `scripts/legacy-source-allowlist.json`，迁移完成或调用改走 IPC 后应立即删除对应条目。
+前端新代码放在 `src/app/`、`src/core/`、`src/features/<功能>/` 或 `src/shared/`。功能之间只从对方的 `index.ts` 公共入口导入，不直接引 `ui/` 或 `data/` 内部文件。`core` 和 `shared` 不反向依赖功能或应用壳；Tauri 桥接调用统一走 `src/core/ipc/`。尚未迁入目标目录的旧源码和临时兼容入口记录在 `scripts/legacy-source-allowlist.json`；完成迁移或改走 IPC 后，应立即删除对应条目。新代码不能通过增加白名单条目绕过目录约定。
 
 格式临时例外只记录在 `.prettierignore.migration`，ESLint 临时例外只记录在 `eslint.legacy-exemptions.json`；两者都按具体文件列出，不允许整目录豁免，也不降低 Vue 模板解析规则。文件修好后应删除对应条目，测试会拒绝失效的格式例外。
 

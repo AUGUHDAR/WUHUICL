@@ -7,9 +7,18 @@ import process from 'node:process';
 import ts from 'typescript';
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.vue']);
-const LEGACY_DIRECTORIES = ['components', 'composables', 'views'];
+const TARGET_SOURCE_DIRECTORIES = new Set(['app', 'assets', 'core', 'features', 'shared']);
 const ALLOWLIST_PATH = path.join('scripts', 'legacy-source-allowlist.json');
 const DIRECT_IPC_FILES = new Set(['api.ts', 'shim.ts', 'shim-splash.ts']);
+const ROOT_ENTRY_FILES = new Set([
+    'src/App.vue',
+    'src/api.ts',
+    'src/env.d.ts',
+    'src/main.ts',
+    'src/splash.ts',
+    'src/shim-splash.ts',
+    'src/shim.ts'
+]);
 
 function usage() {
     return 'Usage: node scripts/check-architecture.mjs [--root <directory>] [--allowlist <file>] [--strict-allowlist]';
@@ -156,6 +165,21 @@ function inspectTree(sourceFile, block) {
             const name = current.getText(sourceFile);
             return name === 'window' || name === 'globalThis' || windowAliases.has(name);
         }
+        if (ts.isPropertyAccessExpression(current) && current.name.text === 'window') {
+            const base = unwrapExpression(current.expression);
+            if (base?.kind !== ts.SyntaxKind.Identifier) return false;
+            const name = base.getText(sourceFile);
+            return name === 'globalThis' || windowAliases.has(name);
+        }
+        if (ts.isElementAccessExpression(current)) {
+            const key = literalSpecifier(current.argumentExpression)?.text;
+            const base = unwrapExpression(current.expression);
+            const name = base?.kind === ts.SyntaxKind.Identifier ? base.getText(sourceFile) : null;
+            return (
+                key === 'window' &&
+                (name === 'globalThis' || (name !== null && windowAliases.has(name)))
+            );
+        }
         return false;
     };
     const literalSpecifier = (node) => {
@@ -293,11 +317,11 @@ function appModule(sourcePath) {
 
 function legacySourceFile(sourcePath) {
     const parts = sourcePath.split('/');
-    return (
-        parts[0] === 'src' &&
-        LEGACY_DIRECTORIES.includes(parts[1]) &&
-        SOURCE_EXTENSIONS.has(path.extname(sourcePath).toLowerCase())
-    );
+    if (parts[0] !== 'src' || !SOURCE_EXTENSIONS.has(path.extname(sourcePath).toLowerCase())) {
+        return false;
+    }
+    if (parts.length === 2) return !ROOT_ENTRY_FILES.has(sourcePath);
+    return !TARGET_SOURCE_DIRECTORIES.has(parts[1]);
 }
 
 function canDirectlyAccessIpc(sourcePath) {

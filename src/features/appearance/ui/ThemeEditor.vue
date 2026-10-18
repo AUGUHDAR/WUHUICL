@@ -2,11 +2,13 @@
 import { computed } from 'vue';
 import { enterEditMode, store, toast } from '../../../store';
 import { DEFAULT_CUSTOM_THEME, THEME_PRESETS, type Settings, type ThemeName } from '@shared/types';
-import { updateSettings } from '../../settings';
 import { errText } from '../../../api';
+const props = defineProps<{
+    updateSettings: (patch: Partial<Settings>) => Promise<unknown>;
+}>();
 async function save(patch: Partial<Settings>) {
     try {
-        await updateSettings(patch);
+        await props.updateSettings(patch);
     } catch (error) {
         toast('保存设置失败：' + errText(error), 'error');
     }

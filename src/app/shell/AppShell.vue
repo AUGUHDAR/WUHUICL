@@ -2,10 +2,10 @@
 import { inject } from 'vue';
 import { APP_SHELL_CONTEXT } from './useAppShell';
 import CreatorMotto from '../../components/CreatorMotto.vue';
-import MascotStage from '../../components/MascotStage.vue';
 import AppOverlays from '../overlays/AppOverlays.vue';
 const shell = inject(APP_SHELL_CONTEXT)!;
 const {
+    MascotStage,
     isMac,
     appVersion,
     brandHead,

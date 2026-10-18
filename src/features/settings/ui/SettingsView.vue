@@ -34,6 +34,7 @@ import SettingsUpdatesSection from './SettingsUpdatesSection.vue';
 import SettingsPluginsSection from './SettingsPluginsSection.vue';
 import SettingsUpdateDialogs from './SettingsUpdateDialogs.vue';
 import { useSettingsPersistence } from './useSettingsPersistence';
+import { updateSettings } from '../data';
 const ThirdPartyNotices = defineAsyncComponent(async () => {
     const module = await import('../../updates');
     return module.ThirdPartyNotices;
@@ -366,14 +367,17 @@ onMounted(refreshUpdateState);
                 <span data-ui="SettingsView:65c5c2524d71">正在加载设置…</span>
             </div>
             <template v-else>
-                <AppearanceThemeCard v-show="category === 'appearance'" />
+                <AppearanceThemeCard
+                    v-show="category === 'appearance'"
+                    :update-settings="updateSettings"
+                />
                 <SettingsFeaturesSection :visible="category === 'features'" />
                 <div
                     data-ui="SettingsView:9816c9c5870a"
                     class="background-settings"
                     v-show="category === 'appearance'"
                 >
-                    <HomeLayoutEditor />
+                    <HomeLayoutEditor :update-settings="updateSettings" />
                 </div>
                 <div
                     data-ui="SettingsView:6e353ae31f3c"

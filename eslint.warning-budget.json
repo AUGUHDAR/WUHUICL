@@ -447,7 +447,7 @@
         "file": "src/features/appearance/ui/HomeLayoutEditor.vue",
         "rule": "@typescript-eslint/no-unused-expressions",
         "messageId": "unusedExpression",
-        "line": 83
+        "line": 86
     },
     {
         "file": "src/features/community/data/communityDownloadQueue.ts",

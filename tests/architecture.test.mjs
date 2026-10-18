@@ -234,6 +234,112 @@ test('reports indirect window aliases before IPC access', async (t) => {
     assert.match(diagnostics, /features\/accounts\/ui\/Alias\.ts:2:1 .*direct-ipc-access/);
 });
 
+test('requires new source files outside target directories to be reviewed', async (t) => {
+    const root = await createFixture(t, {
+        'src/App.vue': '<template><main /></template>\n',
+        'src/newHelper.ts': 'export const helper = true;\n',
+        'src/legacy/NewHelper.ts': 'export const helper = true;\n'
+    });
+
+    const result = runChecker(root);
+    const diagnostics = output(result);
+
+    assert.equal(result.status, 1, diagnostics);
+    assert.match(diagnostics, /src\/newHelper\.ts:1:1 .*legacy-source/);
+    assert.match(diagnostics, /src\/legacy\/NewHelper\.ts:1:1 .*legacy-source/);
+});
+
+test('keeps executable root entries outside the legacy migration list', async (t) => {
+    const root = await createFixture(t, {
+        'scripts/legacy-source-allowlist.json': JSON.stringify({
+            legacySourceFiles: [],
+            legacyWindowKamuclAccesses: []
+        }),
+        'src/App.vue': '<template><main /></template>\n',
+        'src/main.ts': "import './splash';\n",
+        'src/splash.ts': 'export const splash = true;\n',
+        'src/shim-splash.ts': 'export const shim = true;\n'
+    });
+
+    const result = runChecker(root);
+    const diagnostics = output(result);
+
+    assert.equal(result.status, 0, diagnostics);
+});
+
+test('enforces feature boundaries from the feature public entrypoint', async (t) => {
+    const root = await createFixture(t, {
+        'src/features/accounts/ui/Internal.ts': 'export const internal = true;\n',
+        'src/features/settings/index.ts': "export { internal } from '../accounts/ui/Internal';\n"
+    });
+
+    const result = runChecker(root);
+    const diagnostics = output(result);
+
+    assert.equal(result.status, 1, diagnostics);
+    assert.match(diagnostics, /features\/settings\/index\.ts:1:1 .*feature-boundary/);
+});
+
+test('reports globalThis.window IPC access through direct and aliased references', async (t) => {
+    const root = await createFixture(t, {
+        'src/features/accounts/ui/GlobalWindow.ts': [
+            'const direct = globalThis.window.kamucl;',
+            'const windowRef = globalThis.window;',
+            'const indirect = windowRef.kamucl;',
+            'const globalRef = globalThis;',
+            'const indirectGlobal = globalRef.window.kamucl;',
+            'void [direct, indirect, indirectGlobal];',
+            ''
+        ].join('\n')
+    });
+
+    const result = runChecker(root);
+    const diagnostics = output(result);
+
+    assert.equal(result.status, 1, diagnostics);
+    assert.match(diagnostics, /features\/accounts\/ui\/GlobalWindow\.ts:1:1 .*direct-ipc-access/);
+    assert.match(diagnostics, /features\/accounts\/ui\/GlobalWindow\.ts:3:1 .*direct-ipc-access/);
+    assert.match(diagnostics, /features\/accounts\/ui\/GlobalWindow\.ts:5:1 .*direct-ipc-access/);
+});
+
+test('legacy settings and favorite paths share their feature implementations', () => {
+    const settingsFacade = readFileSync(
+        path.join(repositoryRoot, 'src', 'settingsUpdates.ts'),
+        'utf8'
+    );
+    const favoriteFacade = readFileSync(
+        path.join(repositoryRoot, 'src', 'modFavorites.ts'),
+        'utf8'
+    );
+
+    assert.match(
+        settingsFacade,
+        /export \{ updateSettings \} from ['"]\.\/features\/settings\/data['"]/
+    );
+    assert.match(favoriteFacade, /from ['"]\.\/features\/community\/data\/modFavorites['"]/);
+    assert.doesNotMatch(favoriteFacade, /let writeQueue/);
+    assert.doesNotMatch(favoriteFacade, /window\.kamucl/);
+});
+
+test('appearance UI receives the settings writer from its settings parent', () => {
+    const appearanceFiles = ['ThemeEditor.vue', 'HomeLayoutEditor.vue'].map((name) =>
+        readFileSync(path.join(repositoryRoot, 'src', 'features', 'appearance', 'ui', name), 'utf8')
+    );
+    const settingsView = readFileSync(
+        path.join(repositoryRoot, 'src', 'features', 'settings', 'ui', 'SettingsView.vue'),
+        'utf8'
+    );
+
+    for (const source of appearanceFiles) {
+        assert.doesNotMatch(source, /from ['"]\.\.\/\.\.\/settings['"]/);
+    }
+    assert.match(
+        settingsView,
+        /<AppearanceThemeCard[\s\S]{0,120}:update-settings="updateSettings"/
+    );
+    assert.match(settingsView, /<HomeLayoutEditor\s+:update-settings="updateSettings"/);
+});
+
 test('package architecture command rejects stale migration entries', () => {
     const packageJson = JSON.parse(readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'));
     const command = packageJson.scripts['check:architecture'];
