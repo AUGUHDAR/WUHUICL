@@ -1,0 +1,22 @@
+# 跨编辑器的通用约定；代码的具体排版以 .prettierrc.json 为准。
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# 代码列宽与 .prettierrc.json 的 printWidth 对齐，便于 IDE 自动换行一致
+[*.{ts,vue,mjs,cjs}]
+max_line_length = 100
+
+# 工具链写回的 JSON / YAML 使用 2 空格，与 npm、tsc 保持一致
+[*.{json,yml,yaml}]
+indent_size = 2
+
+# 文档里行尾空格用于换行，不能裁剪
+[*.md]
+trim_trailing_whitespace = false

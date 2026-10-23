@@ -1,0 +1,95 @@
+name: BUG 反馈
+description: 行为不对、界面不对、报错、启动失败
+title: '[BUG] '
+labels:
+    - bug
+body:
+    - type: markdown
+      attributes:
+          value: |
+              有日志我看得快一点，一般在这两个地方：
+
+              ```
+              游戏目录\versions\你的实例\logs\latest.log
+              %APPDATA%\com.wuhuicl.app\logs\
+              ```
+
+              截图可以直接拖进下面的输入框。贴日志前扫一眼，别把账号名以外的凭据带出来。
+    - type: textarea
+      id: what
+      attributes:
+          label: 发生了什么
+          description: 一句话结论，再加你看到的细节（报错原文、界面哪里不对）
+          placeholder: 点"检测更新"以后一直转圈，没有报错，也没有进度
+      validations:
+          required: true
+    - type: textarea
+      id: steps
+      attributes:
+          label: 怎么复现
+          description: 从哪个页面、点了什么、按什么顺序
+          placeholder: |
+              1. 首页选中实例「26.2-Fabric」
+              2. 点右上角"检测更新"
+              3. 等了 30 秒，按钮一直转圈
+      validations:
+          required: true
+    - type: textarea
+      id: expect
+      attributes:
+          label: 你期望看到什么
+      validations:
+          required: true
+    - type: dropdown
+      id: original
+      attributes:
+          label: 原版 KAMUCL 在这里是正常的吗
+          description: 有这一条我就能直接判断是移植的偏差，还是原版本来就这样
+          options:
+              - 原版正常，这个不对
+              - 原版也这样
+              - 我手上没有原版，没法比
+              - 不确定
+      validations:
+          required: true
+    - type: dropdown
+      id: os
+      attributes:
+          label: 系统
+          options:
+              - Windows 11
+              - Windows 10
+              - Windows 其他版本
+              - 不是 Windows（请说明）
+      validations:
+          required: true
+    - type: input
+      id: launcher-version
+      attributes:
+          label: 启动器版本
+          description: 标题栏左下角那个 v0.x.x
+          placeholder: v0.1.0
+      validations:
+          required: true
+    - type: input
+      id: game-version
+      attributes:
+          label: 出问题的实例（游戏版本 + 加载器）
+          placeholder: 26.2 · Fabric 0.19.5
+    - type: textarea
+      id: logs
+      attributes:
+          label: 日志
+          description: 贴关键片段就行，长文件可以直接拖进来
+          render: shell
+    - type: checkboxes
+      id: checks
+      attributes:
+          label: 顺手确认一下
+          options:
+              - label: 我用的是最新便携版（不是很久以前群里拿的旧包）
+                required: false
+              - label: 我已经把日志里除账号名以外的凭据抹掉了
+                required: true
+              - label: 这不是安装包 / 杀毒软件拦截之类的环境问题（SmartScreen 放行方法见 README）
+                required: false

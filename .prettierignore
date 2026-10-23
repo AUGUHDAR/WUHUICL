@@ -1,0 +1,19 @@
+# 生成物与第三方目录：不参与格式化
+node_modules/
+dist/
+src-tauri/
+
+# 本地工程台账，仅存本地，不随仓库分发
+docs/
+
+# 非代码文件：页面、样式与文档沿用既有排版，仅由 .editorconfig 约束缩进与行尾
+*.html
+*.css
+*.md
+
+# JSON 由 npm / tsc 工具链写回，2 空格缩进与工具保持一致，避免互相覆盖
+*.json
+
+# 锁文件由包管理器维护
+package-lock.json
+Cargo.lock

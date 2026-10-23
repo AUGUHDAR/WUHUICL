@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' kamucl-plugin:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: kamucl-asset: http://kamucl-asset.localhost; connect-src 'self' ipc: http://ipc.localhost"
+    />
+    <title>WUHUICL 启动器</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <!-- shim 先于 main.ts 执行（module 脚本按文档顺序），保证 window.kamucl 就绪 -->
+    <script type="module" src="/src/shim.ts"></script>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

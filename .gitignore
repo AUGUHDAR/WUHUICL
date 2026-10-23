@@ -1,0 +1,13 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+*.log
+user-skin.png
+.idea/
+docs/
+
+# 生物头像：从自己的游戏安装里拷进来，见 .github/CONTRIBUTING.md
+public/mobs/
+crash-pid.txt
+.vite/

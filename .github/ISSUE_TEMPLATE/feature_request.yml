@@ -1,0 +1,60 @@
+name: 功能建议
+description: 想要什么功能，或者哪个流程别扭
+title: '[建议] '
+labels:
+    - enhancement
+body:
+    - type: markdown
+      attributes:
+          value: |
+              这个启动器平时拿原版 KAMUCL 当尺子。"原版有、这里还没做"的属于补漏，我按对表的顺序排；"原版也没有"的新想法我会多想一下，因为那会让两个启动器的行为不一样。
+    - type: textarea
+      id: problem
+      attributes:
+          label: 你想解决什么问题
+          description: 用场景说，不用功能名说。"每次都要手动切实例"比"要一个实例切换器"有用
+      validations:
+          required: true
+    - type: dropdown
+      id: origin
+      attributes:
+          label: 原版 KAMUCL 里有这个吗
+          options:
+              - 原版有，这里还没做 / 做了但不对
+              - 原版也没有，这是新想法
+              - 不确定
+      validations:
+          required: true
+    - type: textarea
+      id: expect
+      attributes:
+          label: 你希望它长什么样
+          description: 大概的交互流程就行，有草图或截图更好（可以直接拖进来）
+      validations:
+          required: true
+    - type: textarea
+      id: now
+      attributes:
+          label: 现在你只能怎么办
+          description: 现在的绕路方式，能帮我判断这个痛有多真
+    - type: dropdown
+      id: scope
+      attributes:
+          label: 这个功能会碰的东西
+          description: 拿不准就选"不知道"
+          options:
+              - 只是界面
+              - 下载 / 安装
+              - 联机与网络
+              - 账号与登录
+              - 游戏文件与存档
+              - 不知道
+    - type: checkboxes
+      id: willing
+      attributes:
+          label: 你愿意自己动手吗
+          options:
+              - label: 我可以提 PR（先看 .github/CONTRIBUTING.md）
+                required: false
+              - label: 我可以帮忙复现和验证，不写代码
+                required: false
