@@ -24,6 +24,9 @@ pub fn command(app: &AppHandle, from_main: bool, channel: &str, args: &[serde_js
             } else {
                 let _ = win.maximize();
             }
+            // tao 在 set_maximized 里会经 apply_diff 把 WS_CAPTION/WS_SYSMENU 写回
+            ensure_frameless(&win);
+            ensure_frameless_later(app);
         }
         "window:close" => {
             let _ = win.close();
@@ -200,9 +203,11 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
         WindowEvent::Moved(_) => {
             emit_caption_pointerdown(window.app_handle());
             schedule_apply(window.app_handle());
+            schedule_frameless(window.app_handle());
         }
         WindowEvent::Resized(_) => {
             schedule_apply(window.app_handle());
+            schedule_frameless(window.app_handle());
         }
         _ => {}
     }
@@ -332,6 +337,22 @@ pub fn schedule_apply(app: &AppHandle) {
     });
 }
 
+static FRAMELESS_PENDING: AtomicU64 = AtomicU64::new(0);
+
+/// 与 schedule_apply 同款去抖：拖拽/缩放会连续触发 Moved/Resized，只在停稳后复位一次样式位
+pub fn schedule_frameless(app: &AppHandle) {
+    let token = FRAMELESS_PENDING.fetch_add(1, SeqCst) + 1;
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(90));
+        if FRAMELESS_PENDING.load(SeqCst) == token {
+            if let Some(win) = handle.get_webview_window("main") {
+                ensure_frameless(&win);
+            }
+        }
+    });
+}
+
 /// 对应原版 nativeAppearance.ts applyNativeAppearance：DWM 帧延入客户区 + 主题染色 + 圆角 + Acrylic。
 /// 不做帧扩展时 DWM 不会把桌面模糊合成进客户区，玻璃层只剩窗口底色，比原版暗约 80 灰度。
 pub fn apply_native_appearance(win: &tauri::WebviewWindow, settings: &serde_json::Value) {
@@ -346,7 +367,6 @@ pub fn apply_native_appearance(win: &tauri::WebviewWindow, settings: &serde_json
     let Ok(hwnd) = win.hwnd() else { return };
     let h = hwnd.0 as *mut std::ffi::c_void;
     let dark: u32 = if light { 0 } else { 1 };
-    let round: u32 = 2;
     let acrylic: u32 = 3;
     #[repr(C)]
     struct Margins {
@@ -374,43 +394,59 @@ pub fn apply_native_appearance(win: &tauri::WebviewWindow, settings: &serde_json
         DwmExtendFrameIntoClientArea(h, &margins);
         DwmSetWindowAttribute(h, 38, &acrylic, 4);
         DwmSetWindowAttribute(h, 20, &dark, 4);
-        DwmSetWindowAttribute(h, 33, &round, 4);
-        strip_system_caption(h);
+    }
+    // 圆角与「隐藏原生边框/标题/文字色」统一由 ensure_frameless 按最大化状态处理
+    ensure_frameless(win);
+}
+
+/// 隐藏 DWM 画的原生边框与标题栏（对应 Axolotl apps/app/src/window_frame.rs 的做法）。
+///
+/// 之前的做法是清 WS_CAPTION/WS_SYSMENU 样式位，但 tao 0.37 在任何窗口标志变化时
+/// 都会把这两个位写回（window_state.rs to_window_styles 无条件置位），于是两边拉锯，
+/// 样式位在一次 maximize/show/DPI 变化后就回来了；而只要窗口带 WS_CAPTION + acrylic
+/// backdrop，DWM 就会在客户区顶部画出原生 caption（白条 + 幽灵标题文字）。
+///
+/// Axolotl 用 DWM 属性从根上关掉：把边框色、标题色、文字色都设为 DWMWA_COLOR_NONE，
+/// 不去碰样式位，DWM 自然不再画那段 caption，也就没有需要反复复位的东西。
+/// 圆角按「非最大化」设置（最大化窗口不该有圆角）。
+pub fn ensure_frameless(win: &tauri::WebviewWindow) {
+    let Ok(hwnd) = win.hwnd() else { return };
+    let maximized = win.is_maximized().unwrap_or(false);
+    let h = hwnd.0 as *mut std::ffi::c_void;
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: *mut std::ffi::c_void,
+            attr: u32,
+            value: *const u32,
+            size: u32,
+        ) -> i32;
+    }
+    const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+    const DWMWA_BORDER_COLOR: u32 = 34;
+    const DWMWA_CAPTION_COLOR: u32 = 35;
+    const DWMWA_TEXT_COLOR: u32 = 36;
+    const DWMWA_COLOR_NONE: u32 = 0xFFFF_FFFE;
+    const DWMWCP_DEFAULT: u32 = 0;
+    const DWMWCP_ROUND: u32 = 2;
+    let round = if maximized { DWMWCP_DEFAULT } else { DWMWCP_ROUND };
+    unsafe {
+        DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &round, 4);
+        // 三者一起设才有效：只设其一仍会留下原生 caption 的一段
+        DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR, &DWMWA_COLOR_NONE, 4);
+        DwmSetWindowAttribute(h, DWMWA_CAPTION_COLOR, &DWMWA_COLOR_NONE, 4);
+        DwmSetWindowAttribute(h, DWMWA_TEXT_COLOR, &DWMWA_COLOR_NONE, 4);
     }
 }
 
-/// 清掉 WS_CAPTION/WS_SYSMENU 样式位（decoration(false) 只是不画，样式位还在：
-/// 最大化/系统拖拽时 DWM 会把系统标题栏按钮顶出来，出现"双标题栏"）。
-/// 原版 Electron titleBarStyle:'hidden' 在 Windows 上同样隐藏了这些样式位。
-fn strip_system_caption(hwnd: *mut std::ffi::c_void) {
-    extern "system" {
-        fn GetWindowLongPtrW(hwnd: *mut std::ffi::c_void, index: i32) -> isize;
-        fn SetWindowLongPtrW(hwnd: *mut std::ffi::c_void, index: i32, value: isize) -> isize;
-        fn SetWindowPos(
-            hwnd: *mut std::ffi::c_void,
-            after: *mut std::ffi::c_void,
-            x: i32,
-            y: i32,
-            w: i32,
-            h: i32,
-            flags: u32,
-        ) -> i32;
-    }
-    const GWL_STYLE: i32 = -16;
-    const WS_CAPTION: isize = 0x00C0_0000;
-    const WS_SYSMENU: isize = 0x0008_0000;
-    const SWP_NOMOVE: u32 = 0x0002;
-    const SWP_NOSIZE: u32 = 0x0001;
-    const SWP_NOZORDER: u32 = 0x0004;
-    const SWP_FRAMECHANGED: u32 = 0x0020;
-    unsafe {
-        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-        let stripped = style & !(WS_CAPTION | WS_SYSMENU);
-        if stripped != style {
-            SetWindowLongPtrW(hwnd, GWL_STYLE, stripped);
-            SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+/// 延后一小段再复位（最大化等窗口状态变化会重置圆角偏好，需在布局稳定后补设）
+fn ensure_frameless_later(app: &AppHandle) {
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        if let Some(win) = handle.get_webview_window("main") {
+            ensure_frameless(&win);
         }
-    }
+    });
 }
 
 /// 对应原版 light 判定：blue-white / white-pink，或 custom 背景亮度 > 128

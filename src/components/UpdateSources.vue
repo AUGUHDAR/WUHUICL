@@ -99,23 +99,27 @@ function remove(url: string) {
                     })
                 "
             >
-                <option value="auto">自动择优（直连与镜像）</option>
+                <option value="auto">自动择优（GitHub / Gitee / 镜像竞速）</option>
                 <option value="direct">仅 GitHub 直连</option>
-                <option value="mirror">仅镜像</option>
+                <option value="gitee">仅 Gitee（国内直连）</option>
+                <option value="mirror">镜像优先（Gitee + 加速镜像）</option>
             </select>
         </div>
         <p class="muted source-help" role="status">
             {{
                 source === 'direct'
-                    ? '只通过 GitHub 下载更新，不启用镜像。'
-                    : source === 'mirror'
-                      ? '从下方预设与自定义镜像中测速择优，不使用 GitHub 直连。'
-                      : '从 GitHub 直连、预设与自定义镜像中测速择优；下载过慢时自动切换来源。'
+                    ? '只通过 GitHub 下载更新，不启用 Gitee 与镜像。'
+                    : source === 'gitee'
+                      ? '只通过 Gitee（gitee.com/AUGUHDAR/WUHUICL）国内直连下载更新。'
+                      : source === 'mirror'
+                        ? '从 Gitee 与下方预设、自定义镜像中测速择优，不使用 GitHub 直连。'
+                        : 'GitHub、Gitee 与预设、自定义镜像竞速择优；下载过慢时自动切换来源。'
             }}
         </p>
         <template v-if="source !== 'direct'">
             <div class="source-row source-list">
-                <span>预设镜像</span
+                <span>预设来源</span
+                ><span class="source-preset source-preset-official">Gitee（官方国内源）</span
                 ><span v-for="mirror in UPDATE_MIRRORS" :key="mirror.url" class="source-preset">{{
                     mirror.label
                 }}</span>
@@ -139,7 +143,7 @@ function remove(url: string) {
                 </button>
             </div>
             <p class="muted source-help">
-                最多 {{ MAX_CUSTOM_UPDATE_MIRRORS }} 个；保存后与预设一起参与测速。
+                最多 {{ MAX_CUSTOM_UPDATE_MIRRORS }} 个；保存后与 Gitee、预设镜像一起参与测速。
             </p>
             <ul v-if="custom.length || legacySeparate" class="custom-mirror-list">
                 <li v-for="url in custom" :key="url">
@@ -204,6 +208,10 @@ function remove(url: string) {
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 4px 7px;
+}
+.source-preset-official {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    color: var(--accent-2);
 }
 .custom-mirror-list {
     list-style: none;

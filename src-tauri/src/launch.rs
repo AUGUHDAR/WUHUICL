@@ -114,6 +114,25 @@ pub fn is_version_running(id: &str) -> bool {
     running_version_ids().iter().any(|v| v == id)
 }
 
+/// 运行中的游戏进程 pid（内存整理要跳过正在玩的游戏，对应原版 getRunningGamePids）
+pub fn running_game_pids() -> Vec<u32> {
+    with_globals(|gg| {
+        gg.sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| !s.exited.load(Ordering::SeqCst))
+            .filter_map(|s| {
+                s.child
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|proc| proc.pid)
+            })
+            .collect()
+    })
+}
+
 /// 最近一次启动上下文（exportLogs 用，对应 getLastLaunch）
 pub fn last_launch() -> Option<Value> {
     with_globals(|gg| gg.last_launch.lock().unwrap().clone())
@@ -297,7 +316,25 @@ fn game_launch(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
 
     let app2 = app.clone();
     let inv = LAST_INVOCATION.lock().unwrap().clone().unwrap();
+    // 对应原版 launch.ts:654-663：开启「启动前整理内存」时先整理，再启动
+    let organize_before = s["memoryOrganizeBeforeLaunch"].as_bool() == Some(true);
     std::thread::spawn(move || {
+        if organize_before {
+            send_state(
+                &app2,
+                json!({
+                    "status": "launching",
+                    "text": "正在整理内存…",
+                    "versionId": inv.version_id,
+                    "folder": inv.folder,
+                    "launchId": inv.launch_id
+                }),
+            );
+            if let Err(e) = crate::misc::run_memory_organize() {
+                // 整理失败不阻断启动，只记日志
+                eprintln!("启动前内存整理失败：{e}");
+            }
+        }
         if let Err(e) = launch_pipeline(&app2, &inv) {
             record_launch_preparation_error(&inv.version_id, &e);
             send_state(
@@ -619,6 +656,46 @@ fn launch_owned(app: &AppHandle, inv: &Invocation, token: String, deadline: &Dea
         let opt_file = Path::new(&effective_dir).join("options.txt");
         if !opt_file.exists() {
             let _ = std::fs::write(&opt_file, "lang:zh_cn\n");
+        }
+        // 实际 MC 版本（决定选项编码与按键格式）；正式版用版本链底 id，实例自带 _mcVersion 优先
+        let options_mc_version = installer::read_version_json(app, folder, version_id)
+            .ok()
+            .and_then(|j| j.get("_mcVersion").and_then(|v| v.as_str()).map(str::to_string))
+            .or_else(|| {
+                installer::resolve_version_chain(app, folder, version_id)
+                    .ok()
+                    .map(|(merged, base_id)| {
+                        merged
+                            .get("_mcVersion")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string)
+                            .unwrap_or(base_id)
+                    })
+            })
+            .unwrap_or_default();
+        // 默认游戏选项同步（总开关开启时覆盖实例 options.txt 的玩家修改项，其余行原样保留）
+        let (applied_options, unsupported_options) =
+            crate::gameoptions::sync(app, &effective_dir, &options_mc_version);
+        if !applied_options.is_empty() {
+            log(format!(
+                "[WUHUICL] 已同步 {} 项默认游戏选项到 options.txt",
+                applied_options.len()
+            ));
+        }
+        if !unsupported_options.is_empty() {
+            log(format!(
+                "[WUHUICL] Minecraft {} 不支持以下默认选项，已跳过：{}",
+                options_mc_version,
+                unsupported_options.join("、")
+            ));
+        }
+        // 默认按键同步（keySync 开启且版本 ≥1.13 时覆盖 key_* 项）
+        if crate::settings::get(app)["keySync"].as_bool().unwrap_or(false)
+            && crate::gameoptions::mc_version_at_least_pub(&options_mc_version, "1.13")
+        {
+            if crate::misc::sync_keys_to_game_dir(app, &effective_dir) {
+                log("[WUHUICL] 已同步默认按键到 options.txt".into());
+            }
         }
 
         // a) 版本链合并
@@ -1360,7 +1437,7 @@ fn declared_java_major(json: &Value) -> Option<i64> {
 }
 
 /// launch.ts resolveJavaRequirement 的移植（模组/ASM 约束为 TODO 钩子）
-fn resolve_java_requirement(merged: &Value, mc_version: &str, instance_config: &Value) -> Result<(i64, Option<i64>), String> {
+pub(crate) fn resolve_java_requirement(merged: &Value, mc_version: &str, instance_config: &Value) -> Result<(i64, Option<i64>), String> {
     let major = declared_java_major(merged)
         .or_else(|| release_java_major(mc_version))
         .or_else(|| declared_java_major(instance_config));

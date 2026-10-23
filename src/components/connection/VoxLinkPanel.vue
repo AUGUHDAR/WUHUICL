@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { natLabel } from '@shared/voxlinkNat';
+import UiGlyph from '../UiGlyph.vue';
 import VoxLinkModSync from './VoxLinkModSync.vue';
 import VoxLinkTickets from './VoxLinkTickets.vue';
 import { unreadTickets } from '../../voxlinkTickets';
@@ -727,9 +728,10 @@ onUnmounted(() => {
                     class="stage-item"
                     :class="step.state"
                 >
-                    <span data-ui="VoxLinkPanel:e622b7bd540c" class="stage-dot">{{
-                        step.state === 'done' ? '✓' : i + 1
-                    }}</span
+                    <span data-ui="VoxLinkPanel:e622b7bd540c" class="stage-dot">
+                        <UiGlyph v-if="step.state === 'done'" name="check" :size="10" />
+                        <template v-else>{{ i + 1 }}</template>
+                    </span
                     ><span data-ui="VoxLinkPanel:1fd8eb27a14d" class="stage-copy"
                         ><strong>{{ step.label }}</strong
                         ><small>{{ step.detail || '等待前一步完成' }}</small></span

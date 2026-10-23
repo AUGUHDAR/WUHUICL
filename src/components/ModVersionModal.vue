@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiGlyph from './UiGlyph.vue';
 import { onMounted, onUnmounted, ref } from 'vue';
 import type { InstalledVersion } from '@shared/types';
 import type { ModVersionChoices, ModChangePlan } from '@shared/modManagement';
@@ -112,7 +113,7 @@ onMounted(load);
                         aria-label="关闭"
                         @click="emit('close')"
                     >
-                        ×
+                        <UiGlyph name="close" :size="14" />
                     </button>
                 </header>
                 <div class="version-content">

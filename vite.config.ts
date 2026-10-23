@@ -34,6 +34,9 @@ export default defineConfig({
     server: {
         port: 5173,
         strictPort: true,
+        // 显式绑 IPv4 回环：默认只监听 [::1]，WebView2 按 localhost 解析到 127.0.0.1，
+        // 在本机会直接连接超时，dev 模式前端整片空白。
+        host: '127.0.0.1',
         watch: {
             ignored: ['**/src-tauri/**']
         }

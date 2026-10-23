@@ -133,8 +133,17 @@ face.onload = () => {
     raf = requestAnimationFrame(frame);
     bridge.ready();
 };
-face.onerror = () => bridge.failed('启动头像资源无法加载');
-face.src = faceUrl;
+let usingCustomFace = !!window.__KAMUCL_SPLASH_FACE__;
+face.onerror = () => {
+    // 注入的自定义头像加载失败时回退内置默认图；默认图也失败才报启动失败
+    if (usingCustomFace) {
+        usingCustomFace = false;
+        face.src = faceUrl;
+        return;
+    }
+    bridge.failed('启动头像资源无法加载');
+};
+face.src = usingCustomFace ? window.__KAMUCL_SPLASH_FACE__! : faceUrl;
 window.addEventListener('resize', resize);
 window.addEventListener('error', () => bridge.failed('启动动画渲染失败'));
 window.addEventListener('unload', () => {

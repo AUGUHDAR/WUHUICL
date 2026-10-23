@@ -18,7 +18,7 @@ import SkinViewer3D from '../components/SkinViewer3D.vue';
 import SkinEditor from '../components/SkinEditor.vue';
 import type { SkinPreviewAnimation } from '../skinModel';
 import { resolveSkinPreview } from '../skinPreviewSelection';
-import { createFallbackSkin } from '../fallbackSkin';
+import { loadFallbackSkinDataUrl } from '../fallbackSkin';
 const editorOpen = ref(false);
 import type { CapeInfo, ProfileSkins, SkinHistoryEntry, SkinVariant } from '@shared/types';
 
@@ -26,10 +26,10 @@ import type { CapeInfo, ProfileSkins, SkinHistoryEntry, SkinVariant } from '@sha
 const isMs = computed(() => store.selectedAccount?.type === 'microsoft');
 const isExternal = computed(() => store.selectedAccount?.type === 'yggdrasil');
 const isOffline = computed(() => store.selectedAccount?.type === 'offline');
-const defaultSkin = computed(() =>
-    isOffline.value ? createFallbackSkin().toDataURL('image/png') : ''
-);
-const canApplySkin = computed(() => isMs.value || isOffline.value);
+const defaultSkin = ref('');
+void loadFallbackSkinDataUrl().then((url) => {
+    defaultSkin.value = url;
+});const canApplySkin = computed(() => isMs.value || isOffline.value);
 const canViewProfile = computed(() => canApplySkin.value || isExternal.value);
 const historyAccountId = () => (isOffline.value ? store.selectedAccount?.id : undefined);
 

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
- * 默认配置：启动器级默认按键。
+ * 游戏内配置：启动器级默认按键与游戏选项。
  * 开启「按键设置同步」后，启动任何版本时自动把默认按键写入该实例 options.txt 的 key_* 项。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import DefaultGameOptions from '../components/DefaultGameOptions.vue';
 import SelectMenu from '../components/SelectMenu.vue';
+import ConfirmModal from '../components/ConfirmModal.vue';
 import {
     errText,
     getDefaultKeys,
@@ -193,12 +194,21 @@ async function clearCapturedKey() {
     await applyKey(id, 'key.keyboard.unknown');
     toast('已将该按键设置为空', 'success');
 }
-async function resetAllKeys() {
+/** 一键覆盖全部自定义按键属于破坏性操作，先经 ConfirmModal 二次确认 */
+const resetConfirmOpen = ref(false);
+const resettingKeys = ref(false);
+
+async function confirmResetAllKeys() {
+    if (resettingKeys.value) return;
+    resettingKeys.value = true;
     try {
         keys.value = await resetDefaultKeys();
         toast('按键已全部恢复为 MC 原版默认', 'success');
+        resetConfirmOpen.value = false;
     } catch (e) {
         toast('重置失败：' + errText(e), 'error');
+    } finally {
+        resettingKeys.value = false;
     }
 }
 
@@ -218,13 +228,13 @@ onUnmounted(stopCapture);
 <template>
     <div data-ui="KeysView:68edd6496058" class="page cfg-page" :data-design-page="section">
         <div data-ui="KeysView:3f669650903f" class="page-head">
-            <h1 data-ui="KeysView:f824d576be0f" class="page-title">默认配置</h1>
+            <h1 data-ui="KeysView:f824d576be0f" class="page-title">游戏内配置</h1>
             <p data-ui="KeysView:f1949eee5dfe" class="page-sub">
                 让每个世界，都保留你熟悉的操作习惯。
             </p>
         </div>
 
-        <nav data-ui="KeysView:c0a728e450f2" class="cfg-sections" aria-label="默认配置分类">
+        <nav data-ui="KeysView:c0a728e450f2" class="cfg-sections" aria-label="游戏内配置分类">
             <button
                 data-ui="KeysView:384d69817c73"
                 :class="{ active: section === 'game' }"
@@ -422,7 +432,7 @@ onUnmounted(stopCapture);
                         data-ui="KeysView:051ad2a1db23"
                         class="btn btn-ghost btn-sm"
                         :disabled="!keyModifiedCount"
-                        @click="resetAllKeys"
+                        @click="resetConfirmOpen = true"
                     >
                         全部恢复默认
                     </button>
@@ -518,6 +528,15 @@ onUnmounted(stopCapture);
             @click="stopCapture"
         ></div>
     </div>
+    <ConfirmModal
+        :open="resetConfirmOpen"
+        title="全部恢复默认按键"
+        message="确定要把所有按键恢复为 MC 原版默认吗？你在游戏内改过的自定义按键会被整体覆盖。"
+        confirm-text="全部恢复默认"
+        :busy="resettingKeys"
+        @confirm="confirmResetAllKeys"
+        @cancel="resetConfirmOpen = false"
+    />
 </template>
 
 <style scoped>
@@ -545,12 +564,13 @@ onUnmounted(stopCapture);
     padding: 18px 20px;
     border: 1px solid var(--border);
     border-radius: 14px;
-    background: var(--card);
+    /* background/box-shadow 由下方 .cfg-page .cfg-sections button 决定（特异性更高） */
     color: var(--text);
     cursor: pointer;
     transition:
         background 180ms,
-        border-color 180ms;
+        border-color 180ms,
+        box-shadow 180ms;
 }
 .cfg-sections small {
     font-size: 12px;
@@ -774,7 +794,8 @@ onUnmounted(stopCapture);
     padding: 8px 14px;
     border: 0;
     border-radius: var(--radius-sm);
-    background: transparent;
+    /* 未选中页签也要有实底（与内容卡片同层），透明底在背景图上看不出可点 */
+    background: var(--surface-content);
 }
 .cfg-page .cfg-sections button.active {
     background: var(--accent-soft);

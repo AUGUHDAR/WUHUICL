@@ -4,7 +4,8 @@ export interface MemoryOrganizeResult {
     afterMB: number;
     processed: number;
     skipped: number;
-    failures: Record<string, number>;
+    /** 失败/跳过原因 → 次数（后端可能不返回，读取时需判空） */
+    failures?: Record<string, number>;
     elapsedMs: number;
 }
 export function shouldSkipMemoryProcess(

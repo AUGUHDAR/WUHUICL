@@ -6,6 +6,7 @@
 import { computed, reactive, ref, watch } from 'vue';
 import ModInstallDialog from './ModInstallDialog.vue';
 import MarqueeText from './MarqueeText.vue';
+import UiGlyph from './UiGlyph.vue';
 import { errText, installVersion, onInstallDone, parseMods, getModTargets } from '../api';
 import {
     selectInstance,
@@ -315,7 +316,7 @@ const modCompatOf = (m: ModInfo): string[] => matchMap.value[m.filePath] ?? [];
                                     }}</span>
                                 </div>
                                 <div class="mod-sub muted">
-                                    <template v-if="m.error">⚠ {{ m.error }}</template>
+                                    <template v-if="m.error"><UiGlyph name="warning" :size="12" /> {{ m.error }}</template>
                                     <template v-else>
                                         <span v-if="m.mcRange">MC {{ m.mcRange }}</span>
                                         <span v-if="m.loaderRange">

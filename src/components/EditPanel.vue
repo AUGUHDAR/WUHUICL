@@ -28,14 +28,13 @@ const pages: { value: ViewName; label: string }[] = [
     { value: 'mods', label: '模组' },
     { value: 'packs', label: '材质包' },
     { value: 'shaders', label: '光影包' },
-    { value: 'keys', label: '默认配置' },
+    { value: 'keys', label: '游戏内配置' },
     { value: 'skins', label: '皮肤' },
     { value: 'community', label: '社区资源' },
     { value: 'servers', label: '服务器' },
     { value: 'friends', label: '联机' },
     { value: 'settings', label: '设置' },
-    { value: 'accounts', label: '账户' },
-    { value: 'bridge', label: 'MOD 面板' }
+    { value: 'accounts', label: '账户' }
 ];
 const filter = ref(''),
     folded = ref(new Set<string>()),

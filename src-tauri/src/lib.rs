@@ -10,10 +10,77 @@
 //! - windowctl.rs  窗口控制（minimize/maximize/close，对应 main/index.ts 的 window:* 通道）
 //! - assetproto.rs kamucl-asset 受管图片协议（对应 protocol.handle('kamucl-asset')）
 
+/// 注入到主窗口的「像应用不像浏览器」守卫：屏蔽刷新/打印/开发者工具/缩放快捷键与右键菜单。
+/// 这些是 WebView2 默认行为，桌面应用不该把它们暴露给用户。
+/// Ctrl+C/V/X/A 与 Ctrl+F 之类的文本编辑/查找不加拦截——输入框里仍要正常工作。
+pub const DESKTOP_APP_GUARDS: &str = r#"
+(() => {
+    const isEditable = (el) =>
+        !!el && (el.isContentEditable ||
+            ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
+
+    window.addEventListener(
+        'keydown',
+        (event) => {
+            const key = (event.key || '').toLowerCase();
+            const ctrl = event.ctrlKey || event.metaKey;
+            // F5 / Ctrl+R：刷新
+            if (key === 'f5' || (ctrl && key === 'r')) {
+                event.preventDefault();
+                return false;
+            }
+            // F7：光标浏览；F12 / Ctrl+Shift+I,J,C：开发者工具
+            if (key === 'f7') {
+                event.preventDefault();
+                return false;
+            }
+            if (
+                key === 'f12' ||
+                (ctrl && event.shiftKey && ['i', 'j', 'c'].includes(key))
+            ) {
+                event.preventDefault();
+                return false;
+            }
+            // Ctrl+P：打印
+            if (ctrl && key === 'p') {
+                event.preventDefault();
+                return false;
+            }
+            // Ctrl+U：查看源码
+            if (ctrl && key === 'u') {
+                event.preventDefault();
+                return false;
+            }
+            // Ctrl +/-/0：页面缩放（应用有自己的界面缩放，不吃浏览器缩放）
+            if (ctrl && ['+', '=', '-', '_', '0'].includes(key)) {
+                event.preventDefault();
+                return false;
+            }
+        },
+        true
+    );
+
+    // 右键菜单：输入框内保留系统编辑菜单（复制/粘贴），其余位置屏蔽
+    window.addEventListener(
+        'contextmenu',
+        (event) => {
+            const target = event.target;
+            if (isEditable(target)) return;
+            const selection = window.getSelection && window.getSelection();
+            if (selection && selection.toString().length > 0) return;
+            event.preventDefault();
+        },
+        true
+    );
+})();
+"#;
+
 pub mod accounts;
 pub mod appearance;
 pub mod assetproto;
+pub mod dragout;
 pub mod exportlogs;
+pub mod feedback;
 pub mod gamedir;
 pub mod gameoptions;
 pub mod download;
@@ -53,9 +120,96 @@ pub mod vlcli;
 pub mod windowctl;
 pub mod worlds;
 
+use base64::Engine;
 use gate::BootGate;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
+
+
+/// 当前线程正在处理的 IPC 通道(ipc_invoke 入口写入),OOM 探针用它归因
+thread_local! {
+    static CURRENT_IPC: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+pub fn set_current_ipc(channel: &str) {
+    CURRENT_IPC.with(|c| *c.borrow_mut() = channel.to_string());
+}
+pub fn current_ipc() -> String {
+    CURRENT_IPC.with(|c| c.borrow().clone())
+}
+
+fn append_panic_log(text: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(crate::settings::user_data_dir_panic_log())
+    {
+        let _ = f.write_all(text.as_bytes());
+    }
+}
+
+/// 分配失败探针：OOM(=c0000409 fastfail)前把「请求大小/对齐」落盘，
+/// 否则崩溃后无从判断是巨大单次分配还是累积耗尽。
+/// 只在分配失败那一刻写文件，正常路径零开销。
+struct OomProbe;
+
+unsafe impl std::alloc::GlobalAlloc for OomProbe {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        if layout.size() >= 64 * 1024 * 1024 {
+            let bt = std::backtrace::Backtrace::force_capture();
+            append_panic_log(&format!(
+                "[alloc-big] size={} align={} thread={:?} ipc={}\n{bt}\n",
+                layout.size(),
+                layout.align(),
+                std::thread::current().name().unwrap_or("<unnamed>"),
+                current_ipc()
+            ));
+        }
+        let ptr = std::alloc::System.alloc(layout);
+        if ptr.is_null() {
+            let bt = std::backtrace::Backtrace::force_capture();
+            append_panic_log(&format!(
+                "[alloc-fail] size={} align={} thread={:?} ipc={}\n{bt}\n",
+                layout.size(),
+                layout.align(),
+                std::thread::current().name().unwrap_or("<unnamed>"),
+                current_ipc()
+            ));
+        }
+        ptr
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        std::alloc::System.dealloc(ptr, layout)
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
+        // ≥64MB 的扩容先记一笔(成功也记):崩溃前的"最后一次大分配"就是调用方
+        if new_size >= 64 * 1024 * 1024 {
+            let bt = std::backtrace::Backtrace::force_capture();
+            append_panic_log(&format!(
+                "[realloc-big] old={} new={} thread={:?} ipc={}\n{bt}\n",
+                layout.size(),
+                new_size,
+                std::thread::current().name().unwrap_or("<unnamed>"),
+                current_ipc()
+            ));
+        }
+        let p = std::alloc::System.realloc(ptr, layout, new_size);
+        if p.is_null() {
+            let bt = std::backtrace::Backtrace::force_capture();
+            append_panic_log(&format!(
+                "[realloc-fail] old={} new={} thread={:?} ipc={}\n{bt}\n",
+                layout.size(),
+                new_size,
+                std::thread::current().name().unwrap_or("<unnamed>"),
+                current_ipc()
+            ));
+        }
+        p
+    }
+}
+
+#[global_allocator]
+static ALLOC: OomProbe = OomProbe;
 
 /// 全局状态：启动门 + 各子系统的惰性句柄
 pub struct AppState {
@@ -71,6 +225,26 @@ impl AppState {
 }
 
 pub fn run() {
+    // panic = abort：panic 消息只写 stderr，双击启动时无人看见。
+    // 把 panic 信息落盘 user_data/logs/panic.log，崩溃后能直接定位。
+    std::panic::set_hook(Box::new(|info| {
+        let thread = std::thread::current();
+        let name = thread.name().unwrap_or("<unnamed>").to_string();
+        let msg = format!(
+            "[{}] panic in thread `{}`: {}\n  at {}\n",
+            chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+            name,
+            info,
+            info.location()
+                .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+                .unwrap_or_default()
+        );
+        let _ = std::fs::write(
+            crate::settings::user_data_dir_panic_log(),
+            &msg,
+        );
+        eprintln!("{}", msg);
+    }));
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -81,6 +255,14 @@ pub fn run() {
             // PCL 式目录：exe 旁 .minecraft\versions 与 WUHUICL\，并把旧 %APPDATA% 数据一次性搬来
             crate::settings::ensure_exe_side_dirs(app.handle());
             crate::vlcli::session::bind(app.handle());
+            // 社区整合包下载完成后的安装走 modpacks.rs（对应原版动态 import installModpack）
+            crate::community::set_modpack_install_hook(std::sync::Arc::new(
+                crate::modpacks::install_modpack_job,
+            ));
+            // 模组迁移到未安装版本时现场安装实例（mods.rs 迁移钩子）
+            crate::mods::set_migration_install_hook(std::sync::Arc::new(
+                crate::installer::migration_install_hook,
+            ));
             crate::setup_windows(app.handle())?;
             Ok(())
         })
@@ -144,6 +326,9 @@ fn setup_windows(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error
             color: None,
             interactive: false,
         })
+        // 应用而非浏览器：拦掉 WebView2 自带的刷新/打印/缩放/查看源码/右键菜单。
+        // 页面脚本运行前注入，所以这些按键在任何视图里都不会漏出去。
+        .initialization_script(DESKTOP_APP_GUARDS)
         .on_page_load(move |_window, event| {
             if matches!(event.event(), PageLoadEvent::Finished) {
                 gate::set_painted(&main_handle);
@@ -168,6 +353,21 @@ fn setup_windows(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error
     let scale = monitor.scale_factor();
     let size = monitor.size();
     let pos = monitor.position();
+    // 自定义开屏头像：设置指向受管方块头 PNG 时以 data URL 注入开屏页；读取失败走内置默认图
+    let splash_face_script = {
+        let s = crate::settings::get(app);
+        let path = s["splashFacePath"].as_str().unwrap_or("");
+        let custom = s["splashFaceSource"].as_str() == Some("custom") && !path.is_empty();
+        if custom {
+            std::fs::read(path)
+                .ok()
+                .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes))
+                .map(|b64| format!("window.__KAMUCL_SPLASH_FACE__='data:image/png;base64,{b64}';"))
+                .unwrap_or_else(|| "window.__KAMUCL_SPLASH_FACE__='';".into())
+        } else {
+            "window.__KAMUCL_SPLASH_FACE__='';".to_string()
+        }
+    };
     let splash = WebviewWindowBuilder::new(app, "splash", WebviewUrl::App("splash.html".into()))
         .title("WUHUICL · 正在启动")
         .position(pos.x as f64 / scale, pos.y as f64 / scale)
@@ -183,6 +383,7 @@ fn setup_windows(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error
         .always_on_top(true)
         // 对应原版 startupSplash.ts:30：闪屏一律拒绝新窗口（不转发到浏览器）
         .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+        .initialization_script(splash_face_script.as_str())
         .build()?;
     splash.set_ignore_cursor_events(true)?;
     let auto_fit = crate::settings::get(app)["uiWindowAutoFit"].as_bool().unwrap_or(false);

@@ -7,7 +7,7 @@ import type {
     RecordingResult
 } from '@shared/recordings';
 import { errText } from '../api';
-import { store, toast } from '../store';
+import { activeInstalled, store, toast } from '../store';
 import ContentSkeleton from '../components/ContentSkeleton.vue';
 import SelectMenu from '../components/SelectMenu.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
@@ -27,23 +27,27 @@ let generation = 0,
     disposed = false;
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 const activeFolder = computed(() => store.settings?.activeFolder || store.settings?.gameDir || '');
-const folderFilter = ref('');
-const folderOptions = computed(() => [
-    { value: '', label: '全部已绑定文件夹' },
-    ...(store.settings?.folders ?? []).map((f) => ({
-        value: f.path,
-        label: f.name + ' · ' + f.path
-    }))
-]);
+/** 内容范围：instance=只看当前实例；folder=版本文件夹内的所有（含收藏与共享目录） */
+const scope = ref<'instance' | 'folder'>(
+    localStorage.getItem('kamucl.recordingScope') === 'folder' ? 'folder' : 'instance'
+);
+watch(scope, (v) => localStorage.setItem('kamucl.recordingScope', v));
+const currentTarget = computed(() => {
+    const inst = store.resourceVersionId;
+    const folder =
+        activeInstalled.value.find((v) => v.id === inst)?.folder || activeFolder.value;
+    return inst ? { id: inst, folder } : null;
+});
+const scopeOptions = [
+    { value: 'instance', label: '当前实例' },
+    { value: 'folder', label: '版本文件夹内的所有' }
+];
 watch(
-    () => JSON.stringify([activeFolder.value, store.settings?.folders]),
+    () => JSON.stringify([activeFolder.value, store.resourceVersionId, scope.value]),
     () => {
         void refresh(true);
     }
 );
-watch(folderOptions, (options) => {
-    if (!options.some((o) => o.value === folderFilter.value)) folderFilter.value = '';
-});
 watch(
     () => store.fsRefreshTick,
     () => {
@@ -55,7 +59,13 @@ const invoke = <T,>(channel: string, ...args: unknown[]) =>
 const filtered = computed(() =>
     data.value.entries.filter(
         (e) =>
-            (!folderFilter.value || e.folder === folderFilter.value) &&
+            (scope.value === 'folder' ||
+                (scope.value === 'instance' &&
+                    !!currentTarget.value &&
+                    (e.instanceId === currentTarget.value.id ||
+                        (!e.instanceId &&
+                            !!e.folder &&
+                            e.folder === currentTarget.value.folder)))) &&
             (kind.value === 'all' || e.kind === kind.value) &&
             (source.value === 'all' || (source.value === 'library' ? e.library : !e.library)) &&
             `${e.name} ${e.source} ${e.directory}`
@@ -70,7 +80,7 @@ const targets = computed(() =>
 );
 const size = (n: number) =>
     n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
-watch([query, kind, source, folderFilter], () => {
+watch([query, kind, source, scope], () => {
     page.value = 1;
     selected.value = [];
 });
@@ -79,7 +89,11 @@ async function refresh(silent = false) {
     if (!silent) loading.value = true;
     error.value = '';
     try {
-        const next = await invoke<RecordingCatalog>('recordings:list');
+        const next = await invoke<RecordingCatalog>(
+            'recordings:list',
+            scope.value,
+            currentTarget.value ?? {}
+        );
         if (disposed || id !== generation) return;
         data.value = next;
         if (!targets.value.some((t) => t.value === target.value)) target.value = '';
@@ -213,13 +227,13 @@ onUnmounted(() => {
             <details class="recording-help">
                 <summary>使用说明</summary>
                 <p>
-                    自动汇总全部已绑定目录中的实例、共享目录与收藏，原录像保持原位。按住录像名称可拖出，勾选后可一起拖出。复制时校验完整性，同名文件自动添加序号。播放、渲染请在对应模组内完成；跨版本复制前请确认兼容性。
+                    默认只显示当前实例的录像；切到「版本文件夹内的所有」可看整个文件夹。原录像保持原位。按住录像名称可拖出，勾选后可一起拖出。复制时校验完整性，同名文件自动添加序号。播放、渲染请在对应模组内完成；跨版本复制前请确认兼容性。
                 </p>
             </details>
         </div>
         <section class="recording-workspace card">
             <div class="recording-filters" data-ui="recordings:filters">
-                <SelectMenu v-model="folderFilter" :disabled="busy" :options="folderOptions" />
+                <SelectMenu v-model="scope" :disabled="busy" :options="scopeOptions" />
                 <input
                     data-ui="RecordingsView:a4bc662c17f4"
                     v-model="query"

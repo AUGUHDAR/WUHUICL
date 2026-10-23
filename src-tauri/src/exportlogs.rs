@@ -40,7 +40,7 @@ fn export_logs(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
 
 // ---------------- 脱敏（diagnostics.ts） ----------------
 
-fn redact_text(input: &str, known_secrets: &[String]) -> String {
+pub(crate) fn redact_text(input: &str, known_secrets: &[String]) -> String {
     let mut out = input.to_string();
     for secret in known_secrets {
         if secret.is_empty() || secret.len() < 4 {

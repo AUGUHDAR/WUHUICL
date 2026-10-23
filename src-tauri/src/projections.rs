@@ -54,7 +54,8 @@ struct Source {
     folder: Option<PathBuf>,
     root: PathBuf,
     label: String,
-    library: bool,
+    /// 命中该目录的实例 id（实例目录才有；共享目录为 None）
+    instance_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -2012,18 +2013,19 @@ fn active_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(resolve_abs(Path::new(&root)))
 }
 
-fn library_dir(root: &Path) -> Result<PathBuf, String> {
-    let dir = safe_path(root, "projections", true).map_err(|e| e.message)?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir)
+/// 目标实例的 schematics 目录：投影收集/导入的落点跟随所选实例
+/// （实例目录由 instance_directory_state 判定：隔离 = versions/<id>，共享 = 游戏文件夹根）。
+fn instance_projections_dir(app: &tauri::AppHandle, target: &Value) -> Result<PathBuf, String> {
+    let dir = center_target_dir(app, target)?;
+    let schematics = dir.join(projection_dir());
+    std::fs::create_dir_all(&schematics).map_err(|e| e.to_string())?;
+    Ok(schematics)
 }
 
-fn projection_directory(root: &Path, create: bool) -> Result<PathBuf, String> {
-    let dir = safe_path(root, projection_dir(), true).map_err(|e| e.message)?;
-    if create {
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    }
-    Ok(dir)
+/// 只读变体：仅解析路径、不创建目录（扫描时用于展示"导入与保存位置"）
+fn instance_projections_dir_of(app: &tauri::AppHandle, target: &Value) -> Option<PathBuf> {
+    let dir = center_target_dir(app, target).ok()?;
+    Some(dir.join(projection_dir()))
 }
 
 fn validate_instance_name(name: &str) -> Result<(), String> {
@@ -2415,6 +2417,9 @@ fn visit_source(
         if let Some(folder) = &source.folder {
             entry.insert("folder".into(), json!(text_of(folder)));
         }
+        if let Some(instance_id) = &source.instance_id {
+            entry.insert("instanceId".into(), json!(instance_id));
+        }
         entry.insert("id".into(), json!(id.clone()));
         entry.insert("name".into(), json!(name));
         entry.insert("kind".into(), json!(kind));
@@ -2422,7 +2427,6 @@ fn visit_source(
         entry.insert("modified".into(), json!(mtime_ms(&meta)));
         entry.insert("source".into(), json!(source.label));
         entry.insert("directory".into(), json!(full.parent().map(text_of).unwrap_or_default()));
-        entry.insert("library".into(), json!(source.library));
         if !found.contains_key(&id) {
             order.push(id.clone());
         }
@@ -2448,10 +2452,22 @@ fn scan_metadata(app: &tauri::AppHandle, item: &Stored, kind: &str, task_id: &st
     worker_json(app, metadata_job(&file, kind), task_id, task_title, false)
 }
 
-fn scan_inner(app: &tauri::AppHandle, rec: &TaskRecord, task_id: &str, task_title: &str) -> Result<Value, String> {
+fn scan_inner(
+    app: &tauri::AppHandle,
+    rec: &TaskRecord,
+    task_id: &str,
+    task_title: &str,
+    scope: &str,
+    target: &Value,
+) -> Result<Value, String> {
+    let target_folder: Option<String> = target["folder"].as_str().map(str::to_string);
+    let target_id: Option<String> = target["id"].as_str().map(str::to_string);
     let generation = SCAN_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let root = active_root(app)?;
-    let collection = root.join("projections");
+    // 「导入与保存位置」= 当前选中实例的 schematics（扫不到实例时退回游戏文件夹根）
+    let collection = instance_projections_dir_of(app, target)
+        .map(|dir| dir.to_string_lossy().to_string())
+        .unwrap_or_else(|| root.join(projection_dir()).to_string_lossy().to_string());
     let settings_value = settings::get(app);
     let registered: Vec<Value> = {
         let mut seen: HashSet<String> = HashSet::new();
@@ -2470,16 +2486,26 @@ fn scan_inner(app: &tauri::AppHandle, rec: &TaskRecord, task_id: &str, task_titl
         let root_path = resolve_abs(Path::new(folder["path"].as_str().unwrap_or("")));
         let root_text = text_of(&root_path);
         let label = folder["name"].as_str().filter(|v| !v.is_empty()).map(str::to_string).unwrap_or_else(|| root_text.clone());
-        sources.push(Source { folder: Some(root_path.clone()), root: root_path.join("projections"), label: format!("{label} · 集中收藏"), library: true });
-        sources.push(Source { folder: Some(root_path.clone()), root: root_path.clone(), label: format!("{label} · 共享目录"), library: false });
+        // 实例/文件夹视图只看选定实例所在的文件夹
+        if scope == "instance" || scope == "folder" {
+            let active = target_folder.as_deref().unwrap_or("");
+            if !same_path(&root_text, active) {
+                continue;
+            }
+        }
+        // 共享目录模式下的实例其 schematics 就在游戏文件夹根
+        sources.push(Source { folder: Some(root_path.clone()), root: root_path.clone(), label: format!("{label} · 共享目录"), instance_id: None });
         let (ids, errors) = installed_version_ids(&root_path);
         for error in errors {
             warnings.push(format!("{root_text}{COLON}{error}"));
         }
         for id in ids {
+            if scope == "instance" && Some(id.as_str()) != target_id.as_deref() {
+                continue;
+            }
             match center_target_dir(app, &json!({ "folder": root_text, "id": id })) {
                 Ok(dir) => {
-                    sources.push(Source { folder: Some(root_path.clone()), root: dir, label: id.clone(), library: false });
+                    sources.push(Source { folder: Some(root_path.clone()), root: dir, label: id.clone(), instance_id: Some(id.clone()) });
                     instances.push(json!({ "folder": root_text, "id": id, "name": format!("{id} · {root_text}") }));
                 }
                 Err(_) => warnings.push(format!("无法读取实例：{root_text}{COLON}{id}")),
@@ -2581,16 +2607,16 @@ fn scan_inner(app: &tauri::AppHandle, rec: &TaskRecord, task_id: &str, task_titl
     Ok(json!({
         "entries": entries,
         "warnings": warnings,
-        "library": text_of(&collection),
+        "library": collection,
         "instances": instances
     }))
 }
 
-fn list(app: &tauri::AppHandle) -> Result<Value, String> {
+fn list(app: &tauri::AppHandle, scope: &str, target: &Value) -> Result<Value, String> {
     let rec = tasks::register_task("投影 · 扫描全部目录", "world");
     let task_id = rec.id.clone();
     let task_title = rec.title.clone();
-    let outcome = scan_inner(app, &rec, &task_id, &task_title);
+    let outcome = scan_inner(app, &rec, &task_id, &task_title, scope, target);
     let cancelled = rec.cancelled.load(Ordering::SeqCst);
     let error = outcome.as_ref().err().cloned();
     tasks::task_done(app, &task_id, outcome.is_ok(), error, cancelled, None);
@@ -2647,9 +2673,8 @@ fn run_one(
         let inner = item.clone();
         let rec_ref: Option<&TaskRecord> = Some(rec);
         with_file_job(&inner.source.root, rec_ref, || -> Result<(), String> {
-            if !inner.source.library {
-                assert_instance_idle(app, &inner.source.root)?;
-            }
+            // 投影都在某个实例目录下，删除前一律确认该实例未在运行
+            assert_instance_idle(app, &inner.source.root)?;
             current_file(&inner)?;
             let full = safe_path(&inner.source.root, &inner.rel, false).map_err(|e| e.message)?;
             let parent = full.parent().map(|p| p.to_path_buf()).unwrap_or_default();
@@ -2671,14 +2696,15 @@ fn run_one(
         let root_for_lock = root.clone();
         let rec_ref: Option<&TaskRecord> = Some(rec);
         with_file_job(&root_for_lock, rec_ref, || -> Result<(), String> {
-            if action_owned == "dispatch" {
-                assert_instance_idle(app, &root_for_lock)?;
+            // 收集/复制到的目标实例正在运行 → 拒绝写入其 schematics。
+            // 目标目录是 schematics 本身，实例目录取其父级再做运行中判定。
+            if action_owned != "export" {
+                if let Some(instance_dir) = root_for_lock.parent() {
+                    assert_instance_idle(app, instance_dir)?;
+                }
             }
-            let dir = if action_owned == "export" {
-                root_for_lock.clone()
-            } else {
-                projection_directory(&root_for_lock, true)?
-            };
+            // export 用用户挑选的目录原样写入；其余 destination 已是目标 schematics 本身
+            let dir = root_for_lock.clone();
             let rec_ref: Option<&TaskRecord> = Some(rec);
             let copied = copy_projection(&file_for_copy, &dir, rec_ref, &mut on_bytes)?;
             output = Some(copied);
@@ -2737,10 +2763,18 @@ fn operate(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
     let items = selected_items(app, &ids)?;
     let mut destination: Option<PathBuf> = None;
     match action.as_str() {
-        "collect" => destination = Some(library_dir(&root)?),
+        // 收集 = 复制到目标实例的 schematics（默认当前实例，可在弹层里选其它实例）
+        "collect" => {
+            let target = request
+                .get("target")
+                .filter(|v| v.is_object())
+                .cloned()
+                .unwrap_or(Value::Null);
+            destination = Some(instance_projections_dir(app, &target)?);
+        }
         "dispatch" => {
             let target = request.get("target").filter(|v| v.is_object()).ok_or("请选择目标实例".to_string())?;
-            destination = Some(center_target_dir(app, target)?);
+            destination = Some(instance_projections_dir(app, target)?);
         }
         "export" => {
             use tauri_plugin_dialog::DialogExt;
@@ -2750,12 +2784,12 @@ fn operate(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
         }
         _ => {}
     }
+    let _ = root;
     run(app, items, &action, destination.as_deref())
 }
 
-fn import_at(app: &tauri::AppHandle, paths: &[String]) -> Result<Value, String> {
-    let root = active_root(app)?;
-    let destination = library_dir(&root)?;
+fn import_at(app: &tauri::AppHandle, paths: &[String], target: Value) -> Result<Value, String> {
+    let destination = instance_projections_dir(app, &target)?;
     let mut items: Vec<Stored> = Vec::new();
     for raw in paths {
         let file = PathBuf::from(raw);
@@ -2775,18 +2809,18 @@ fn import_at(app: &tauri::AppHandle, paths: &[String]) -> Result<Value, String> 
         entry.insert("source".into(), json!("导入"));
         entry.insert("directory".into(), json!(text_of(&parent)));
         entry.insert("library".into(), json!(false));
-        items.push(Stored { entry: Value::Object(entry), source: Source { folder: None, root: parent, label: "导入".into(), library: false }, rel });
+        items.push(Stored { entry: Value::Object(entry), source: Source { folder: None, root: parent, label: "导入".into(), instance_id: None }, rel });
     }
     run(app, items, "collect", Some(&destination))
 }
 
 /// 对话框选择导入（projections:import 原口径）：挑完复用 import_at
-fn import_dialog(app: &tauri::AppHandle) -> Result<Value, String> {
+fn import_dialog(app: &tauri::AppHandle, target: Value) -> Result<Value, String> {
     use tauri_plugin_dialog::DialogExt;
     let picked = app
         .dialog()
         .file()
-        .set_title("导入投影到集中收藏")
+        .set_title("导入投影到当前实例 schematics")
         .add_filter("Minecraft 投影", &["litematic", "schem", "schematic", "nbt"])
         .blocking_pick_files();
     let Some(picked) = picked else { return Ok(Value::Null) };
@@ -2797,7 +2831,7 @@ fn import_dialog(app: &tauri::AppHandle) -> Result<Value, String> {
     if paths.is_empty() {
         return Ok(Value::Null);
     }
-    import_at(app, &paths)
+    import_at(app, &paths, target)
 }
 
 fn open_directory(dir: &Path) -> Result<(), String> {
@@ -2826,8 +2860,10 @@ fn open(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
             reveal_item(&current_file(&item)?)?;
         }
         None => {
-            let root = active_root(app)?;
-            open_directory(&library_dir(&root)?)?;
+            // 无参 = 打开当前（或指定）实例的 schematics
+            let target = args.get(1).cloned().unwrap_or(Value::Null);
+            let dir = instance_projections_dir(app, &target)?;
+            open_directory(&dir)?;
         }
     }
     Ok(Value::Null)
@@ -3008,21 +3044,23 @@ fn discard_analysis(args: &[Value]) -> Result<Value, String> {
 
 // ---------------- projections:drag（ipcMain.on 等价） ----------------
 
-// Tauri 无 webContents.startDrag 等价 API：校验通过后只能推 files:dragError，不伪造拖拽成功。
 fn handle_drag(app: &tauri::AppHandle, args: &[Value]) {
     let outcome: Result<(), String> = (|| {
         let items = selected_items(app, args.first().unwrap_or(&Value::Null))?;
         if items.len() > DRAG_LIMIT {
             return Err(format!("每次最多拖出 {DRAG_LIMIT} 个投影，请分批选择"));
         }
+        let mut paths: Vec<String> = Vec::with_capacity(items.len());
         for item in &items {
             let file = drag_path(&item.source.root, &item.rel)?;
             let meta = stat_of(&file)?;
             if !meta.is_file() || meta.len() != entry_size(item) || mtime_ms(&meta) != entry_modified(item) {
                 return Err("投影已变化，请刷新后重试".into());
             }
+            paths.push(file.to_string_lossy().to_string());
         }
-        Err(format!("原生文件拖出暂不可用{COLON}请使用「提取到文件夹」或「收集到当前文件夹收藏」"))
+        crate::dragout::validate_paths(&paths)?;
+        crate::dragout::start_drag_out(&paths).map(|_| ())
     })();
     if let Err(e) = outcome {
         installer::emit_event(app, "files:dragError", &Value::String(e));
@@ -3031,10 +3069,17 @@ fn handle_drag(app: &tauri::AppHandle, args: &[Value]) {
 
 pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
     match channel {
-        "projections:list" => Some(list(app)),
+                "projections:list" => {
+            let target = args.get(1).cloned().unwrap_or(json!({}));
+            Some(list(
+                app,
+                args.first().and_then(|v| v.as_str()).unwrap_or("instance"),
+                &target,
+            ))
+        }
         "projections:operate" => Some(operate(app, args)),
-        "projections:import" => Some(import_dialog(app)),
-        // 拖拽导入（projections:importAt）：带路径，跳过对话框
+        "projections:import" => Some(import_dialog(app, args.first().cloned().unwrap_or(Value::Null))),
+        // 拖拽导入（projections:importAt）：带路径 + 目标实例，跳过对话框
         "projections:importAt" => Some(import_at(
             app,
             &args.first()
@@ -3045,6 +3090,7 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
                         .collect::<Vec<String>>()
                 })
                 .unwrap_or_default(),
+            args.get(1).cloned().unwrap_or(Value::Null),
         )),
         "projections:open" => Some(open(app, args)),
         "projections:analyze" => Some(analyze(app, args)),

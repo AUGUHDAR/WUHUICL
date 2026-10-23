@@ -60,6 +60,170 @@ fn safe_join(base: &Path, rel: &str) -> Result<PathBuf, String> {
     Ok(out)
 }
 
+// ---------------- 手动补充文件（modpackManualFiles.ts） ----------------
+
+/// 下载不动的整合包文件：经 event:progress.manualFiles 请求玩家手动提供，
+/// modpack:supplyFiles 弹多选框校验入位后安装线程继续。
+#[derive(Clone)]
+struct ManualFile {
+    project_id: i64,
+    file_id: i64,
+    file_name: String,
+    size: u64,
+    sha1: String,
+    dest: std::path::PathBuf,
+}
+
+struct ManualSession {
+    files: Vec<ManualFile>,
+    task_id: String,
+    created: u64,
+}
+
+fn manual_sessions() -> &'static std::sync::Mutex<std::collections::HashMap<String, ManualSession>> {
+    static S: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, ManualSession>>> =
+        std::sync::OnceLock::new();
+    S.get_or_init(|| {
+        let mut m = std::collections::HashMap::new();
+        let _ = &mut m;
+        std::sync::Mutex::new(m)
+    })
+}
+
+fn manual_files_json(files: &[ManualFile]) -> Value {
+    Value::Array(
+        files
+            .iter()
+            .map(|f| {
+                json!({
+                    "projectID": f.project_id, "fileID": f.file_id,
+                    "fileName": f.file_name, "size": f.size, "sha1": f.sha1,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// 推送 manualFiles 请求（request = None 表示清除补充提示）
+fn emit_manual(app: &tauri::AppHandle, task_id: &str, token: Option<(&str, &[ManualFile])>) {
+    let manual = token
+        .map(|(t, files)| json!({ "token": t, "files": manual_files_json(files) }))
+        .unwrap_or(Value::Null);
+    crate::tasks::emit_progress(
+        app,
+        json!({
+            "taskId": task_id, "taskTitle": "导入整合包", "stage": "modpack",
+            "progress": 0.9, "text": "等待补充整合包文件…", "manualFiles": manual,
+        }),
+    );
+}
+
+/// install 线程侧：注册会话、推送请求并轮询等待补齐（取消即退出）。返回后必须清会话。
+fn wait_manual_files(app: &tauri::AppHandle, rec: &crate::tasks::TaskRecord, files: Vec<ManualFile>) -> Result<String, String> {
+    if files.is_empty() {
+        return Ok(String::new());
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    {
+        let mut s = manual_sessions().lock().unwrap();
+        s.retain(|_, v| now.saturating_sub(v.created) < 30 * 60 * 1000);
+    }
+    let token = crate::accounts::uuid_v4();
+    manual_sessions().lock().unwrap().insert(
+        token.clone(),
+        ManualSession { files, task_id: rec.id.clone(), created: now },
+    );
+    loop {
+        if rec.cancelled.load(std::sync::atomic::Ordering::SeqCst) {
+            manual_sessions().lock().unwrap().remove(&token);
+            emit_manual(app, &rec.id, None);
+            return Err("已取消".into());
+        }
+        let remaining = manual_sessions()
+            .lock()
+            .unwrap()
+            .get(&token)
+            .map(|s| s.files.len())
+            .unwrap_or(0);
+        if remaining == 0 {
+            manual_sessions().lock().unwrap().remove(&token);
+            emit_manual(app, &rec.id, None);
+            return Ok(token);
+        }
+        // 每 2 秒重发一次请求，防止前端弹窗被后到进度事件挤掉
+        let session = manual_sessions().lock().unwrap().get(&token).map(|s| (s.files.clone(), s.task_id.clone()));
+        if let Some((files, task_id)) = session {
+            emit_manual(app, &task_id, Some((&token, &files)));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2000));
+    }
+}
+
+/// modpack:supplyFiles 主体：校验所选文件（大小 + SHA1）复制入位，返回 {accepted, remaining, rejected}
+fn supply_manual_files(app: &tauri::AppHandle, token: &str, sources: &[std::path::PathBuf]) -> Result<Value, String> {
+    let (mut accepted, mut rejected) = (0usize, Vec::<String>::new());
+    {
+        let mut sessions = manual_sessions().lock().unwrap();
+        let Some(session) = sessions.get_mut(token) else {
+            return Err("该补充文件任务已结束，请查看下载中心".into());
+        };
+        for src in sources {
+            let base = src.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let Ok(meta) = std::fs::symlink_metadata(src) else {
+                rejected.push(base);
+                continue;
+            };
+            if meta.is_symlink() || !meta.is_file() {
+                rejected.push(base);
+                continue;
+            }
+            // 大小一致的候选里找 SHA1 匹配（与原版 matches() 同判定）
+            let mut matched: Option<usize> = None;
+            for (i, f) in session.files.iter().enumerate() {
+                if f.size != meta.len() {
+                    continue;
+                }
+                let expected = crate::net::Integrity {
+                    sha1: Some(f.sha1.clone()),
+                    sha512: None,
+                    sha256: None,
+                    size: Some(f.size),
+                };
+                if matches!(crate::net::verify_file(src, &expected, None), Ok(None)) {
+                    matched = Some(i);
+                    break;
+                }
+            }
+            let Some(i) = matched else {
+                rejected.push(base);
+                continue;
+            };
+            let f = &session.files[i];
+            if let Some(parent) = f.dest.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            if !f.dest.exists() {
+                std::fs::copy(src, &f.dest).map_err(|e| e.to_string())?;
+            }
+            session.files.remove(i);
+            accepted += 1;
+        }
+        let remaining = session.files.len();
+        let task_id = session.task_id.clone();
+        let files_now = session.files.clone();
+        drop(sessions);
+        emit_manual(
+            app,
+            &task_id,
+            if remaining == 0 { None } else { Some((token, &files_now)) },
+        );
+        Ok(json!({ "accepted": accepted, "remaining": remaining, "rejected": rejected }))
+    }
+}
+
 // ---------------- 格式检测与解析 ----------------
 
 struct Parsed {
@@ -397,6 +561,18 @@ pub fn install_modpack(
     opts: &Value,
     rec: &TaskRecord,
 ) -> Result<String, String> {
+    install_modpack_with_sink(app, file_path, opts, rec, None)
+}
+
+/// `sink`：社区下载链路传入（stage/progress/text 转发进 ModpackInstallJob.emit_install，
+/// 由社区侧做 overall 0.1+0.9x 映射）；本地导入传 None，行为与原先完全一致。
+pub fn install_modpack_with_sink(
+    app: &tauri::AppHandle,
+    file_path: &str,
+    opts: &Value,
+    rec: &TaskRecord,
+    sink: Option<&(dyn Fn(&str, f64, &str) + Send + Sync)>,
+) -> Result<String, String> {
     let settings = crate::settings::get(app);
     let target_folder = opts["targetFolder"]
         .as_str()
@@ -409,6 +585,9 @@ pub fn install_modpack(
     let started = std::time::Instant::now();
     let emit = |app: &tauri::AppHandle, task_id: &str, stage: &str, progress: f64, text: &str| {
         crate::tasks::emit_progress(app, json!({ "taskId": task_id, "taskTitle": "导入整合包", "stage": stage, "progress": progress, "text": text }));
+        if let Some(sink) = sink {
+            sink(stage, progress, text);
+        }
     };
 
     let mut archive = open_zip(file_path)?;
@@ -511,12 +690,13 @@ pub fn install_modpack(
             return Err("整合包运行配置未安装到目标实例".into());
         }
 
-        // 3) 下载整合包文件
+        // 3) 下载整合包文件（下不动的转手动补充，不再整包失败）
         let total = pending.len();
         let mut done = 0usize;
         let total_bytes: u64 = pending.iter().map(|p| p.5).sum();
         let mut done_bytes: u64 = 0;
-        for (rel, url, urls, sha1, sha512, size) in &pending {
+        let mut manual: Vec<ManualFile> = Vec::new();
+        for (idx, (rel, url, urls, sha1, sha512, size)) in pending.iter().enumerate() {
             crate::tasks::wait_while_paused(rec);
             if rec.cancelled.load(std::sync::atomic::Ordering::SeqCst) {
                 return Err("已取消".into());
@@ -556,7 +736,37 @@ pub fn install_modpack(
                 }
             }
             if !ok {
-                return Err(format!("整合包文件下载失败：{last_err}\n文件：{rel}"));
+                // 下载不动的文件（受限/已下架）转手动补充：projectID/fileID 按 pending
+                // 构造顺序从解析结果回查（mrpack=files[idx]，CurseForge=cf_files[idx]）
+                let (pid, fid) = if parsed.format == "curseforge" {
+                    parsed.cf_files.get(idx).cloned().unwrap_or((0, 0))
+                } else {
+                    let f = parsed.files.get(idx).cloned().unwrap_or(Value::Null);
+                    (
+                        f["projectID"].as_i64().unwrap_or(0),
+                        f["fileID"].as_i64().unwrap_or(0),
+                    )
+                };
+                let name = std::path::Path::new(rel)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                emit(
+                    app,
+                    &rec.id,
+                    "modpack",
+                    0.45 + 0.5 * (done as f64 / total.max(1) as f64),
+                    &format!("「{name}」自动下载失败，稍后可手动补充"),
+                );
+                manual.push(ManualFile {
+                    project_id: pid,
+                    file_id: fid,
+                    file_name: name,
+                    size: *size,
+                    sha1: sha1.to_lowercase(),
+                    dest: dest.clone(),
+                });
+                continue;
             }
             done += 1;
             done_bytes += size;
@@ -568,6 +778,23 @@ pub fn install_modpack(
                 &format!("下载整合包文件 {done}/{total}（{}MB）", done_bytes / 1_048_576),
             );
             let _ = DownloadDetail::default();
+        }
+
+        // 3.5) 手动补充：下不动的文件挂起等待玩家经 modpack:supplyFiles 补齐（取消即失败）
+        if !manual.is_empty() {
+            wait_manual_files(app, rec, manual.clone())?;
+            // 事后复核（防会话竞态）：补齐的文件必须真实落位且校验通过
+            for f in &manual {
+                let expected = crate::net::Integrity {
+                    sha1: Some(f.sha1.clone()),
+                    sha512: None,
+                    sha256: None,
+                    size: Some(f.size),
+                };
+                if let Some(reason) = crate::net::verify_file(&f.dest, &expected, Some(rec.cancelled.as_ref()))? {
+                    return Err(format!("手动补充的文件校验未通过（{}：{}）", f.file_name, reason));
+                }
+            }
         }
 
         // 4) 实例 json：pack 元数据 + 自包含化
@@ -626,6 +853,36 @@ pub fn install_modpack(
 }
 
 /// 统一入口
+/// 社区整合包下载完成后的后台安装（community.rs 的 ModpackInstallJob → install_modpack）。
+/// 对应原版 community.ts `installModpack(tmpPath, installProgress, { signal, nameSource: 'inner', targetFolder })`：
+/// 实例名取包内名、重名自动避让（conflictAction 默认 new）；结束（无论成败）交回 finish，
+/// 由社区侧清理临时目录并推 event:taskDone / event:installDone。
+pub fn install_modpack_job(job: crate::community::ModpackInstallJob) {
+    let crate::community::ModpackInstallJob {
+        app,
+        task_id,
+        pack_path,
+        target_folder,
+        emit_install,
+        finish,
+        ..
+    } = job;
+    let outcome = (|| -> Result<String, String> {
+        let Some(rec) = crate::tasks::get_task(&task_id) else {
+            return Err("任务已结束".into());
+        };
+        let sink = move |stage: &str, progress: f64, text: &str| {
+            emit_install(&json!({ "stage": stage, "progress": progress, "text": text }));
+        };
+        let opts = json!({
+            "nameSource": "inner",
+            "targetFolder": target_folder.clone().unwrap_or_default(),
+        });
+        install_modpack_with_sink(&app, &pack_path.to_string_lossy(), &opts, &rec, Some(&sink))
+    })();
+    (finish)(outcome);
+}
+
 pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
     match channel {
         "modpack:probe" => Some(
@@ -675,7 +932,31 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             });
             Ok(Value::Null)
         })()),
-        "modpack:supplyFiles" => Some(Err("补充文件对话框流程未接入".to_string())),
+        "modpack:supplyFiles" => Some((|| {
+            let token = args.first().and_then(|v| v.as_str()).ok_or("缺少参数")?;
+            let remaining = manual_sessions()
+                .lock()
+                .unwrap()
+                .get(token)
+                .map(|s| s.files.len())
+                .ok_or_else(|| "该补充文件任务已结束，请查看下载中心".to_string())?;
+            // 主进程侧多选框（对应原版 dialog.showOpenDialog multiSelections）
+            use tauri_plugin_dialog::DialogExt;
+            let picked = app
+                .dialog()
+                .file()
+                .set_title(format!("补充整合包文件（剩余 {remaining} 个）"))
+                .add_filter("模组文件", &["jar", "disabled"])
+                .blocking_pick_files();
+            let Some(paths) = picked else {
+                return Ok(json!({ "accepted": 0, "remaining": remaining, "rejected": [] }));
+            };
+            let paths: Vec<std::path::PathBuf> = paths.into_iter().map(|p| std::path::PathBuf::from(p.to_string())).collect();
+            if paths.is_empty() {
+                return Ok(json!({ "accepted": 0, "remaining": remaining, "rejected": [] }));
+            }
+            supply_manual_files(app, token, &paths)
+        })()),
         "modpack:openFile" => Some((|| {
             let _token = args.first().and_then(|v| v.as_str()).unwrap_or("");
             let file_id = args.get(1).and_then(|v| v.as_i64()).unwrap_or(0);

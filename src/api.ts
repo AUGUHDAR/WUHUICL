@@ -55,6 +55,7 @@ import type {
     YggdrasilProviderInput,
     YggdrasilRuntimeInfo
 } from '@shared/types';
+import type { ManagedMod, ModOperationResult } from '@shared/modManagement';
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
     // Vue 的 reactive proxy 无法通过 Electron IPC 结构化克隆（报 An object could not be cloned）。
@@ -307,6 +308,13 @@ export const uploadSkinFromHistory = (id: string, accountId?: string) =>
 export const getSkinAvatar = (accountId?: string) =>
     invoke<string | null>(IPC.skinAvatar, accountId);
 
+/** 保存渲染好的方块头 PNG（开屏/左上角自定义形象），返回受管文件路径 */
+export const saveFaceImage = (dataUrl: string, slot: 'splash' | 'logo') =>
+    invoke<string>(IPC.appearanceSaveFaceImage, dataUrl, slot);
+/** 删除自定义头图文件（设置字段由调用方一并清空） */
+export const resetFaceImage = (slot: 'splash' | 'logo') =>
+    invoke<null>(IPC.appearanceResetFaceImage, slot);
+
 export const getDirectOverview = () =>
     invoke<import('@shared/directConnect').DirectOverview>(IPC.directOverview);
 export const getDirectState = () =>
@@ -497,6 +505,22 @@ export const findModCrossDuplicates = (versionIds: string[], folder?: string) =>
 export const openDir = (rel = '', folder?: string) => invoke<void>(IPC.appOpenDir, rel, folder);
 /** 列出游戏目录下某个子目录的文件 */
 export const listFs = (rel: string, folder?: string) => invoke<FsEntry[]>(IPC.fsList, rel, folder);
+/** 「版本文件夹内的所有」：聚合共享根 + 各实例的同名子目录 */
+export interface AggregatedFs {
+    entries: FsEntry[];
+    instances: { id: string; name: string; folder: string }[];
+    warnings: string[];
+}
+export const listFsAggregate = (rel: string, folder?: string) =>
+    invoke<AggregatedFs>(IPC.fsListAggregate, rel, folder);
+/** 目录作用域的模组清单 / 图标 / 启停 / 锁定（聚合视图的每一行自带目录） */
+export const modCatalogAt = (dir: string) => invoke<ManagedMod[]>(IPC.modsCatalogAt, dir);
+export const modIconsAt = (dir: string, names: string[], kind = 'mods') =>
+    invoke<Record<string, string>>(IPC.modsIconsAt, dir, names, kind);
+export const setModsEnabledAt = (dir: string, names: string[], enabled: boolean) =>
+    invoke<ModOperationResult[]>(IPC.modsSetEnabledAt, dir, names, enabled);
+export const setModsLockedAt = (dir: string, names: string[], locked: boolean) =>
+    invoke<ModOperationResult[]>(IPC.modsSetLockedAt, dir, names, locked);
 export const fsPath = (rel: string, folder?: string) => invoke<string>(IPC.fsPath, rel, folder);
 /** 删除游戏目录下某个子目录中的文件，返回删除后的列表 */
 export const removeFs = (rel: string, name: string, folder?: string) =>

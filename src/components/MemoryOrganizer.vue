@@ -47,10 +47,17 @@ async function toggle(e: Event) {
                 整理可回收工作集；运行中的游戏和受保护进程会跳过。内存可能随进程活动回涨。
             </p>
             <p v-if="result" role="status">
-                可用 {{ result.beforeMB }} → {{ result.afterMB }} MB · 处理 {{ result.processed }} ·
-                跳过 {{ result.skipped }} · {{ (result.elapsedMs / 1000).toFixed(1) }} 秒
+                可用 {{ result.beforeMB }} → {{ result.afterMB }} MB
+                <template v-if="result.afterMB - result.beforeMB > 0"
+                    >（回收 {{ result.afterMB - result.beforeMB }} MB）</template
+                >
+                · 处理 {{ result.processed }} 个进程 · 跳过 {{ result.skipped }} ·
+                {{ (result.elapsedMs / 1000).toFixed(1) }} 秒
             </p>
-            <details v-if="result && Object.keys(result.failures).length">
+            <details
+                v-if="result && result.failures && Object.keys(result.failures).length"
+                open
+            >
                 <summary>跳过或失败原因</summary>
                 <p v-for="(count, reason) in result.failures" class="muted">
                     {{ reason }}：{{ count }}
@@ -70,10 +77,14 @@ async function toggle(e: Event) {
     font-size: 13px;
 }
 .organizer-actions {
+    /* 窄列里改成纵向堆叠：原来横排会让「启动前整理」和按钮互相挤裁 */
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 16px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+}
+.organizer-actions .btn {
+    align-self: flex-start;
 }
 .memory-organizer p {
     line-height: 1.6;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
+import UiGlyph from './UiGlyph.vue';
 import type { RemoteVersion } from '@shared/types';
 import {
     filterVersions,
@@ -226,7 +227,7 @@ onBeforeUnmount(close);
                                 versionCategories.find((c) => c.value === versionCategory(v))?.label
                             }}</small></span
                         ><time>{{ v.releaseTime.slice(0, 10) }}</time
-                        ><b>{{ v.id === modelValue ? '✓' : '' }}</b>
+                        ><b v-if="v.id === modelValue"><UiGlyph name="check" :size="12" /></b>
                     </button>
                 </div>
                 <form

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiGlyph from '../UiGlyph.vue';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import type { InstanceTarget } from '@shared/instanceCenter';
 import type {
@@ -116,7 +117,7 @@ onUnmounted(() => {
     <UpdateDialogShell label="加入房间前检查模组" @dismiss="dismiss">
         <template #header
             ><h2>与房主同步模组</h2>
-            <button class="btn btn-ghost" aria-label="关闭" @click="dismiss">×</button></template
+            <button class="btn btn-ghost" aria-label="关闭" @click="dismiss"><UiGlyph name="close" :size="14" /></button></template
         >
         <p class="connection-muted">房间 {{ code }} · {{ target?.id || '尚未选择游戏实例' }}</p>
         <p v-if="target" class="mod-path">{{ target.folder }}</p>

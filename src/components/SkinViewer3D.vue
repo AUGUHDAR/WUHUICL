@@ -27,7 +27,7 @@ import {
 } from '../skinModel';
 import { loadImage, migrateLegacySkin, detectSkinVariant, normalizeCape } from '../skin-render';
 import { beginBootTask } from '../bootTasks';
-import { createFallbackSkin } from '../fallbackSkin';
+import { loadFallbackSkin } from '../fallbackSkin';
 import { SkinGestureOwner } from '../skinEditorInteraction';
 import { MascotFrameDriver } from '../mascotFrameDriver';
 const props = withDefaults(
@@ -113,7 +113,7 @@ function texture(image: HTMLImageElement | HTMLCanvasElement): Texture {
 async function updateSkin(): Promise<void> {
     if (!gl) return;
     const request = ++skinRequest;
-    let image: HTMLImageElement | HTMLCanvasElement = props.editCanvas || createFallbackSkin(),
+    let image: HTMLImageElement | HTMLCanvasElement = props.editCanvas || (await loadFallbackSkin()),
         remote = !!props.editCanvas;
     try {
         if (props.src && !props.editCanvas) {
@@ -409,9 +409,16 @@ onMounted(() => {
         keyLight = new DirectionalLight(0xffffff, 1);
         keyLight.position.set(-15, 30, 50);
         world.add(keyLight);
-        skin = texture(createFallbackSkin());
-        player.skin.map = skin;
-        player.skin.setOuterLayerVisible(false);
+        void loadFallbackSkin()
+            .catch(() => null)
+            .then((canvas) => {
+                if (closed || !gl || skinRequest) return;
+                const tex = texture(canvas!);
+                skin = tex;
+                player.skin.map = tex;
+                player.skin.setOuterLayerVisible(false);
+                wake();
+            });
         resize = new ResizeObserver(fit);
         resize.observe(container.value!);
         fit();

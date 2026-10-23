@@ -59,15 +59,18 @@ fn normalize_address(address: &str) -> (String, String, Option<u16>) {
 
 // ---------------- SLP 状态探测（pingServer 1:1） ----------------
 
-fn write_var_int(out: &mut Vec<u8>, mut value: i32) {
+fn write_var_int(out: &mut Vec<u8>, value: i32) {
+    // 按 MC 协议把 i32 当 u32 编码(最多 5 字节)。旧实现对负数(如 handshake 的 protocol=-1)
+    // 算术右移永远非 0 → 无限 push → 缓冲翻倍到 4GB → OOM 崩溃(实测)。
+    let mut v = value as u32;
     loop {
-        let mut byte = (value & 0x7f) as u8;
-        value >>= 7;
-        if value != 0 {
+        let mut byte = (v & 0x7f) as u8;
+        v >>= 7;
+        if v != 0 {
             byte |= 0x80;
         }
         out.push(byte);
-        if value == 0 {
+        if v == 0 {
             break;
         }
     }
@@ -84,21 +87,21 @@ fn packet(id: i32, payload: &[u8]) -> Vec<u8> {
 }
 
 fn read_var_int(stream: &mut impl Read, cap: usize) -> Result<i32, String> {
-    let mut len = 0i32;
-    let mut shift = 0;
+    // i64 累加：旧实现 `<< (shift*7)` 在 shift=28 时于 i32 上环绕成负数，
+    // 长度检查被绕过 → take(天文数字) → read_to_end 缓冲翻倍到 4GB → OOM 崩溃
+    let mut len: i64 = 0;
     let mut byte = [0u8; 1];
-    for _ in 0..5 {
+    for shift in 0..5 {
         stream.read_exact(&mut byte).map_err(|_| "连接中断".to_string())?;
-        len |= ((byte[0] & 0x7f) as i32) << (shift * 7);
-        shift += 1;
+        len |= ((byte[0] & 0x7f) as i64) << (shift * 7);
         if byte[0] & 0x80 == 0 {
-            break;
-        }
-        if len > cap as i32 {
-            return Err("响应过大".into());
+            if len < 0 || len > cap as i64 {
+                return Err("响应过大".into());
+            }
+            return Ok(len as i32);
         }
     }
-    Ok(len)
+    Err("响应格式无效".into())
 }
 
 /// MOTD 去 JSON 化（描述可为 string / 数组 / 组件树）
@@ -162,7 +165,6 @@ pub fn ping_server(address: &str) -> Value {
         return offline;
     }
     // 响应：len(packet) + packet(id=0, varint(jsonLen) + json)
-    let mut buf = Vec::new();
     if read_var_int(&mut stream, 1 << 22).is_err() {
         return offline;
     }
@@ -170,8 +172,9 @@ pub fn ping_server(address: &str) -> Value {
         Ok(l) => l as usize,
         Err(_) => return offline,
     };
-    let mut take = stream.take(body_len as u64);
-    if take.read_to_end(&mut buf).is_err() {
+    // 精确读 body_len 字节：read_to_end 会一直吃到连接关闭，异常服务器可喂出 GB 级缓冲
+    let mut buf = vec![0u8; body_len];
+    if stream.read_exact(&mut buf).is_err() {
         return offline;
     }
     let rtt = std::cmp::max(1, start.elapsed().as_millis() as i64);
@@ -208,7 +211,13 @@ pub fn ping_server(address: &str) -> Value {
 
 // ---------------- servers.dat 同步 ----------------
 
-fn servers_dat_candidates(app: &tauri::AppHandle, version_id: Option<&str>, folder: Option<&str>) -> Vec<PathBuf> {
+/// 一个候选 = (servers.dat 路径, 实例 id?, 实例 folder?)；
+/// folder 根的 servers.dat → 共享（无实例归属）；versions/<id>/servers.dat → 归属该实例。
+fn servers_dat_candidates(
+    app: &tauri::AppHandle,
+    version_id: Option<&str>,
+    folder: Option<&str>,
+) -> Vec<(PathBuf, Option<String>, Option<String>)> {
     let settings = crate::settings::get(app);
     let mut out = Vec::new();
     let folders: Vec<String> = match folder {
@@ -223,19 +232,26 @@ fn servers_dat_candidates(app: &tauri::AppHandle, version_id: Option<&str>, fold
     };
     for folder_path in folders {
         let base = PathBuf::from(&folder_path);
-        // 隔离实例的 servers.dat 在 versions/<id>/saves 上一级
-        let mut roots = vec![base.clone()];
-        if let Some(vid) = version_id {
-            let iso = base.join("versions").join(vid);
-            if iso.is_dir() {
-                roots.push(iso);
-            }
+        // 共享 servers.dat（folder 根）
+        let shared = base.join("servers.dat");
+        if shared.exists() {
+            out.push((shared, version_id.map(str::to_string), Some(folder_path.clone())));
         }
-        for root in roots {
-            let dat = root.join("saves").parent().map(|_| root.join("servers.dat")).unwrap_or(root.join("servers.dat"));
-            let dat = root.join("servers.dat");
+        // 隔离实例的 servers.dat：全实例扫描（指定 version_id 时只看该实例）
+        let versions = base.join("versions");
+        let Ok(entries) = std::fs::read_dir(&versions) else { continue };
+        let mut ids: Vec<String> = entries
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .filter_map(|e| e.file_name().to_string_lossy().into_owned().into())
+            .collect();
+        if let Some(vid) = version_id {
+            ids.retain(|id| id == vid);
+        }
+        for id in ids {
+            let dat = versions.join(&id).join("servers.dat");
             if dat.exists() {
-                out.push(dat);
+                out.push((dat, Some(id), Some(folder_path.clone())));
             }
         }
     }
@@ -248,7 +264,7 @@ pub fn sync_from_dat(app: &tauri::AppHandle, version_id: Option<&str>, folder: O
     let mut added = 0i64;
     let mut updated = 0i64;
     let mut errors: Vec<String> = Vec::new();
-    for dat in servers_dat_candidates(app, version_id, folder) {
+    for (dat, dat_version, dat_folder) in servers_dat_candidates(app, version_id, folder) {
         let Ok(raw) = std::fs::read(&dat) else { continue };
         let Ok(root) = nbt::parse_nbt(&raw) else {
             errors.push(format!("{}：servers.dat 无法解析", dat.display()));
@@ -270,9 +286,14 @@ pub fn sync_from_dat(app: &tauri::AppHandle, version_id: Option<&str>, folder: O
             let (normalized, host, port) = normalize_address(&ip);
             if let Some(existing) = list.iter_mut().find(|e| e["normalizedAddress"] == json!(normalized)) {
                 existing["lastSeenAt"] = json!(chrono::Utc::now().to_rfc3339());
+                // 实例级 servers.dat 里的记录归属该实例（未绑定过才补，不覆盖手动绑定）
+                if let (Some(vid), true) = (&dat_version, existing["versionId"].as_str().is_none()) {
+                    existing["versionId"] = json!(vid);
+                    existing["folder"] = json!(dat_folder.clone().unwrap_or_default());
+                }
                 updated += 1;
             } else {
-                list.push(json!({
+                let mut item = json!({
                     "id": crate::accounts::uuid_v4(),
                     "name": name,
                     "address": ip,
@@ -281,7 +302,12 @@ pub fn sync_from_dat(app: &tauri::AppHandle, version_id: Option<&str>, folder: O
                     "port": port,
                     "source": "minecraft",
                     "lastSeenAt": chrono::Utc::now().to_rfc3339()
-                }));
+                });
+                if let Some(vid) = &dat_version {
+                    item["versionId"] = json!(vid);
+                    item["folder"] = json!(dat_folder.clone().unwrap_or_default());
+                }
+                list.push(item);
                 added += 1;
             }
         }

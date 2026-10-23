@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-const props = withDefaults(defineProps<{ name: string; size?: number }>(), { size: 20 });
+const props = withDefaults(
+    defineProps<{ name: string; size?: number; filled?: boolean }>(),
+    { size: 20, filled: false }
+);
 
 // 加载器/版本类型走真实图标（HMCL 官方同款素材，public/loaders/）；
 // 其余保持内置线性图形
@@ -33,6 +36,11 @@ const paths: Record<string, string> = {
     download: 'M12 2v13m-5-5 5 5 5-5M3 16v5h18v-5',
     upload: 'M12 16V3m-5 5 5-5 5 5M3 16v5h18v-5',
     close: 'm5 5 14 14M19 5 5 19',
+    check: 'm5 12.5 4.5 4.5L19 7',
+    warning: 'M12 3 2.5 20h19L12 3zM12 9.5v5M12 17.5h.01',
+    star: 'm12 3 2.7 5.8 6.3.8-4.6 4.3 1.2 6.1-5.6-3.1-5.6 3.1 1.2-6.1L3 9.6l6.3-.8z',
+    clip: 'm21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48',
+    comment: 'M7.9 20A9 9 0 1 0 4 16.1L2 22Z',
     none: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M6 6l12 12'
 };
 const path = computed(() => paths[props.name] || paths.cube);
@@ -52,9 +60,9 @@ const path = computed(() => paths[props.name] || paths.cube);
         :width="size"
         :height="size"
         viewBox="0 0 24 24"
-        fill="none"
+        :fill="filled ? 'currentColor' : 'none'"
+        :stroke-width="filled ? 1 : 1.7"
         stroke="currentColor"
-        stroke-width="1.7"
         stroke-linecap="round"
         stroke-linejoin="round"
         aria-hidden="true"

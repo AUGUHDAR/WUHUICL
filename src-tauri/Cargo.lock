@@ -5463,6 +5463,8 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "url",
+ "windows",
+ "windows-core",
  "windows-registry",
  "windows-sys 0.59.0",
  "zip",

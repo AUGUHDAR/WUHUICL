@@ -428,6 +428,14 @@ export interface Settings {
     /** 首页布局：模块顺序与显隐（main=主列，side=右栏，数组顺序即渲染顺序） */
     homeLayout: HomeLayout;
     /** 背景自定义 */
+    /** 开屏头像来源：default=内置图；account=当前登录账号皮肤；custom=自定义皮肤（splashFacePath） */
+    splashFaceSource?: 'default' | 'account' | 'custom';
+    /** 自定义开屏头像（已渲染成方块头）的受管文件路径 */
+    splashFacePath?: string;
+    /** 左上角图标来源：取值同 splashFaceSource */
+    logoFaceSource?: 'default' | 'account' | 'custom';
+    /** 自定义左上角图标（已渲染成方块头）的受管文件路径 */
+    logoFacePath?: string;
     background: BackgroundSettings;
     /** 首页启动卡的全局默认缩略图（实例专属缩略图优先）。 */
     launchThumbnail: LaunchThumbnailSettings;
@@ -443,8 +451,8 @@ export interface Settings {
     configVersion?: number;
     /** 跳过提示的版本号（该版本不再弹更新提示，直到更新的版本出现） */
     skipUpdateVersion?: string;
-    /** 更新下载源：auto=直连优先镜像兜底；direct=仅 GitHub 直连；mirror=仅自定义镜像 */
-    updateSource?: 'auto' | 'direct' | 'mirror';
+    /** 更新下载源：auto=GitHub/Gitee/镜像竞速；direct=仅 GitHub；gitee=仅 Gitee；mirror=Gitee+镜像 */
+    updateSource?: 'auto' | 'direct' | 'gitee' | 'mirror';
     /** 自定义镜像前缀（拼接在 GitHub 文件 URL 前，如 https://ghproxy.net/） */
     updateMirrorUrl?: string;
     /** Additional update mirrors; the old singular field remains readable. */
@@ -758,6 +766,8 @@ export const IPC = {
     appearanceImportBackground: 'appearance:importBackground', // () => Settings | null  导入受管背景并保存
     appearanceImportBackgroundMulti: 'appearance:importBackgroundMulti', // () => Settings | null  多选导入背景图（自动切换用）
     appearanceResetBackground: 'appearance:resetBackground', // () => Settings  恢复默认并清理旧受管背景
+    appearanceSaveFaceImage: 'appearance:saveFaceImage', // (dataUrl, slot: 'splash'|'logo') => string  保存渲染好的方块头
+    appearanceResetFaceImage: 'appearance:resetFaceImage', // (slot) => null  删除自定义头图文件
     appearanceImportLaunchThumbnail: 'appearance:importLaunchThumbnail', // () => Settings | null
     appearanceResetLaunchThumbnail: 'appearance:resetLaunchThumbnail', // () => Settings
 
@@ -876,6 +886,11 @@ export const IPC = {
     appearanceExportTheme: 'appearance:exportTheme',
     appearanceImportTheme: 'appearance:importTheme',
     modsIcons: 'mods:icons',
+    // 目录作用域版本（聚合视图按行定位回具体实例目录；参数为绝对目录）
+    modsIconsAt: 'mods:iconsAt',
+    modsCatalogAt: 'mods:catalogAt',
+    modsSetEnabledAt: 'mods:setEnabledAt',
+    modsSetLockedAt: 'mods:setLockedAt',
     modsTargets: 'mods:targets', // Scan all registered folders; folder + id identify each target.
     modsParse: 'mods:parse', // (paths: string[]) => ModInfo[]  支持文件/文件夹路径，静默解析元数据
     modsPrepare: 'mods:prepare',
@@ -947,6 +962,8 @@ export const IPC = {
     appOpenDir: 'app:openDir', // (rel?: string) => void  用系统资源管理器打开目录
     fsImportResources: 'fs:importResources',
     fsList: 'fs:list', // (rel: string) => FsEntry[]
+    // (rel, folder?) => {entries: FsEntry[], instances, warnings} —— 「版本文件夹内的所有」聚合视图
+    fsListAggregate: 'fs:listAggregate',
     fsPath: 'fs:path', // (rel: string, folder?: string) => string; backend-resolved native path
     fsRemove: 'fs:remove', // (rel: string, name: string) => FsEntry[]
     fsToggleDisable: 'fs:toggleDisable', // (rel: string, name: string) => FsEntry[] —— 模组禁用/启用（.jar ↔ .jar.disabled）

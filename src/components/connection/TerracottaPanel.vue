@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { terracottaRole } from '@shared/uiPresentation';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
+import UiGlyph from '../UiGlyph.vue';
 import ConnectionPanel from './ConnectionPanel.vue';
 import ConnectionStatus from './ConnectionStatus.vue';
 import { toast } from '../../store';
@@ -418,7 +419,7 @@ onUnmounted(() => {
                         data-ui="TerracottaPanel:f1d7550a3d17"
                         class="stage-dot"
                         aria-hidden="true"
-                        >{{ s.state === 'done' ? '✓' : '' }}</span
+                        ><UiGlyph v-if="s.state === 'done'" name="check" :size="10" /></span
                     >
                     <span data-ui="TerracottaPanel:99431821492b" class="stage-copy"
                         ><strong>{{ s.label }}</strong

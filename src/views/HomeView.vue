@@ -1125,16 +1125,8 @@ onUnmounted(() => {
                         ><span>正在加载皮肤…</span>
                     </div>
                     <button
-                        data-ui="HomeView:0309ef6b61da"
-                        v-else-if="!store.selectedAccount"
-                        class="skin-overlay action"
-                        @click="store.currentView = 'accounts'"
-                    >
-                        登录后加载角色皮肤
-                    </button>
-                    <button
                         data-ui="HomeView:70bc857e7889"
-                        v-else-if="skinError"
+                        v-else-if="store.selectedAccount && skinError"
                         class="skin-overlay action error"
                         :title="skinError"
                         @click="reloadSkin(true)"

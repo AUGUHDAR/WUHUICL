@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiGlyph from './UiGlyph.vue';
 import PercentSlider from './PercentSlider.vue';
 import { computed, reactive, ref, watch } from 'vue';
 import {
@@ -363,7 +364,7 @@ function addCustom() {
                             )
                         "
                     >
-                        ×
+                        <UiGlyph name="close" :size="14" />
                     </button></span
                 ><span v-if="!custom.length" class="palette-help">可保存你常用的颜色。</span>
             </div>

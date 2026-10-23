@@ -463,6 +463,13 @@ const onlineCount = computed(() => servers.value.filter((s) => pingOf(s)?.online
 watch(servers, (list) => {
     selected.value = new Set([...selected.value].filter((id) => list.some((s) => s.id === id)));
 });
+/** 当前实例变化后重新同步该实例的 servers.dat 并刷新列表 */
+watch(
+    () => [store.resourceVersionId, currentInstanceFolder.value] as const,
+    () => {
+        if (!loading.value) void load();
+    }
+);
 function requestDelete(s: ServerEntry) {
     Object.assign(delModal, { open: true, target: s, batch: false });
 }

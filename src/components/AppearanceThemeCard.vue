@@ -206,49 +206,6 @@ function chooseTheme(theme: ThemeName) {
     gap: var(--space-4);
 }
 
-/* PCL 式折叠卡片：折叠态 = 标题行（行高）+ 右侧箭头；展开态内容统一内边距 */
-.collapse {
-    padding: 0;
-}
-.collapse-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-3);
-    min-height: var(--row-h);
-    padding: var(--space-2) var(--card-pad);
-    cursor: pointer;
-    list-style: none;
-    user-select: none;
-}
-.collapse-head::-webkit-details-marker {
-    display: none;
-}
-.collapse-head:hover .group-title {
-    color: var(--accent-2);
-}
-.collapse-arrow {
-    width: 7px;
-    height: 7px;
-    border-right: 2px solid var(--text-dim);
-    border-bottom: 2px solid var(--text-dim);
-    /* 折叠态：箭头朝上（PCL 折叠卡片右上箭头） */
-    transform: rotate(-45deg);
-    transition: transform 0.18s ease;
-    flex-shrink: 0;
-}
-.collapse[open] > .collapse-head .collapse-arrow {
-    /* 展开态：箭头朝下 */
-    transform: rotate(45deg);
-}
-.collapse-body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--card-pad) var(--card-pad);
-    border-top: 1px solid var(--border);
-}
-
 /* 主题选择 */
 .theme-options {
     display: grid;
@@ -418,6 +375,11 @@ function chooseTheme(theme: ThemeName) {
 .theme-option.active {
     border-color: var(--accent);
     background: var(--accent-soft);
+}
+/* 网格卡片按下方的间隙只有 8px：外描边会压到相邻卡片，聚焦指示改画在卡片内沿 */
+.theme-option:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
 }
 .theme-preview {
     width: 46px;

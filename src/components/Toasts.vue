@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiGlyph from './UiGlyph.vue';
 import { store, dismissToast } from '../store';
 </script>
 
@@ -19,7 +20,7 @@ import { store, dismissToast } from '../store';
             <span class="toast-dot"></span>
             <span class="toast-text">{{ t.text }}</span
             ><button class="icon-btn toast-close" aria-label="关闭通知" @click="dismissToast(t.id)">
-                ×
+                <UiGlyph name="close" :size="14" />
             </button>
         </div>
     </TransitionGroup>

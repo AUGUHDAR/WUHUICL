@@ -2,6 +2,7 @@
 import type { ServerEntry, ServerPingResult } from '@shared/types';
 import { privateServerText } from '@shared/serverPrivacy';
 import ConnectionStatus from './ConnectionStatus.vue';
+import UiGlyph from '../UiGlyph.vue';
 import ServerAddress from './ServerAddress.vue';
 defineProps<{
     server: ServerEntry;
@@ -34,7 +35,7 @@ defineEmits<{ select: []; toggle: []; connect: []; favorite: []; address: [] }>(
             :title="server.favorite ? '取消收藏' : '收藏，优先显示'"
             @click="$emit('favorite')"
         >
-            {{ server.favorite ? '★' : '☆' }}
+            <UiGlyph name="star" :size="14" :filled="!!server.favorite" />
         </button>
         <div class="server-row-button">
             <button

@@ -1,6 +1,6 @@
 [package]
 name = "wuhuicl"
-version = "1.0.0"
+version = "1.0.1"
 description = "WUHUICL - 简约美观的一键式 Minecraft 启动器"
 edition = "2021"
 rust-version = "1.82"
@@ -40,6 +40,17 @@ url = "2"
 rand = "0.9"
 flate2 = "1"
 windows-registry = "0.5"
+# 原生拖出（DoDragDrop + CF_HDROP）：与 vendor/wry 同版本，特性保持最小集
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_Memory",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Ole",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.62"
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
   "Win32_System_SystemInformation",

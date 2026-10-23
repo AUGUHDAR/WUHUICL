@@ -42,8 +42,8 @@
 //!    —— 阻塞读无法预先打断；保留 15s 无数据中止（『下载网络停滞』），由
 //!    download_client 的 120s 读超时兜底硬停。
 //! 4. 15s 无数据看门狗在读返回后回溯判定（原版为预判定时器），暂停/限速期间不计时。
-//! 5. macOS ARM64 原生库校验值解析（platformNatives.resolveNativeIntegrity）与 ≥50MiB
-//!    磁盘空间预检未移植（windows-sys 未启用文件系统特性且不允许加依赖）。
+//! 5. macOS ARM64 原生库校验值解析（platformNatives.resolveNativeIntegrity）未移植；
+//!    ≥50MiB 磁盘空间预检已按原版语义补齐（GetDiskFreeSpaceExW，探测失败不拦截）。
 //! 6. 事件经 [`crate::tasks::emit_progress`] 推 `event:progress`；ProgressEvent 字段名与
 //!    shared/types.ts 逐字一致（stage/progress/overall/text/speed/etaSeconds/bytesDone/
 //!    bytesTotal/indeterminate/source/taskId/taskTitle/manualFiles…），文件数进 text。
@@ -479,6 +479,23 @@ fn part_path(dest: &Path) -> PathBuf {
     let mut os = dest.as_os_str().to_os_string();
     os.push(".part");
     PathBuf::from(os)
+}
+
+/// 目录所在磁盘的当前用户可用空间（GetDiskFreeSpaceExW，对应原版 statfs 的 bavail*bsize）。
+/// 失败返回 None：调用方跳过预检，写失败兜底仍会报错。
+fn disk_free_bytes(dir: &Path) -> Option<u64> {
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let wide: Vec<u16> = dir
+        .as_os_str()
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut avail: u64 = 0;
+    let mut total: u64 = 0;
+    let mut free: u64 = 0;
+    let ok = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut avail, &mut total, &mut free) };
+    (ok != 0).then_some(avail)
 }
 
 // ---------------- 限速 / 并发闸门（downloadLimits.ts DownloadLimiter） ----------------
@@ -1535,7 +1552,17 @@ fn download_file_inner(rec: &Arc<TaskRecord>, url: &str, dest: &Path, opts: &Dow
             }
             return Ok(());
         }
-        // 4.（磁盘空间预检未移植，见文件头差异说明）
+        // 4. 磁盘空间预检（对应原版 statfs：已知 size 且 ≥50MiB 时，可用空间 < size 拒开下载）。
+        //    探测失败（如异构 UNC）不拦截——写失败兜底仍会报错。
+        if expected.size.is_some_and(|s| s >= 50 * 1024 * 1024) {
+            if let Some(parent) = dest.parent() {
+                if let Some(avail) = disk_free_bytes(parent) {
+                    if avail < expected.size.unwrap_or(0) {
+                        return Err("磁盘空间不足".into());
+                    }
+                }
+            }
+        }
         let mut supplied: Vec<String> = Vec::with_capacity(1 + opts.alternatives.len());
         supplied.push(url.to_string());
         supplied.extend(opts.alternatives.iter().cloned());

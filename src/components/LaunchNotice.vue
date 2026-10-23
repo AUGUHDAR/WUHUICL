@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue';
+import UiGlyph from './UiGlyph.vue';
 import { store } from '../store';
 
 const visible = ref(false);
@@ -37,7 +38,7 @@ onUnmounted(dismiss);
     <Teleport to="body">
         <Transition name="launch-notice">
             <div v-if="visible" class="launch-success" role="status" aria-live="polite">
-                <span class="launch-success-icon" aria-hidden="true">✓</span>
+                <span class="launch-success-icon" aria-hidden="true"><UiGlyph name="check" :size="15" /></span>
                 <div>
                     <strong>游戏已启动</strong><small>游戏进程已运行，窗口正在加载，请稍候</small>
                 </div>

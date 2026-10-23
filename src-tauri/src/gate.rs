@@ -117,6 +117,8 @@ fn try_reveal(app: &AppHandle) {
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.show();
         let _ = main.set_focus();
+        // tao 的 set_visible 会经 apply_diff 把 WS_CAPTION/WS_SYSMENU 写回，显示后补一次无边框复位
+        crate::windowctl::schedule_frameless(app);
     }
     if let Some(splash) = app.get_webview_window("splash") {
         let _ = splash.emit_to("splash", "boot:reveal", ());

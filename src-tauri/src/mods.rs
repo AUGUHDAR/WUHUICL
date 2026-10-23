@@ -1707,9 +1707,8 @@ pub fn apply_mod_updates(app: &tauri::AppHandle, dir: &Path, items: &[Value]) ->
 
 // ---------------- modManagement.ts ----------------
 
-/// modCatalog()
-pub fn mod_catalog(app: &tauri::AppHandle, version_id: &str, folder: &str) -> Result<(PathBuf, Vec<Value>), String> {
-    let dir = resolve_resource_directory(app, folder, version_id, "mods")?;
+/// modCatalog()：读某个模组目录的清单（按目录作用域，供聚合视图按行定位）
+pub fn mod_catalog_in_dir(app: &tauri::AppHandle, dir: &Path) -> Result<Vec<Value>, String> {
     let entries = scan_managed_mod_directory(&dir.to_string_lossy(), "catalog")?;
     let mut list: Vec<Value> = Vec::new();
     for i in entries {
@@ -1724,14 +1723,21 @@ pub fn mod_catalog(app: &tauri::AppHandle, version_id: &str, folder: &str) -> Re
             item["fingerprint"] = fp.clone();
         }
         if !sha1.is_empty() {
-            item["identity"] = json!(mod_identity(app, &dir, &sha1));
-            item["locked"] = json!(is_mod_locked(app, &dir, &sha1));
+            item["identity"] = json!(mod_identity(app, dir, &sha1));
+            item["locked"] = json!(is_mod_locked(app, dir, &sha1));
         }
         if let Some(err) = i.get("error") {
             item["error"] = err.clone();
         }
         list.push(item);
     }
+    Ok(list)
+}
+
+/// modCatalog()
+pub fn mod_catalog(app: &tauri::AppHandle, version_id: &str, folder: &str) -> Result<(PathBuf, Vec<Value>), String> {
+    let dir = resolve_resource_directory(app, folder, version_id, "mods")?;
+    let list = mod_catalog_in_dir(app, &dir)?;
     Ok((dir, list))
 }
 
@@ -1806,12 +1812,56 @@ pub fn identify(app: &tauri::AppHandle, dir: &Path, mods: &[Value]) -> Result<()
     Ok(())
 }
 
+/// 聚合视图按行定位用的目录校验：绝对路径、无符号链接、最后一级是该类资源子目录、
+/// 且位于某个已登记游戏文件夹之内（防止前端传入任意路径）。
+pub(crate) fn checked_resource_dir(app: &tauri::AppHandle, raw: &str) -> Result<PathBuf, String> {
+    let input = raw.trim();
+    if input.is_empty() {
+        return Err("资源目录无效，请刷新后重试".into());
+    }
+    let path = PathBuf::from(input);
+    if !path.is_absolute() {
+        return Err("资源目录必须是绝对路径".into());
+    }
+    let kind = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if !["mods", "resourcepacks", "shaderpacks"].contains(&kind.as_str()) {
+        return Err("资源目录无效，请刷新后重试".into());
+    }
+    let meta = std::fs::symlink_metadata(&path).map_err(|_| "资源目录不存在，请刷新后重试".to_string())?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err("资源目录是链接或不是文件夹，请确认实际位置".into());
+    }
+    let real = installer::canonical_path(input);
+    let inside = crate::settings::get(app)
+        .get("folders")
+        .and_then(|f| f.as_array())
+        .map(|arr| {
+            arr.iter().any(|f| {
+                let base = installer::canonical_path(f["path"].as_str().unwrap_or(""));
+                real.starts_with(&base)
+            })
+        })
+        .unwrap_or(false);
+    if !inside {
+        return Err("资源目录不属于任何已登记的游戏文件夹".into());
+    }
+    Ok(real)
+}
+
 /// setModsEnabled()：批量启停（.disabled 后缀交换，绝不覆盖）
 pub fn set_mods_enabled(app: &tauri::AppHandle, version_id: &str, folder: &str, names: &[String], enabled: bool) -> Result<Value, String> {
     let dir = resolve_resource_directory(app, folder, version_id, "mods")?;
+    set_mods_enabled_in_dir(app, &dir, names, enabled)
+}
+
+/// setModsEnabled() 的目录作用域版本（聚合视图按行定位到具体实例目录）
+pub fn set_mods_enabled_in_dir(app: &tauri::AppHandle, dir: &Path, names: &[String], enabled: bool) -> Result<Value, String> {
     let rec = tasks::register_task("批量启停模组", "download");
-    let result = download::with_file_job(&dir, Some(rec.as_ref()), || -> Result<Value, String> {
-        assert_mods_idle(app, &dir)?;
+    let result = download::with_file_job(dir, Some(rec.as_ref()), || -> Result<Value, String> {
+        assert_mods_idle(app, dir)?;
         if names.len() > 10_000 {
             return Err("单次最多处理10000个模组".into());
         }
@@ -1827,7 +1877,7 @@ pub fn set_mods_enabled(app: &tauri::AppHandle, version_id: &str, folder: &str, 
                 list.push(n.clone());
                 list.push(format!("{base}{}", if enabled { "" } else { ".disabled" }));
             }
-            protect_mod_change(&dir, &list, "批量启停模组前")?;
+            protect_mod_change(dir, &list, "批量启停模组前")?;
         }
         let mut results: Vec<Value> = Vec::new();
         for name in &unique {
@@ -1836,10 +1886,10 @@ pub fn set_mods_enabled(app: &tauri::AppHandle, version_id: &str, folder: &str, 
                 let base = regex::Regex::new(r"(?i)\.disabled$").unwrap().replace(name, "").to_string();
                 let target = format!("{base}{}", if enabled { "" } else { ".disabled" });
                 if !dir.join(name).exists() && dir.join(&target).exists() {
-                    validate_mod_file(&dir, &target, None)?;
+                    validate_mod_file(dir, &target, None)?;
                     return Ok(json!({ "fileName": name, "name": target, "ok": true }));
                 }
-                validate_mod_file(&dir, name, None)?;
+                validate_mod_file(dir, name, None)?;
                 if name != &target {
                     if dir.join(&target).exists() {
                         return Err("目标文件已存在，未覆盖".into());
@@ -1867,11 +1917,15 @@ pub fn set_mods_enabled(app: &tauri::AppHandle, version_id: &str, folder: &str, 
 /// lockMods()
 pub fn lock_mods(app: &tauri::AppHandle, version_id: &str, folder: &str, names: &[String], locked: bool) -> Result<Value, String> {
     let dir = resolve_resource_directory(app, folder, version_id, "mods")?;
-    let (dir2, mods) = mod_catalog(app, version_id, folder)?;
-    let _ = dir2;
+    lock_mods_in_dir(app, &dir, names, locked)
+}
+
+/// lockMods() 的目录作用域版本（聚合视图按行定位到具体实例目录）
+pub fn lock_mods_in_dir(app: &tauri::AppHandle, dir: &Path, names: &[String], locked: bool) -> Result<Value, String> {
+    let mods = mod_catalog_in_dir(app, dir)?;
     let selected: Vec<Value> = mods.iter().filter(|m| names.contains(&m.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string())).cloned().collect();
     // Hash identity remains stable when offline.
-    let _ = identify(app, &dir, &selected);
+    let _ = identify(app, dir, &selected);
     let mut results: Vec<Value> = Vec::new();
     for name in names {
         let run = || -> Result<(), String> {
@@ -1881,8 +1935,8 @@ pub fn lock_mods(app: &tauri::AppHandle, version_id: &str, folder: &str, names: 
             if sha1.is_empty() {
                 return Err("无法校验模组文件".into());
             }
-            validate_mod_file(&dir, name, Some(sha1))?;
-            set_mod_locked(app, &dir, sha1, locked);
+            validate_mod_file(dir, name, Some(sha1))?;
+            set_mod_locked(app, dir, sha1, locked);
             Ok(())
         };
         match run() {
@@ -3476,8 +3530,16 @@ static ICON_QUEUE: Mutex<()> = Mutex::new(());
 
 /// getModIcons()：缓存目录 userData/cache/mod-icons-v1；远程 7 天 / 内嵌 60 秒
 pub fn get_mod_icons(app: &tauri::AppHandle, version: &str, folder: &str, requested: &[String], kind: &str) -> Value {
-    let _guard = ICON_QUEUE.lock().unwrap();
     let kind = if kind.is_empty() { "mods" } else { kind };
+    match resolve_resource_directory(app, folder, version, kind) {
+        Ok(dir) => get_mod_icons_in_dir(app, &dir, requested, kind),
+        Err(_) => json!({}),
+    }
+}
+
+/// getModIcons() 的目录作用域版本（聚合视图按行定位到具体实例目录）
+pub fn get_mod_icons_in_dir(app: &tauri::AppHandle, dir: &Path, requested: &[String], kind: &str) -> Value {
+    let _guard = ICON_QUEUE.lock().unwrap();
     let names: Vec<String> = {
         let mut seen = HashSet::new();
         requested
@@ -3490,61 +3552,57 @@ pub fn get_mod_icons(app: &tauri::AppHandle, version: &str, folder: &str, reques
             .cloned()
             .collect()
     };
-    let result = (|| -> Result<Value, String> {
-        let dir = resolve_resource_directory(app, folder, version, kind)?;
-        let cache_dir = icons_cache_dir(app);
-        let mut result: serde_json::Map<String, Value> = serde_json::Map::new();
-        let mut todo: Vec<String> = Vec::new();
-        let mut keys: HashMap<String, PathBuf> = HashMap::new();
-        for name in &names {
-            let path = dir.join(name);
-            let Ok(stat) = std::fs::symlink_metadata(&path) else { continue };
-            if !stat.is_file() {
-                continue;
-            }
-            let mtime = stat.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-            let ctime = stat.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
-            let key_src = serde_json::to_string(&json!([dir.to_string_lossy(), name, stat.len(), mtime, ctime])).unwrap_or_default();
-            let key = hex::encode(Sha256::digest(key_src.as_bytes()));
-            let cache_path = cache_dir.join(format!("{key}.json"));
-            keys.insert(name.clone(), cache_path.clone());
-            if let Ok(raw) = std::fs::read(&cache_path) {
-                if let Ok(cache) = serde_json::from_slice::<Value>(&raw) {
-                    if cache.get("expires").and_then(|v| v.as_u64()).unwrap_or(0) > now_ms() {
-                        result.insert(name.clone(), cache.get("icon").cloned().unwrap_or(json!("")));
-                        continue;
-                    }
+    let cache_dir = icons_cache_dir(app);
+    let mut result: serde_json::Map<String, Value> = serde_json::Map::new();
+    let mut todo: Vec<String> = Vec::new();
+    let mut keys: HashMap<String, PathBuf> = HashMap::new();
+    for name in &names {
+        let path = dir.join(name);
+        let Ok(stat) = std::fs::symlink_metadata(&path) else { continue };
+        if !stat.is_file() {
+            continue;
+        }
+        let mtime = stat.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+        let ctime = stat.created().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+        let key_src = serde_json::to_string(&json!([dir.to_string_lossy(), name, stat.len(), mtime, ctime])).unwrap_or_default();
+        let key = hex::encode(Sha256::digest(key_src.as_bytes()));
+        let cache_path = cache_dir.join(format!("{key}.json"));
+        keys.insert(name.clone(), cache_path.clone());
+        if let Ok(raw) = std::fs::read(&cache_path) {
+            if let Ok(cache) = serde_json::from_slice::<Value>(&raw) {
+                if cache.get("expires").and_then(|v| v.as_u64()).unwrap_or(0) > now_ms() {
+                    result.insert(name.clone(), cache.get("icon").cloned().unwrap_or(json!("")));
+                    continue;
                 }
             }
-            todo.push(name.clone());
         }
-        if todo.is_empty() {
-            return Ok(Value::Object(result));
+        todo.push(name.clone());
+    }
+    if todo.is_empty() {
+        return Value::Object(result);
+    }
+    let identities: Vec<Value> = match scan_mod_directory(&dir.to_string_lossy(), true, Some(&todo), "icons") {
+        Ok(list) => list.into_iter().filter(|i| i.get("sha1").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false)).collect(),
+        Err(_) => return Value::Object(result),
+    };
+    let matches = match_mod_icons(app, &identities);
+    for info in &identities {
+        let name = info.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let mut icon = String::new();
+        if let Some(url) = matches.get(&name) {
+            icon = icon_image_data(url).unwrap_or_default();
         }
-        let identities: Vec<Value> = scan_mod_directory(&dir.to_string_lossy(), true, Some(&todo), "icons")?
-            .into_iter()
-            .filter(|i| i.get("sha1").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false))
-            .collect();
-        let matches = match_mod_icons(app, &identities);
-        for info in &identities {
-            let name = info.get("fileName").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let mut icon = String::new();
-            if let Some(url) = matches.get(&name) {
-                icon = icon_image_data(url).unwrap_or_default();
-            }
-            let remote = !icon.is_empty();
-            if !remote {
-                icon = info.get("iconDataUrl").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            }
-            result.insert(name.clone(), json!(icon));
-            if let Some(cache_path) = keys.get(&name) {
-                let payload = json!({ "icon": icon, "expires": now_ms() + if remote { 7 * 86_400_000 } else { 60_000 } });
-                let _ = std::fs::write(cache_path, payload.to_string());
-            }
+        let remote = !icon.is_empty();
+        if !remote {
+            icon = info.get("iconDataUrl").and_then(|v| v.as_str()).unwrap_or("").to_string();
         }
-        Ok(Value::Object(result))
-    })();
-    result.unwrap_or_else(|_| json!({}))
+        result.insert(name.clone(), json!(icon));
+        if let Some(cache_path) = keys.get(&name) {
+            let payload = json!({ "icon": icon, "expires": now_ms() + if remote { 7 * 86_400_000 } else { 60_000 } });
+            let _ = std::fs::write(cache_path, payload.to_string());
+        }
+    }
+    Value::Object(result)
 }
 
 // ---------------- modFavorites.ts + shared/modFavorites.ts ----------------
@@ -5097,6 +5155,29 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             let (_dir, list) = mod_catalog(app, &id, &folder)?;
             Ok(json!(list))
         })()),
+        // 以下四条按绝对目录作用域（聚合视图的每一行自带 directory，直接定位回该实例目录）
+        "mods:catalogAt" => Some((|| -> Result<Value, String> {
+            let dir = checked_resource_dir(app, arg_str(args, 0).unwrap_or(""))?;
+            Ok(json!(mod_catalog_in_dir(app, &dir)?))
+        })()),
+        "mods:iconsAt" => Some((|| -> Result<Value, String> {
+            let dir = checked_resource_dir(app, arg_str(args, 0).unwrap_or(""))?;
+            let names: Vec<String> = arg(args, 1).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+            let kind = arg_str(args, 2).unwrap_or("mods").to_string();
+            Ok::<Value, String>(get_mod_icons_in_dir(app, &dir, &names, &kind))
+        })()),
+        "mods:setEnabledAt" => Some(installer::run_blocking(|| {
+            let dir = checked_resource_dir(app, arg_str(args, 0).unwrap_or(""))?;
+            let names: Vec<String> = arg(args, 1).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+            let enabled = arg(args, 2).and_then(|v| v.as_bool()).unwrap_or(false);
+            set_mods_enabled_in_dir(app, &dir, &names, enabled)
+        })),
+        "mods:setLockedAt" => Some(installer::run_blocking(|| {
+            let dir = checked_resource_dir(app, arg_str(args, 0).unwrap_or(""))?;
+            let names: Vec<String> = arg(args, 1).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+            let locked = arg(args, 2).and_then(|v| v.as_bool()).unwrap_or(false);
+            lock_mods_in_dir(app, &dir, &names, locked)
+        })),
         "mods:setEnabled" => Some(installer::run_blocking(|| {
             let id = arg_str(args, 0).unwrap_or("").to_string();
             let folder = arg_str(args, 1).unwrap_or("").to_string();

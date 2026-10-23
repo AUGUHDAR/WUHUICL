@@ -48,6 +48,16 @@ pub fn user_data_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
 /// 启动器数据文件夹名（exe 旁）
 pub const LAUNCHER_DATA_DIR_NAME: &str = "WUHUICL";
 
+/// panic 日志落点：exe 旁 WUHUICL\logs\panic.log（panic hook 没有 AppHandle，
+/// 单独走 exe_dir；hook 阶段不允许再 panic，全部静默失败）
+pub fn user_data_dir_panic_log() -> std::path::PathBuf {
+    let dir = exe_dir()
+        .map(|d| d.join(LAUNCHER_DATA_DIR_NAME).join("logs"))
+        .unwrap_or_else(std::env::temp_dir);
+    let _ = std::fs::create_dir_all(&dir);
+    dir.join("panic.log")
+}
+
 /// 旧版数据根（%APPDATA%\com.wuhuicl.app）：一次性迁移的来源。
 fn legacy_user_data_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
     let dir = app.path().app_data_dir().ok()?;
@@ -190,6 +200,10 @@ pub fn defaults() -> Value {
                 { "key": "authorCard", "visible": true }
             ]
         },
+        "splashFaceSource": "default",
+        "splashFacePath": "",
+        "logoFaceSource": "default",
+        "logoFacePath": "",
         "background": { "mode": "none", "color": "#1b2437", "image": "", "opacity": 0.5, "blur": 0, "fit": "crop" },
         "launchThumbnail": { "image": "", "fit": "crop" },
         "skinEditorPalette": { "custom": [], "recent": [], "color": "#000000", "alpha": 1.0 },

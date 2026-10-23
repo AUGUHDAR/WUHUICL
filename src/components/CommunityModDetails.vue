@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiGlyph from './UiGlyph.vue';
 import { ref, watch } from 'vue';
 import { communityProject, errText } from '../api';
 import type { CommunityModProject, CommunityProjectReference } from '@shared/types';
@@ -83,7 +84,7 @@ function download() {
                         aria-label="关闭模组详情"
                         @click="emit('close')"
                     >
-                        ×
+                        <UiGlyph name="close" :size="14" />
                     </button>
                 </header>
                 <div v-if="loading" class="project-loading muted" role="status">

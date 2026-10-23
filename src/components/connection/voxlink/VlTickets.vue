@@ -1,5 +1,6 @@
 <script setup lang="ts">
 /** 工单：附件走系统选择框或拖进窗口，列表靠 poll 与服务端对齐。 */
+import UiGlyph from '../../UiGlyph.vue';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { toast } from '../../../store';
 import { call, onDropPaths, vl } from './useVoxlink';
@@ -260,7 +261,7 @@ onMounted(() => void load());
 
             <div v-if="files.length" class="vl-row" style="margin-top: 10px">
                 <span v-for="(f, i) in files" :key="f" class="vl-pill ok" @click.stop="files.splice(i, 1)">
-                    {{ base(f) }} ×
+                    {{ base(f) }} <UiGlyph name="close" :size="11" />
                 </span>
             </div>
 

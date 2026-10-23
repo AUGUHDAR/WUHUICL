@@ -93,7 +93,7 @@ export const settingsCatalog = [
         id: 'features',
         category: 'features',
         name: '功能管理',
-        keywords: '侧边栏 模组 资源包 光影 录像 MOD 面板 服务器 联机 皮肤 社区'
+        keywords: '侧边栏 模组 资源包 光影 录像 服务器 联机 皮肤 社区'
     },
     { id: 'plugins', category: 'features', name: '插件', keywords: '安装 删除 启用 停用 JS' },
     {

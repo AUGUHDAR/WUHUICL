@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import type { CommunityFile, InstallOptions, LoaderName } from '@shared/types';
 import type { RecordingKind } from '@shared/recordings';
 import SelectMenu from './SelectMenu.vue';
+import UiGlyph from './UiGlyph.vue';
 import { errText } from '../api';
 import { formatReleaseTime } from '@shared/releaseTime';
 const props = defineProps<{
@@ -94,7 +95,7 @@ function choose(value: string) {
                 />
                 <p v-else class="recording-unavailable" role="alert">
                     <strong
-                        >⚠
+                        ><UiGlyph name="warning" :size="13" />
                         {{ kind === 'replaymod' ? 'ReplayMod' : 'Flashback' }} 暂无兼容版本</strong
                     ><br />当前 Minecraft {{ mc }} /
                     {{ loader }} 无法安装此录像模组。请更换加载器或选择“不安装录像模组”。

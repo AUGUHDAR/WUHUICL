@@ -33,6 +33,19 @@ pub fn system_info() -> serde_json::Value {
     })
 }
 
+/// 系统当前可用物理内存（MB，对应 os.freemem()）：内存整理前后对比用
+pub fn available_memory_mb() -> u64 {
+    let mut ms: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+    ms.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+    unsafe {
+        if GlobalMemoryStatusEx(&mut ms) != 0 {
+            ms.ullAvailPhys / (1024 * 1024)
+        } else {
+            0
+        }
+    }
+}
+
 /// 对应 productArchitecture(process.arch)：x64 / arm64，其余 unsupported
 fn architecture() -> &'static str {
     match std::env::consts::ARCH {

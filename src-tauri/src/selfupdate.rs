@@ -7,6 +7,7 @@
 //! 一个版本，预发布信息只允许写在正文里。
 
 use serde_json::{json, Value};
+use std::path::PathBuf;
 use tauri::{Emitter, Manager};
 
 const REPO_API: &str = "https://api.github.com/repos/AUGUHDAR/WUHUICL/releases";
@@ -16,6 +17,54 @@ const GITEE_API: &str = "https://gitee.com/api/v5/repos/AUGUHDAR/WUHUICL/release
 const GH_DOWNLOAD: &str = "https://github.com/AUGUHDAR/WUHUICL/releases/download";
 /// Gitee 下载基址
 const GITEE_DOWNLOAD: &str = "https://gitee.com/AUGUHDAR/WUHUICL/releases/download";
+/// 预设 gh 前缀镜像（与 shared/updateMirrors.ts 保持一致）
+const PRESET_MIRRORS: &[&str] = &["https://ghproxy.net/", "https://gh-proxy.com/", "https://ghfast.top/"];
+
+/// 读取玩家设置的更新来源：('auto'|'direct'|'mirror', 镜像前缀列表)
+fn update_sources_config(app: &tauri::AppHandle) -> (String, Vec<String>) {
+    let s = crate::settings::get(app);
+    let source = s["updateSource"].as_str().unwrap_or("auto").to_string();
+    let mut mirrors: Vec<String> = s["updateMirrorUrls"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str())
+                .filter(|u| u.starts_with("https://") && !u.contains(['?', '#', '@']))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(legacy) = s["updateMirrorUrl"].as_str() {
+        if legacy.starts_with("https://") && !mirrors.iter().any(|m| m == legacy) {
+            mirrors.push(legacy.to_string());
+        }
+    }
+    (source, mirrors)
+}
+
+/// 按 updateSource 设置拼出下载候选（label, url）；direct=仅 GitHub，gitee=仅 Gitee，
+/// mirror = Gitee + 预设/自定义 gh 前缀镜像，auto = 全部。
+fn download_candidates(app: &tauri::AppHandle, version: &str, name: &str) -> Vec<(String, String)> {
+    let (source, custom) = update_sources_config(app);
+    let gh = format!("{GH_DOWNLOAD}/{version}/{}", name);
+    let gitee = format!("{GITEE_DOWNLOAD}/{version}/{}", name);
+    let mut out: Vec<(String, String)> = Vec::new();
+    if source != "mirror" && source != "gitee" {
+        out.push(("GitHub".into(), gh.clone()));
+    }
+    if source != "direct" {
+        out.push(("Gitee".into(), gitee));
+        if source == "auto" || source == "mirror" {
+            let preset_iter = PRESET_MIRRORS.iter().copied();
+            let custom_iter = custom.iter().map(|s| s.as_str());
+            for m in preset_iter.chain(custom_iter) {
+                let base = if m.ends_with('/') { m.to_string() } else { format!("{m}/") };
+                out.push((format!("镜像 {}", base.trim_start_matches("https://").trim_end_matches('/')), format!("{base}{gh}")));
+            }
+        }
+    }
+    out
+}
 
 fn current_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
@@ -95,8 +144,6 @@ fn build_check_result(data: &Value) -> Value {
     let tag = parse_tag(data["tag_name"].as_str().unwrap_or(""))
         .unwrap_or_default();
     let has_update = is_newer(&tag, &current_version());
-    let (download_base, is_gitee) = (GITEE_DOWNLOAD, data["gitee"].as_bool().unwrap_or(false));
-    let _ = (download_base, is_gitee);
     let assets: Vec<Value> = data["assets"]
         .as_array()
         .cloned()
@@ -110,7 +157,6 @@ fn build_check_result(data: &Value) -> Value {
             Some(json!({
                 "name": name,
                 "url": a["browser_download_url"].as_str().map(str::to_string)
-                    .or_else(|| a["browser_download_url"].as_str().map(str::to_string))
                     .unwrap_or_default(),
                 "size": a["size"].as_u64().unwrap_or(0)
             }))
@@ -247,17 +293,18 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
     // 竞速：胜者通道（先完成校验通过的一方把结果发回来）
     let (win_tx, win_rx) = std::sync::mpsc::channel::<(String, u64)>();
     let cancel_race = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // 慢速提示（原版 applyUpdate.ts：bps>0 且 <100KB/s 持续 30s 推一次 event:updateSlowHint）：
+    // 多源竞速共享「已提示」位，任一路先触发即全局只提示一次
+    let slow_hint_sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-    let sources = vec![
-        ("GitHub".to_string(), format!("{GH_DOWNLOAD}/{version}/{}", name)),
-        ("Gitee".to_string(), format!("{GITEE_DOWNLOAD}/{version}/{}", name)),
-    ];
+    let sources = download_candidates(app, &version, &name);
     for (label, url) in sources {
         let app2 = app.clone();
         let task_id2 = task_id.clone();
         let rec2 = rec.clone();
         let cancel2 = cancel_race.clone();
         let win_tx2 = win_tx.clone();
+        let slow_hint2 = slow_hint_sent.clone();
         let version2 = version.clone();
         let name2 = name.clone();
         let expected2 = expected.clone();
@@ -271,6 +318,11 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
             let tid = task_id2.clone();
             let label3 = label.clone();
             let cancel3 = cancel2.clone();
+            // (上次采样时刻, 上次字节数, 连续慢速起点)
+            let slow_state3 = std::sync::Arc::new(std::sync::Mutex::new(
+                (std::time::Instant::now(), 0u64, None::<std::time::Instant>),
+            ));
+            let slow_hint3 = slow_hint2.clone();
             let progress: crate::installer::FileProgress = &move |done: u64, total: Option<u64>| {
                 if cancel3.load(std::sync::atomic::Ordering::SeqCst) {
                     return; // 已有胜者：此路进度不再上报
@@ -287,6 +339,30 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
                         "text": format!("下载更新包（{label3} 先到先用）{}", crate::installer::fmt_mb(done))
                     }),
                 );
+                // 慢速窗口判定：每秒采样一次速率，bps=0（完全停滞）不提示，交给竞速超时
+                let now = std::time::Instant::now();
+                let mut g = slow_state3.lock().unwrap();
+                let dt = now.duration_since(g.0).as_secs_f64();
+                if dt >= 1.0 {
+                    let bps = ((done.saturating_sub(g.1)) as f64 / dt) as u64;
+                    let slow_since = if bps > 0 && bps < 100 * 1024 {
+                        *g = (now, done, g.2.or(Some(now)));
+                        g.2
+                    } else {
+                        *g = (now, done, None);
+                        None
+                    };
+                    drop(g);
+                    if let Some(start) = slow_since {
+                        if now.duration_since(start) >= std::time::Duration::from_secs(30)
+                            && !slow_hint3.swap(true, std::sync::atomic::Ordering::SeqCst)
+                        {
+                            if let Some(win) = app3.get_webview_window("main") {
+                                let _ = win.emit_to("main", "event:updateSlowHint", json!({ "taskId": tid }));
+                            }
+                        }
+                    }
+                }
             };
             let result = crate::installer::download_file(
                 &app2,
@@ -375,8 +451,12 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
 
 fn sha256_file_hex(path: &std::path::Path) -> Result<String, String> {
     use sha2::{Digest, Sha256};
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-    Ok(hex::encode(Sha256::digest(&bytes)))
+    // 流式读取：本地安装包可能非常大，一次性 read 全文件会直接把 32 位堆打爆
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut reader = std::io::BufReader::with_capacity(1024 * 1024, file);
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut reader, &mut hasher).map_err(|e| e.to_string())?;
+    Ok(hex::encode(Sha256::digest(&hasher.finalize())))
 }
 
 /// update:apply(release)：写替换脚本（等当前进程退出 → 换 exe → 重启）然后退出。
@@ -407,6 +487,163 @@ for /l %%i in (1,1,60) do (
 
   timeout /t 1 /nobreak >nul
 
+)
+
+:replace
+
+if exist \"%TARGET%.old\" del /f /q \"%TARGET%.old\"
+
+copy /y \"%TARGET%\" \"%TARGET%.old\" >nul
+
+move /y \"%STAGED%\" \"%TARGET%\" >nul || goto :fail
+
+start \"\" \"%TARGET%\"
+
+exit /b 0
+
+:fail
+
+exit /b 1
+
+",
+        target = target.to_string_lossy(),
+        staged = staged.to_string_lossy(),
+        pid = std::process::id(),
+    );
+    std::fs::write(&bat, script).map_err(|e| e.to_string())?;
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+    Command::new("cmd")
+        .args(["/C", &bat.to_string_lossy()])
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    app.exit(0);
+    Ok(())
+}
+
+/// update:pickLocalFile：选择本地 exe 安装包并校验（版本号解析 + 与 Release 资产的 SHA-256 对照）
+fn pick_local_file(app: &tauri::AppHandle) -> Result<Value, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = app
+        .dialog()
+        .file()
+        .add_filter("WUHUICL 安装包", &["exe"])
+        .blocking_pick_file();
+    let Some(path) = picked else {
+        return Ok(Value::Null); // 用户取消：前端静默
+    };
+    let file_path = path.to_string();
+    let meta = std::fs::metadata(&file_path).map_err(|_| "安装包文件不存在".to_string())?;
+    if !meta.is_file() {
+        return Err("所选路径不是文件".into());
+    }
+    // 安装包正常 ≤ 200MB；超限直接拒绝，避免校验阶段吃光内存
+    if meta.len() > 200 * 1024 * 1024 {
+        return Err(format!(
+            "文件大小 {:.0} MB 超出安装包正常范围（≤200MB）",
+            meta.len() as f64 / 1048576.0
+        ));
+    }
+    let name = PathBuf::from(&file_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    // 文件名解析版本：wuhuicl-1.2.3.exe / WUHUICL-1.2.3.exe / 1.2.3.exe
+    let lower = name.to_lowercase();
+    let version = lower
+        .trim_end_matches(".exe")
+        .split(['-', '_'])
+        .find_map(|part| {
+            let t = part.trim_start_matches('v');
+            let ok = !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit() || b == b'.');
+            ok.then(|| t.to_string())
+        })
+        .unwrap_or_default();
+    let version_ok = !version.is_empty() && is_newer(&version, &current_version());
+    // SHA-256 对照：能联网拿到当前版本线 Release 资产 digest 才能比对
+    let mut sha256 = "unknown";
+    let mut detail = String::new();
+    if let Ok(data) = crate::net::client()
+        .get(format!("{REPO_API}/latest"))
+        .header("Accept", "application/vnd.github+json")
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+    {
+        if data.status().is_success() {
+            if let Ok(rel) = data.json::<Value>() {
+                let digest = rel["assets"]
+                    .as_array()
+                    .and_then(|a| {
+                        a.iter()
+                            .find(|a| {
+                                a["name"].as_str().map(|n| n.to_lowercase().ends_with(".exe")).unwrap_or(false)
+                            })
+                            .and_then(|a| a["digest"].as_str())
+                    })
+                    .and_then(|d| d.strip_prefix("sha256:"))
+                    .map(str::to_lowercase);
+                if let Some(expected) = digest {
+                    match sha256_file_hex(std::path::Path::new(&file_path)) {
+                        Ok(actual) => {
+                            sha256 = if actual == expected { "match" } else { "mismatch" };
+                            if sha256 == "mismatch" {
+                                detail = "与官方发布的 SHA-256 不一致：文件可能损坏或被改动，请重新下载".into();
+                            }
+                        }
+                        Err(e) => detail = e,
+                    }
+                } else {
+                    detail = "官方发布缺少 SHA-256 校验值，无法比对".into();
+                }
+            }
+        } else {
+            detail = format!("无法连接 GitHub 校验（HTTP {}）", data.status().as_u16());
+        }
+    } else {
+        detail = "无法连接 GitHub 校验，请检查网络".into();
+    }
+    Ok(json!({
+        "filePath": file_path,
+        "fileName": name,
+        "fileSize": meta.len(),
+        "version": version,
+        "versionOk": version_ok,
+        "sha256": sha256,
+        "detail": detail
+    }))
+}
+
+/// update:applyLocal：本地安装包走与 update:apply 相同的备份-替换-重启脚本
+fn apply_local_file(app: &tauri::AppHandle, check: &Value) -> Result<(), String> {
+    let path = check["filePath"].as_str().unwrap_or("");
+    if path.is_empty() {
+        return Err("缺少安装包路径，请重新选择".into());
+    }
+    let staged = PathBuf::from(path);
+    if !staged.is_file() {
+        return Err("安装包文件不存在，请重新选择".into());
+    }
+    let current = std::env::current_exe().map_err(|e| e.to_string())?;
+    let target = current.canonicalize().unwrap_or(current);
+    let dir = update_dir(app);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let bat = dir.join("apply-local-update.bat");
+    let script = format!(
+        "@echo off
+
+setlocal
+
+set \"TARGET={target}\"
+
+set \"STAGED={staged}\"
+
+for /l %%i in (1,1,60) do (
+
+  tasklist /FI \"PID eq {pid}\" | find \"{pid}\" >nul 2>&1 || goto :replace
+
+  timeout /t 1 /nobreak >nul
 )
 
 :replace
@@ -488,11 +725,13 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             let release = args.first().cloned().unwrap_or(Value::Null);
             Some(apply_update(app, &release).map(|_| Value::Null))
         }
-        "update:applyLocal" | "update:restoreBackup" => {
-            Some(Err("备份恢复未启用：更新脚本自带 .old 回滚".into()))
-        }
         "update:applyPending" => Some(Ok(Value::Bool(false))),
-        "update:pickLocalFile" => Some(Ok(Value::Null)),
+        "update:pickLocalFile" => Some(pick_local_file(app)),
+        "update:applyLocal" => {
+            let check = args.first().cloned().unwrap_or(Value::Null);
+            Some(apply_local_file(app, &check).map(|_| Value::Null))
+        }
+        "update:restoreBackup" => Some(Err("备份恢复未启用：更新脚本自带 .old 回滚".into())),
         _ => None,
     }
 }

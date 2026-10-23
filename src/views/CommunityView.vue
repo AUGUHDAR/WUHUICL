@@ -23,6 +23,7 @@ import { instanceKey } from '@shared/modCompatibility';
 import { communityFileMatchesInstance, usesCommunityLoader } from '@shared/communityPolicy';
 import { mcmodSearchUrl } from '@shared/communityLinks';
 import SelectMenu from '../components/SelectMenu.vue';
+import UiGlyph from '../components/UiGlyph.vue';
 import CommunityVersionFilter from '../components/CommunityVersionFilter.vue';
 import { readCommunitySession, saveCommunitySession } from '../communitySession';
 import {
@@ -947,10 +948,11 @@ function confirmDownload() {
                 >
                     {{ warning }}
                 </p>
-                <!-- 加载中 -->
+                <!-- 加载中：与结果卡片网格同构，搜索完成后无缝过渡 -->
                 <ContentSkeleton
                     v-if="loading && !results.length"
                     label="正在搜索社区资源…"
+                    variant="grid"
                     :rows="6"
                     retry
                     @retry="doSearch(true)"
@@ -1259,13 +1261,14 @@ function confirmDownload() {
                                 )
                             "
                         >
-                            {{
-                                favorites.some(
-                                    (f) =>
-                                        f.key === modal.item!.source + ':' + modal.item!.projectId
-                                )
-                                    ? '★ 已收藏'
-                                    : '☆ 收藏模组'
+                            <UiGlyph
+                                name="star"
+                                :size="14"
+                                :filled="favorites.some((f) => f.key === itemKey(modal.item!))"
+                            />{{
+                                favorites.some((f) => f.key === itemKey(modal.item!))
+                                    ? ' 已收藏'
+                                    : ' 收藏模组'
                             }}
                         </button>
                         <button
@@ -2084,9 +2087,12 @@ function confirmDownload() {
     .community-page > .instance-row {
         justify-content: flex-end;
     }
+    /* 两栏只服务于「找资源」分支；分区条、下载队列、收藏管理都跨满整行 */
     .community-page > .search-card,
     .community-page > .card,
-    .community-page > .status-strip {
+    .community-page > .status-strip,
+    .community-page > .community-sections,
+    .community-page > .favorites-manager {
         grid-column: 1/-1;
     }
 }

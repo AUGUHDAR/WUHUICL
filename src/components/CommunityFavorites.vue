@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiGlyph from './UiGlyph.vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import SelectMenu from './SelectMenu.vue';
 import ConfirmModal from './ConfirmModal.vue';
@@ -432,7 +433,7 @@ const sortOptions = [
                             :disabled="linking"
                             @click="linkRecord = null"
                         >
-                            ×
+                            <UiGlyph name="close" :size="14" />
                         </button>
                     </div>
                     <p class="muted">

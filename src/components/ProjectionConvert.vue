@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiGlyph from './UiGlyph.vue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import type {
     ProjectionEntry,
@@ -105,7 +106,7 @@ onUnmounted(() => {
                         aria-label="关闭转换"
                         @click="emit('close')"
                     >
-                        ×
+                        <UiGlyph name="close" :size="14" />
                     </button>
                 </header>
                 <p class="muted">{{ entry.name }} · 原文件保留，重名生成独立副本</p>

@@ -454,39 +454,51 @@ input[type='number'] {
   cursor: default;
 }
 
-/* ---------------- 滑块（已填充段 = 金渐变，由组件内联背景实现） ---------------- */
+/* ---------------- 滑块（规格对齐 PCL：细轨 + 空心圆点，hover 只变色不放大） ----------------
+   轨道 1px 半透明细线，已填充段由组件内联背景画成主题色；圆点 10px 空心（底色 + 主题色描边），
+   比原先 16px 实心渐变球更精准好拖，也不会在拖动时忽大忽小。 */
 .slider {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--card-2);
-  border: 1px solid var(--border);
+  height: 16px;
+  background: transparent;
   outline: none;
   cursor: pointer;
+}
+.slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-dim) 26%, transparent);
 }
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
   border-radius: 50%;
-  background: var(--accent-grad);
-  border: none;
+  background: var(--card-solid, var(--card));
+  border: 2px solid var(--accent);
   cursor: pointer;
-  box-shadow: 0 2px 8px var(--accent-soft);
-  transition: transform 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
-.slider::-webkit-slider-thumb:hover {
-  transform: scale(1.2);
+.slider:hover::-webkit-slider-thumb,
+.slider:active::-webkit-slider-thumb {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.slider::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-dim) 26%, transparent);
 }
 .slider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: var(--accent);
-  border: none;
+  background: var(--card-solid, var(--card));
+  border: 2px solid var(--accent);
   cursor: pointer;
 }
 
@@ -536,6 +548,49 @@ input[type='number'] {
 .tag-accent {
   background: var(--accent-soft);
   color: var(--accent-2);
+}
+
+/* ---------------- 折叠卡片（PCL 式：折叠态 = 标题行 + 右侧箭头） ---------------- */
+.collapse {
+  padding: 0;
+}
+.collapse-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--row-h);
+  padding: var(--space-2) var(--card-pad);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.collapse-head::-webkit-details-marker {
+  display: none;
+}
+.collapse-head:hover .group-title {
+  color: var(--accent-2);
+}
+.collapse-arrow {
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--text-dim);
+  border-bottom: 2px solid var(--text-dim);
+  /* 折叠态：箭头朝上（PCL 折叠卡片右上箭头） */
+  transform: rotate(-45deg);
+  transition: transform 0.18s ease;
+  flex-shrink: 0;
+}
+.collapse[open] > .collapse-head .collapse-arrow {
+  /* 展开态：箭头朝下 */
+  transform: rotate(45deg);
+}
+.collapse-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--card-pad) var(--card-pad);
+  border-top: 1px solid var(--border);
 }
 
 /* ---------------- 页面标题 ---------------- */

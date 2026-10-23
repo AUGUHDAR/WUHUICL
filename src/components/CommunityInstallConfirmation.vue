@@ -81,7 +81,7 @@ const canInstall = computed(
                     </p>
                 </template>
                 <div class="modal-actions">
-                    <button class="btn btn-ghost" @click="emit('close')">稍后确认</button
+                    <button class="btn btn-ghost" data-modal-dismiss @click="emit('close')">稍后确认</button
                     ><button
                         v-if="item.plan?.warnings.length || !includeDependencies"
                         class="btn btn-ghost"

@@ -647,8 +647,8 @@ fn extract_zip_world(
     Ok(())
 }
 
-/// world:import（对应原版 importWorld / importWorldInFolder；新实例分支在
-/// installer.rs 的安装管线就绪后接入，当前只支持导入到已存在实例）
+/// world:import（对应原版 importWorld / importWorldInFolder；newInstance 分支安装目标
+/// 实例后导入，失败连同新实例目录一并回滚）
 pub fn import_world(
     app: &tauri::AppHandle,
     input: &str,
@@ -669,12 +669,52 @@ pub fn import_world(
         .ok_or("所选存档已变化，请重新拖入并确认")?;
     let world_name = clean_leaf_name(options["worldName"].as_str().unwrap_or(""), "存档名称")?;
     let mut version_id = options["targetVersionId"].as_str().unwrap_or("").trim().to_string();
-    if options["newInstance"].is_object() {
-        return Err("创建新实例的存档导入尚未接入，请先安装对应版本".into());
+    let mut created_instance_dir: Option<std::path::PathBuf> = None;
+    if let Some(new_inst) = options["newInstance"].as_object() {
+        let minecraft_version = new_inst["minecraftVersion"].as_str().unwrap_or("").trim().to_string();
+        let instance_name = clean_leaf_name(new_inst["instanceName"].as_str().unwrap_or(""), "实例名称")?;
+        if minecraft_version.is_empty() {
+            return Err("新实例必须指定 Minecraft 版本".into());
+        }
+        let dir = std::path::Path::new(&target_folder).join("versions").join(&instance_name);
+        if dir.exists() {
+            return Err(format!("实例名称已存在：{instance_name}"));
+        }
+        let loader = new_inst["loader"].as_str().unwrap_or("").to_string();
+        let loader_version = new_inst["loaderVersion"].as_str().unwrap_or("").to_string();
+        let app2 = app.clone();
+        // 原版：创建目标实例占总进度 0~0.65，事件文本带「创建目标实例 ·」前缀
+        let installed_id = crate::installer::install_vanilla_public(
+            app,
+            Some(rec),
+            &minecraft_version,
+            &target_folder,
+            Some(&instance_name),
+            if loader.is_empty() { None } else { Some(loader.as_str()) },
+            if loader_version.is_empty() { None } else { Some(loader_version.as_str()) },
+            |event: &Value| {
+                let mut e = event.clone();
+                if let Some(obj) = e.as_object_mut() {
+                    let base = obj
+                        .get("overall")
+                        .and_then(|v| v.as_f64())
+                        .or_else(|| obj.get("progress").and_then(|v| v.as_f64()))
+                        .unwrap_or(0.0);
+                    obj.insert("overall".into(), json!(base * 0.65));
+                    let text = obj.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    obj.insert("text".into(), json!(format!("创建目标实例 · {text}")));
+                }
+                crate::tasks::emit_progress(&app2, e);
+            },
+        )?;
+        version_id = installed_id;
+        crate::installer::set_new_instance_isolation(&target_folder, &version_id, true)?;
+        created_instance_dir = Some(std::path::Path::new(&target_folder).join("versions").join(&version_id));
     }
     if version_id.is_empty() {
         return Err("请选择已有实例或创建新实例".into());
     }
+    let outcome = (|| -> Result<Value, String> {
     let installed = crate::versions::scan_folder_public(&target_folder, true);
     let installed = installed
         .iter()
@@ -761,12 +801,21 @@ pub fn import_world(
             "worldName": world_name,
             "worldDirectory": destination.to_string_lossy(),
             "installedResourcePacks": [],
-            "createdInstance": false
+            "createdInstance": created_instance_dir.is_some()
         }))
     })();
 
     let _ = std::fs::remove_dir_all(&transaction);
     result.map_err(|e| format!("存档导入失败，已回滚：{e}"))
+    })();
+
+    // 新实例导入失败时连同刚创建的实例目录一并回滚（原版 finally 分支）
+    if outcome.is_err() {
+        if let Some(d) = &created_instance_dir {
+            let _ = std::fs::remove_dir_all(d);
+        }
+    }
+    outcome
 }
 
 /// 统一入口

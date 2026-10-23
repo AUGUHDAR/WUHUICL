@@ -2,6 +2,8 @@ import type { InstanceTarget } from './instanceCenter';
 export type RecordingKind = 'replaymod' | 'flashback';
 export interface RecordingEntry {
     folder?: string;
+    /** 归属实例 id（来自实例目录的记录才有；收藏库/共享目录没有） */
+    instanceId?: string;
     id: string;
     name: string;
     kind: RecordingKind;

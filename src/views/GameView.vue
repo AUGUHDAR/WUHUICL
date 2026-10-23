@@ -551,6 +551,61 @@ const filtered = computed(() =>
 const formatDate = formatReleaseTime;
 const latestRelease = computed(() => manifest.value.find((v) => v.type === 'release'));
 
+// ---------------- 大版本折叠（对应 PCL/HMCL 的版本列表分组） ----------------
+/** 分组键：正式版按 1.X（如 1.21）；快照按年份；旧版归 Alpha / Beta */
+function majorGroup(v: RemoteVersion): { key: string; label: string } {
+    if (v.type === 'old_alpha') return { key: 'old-alpha', label: 'Alpha 远古版' };
+    if (v.type === 'old_beta') return { key: 'old-beta', label: 'Beta 旧版' };
+    // 快照：23w45a / 1.20-pre1 等统一按年份归组，年份取不到再退回快照
+    const snapYear = /^(\d{2})w\d{2}/.exec(v.id)?.[1];
+    if (v.type === 'snapshot' && snapYear)
+        return { key: `snap-20${snapYear}`, label: `20${snapYear} 快照` };
+    // 正式版：主版本号（1.21.4 → 1.21）；无匹配时归「其他」
+    const major = /^(\d+\.\d+)/.exec(v.id)?.[1];
+    if (major) return { key: major, label: major };
+    return v.type === 'snapshot'
+        ? { key: 'snapshot', label: '快照' }
+        : { key: 'other', label: '其他版本' };
+}
+interface VersionGroup {
+    key: string;
+    label: string;
+    versions: RemoteVersion[];
+    installed: number;
+    newest: number;
+}
+const groups = computed<VersionGroup[]>(() => {
+    const map = new Map<string, VersionGroup>();
+    for (const v of filtered.value) {
+        const { key, label } = majorGroup(v);
+        let group = map.get(key);
+        if (!group) {
+            group = { key, label, versions: [], installed: 0, newest: 0 };
+            map.set(key, group);
+        }
+        group.versions.push(v);
+        if (isInstalled(v)) group.installed++;
+        group.newest = Math.max(group.newest, Date.parse(v.releaseTime) || 0);
+    }
+    // 组内按发布时间降序（与平铺列表一致），组间按最新版本排序
+    for (const group of map.values())
+        group.versions.sort((a, b) => Date.parse(b.releaseTime) - Date.parse(a.releaseTime));
+    return [...map.values()].sort((a, b) => b.newest - a.newest);
+});
+/** 展开状态：默认全部折叠；含最新正式版的组与搜索命中的组自动展开，用户手动展开的组记在集合里 */
+const expandedGroups = ref(new Set<string>());
+watch([typeFilter, keyword], () => (expandedGroups.value = new Set()));
+function groupOpen(group: VersionGroup) {
+    if (keyword.value) return true;
+    if (group.versions.some((v) => v.id === latestRelease.value?.id)) return true;
+    return expandedGroups.value.has(group.key);
+}
+function toggleGroup(group: VersionGroup) {
+    const next = new Set(expandedGroups.value);
+    groupOpen(group) ? next.delete(group.key) : next.add(group.key);
+    expandedGroups.value = next;
+}
+
 const isInstalled = (v: RemoteVersion) => store.installed.some((i) => i.mcVersion === v.id);
 
 // ---------------- 安装模态框 ----------------
@@ -1449,65 +1504,89 @@ async function confirmIsolation() {
                 }}</span>
             </div>
             <div v-else class="version-list">
-                <div v-for="v in filtered" :key="v.id" class="version-row">
-                    <div class="version-info">
-                        <span class="version-id">{{ v.id }}</span>
-                        <span class="tag" :class="typeTagClass(v.type)">{{
-                            typeText[v.type]
-                        }}</span>
-                        <time
-                            class="muted version-date"
-                            :datetime="v.releaseTime"
-                            title="本地发布时间"
-                            >{{ formatDate(v.releaseTime) }}</time
-                        >
-                    </div>
-                    <div class="version-actions">
-                        <div
-                            v-if="store.installing.has(v.id) && versionProgress(v.id)"
-                            class="row-progress"
-                        >
-                            <div class="row-bar">
-                                <div
-                                    class="row-bar-fill"
-                                    :style="{
-                                        width:
-                                            Math.round(progressMono(versionProgress(v.id)) * 100) +
-                                            '%'
-                                    }"
-                                ></div>
+                <details
+                    v-for="group in groups"
+                    :key="group.key"
+                    class="collapse version-group"
+                    :open="groupOpen(group)"
+                    @toggle="
+                        ($event.currentTarget as HTMLDetailsElement).open !== groupOpen(group) &&
+                            toggleGroup(group)
+                    "
+                >
+                    <summary class="collapse-head version-group-head">
+                        <span class="version-group-title">
+                            <strong>{{ group.label }}</strong>
+                            <small class="muted">{{ group.versions.length }} 个版本</small>
+                            <span v-if="group.installed" class="tag tag-success"
+                                >已安装 {{ group.installed }}</span
+                            >
+                        </span>
+                        <span class="collapse-arrow" aria-hidden="true"></span>
+                    </summary>
+                    <div class="collapse-body version-group-body">
+                        <div v-for="v in group.versions" :key="v.id" class="version-row">
+                            <div class="version-info">
+                                <span class="version-id">{{ v.id }}</span>
+                                <span class="tag" :class="typeTagClass(v.type)">{{
+                                    typeText[v.type]
+                                }}</span>
+                                <time
+                                    class="muted version-date"
+                                    :datetime="v.releaseTime"
+                                    title="本地发布时间"
+                                    >{{ formatDate(v.releaseTime) }}</time
+                                >
                             </div>
-                            <span class="muted row-progress-text">
-                                {{ Math.round(progressMono(versionProgress(v.id)) * 100) }}%
-                                {{
-                                    versionProgress(v.id).speed
-                                        ? '· ' + formatSpeed(versionProgress(v.id).speed)
-                                        : ''
-                                }}
-                                {{ progressEta(v.id) ? '· ' + progressEta(v.id) : '' }}
-                                {{
-                                    versionProgress(v.id).source
-                                        ? '· ' + versionProgress(v.id).source
-                                        : ''
-                                }}
-                            </span>
+                            <div class="version-actions">
+                                <div
+                                    v-if="store.installing.has(v.id) && versionProgress(v.id)"
+                                    class="row-progress"
+                                >
+                                    <div class="row-bar">
+                                        <div
+                                            class="row-bar-fill"
+                                            :style="{
+                                                width:
+                                                    Math.round(
+                                                        progressMono(versionProgress(v.id)) * 100
+                                                    ) + '%'
+                                            }"
+                                        ></div>
+                                    </div>
+                                    <span class="muted row-progress-text">
+                                        {{ Math.round(progressMono(versionProgress(v.id)) * 100) }}%
+                                        {{
+                                            versionProgress(v.id).speed
+                                                ? '· ' + formatSpeed(versionProgress(v.id).speed)
+                                                : ''
+                                        }}
+                                        {{ progressEta(v.id) ? '· ' + progressEta(v.id) : '' }}
+                                        {{
+                                            versionProgress(v.id).source
+                                                ? '· ' + versionProgress(v.id).source
+                                                : ''
+                                        }}
+                                    </span>
+                                </div>
+                                <span v-if="isInstalled(v)" class="tag tag-success">已安装</span>
+                                <button
+                                    class="btn btn-sm btn-ghost"
+                                    :disabled="store.installing.has(v.id)"
+                                    @click="openInstall(v)"
+                                >
+                                    {{
+                                        store.installing.has(v.id)
+                                            ? '下载中'
+                                            : isInstalled(v)
+                                              ? '再次安装'
+                                              : '安装'
+                                    }}
+                                </button>
+                            </div>
                         </div>
-                        <span v-if="isInstalled(v)" class="tag tag-success">已安装</span>
-                        <button
-                            class="btn btn-sm btn-ghost"
-                            :disabled="store.installing.has(v.id)"
-                            @click="openInstall(v)"
-                        >
-                            {{
-                                store.installing.has(v.id)
-                                    ? '下载中'
-                                    : isInstalled(v)
-                                      ? '再次安装'
-                                      : '安装'
-                            }}
-                        </button>
                     </div>
-                </div>
+                </details>
             </div>
         </div>
         <!-- 已安装区 -->
@@ -2118,7 +2197,7 @@ async function confirmIsolation() {
                     </template>
                     <div class="modal-actions">
                         <button class="btn btn-ghost" @click="javaModal.open = false">取消</button>
-                        <button class="btn btn-gold" @click="onConfirmJava">确定</button>
+                        <button class="btn btn-gold" @click="onConfirmJava">保存</button>
                     </div>
                 </div>
             </div>
@@ -2966,6 +3045,41 @@ async function confirmIsolation() {
     /* 不再限制高度——整页单条外滚动，消灭内层嵌套滚动 */
     display: flex;
     flex-direction: column;
+    gap: var(--space-1);
+}
+/* 大版本分组：折叠头一行放组名 + 数量 + 已安装数，展开后是组内版本行 */
+.version-group {
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    transition: border-color 0.15s ease;
+}
+.version-group[open] {
+    border-color: var(--border);
+}
+.version-group-head {
+    min-height: 38px;
+    padding: var(--space-1) var(--space-3);
+    border-radius: var(--radius-md);
+}
+.version-group-head:hover {
+    background: var(--card-2);
+}
+.version-group-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+}
+.version-group-title strong {
+    font-variant-numeric: tabular-nums;
+}
+.version-group-title small {
+    font-size: var(--text-xs);
+}
+.version-group-body {
+    gap: 0;
+    border-top: 0;
+    padding: 0 var(--space-1) var(--space-1);
 }
 .version-row {
     display: flex;

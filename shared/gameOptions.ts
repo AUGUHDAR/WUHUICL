@@ -342,6 +342,22 @@ export const GAME_OPTIONS: GameOptionDef[] = [
 export const uniqueGameOptions = GAME_OPTIONS.filter(
     (d, i, a) => a.findIndex((other) => other.id === d.id) === i
 );
+// 常用参数一级可见（UX_PRINCIPLES「参数分层」）：只露玩家真会调的项，其余折叠进「全部选项」。
+export const COMMON_OPTION_IDS = [
+    'fov',
+    'soundCategory_master',
+    'soundCategory_music',
+    'mouseSensitivity',
+    'gamma',
+    'renderDistance',
+    'maxFps',
+    'enableVsync',
+    'guiScale',
+    'particles',
+    'mainHand',
+    'autoJump',
+    'lang'
+] as const;
 // Same row-major sequence as the game's video submenus: quality, display, appearance.
 export const VIDEO_OPTION_ORDER = [
     'renderDistance',

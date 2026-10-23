@@ -46,6 +46,8 @@ struct Source {
     root: PathBuf,
     label: String,
     library: bool,
+    /// 命中该目录的实例 id（实例目录才有；收藏/共享目录为 None）
+    instance_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -666,6 +668,9 @@ fn visit_source(
         if let Some(folder) = &source.folder {
             entry.insert("folder".into(), json!(folder.to_string_lossy().into_owned()));
         }
+        if let Some(instance_id) = &source.instance_id {
+            entry.insert("instanceId".into(), json!(instance_id));
+        }
         entry.insert("id".into(), json!(id.clone()));
         entry.insert("name".into(), json!(name));
         entry.insert("kind".into(), json!(kind));
@@ -682,7 +687,16 @@ fn visit_source(
     Ok(())
 }
 
-fn scan_inner(app: &tauri::AppHandle, rec: &TaskRecord, task_id: &str, task_title: &str) -> Result<Value, String> {
+fn scan_inner(
+    app: &tauri::AppHandle,
+    rec: &TaskRecord,
+    task_id: &str,
+    task_title: &str,
+    scope: &str,
+    target: &Value,
+) -> Result<Value, String> {
+    let target_folder: Option<String> = target["folder"].as_str().map(str::to_string);
+    let target_id: Option<String> = target["id"].as_str().map(str::to_string);
     let generation = SCAN_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let root = active_root(app)?;
     let collection = root.join("recordings");
@@ -700,20 +714,36 @@ fn scan_inner(app: &tauri::AppHandle, rec: &TaskRecord, task_id: &str, task_titl
     let mut sources: Vec<Source> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     let mut instances: Vec<Value> = Vec::new();
+    // 实例视图（scope=instance）：只看选定实例 + 它所在文件夹的收藏/共享目录；
+    // scope=folder：整个版本文件夹。scope=all：全部文件夹（旧行为，保留给“全库”）。
+
     for folder in &registered {
         let root_path = resolve_abs(Path::new(folder["path"].as_str().unwrap_or("")));
         let root_text = root_path.to_string_lossy().into_owned();
         let label = folder["name"].as_str().filter(|v| !v.is_empty()).map(str::to_string).unwrap_or_else(|| root_text.clone());
-        sources.push(Source { folder: Some(root_path.clone()), root: root_path.join("recordings"), label: format!("{label} · 集中收藏"), library: true });
-        sources.push(Source { folder: Some(root_path.clone()), root: root_path.clone(), label: format!("{label} · 共享目录"), library: false });
+        if scope == "instance" || scope == "folder" {
+            // 只处理当前实例所在的文件夹（folder_text 与选定 folder 同路径）
+            let active = target_folder.as_deref().unwrap_or("");
+            if !same_path(&root_text, active) {
+                continue;
+            }
+        }
+        sources.push(Source { folder: Some(root_path.clone()), root: root_path.join("recordings"), label: format!("{label} · 集中收藏"), library: true, instance_id: None });
+        sources.push(Source { folder: Some(root_path.clone()), root: root_path.clone(), label: format!("{label} · 共享目录"), library: false, instance_id: None });
         let (ids, errors) = installed_version_ids(&root_path);
         for error in errors {
             warnings.push(format!("{root_text}{COLON}{error}"));
         }
         for id in ids {
+            if scope == "instance" {
+                // 只保留当前实例
+                if Some(id.as_str()) != target_id.as_deref() {
+                    continue;
+                }
+            }
             match center_target_dir(app, &json!({ "folder": root_text, "id": id })) {
                 Ok(dir) => {
-                    sources.push(Source { folder: Some(root_path.clone()), root: dir, label: id.clone(), library: false });
+                    sources.push(Source { folder: Some(root_path.clone()), root: dir, label: id.clone(), library: false, instance_id: Some(id.clone()) });
                     instances.push(json!({ "folder": root_text, "id": id, "name": format!("{id} · {root_text}") }));
                 }
                 Err(_) => warnings.push(format!("无法读取实例：{root_text}{COLON}{id}")),
@@ -773,11 +803,11 @@ fn scan_inner(app: &tauri::AppHandle, rec: &TaskRecord, task_id: &str, task_titl
 }
 
 // 对应原版 recordingsIpc.ts scan()
-fn list(app: &tauri::AppHandle) -> Result<Value, String> {
+fn list(app: &tauri::AppHandle, scope: &str, target: &Value) -> Result<Value, String> {
     let rec = tasks::register_task("录像 · 扫描全部目录", "world");
     let task_id = rec.id.clone();
     let task_title = rec.title.clone();
-    let outcome = scan_inner(app, &rec, &task_id, &task_title);
+    let outcome = scan_inner(app, &rec, &task_id, &task_title, scope, target);
     let cancelled = rec.cancelled.load(Ordering::SeqCst);
     let error = outcome.as_ref().err().cloned();
     tasks::task_done(app, &task_id, outcome.is_ok(), error, cancelled, None);
@@ -967,7 +997,7 @@ fn import(app: &tauri::AppHandle) -> Result<Value, String> {
         entry.insert("source".into(), json!("导入"));
         entry.insert("directory".into(), json!(parent.to_string_lossy().into_owned()));
         entry.insert("library".into(), json!(false));
-        items.push(Stored { entry: Value::Object(entry), source: Source { folder: None, root: parent, label: "导入".into(), library: false }, rel });
+        items.push(Stored { entry: Value::Object(entry), source: Source { folder: None, root: parent, label: "导入".into(), library: false, instance_id: None }, rel });
     }
     run(app, items, "collect", Some(&destination))
 }
@@ -1020,6 +1050,7 @@ fn handle_drag(app: &tauri::AppHandle, args: &[Value]) {
         if items.len() > DRAG_LIMIT {
             return Err(format!("每次最多拖出 {DRAG_LIMIT} 个录像，请分批选择"));
         }
+        let mut paths: Vec<String> = Vec::with_capacity(items.len());
         for item in &items {
             let file = drag_path(&item.source.root, &item.rel)?;
             let meta = stat_of(&file)?;
@@ -1028,8 +1059,11 @@ fn handle_drag(app: &tauri::AppHandle, args: &[Value]) {
             if !meta.is_file() || meta.len() != size || mtime_ms(&meta) != modified {
                 return Err("录像已变化，请刷新后重试".into());
             }
+            paths.push(file.to_string_lossy().to_string());
         }
-        Err(format!("原生文件拖出暂不可用{COLON}请使用「提取到文件夹」或「收集到当前文件夹收藏」"))
+        crate::dragout::validate_paths(&paths)?;
+        // DoDragDrop 模态循环：阻塞到玩家松手
+        crate::dragout::start_drag_out(&paths).map(|_| ())
     })();
     if let Err(e) = outcome {
         installer::emit_event(app, "files:dragError", &Value::String(e));
@@ -1038,7 +1072,14 @@ fn handle_drag(app: &tauri::AppHandle, args: &[Value]) {
 
 pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
     match channel {
-        "recordings:list" => Some(list(app)),
+        "recordings:list" => {
+            let target = args.get(1).cloned().unwrap_or(json!({}));
+            Some(list(
+                app,
+                args.first().and_then(|v| v.as_str()).unwrap_or("instance"),
+                &target,
+            ))
+        }
         "recordings:operate" => Some(operate(app, args)),
         "recordings:import" => Some(import(app)),
         "recordings:open" => Some(open(app, args)),

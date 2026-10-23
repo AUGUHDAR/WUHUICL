@@ -107,6 +107,43 @@ fn import_managed_image(app: &tauri::AppHandle, src: &PathBuf, kind: &str) -> Re
     Ok(dest.to_string_lossy().to_string())
 }
 
+/// appearance:saveFaceImage(dataUrl, slot) → 受管路径。开屏头像/左上角图标：
+/// 前端已把皮肤渲染成方块头 PNG，这里校验后落盘到受管 faces/ 目录。
+fn save_face_image(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
+    let data_url = args.first().and_then(|v| v.as_str()).unwrap_or("");
+    let slot = args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+    if !matches!(slot, "splash" | "logo") {
+        return Err("未知的形象槽位".into());
+    }
+    let raw = data_url
+        .strip_prefix("data:image/png;base64,")
+        .ok_or("头像数据无效")?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(raw)
+        .map_err(|_| "头像数据无效".to_string())?;
+    if bytes.len() > 4 * 1024 * 1024 {
+        return Err("头像图片过大".into());
+    }
+    if bytes.len() < 24 || bytes[0..4] != [0x89, 0x50, 0x4e, 0x47] {
+        return Err("头像必须是 PNG 图片".into());
+    }
+    let root = managed_root(app).join("faces");
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    let dest = root.join(format!("{slot}.png"));
+    std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+    Ok(json!(dest.to_string_lossy().to_string()))
+}
+
+/// appearance:resetFaceImage(slot)：删除自定义头图文件（设置字段由前端一并清空）
+fn reset_face_image(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
+    let slot = args.first().and_then(|v| v.as_str()).unwrap_or("");
+    if !matches!(slot, "splash" | "logo") {
+        return Err("未知的形象槽位".into());
+    }
+    let _ = std::fs::remove_file(managed_root(app).join("faces").join(format!("{slot}.png")));
+    Ok(Value::Null)
+}
+
 fn patch_background(app: &tauri::AppHandle, patch: Value) -> Result<Value, String> {
     crate::settings::save(app, json!({ "background": patch }))
 }
@@ -189,6 +226,8 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         "appearance:importBackground" => Some(import_background(app, false)),
         "appearance:importBackgroundMulti" => Some(import_background(app, true)),
         "appearance:resetBackground" => Some(reset_background(app)),
+        "appearance:saveFaceImage" => Some(save_face_image(app, args)),
+        "appearance:resetFaceImage" => Some(reset_face_image(app, args)),
         "appearance:importLaunchThumbnail" => Some(import_launch_thumbnail(app)),
         "appearance:resetLaunchThumbnail" => Some(reset_launch_thumbnail(app)),
         _ => None,

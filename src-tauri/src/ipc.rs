@@ -6,7 +6,7 @@
 //! 启动关键通道（settings/accounts/versions/folders/systemInfo/exitHistory/…）
 //! 为真实现；未移植通道显式返回「未实现的通道」错误，便于移植期发现缺口。
 
-use crate::{accounts, appearance, bridge, catalog, direct, frp, selfupdate, centercmd, community, misc, modpacks, mods, projections, recordings, servers, skins, terracotta, voxlink, vlcli, worlds, exportlogs, gate, gamedir, gamefolders, installer, javaman, launch, mslogin, settings, sysinfo, versions, windowctl};
+use crate::{accounts, appearance, bridge, catalog, direct, frp, selfupdate, centercmd, community, feedback, misc, modpacks, mods, projections, recordings, servers, skins, tasks, terracotta, voxlink, vlcli, worlds, exportlogs, gate, gamedir, gamefolders, installer, javaman, launch, mslogin, settings, sysinfo, versions, windowctl};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, WebviewWindow};
 
@@ -18,9 +18,13 @@ pub async fn ipc_invoke(
     args: Vec<Value>,
 ) -> Result<Value, String> {
     // 同步 command 在 WebView2 的 UI 线程上执行，扫描/下载/对话框会冻住界面（原版 main 是独立进程）。
-    tauri::async_runtime::spawn_blocking(move || invoke(&app, &channel, &args))
-        .await
-        .map_err(|e| format!("后台任务崩溃：{e}"))?
+    // OOM 探针归因：blocking 线程记下当前处理的通道，崩溃日志能直接指认肇事 IPC。
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::set_current_ipc(&channel);
+        invoke(&app, &channel, &args)
+    })
+    .await
+    .map_err(|e| format!("后台任务崩溃：{e}"))?
 }
 
 #[tauri::command]
@@ -88,6 +92,9 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         return r;
     }
     if let Some(r) = voxlink::invoke(app, channel, args) {
+        return r;
+    }
+    if let Some(r) = feedback::invoke(app, channel, args) {
         return r;
     }
     if let Some(r) = projections::invoke(app, channel, args) {
@@ -278,12 +285,40 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         "window:visibility" => Ok(windowctl::visibility(app)),
 
         // ---------------- 任务 ----------------
-        "tasks:cancel" | "tasks:pause" | "tasks:resume" => Ok(json!(false)),
+        // 对应原版 cancelTaskAndWait：发出取消后等任务主流程退出（finish_task 移除登记），
+        // 30s 未退出抛「取消超时」，避免 UI 把仍在写盘的任务当成已取消
+        "tasks:cancel" => {
+            let id = args.first().and_then(|v| v.as_str()).ok_or("缺少 taskId")?;
+            if !tasks::cancel_task(id) {
+                return Ok(json!(false));
+            }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            while tasks::get_task(id).is_some() {
+                if std::time::Instant::now() >= deadline {
+                    return Err("取消超时：后台任务尚未停止，请稍后重试".into());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Ok(json!(true))
+        }
+        "tasks:pause" => {
+            let id = args.first().and_then(|v| v.as_str()).ok_or("缺少 taskId")?;
+            Ok(json!(tasks::pause_task(id)))
+        }
+        "tasks:resume" => {
+            let id = args.first().and_then(|v| v.as_str()).ok_or("缺少 taskId")?;
+            Ok(json!(tasks::resume_task(id)))
+        }
 
         // ---------------- 文件 ----------------
         "fs:list" => {
             let (rel, folder) = two_strings_first_optional(args)?;
             fs_list(app, &rel, &folder)
+        }
+        // 「版本文件夹内的所有」：聚合共享根 + 各实例，返回 {entries, instances, warnings}
+        "fs:listAggregate" => {
+            let (rel, folder) = two_strings_first_optional(args)?;
+            fs_list_aggregate(app, &rel, &folder)
         }
         "fs:path" => {
             let (rel, folder) = two_strings_first_optional(args)?;
@@ -339,27 +374,30 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
                 return Err("该实例正在运行中，请先退出游戏再禁用/启用模组".into());
             }
             let dir = fs_resolve(app, &rel, folder)?;
-            let base = std::path::Path::new(&name)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let lower = base.to_lowercase();
-            let to = if lower.ends_with(".jar.disabled") {
-                dir.join(&base[..base.len() - ".disabled".len()])
-            } else if lower.ends_with(".jar") {
-                dir.join(format!("{}.disabled", base))
-            } else {
-                return Err("仅支持禁用 .jar 模组文件".into());
-            };
-            let from = dir.join(&base);
-            if !from.exists() {
-                return Err("文件不存在，请刷新后重试".into());
-            }
-            if to.exists() {
-                return Err("目标文件名已存在，请手动处理后重试".into());
-            }
-            std::fs::rename(&from, &to).map_err(|e| e.to_string())?;
+            toggle_disable_in_dir(&dir, &name)?;
             fs_list(app, &rel, folder)
+        }
+        // 以下三条按绝对目录作用域（聚合视图的每一行自带 directory，直接定位回该实例目录）
+        "fs:removeAt" => {
+            let (dir_arg, name) = two_strings(args)?;
+            let dir = mods::checked_resource_dir(app, &dir_arg)?;
+            let instance_dir = dir.parent().ok_or("路径异常")?.to_path_buf();
+            let dir_for_job = dir.clone();
+            crate::download::with_file_job(&dir, None, move || {
+                mods::assert_instance_idle(app, &instance_dir)?;
+                crate::projections::recycle_file(&dir_for_job, &name)
+            })?;
+            Ok(Value::Null)
+        }
+        "fs:toggleDisableAt" => {
+            let (dir_arg, name) = two_strings(args)?;
+            let dir = mods::checked_resource_dir(app, &dir_arg)?;
+            toggle_disable_in_dir(&dir, &name)?;
+            Ok(Value::Null)
+        }
+        "fs:dragAt" => {
+            fs_drag_at(app, args);
+            Ok(Value::Null)
         }
         "fs:importResources" => {
             // 对应原版 ipc.ts IPC.fsImportResources
@@ -511,39 +549,110 @@ fn send(app: &AppHandle, from_main: bool, channel: &str, args: &[Value]) -> Resu
 }
 
 /// 对应原版 ipc.ts ipcMain.on('fs:drag') 与 core/resourceDragPaths.ts：
-/// 目录与文件名校验逐条照抄；Tauri 没有 webContents.startDrag 等价 API，
-/// 因此校验通过后仍回报 files:dragError（与原版失败分支同一通道，属平台差异，已在交付说明登记）。
+/// 目录与文件名校验逐条照抄；校验通过后启动 OLE DoDragDrop 模态拖出。
 fn fs_drag(app: &AppHandle, args: &[Value]) {
     let rel = args.first().and_then(|v| v.as_str()).unwrap_or("");
     let names = args.get(1).cloned().unwrap_or(Value::Null);
     let folder = args.get(2).and_then(|v| v.as_str());
     let msg: String = (|| {
         let parts: Vec<&str> = rel.split('/').collect();
-        let ok = parts.len() == 3
+        let instance_shape = parts.len() == 3
             && parts[0] == "versions"
             && !parts[1].is_empty()
             && !parts[1].contains('\\')
             && matches!(parts[2], "mods" | "resourcepacks" | "shaderpacks");
-        if !ok {
+        // 「版本文件夹内的所有」视图里的共享根目录：单级 <rel>，目录按活动文件夹解析
+        let shared_shape = parts.len() == 1 && matches!(parts[0], "mods" | "resourcepacks" | "shaderpacks");
+        if !instance_shape && !shared_shape {
             return "不支持拖出该目录".to_string();
         }
         let folder = match folder {
             Some(f) if !f.is_empty() => f,
             _ => return "未指定游戏文件夹".to_string(),
         };
-        let target = json!({ "folder": folder, "id": parts[1] });
-        let (_, dir, _, _) = match centercmd::center_target(app, &target) {
+        let dir = if instance_shape {
+            let target = json!({ "folder": folder, "id": parts[1] });
+            let (_, dir, _, _) = match centercmd::center_target(app, &target) {
+                Ok(v) => v,
+                Err(e) => return e,
+            };
+            dir.join(parts[2])
+        } else {
+            let Ok(dir) = mods::checked_resource_dir(app, &std::path::Path::new(folder).join(parts[0]).to_string_lossy()) else {
+                return "资源目录无效".to_string();
+            };
+            dir
+        };
+        let files = match drag_resource_files(&dir, &names) {
             Ok(v) => v,
             Err(e) => return e,
         };
-        match drag_resource_files(&dir.join(parts[2]), &names) {
-            // 解析成功也不能伪造拖出成功：这里给出与原版同一条通道的能力缺失说明
-            Ok(_) => "当前运行环境不支持原生拖出到系统".to_string(),
+        if let Err(e) = crate::dragout::validate_paths(&files) {
+            return e;
+        }
+        // DoDragDrop 是模态循环：阻塞本调用线程直到松手/取消（用户手势全程持有）
+        match crate::dragout::start_drag_out(&files) {
+            Ok(_) => String::new(), // 拖出成功：不推错误
             Err(e) => e,
         }
     })();
-    if let Some(win) = app.get_webview_window("main") {
-        let _ = tauri::Emitter::emit_to(&win, "main", "files:dragError", format!("Error: {}", msg));
+    // 空 msg = 成功，不推 files:dragError
+    if !msg.is_empty() {
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = tauri::Emitter::emit_to(&win, "main", "files:dragError", format!("Error: {}", msg));
+        }
+    }
+}
+
+/// 模组禁用/启用（.jar ↔ .jar.disabled），按目录执行：实例视图与聚合视图共用
+fn toggle_disable_in_dir(dir: &std::path::Path, name: &str) -> Result<(), String> {
+    let base = std::path::Path::new(name)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let lower = base.to_lowercase();
+    let to = if lower.ends_with(".jar.disabled") {
+        dir.join(&base[..base.len() - ".disabled".len()])
+    } else if lower.ends_with(".jar") {
+        dir.join(format!("{}.disabled", base))
+    } else {
+        return Err("仅支持禁用 .jar 模组文件".into());
+    };
+    let from = dir.join(&base);
+    if !from.exists() {
+        return Err("文件不存在，请刷新后重试".into());
+    }
+    if to.exists() {
+        return Err("目标文件名已存在，请手动处理后重试".into());
+    }
+    std::fs::rename(&from, &to).map_err(|e| e.to_string())
+}
+
+/// fs_drag 的目录作用域版本：前端聚合视图的每行直接给出绝对目录
+fn fs_drag_at(app: &AppHandle, args: &[Value]) {
+    let dir_arg = args.first().and_then(|v| v.as_str()).unwrap_or("");
+    let names = args.get(1).cloned().unwrap_or(Value::Null);
+    let msg: String = (|| {
+        let dir = match mods::checked_resource_dir(app, dir_arg) {
+            Ok(dir) => dir,
+            Err(e) => return e,
+        };
+        let files = match drag_resource_files(&dir, &names) {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+        if let Err(e) = crate::dragout::validate_paths(&files) {
+            return e;
+        }
+        match crate::dragout::start_drag_out(&files) {
+            Ok(_) => String::new(),
+            Err(e) => e,
+        }
+    })();
+    if !msg.is_empty() {
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = tauri::Emitter::emit_to(&win, "main", "files:dragError", format!("Error: {}", msg));
+        }
     }
 }
 
@@ -851,6 +960,103 @@ fn fs_list(app: &AppHandle, rel: &str, folder: &str) -> Result<Value, String> {
         })
     });
     Ok(Value::Array(out))
+}
+
+/// 「版本文件夹内的所有」：聚合共享根目录 + 每个已装实例的该子目录。
+/// 与投影/录像/服务器三页同口径——按实例分开列，**不合并同名文件**（不同实例的同名
+/// mod 是两份独立文件），每条带 instanceId/instanceName 供前端按行定位回实例目录。
+fn fs_list_aggregate(app: &AppHandle, rel: &str, folder: &str) -> Result<Value, String> {
+    if !matches!(rel, "mods" | "resourcepacks" | "shaderpacks") {
+        return Err("内容范围只支持模组/资源包/光影包目录".into());
+    }
+    // 共享根目录（<folder>/<rel>）
+    let mut sources: Vec<(String, String, std::path::PathBuf)> = Vec::new();
+    let shared = fs_resolve(app, rel, folder)?;
+    let shared_identity = crate::installer::path_identity(&shared.to_string_lossy());
+    sources.push((String::new(), "共享目录".to_string(), shared));
+
+    // 各已装实例：优先取实例声明目录（隔离时 = versions/<id>），否则回落共享根
+    let settings_value = settings::get(app);
+    let installed = crate::versions::list_installed(&settings_value, false);
+    let mut warnings: Vec<String> = Vec::new();
+    let mut instances: Vec<Value> = Vec::new();
+    for v in installed.as_array().cloned().unwrap_or_default() {
+        let id = v["id"].as_str().unwrap_or("").to_string();
+        if id.is_empty() {
+            continue;
+        }
+        let vfolder = v
+            .get("folder")
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| folder.to_string());
+        // 实例目录与共享根相同时不重复列：共享条目已覆盖
+        match crate::mods::resolve_resource_directory(app, &vfolder, &id, rel) {
+            Ok(dir) => {
+                if crate::installer::path_identity(&dir.to_string_lossy()) == shared_identity {
+                    continue;
+                }
+                instances.push(json!({ "id": id, "name": id, "folder": vfolder }));
+                sources.push((id.clone(), id, dir));
+            }
+            Err(e) => warnings.push(format!("{}：{}", id, e)),
+        }
+    }
+
+    let mut out: Vec<Value> = Vec::new();
+    for (instance_id, instance_name, dir) in sources {
+        let names = match std::fs::read_dir(&dir) {
+            Ok(rd) => rd.filter_map(|e| e.ok()).collect::<Vec<_>>(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => {
+                warnings.push(format!("{}：无法读取资源目录", dir.to_string_lossy()));
+                continue;
+            }
+        };
+        for e in names {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let meta = match std::fs::symlink_metadata(&e.path()) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if meta.file_type().is_symlink() || name == ".DS_Store" {
+                continue;
+            }
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            out.push(json!({
+                "name": name,
+                "size": meta.len(),
+                "isDir": meta.is_dir(),
+                "mtime": mtime,
+                "instanceId": instance_id,
+                "instanceName": instance_name,
+                "directory": dir.to_string_lossy()
+            }));
+        }
+    }
+    // 实例优先、目录优先、再按名称：同名文件在不同实例下相邻可见
+    out.sort_by(|a, b| {
+        let ia = a["instanceId"].as_str().unwrap_or("");
+        let ib = b["instanceId"].as_str().unwrap_or("");
+        ia.cmp(ib).then_with(|| {
+            let da = a["isDir"].as_bool().unwrap_or(false);
+            let db = b["isDir"].as_bool().unwrap_or(false);
+            db.cmp(&da).then_with(|| {
+                a["name"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .cmp(&b["name"].as_str().unwrap_or("").to_lowercase())
+            })
+        })
+    });
+    Ok(json!({ "entries": out, "instances": instances, "warnings": warnings }))
 }
 
 /// 文件/目录选择（tauri-plugin-dialog 阻塞式，对应原版 dialog.showOpenDialog）

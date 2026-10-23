@@ -7,7 +7,7 @@ import type {
     ProjectionResult
 } from '@shared/projections';
 import { errText } from '../api';
-import { store, toast } from '../store';
+import { activeInstalled, store, toast } from '../store';
 import ContentSkeleton from '../components/ContentSkeleton.vue';
 import SelectMenu from '../components/SelectMenu.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
@@ -29,23 +29,26 @@ let generation = 0,
     disposed = false;
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 const activeFolder = computed(() => store.settings?.activeFolder || store.settings?.gameDir || '');
-const folderFilter = ref('');
-const folderOptions = computed(() => [
-    { value: '', label: '全部已绑定文件夹' },
-    ...(store.settings?.folders ?? []).map((f) => ({
-        value: f.path,
-        label: f.name + ' · ' + f.path
-    }))
-]);
+/** 内容范围：instance=只看当前实例；folder=版本文件夹内的所有（含收藏与共享目录） */
+const scope = ref<'instance' | 'folder'>(
+    localStorage.getItem('kamucl.projectionScope') === 'folder' ? 'folder' : 'instance'
+);
+watch(scope, (v) => localStorage.setItem('kamucl.projectionScope', v));
+const currentTarget = computed(() => {
+    const inst = store.resourceVersionId;
+    const folder = activeInstalled.value.find((v) => v.id === inst)?.folder || activeFolder.value;
+    return inst ? { id: inst, folder } : null;
+});
+const scopeOptions = [
+    { value: 'instance', label: '当前实例' },
+    { value: 'folder', label: '版本文件夹内的所有' }
+];
 watch(
-    () => JSON.stringify([activeFolder.value, store.settings?.folders]),
+    () => JSON.stringify([activeFolder.value, store.resourceVersionId, scope.value]),
     () => {
         void refresh(true);
     }
 );
-watch(folderOptions, (options) => {
-    if (!options.some((o) => o.value === folderFilter.value)) folderFilter.value = '';
-});
 watch(
     () => store.fsRefreshTick,
     () => {
@@ -57,9 +60,16 @@ const invoke = <T,>(channel: string, ...args: unknown[]) =>
 const filtered = computed(() =>
     data.value.entries.filter(
         (e) =>
-            (!folderFilter.value || e.folder === folderFilter.value) &&
+            (scope.value === 'folder' ||
+                (scope.value === 'instance' &&
+                    !!currentTarget.value &&
+                    (e.instanceId === currentTarget.value.id ||
+                        (!e.instanceId &&
+                            !!e.folder &&
+                            e.folder === currentTarget.value.folder)))) &&
             (kind.value === 'all' || e.kind === kind.value) &&
-            (source.value === 'all' || (source.value === 'library' ? e.library : !e.library)) &&
+            (source.value === 'all' ||
+                (source.value === 'shared' ? !e.instanceId : !!e.instanceId)) &&
             `${e.name} ${e.source} ${e.directory}`
                 .toLowerCase()
                 .includes(query.value.trim().toLowerCase())
@@ -72,7 +82,9 @@ const targets = computed(() =>
 );
 const size = (n: number) =>
     n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
-watch([query, kind, source, folderFilter], () => {
+/** 当前实例为空、但该文件夹其它实例里有投影 → 空状态给出切换入口，避免误以为"没有投影" */
+const othersHaveProjections = ref(false);
+watch([query, kind, source, scope], () => {
     page.value = 1;
     selected.value = [];
 });
@@ -81,13 +93,30 @@ async function refresh(silent = false) {
     if (!silent) loading.value = true;
     error.value = '';
     try {
-        const next = await invoke<ProjectionCatalog>('projections:list');
+        const next = await invoke<ProjectionCatalog>(
+            'projections:list',
+            scope.value,
+            currentTarget.value ?? {}
+        );
         if (disposed || id !== generation) return;
         data.value = next;
         if (!targets.value.some((t) => t.value === target.value)) target.value = '';
         selected.value = selected.value.filter((id) => next.entries.some((e) => e.id === id));
         page.value = Math.min(page.value, pages.value);
         if (!silent) target.value = '';
+        // 当前实例没投影时，探一次「版本文件夹内的所有」是否有其它实例的投影，
+        // 决定空状态是给"导入入口"还是给"切换范围"入口（玩家不该误以为整个文件夹都是空的）
+        if (scope.value === 'instance' && next.entries.length === 0) {
+            const all = await invoke<ProjectionCatalog>(
+                'projections:list',
+                'folder',
+                currentTarget.value ?? {}
+            );
+            if (!disposed && id === generation)
+                othersHaveProjections.value = all.entries.some((e) => !!e.instanceId);
+        } else {
+            othersHaveProjections.value = false;
+        }
     } catch (e) {
         if (!disposed && id === generation) error.value = errText(e);
     } finally {
@@ -121,7 +150,8 @@ function selectPage() {
 }
 async function open(entry?: ProjectionEntry) {
     try {
-        await invoke('projections:open', entry?.id);
+        // 无参 = 打开当前实例的 schematics；有参 = 定位到该文件
+        await invoke('projections:open', entry?.id, currentTarget.value ?? {});
     } catch (e) {
         toast(errText(e), 'error');
     }
@@ -138,13 +168,19 @@ async function execute(action: ProjectionRequest['action'] | 'import') {
     confirm.value = '';
     busy.value = true;
     try {
+        // collect 默认落到当前实例；dispatch 必须带所选目标实例
+        const effectiveTarget =
+            action === 'dispatch' ? destination : (destination ?? currentTarget.value ?? {});
         const result =
             action === 'import'
-                ? await invoke<ProjectionResult[] | null>('projections:import')
+                ? await invoke<ProjectionResult[] | null>(
+                      'projections:import',
+                      currentTarget.value ?? {}
+                  )
                 : await invoke<ProjectionResult[] | null>('projections:operate', {
                       action,
                       ids,
-                      target: destination
+                      target: effectiveTarget
                   });
         if (result) {
             results.value = result;
@@ -165,7 +201,7 @@ async function execute(action: ProjectionRequest['action'] | 'import') {
 function escape(e: KeyboardEvent) {
     if (e.key === 'Escape') confirm.value = '';
 }
-/** 拖入投影文件一键导入集中收藏（projections:importAt，跳过对话框） */
+/** 拖入投影文件一键导入（projections:importAt，落到当前实例 schematics，跳过对话框） */
 const dragActive = ref(false);
 async function dropProjections(event: DragEvent) {
     dragActive.value = false;
@@ -176,7 +212,11 @@ async function dropProjections(event: DragEvent) {
     if (!files.length) return;
     busy.value = true;
     try {
-        const result = await invoke<ProjectionResult[] | null>('projections:importAt', files);
+        const result = await invoke<ProjectionResult[] | null>(
+            'projections:importAt',
+            files,
+            currentTarget.value ?? {}
+        );
         if (result) {
             results.value = result;
         }
@@ -218,7 +258,9 @@ onUnmounted(() => {
                 <h1 data-ui="ProjectionsView:2ac7467a0648">
                     投影 <small>{{ data.entries.length }} 个</small>
                 </h1>
-                <p class="muted">汇总全部绑定目录与隔离实例中的投影文件。</p>
+                <p class="muted">
+                    汇总各实例 schematics 目录中的投影文件；支持子目录（如 schematics/sync）。
+                </p>
             </div>
             <div class="actions">
                 <button
@@ -226,7 +268,7 @@ onUnmounted(() => {
                     class="btn btn-ghost"
                     @click="open()"
                 >
-                    打开收藏文件夹</button
+                    打开当前实例 schematics</button
                 ><button
                     data-ui="ProjectionsView:1594a41b4b07"
                     class="btn btn-gold"
@@ -245,18 +287,20 @@ onUnmounted(() => {
             </div>
         </header>
         <div class="recording-library" data-ui="projections:library">
-            <span data-ui="ProjectionsView:2931d23fc4f5" class="muted">导入与收藏保存位置：</span
+            <span data-ui="ProjectionsView:2931d23fc4f5" class="muted">导入与复制保存位置：</span
             ><span class="path" :title="data.library">{{ data.library || '正在读取…' }}</span>
             <details class="recording-help">
                 <summary>使用说明</summary>
                 <p>
-                    自动汇总全部已绑定目录中的实例、共享目录与收藏，原投影保持原位。按住投影名称可拖出，勾选后可一起拖出。复制时校验完整性，同名文件自动添加序号。通过“转换”检查格式与游戏版本差异，再生成副本。
+                    默认只显示当前实例的投影；切到「版本文件夹内的所有」可看整个文件夹。投影存放在各实例的
+                    schematics 目录，可再分子目录（如
+                    schematics/sync），这里会一并列出。按住投影名称可拖出，勾选后可一起拖出。复制时校验完整性，同名文件自动添加序号。通过“转换”检查格式与游戏版本差异，再生成副本。
                 </p>
             </details>
         </div>
         <section class="recording-workspace card">
             <div class="recording-filters" data-ui="projections:filters">
-                <SelectMenu v-model="folderFilter" :disabled="busy" :options="folderOptions" />
+                <SelectMenu v-model="scope" :disabled="busy" :options="scopeOptions" />
                 <input
                     data-ui="ProjectionsView:a4bc662c17f4"
                     v-model="query"
@@ -281,8 +325,8 @@ onUnmounted(() => {
                     :disabled="busy"
                     :options="[
                         { value: 'all', label: '全部位置' },
-                        { value: 'library', label: '集中收藏' },
-                        { value: 'instances', label: '游戏目录' }
+                        { value: 'shared', label: '游戏文件夹根' },
+                        { value: 'instances', label: '实例目录' }
                     ]"
                 />
             </div>
@@ -348,7 +392,7 @@ onUnmounted(() => {
                         :disabled="busy"
                         @click="execute('collect')"
                     >
-                        收集到当前文件夹收藏</button
+                        复制到当前实例</button
                     ><button
                         data-ui="ProjectionsView:000f81fa6db3"
                         class="btn btn-ghost"
@@ -399,20 +443,21 @@ onUnmounted(() => {
                 <span>{{
                     data.entries.length
                         ? '没有匹配的投影，请调整搜索或筛选。'
-                        : '暂无投影。可导入 .litematic、.schem、.schematic 或原版结构 .nbt。'
+                        : othersHaveProjections
+                          ? '当前实例还没有投影，但该文件夹的其它实例里有。'
+                          : '暂无投影。可导入 .litematic、.schem、.schematic 或原版结构 .nbt。'
                 }}</span
                 ><button
                     data-ui="ProjectionsView:c0ed13df1c01"
-                    v-if="data.entries.length"
+                    v-if="data.entries.length || othersHaveProjections"
                     class="btn btn-ghost"
                     @click="
-                        query = '';
-                        kind = 'all';
-                        source = 'all';
-                        folderFilter = '';
+                        othersHaveProjections
+                            ? (scope = 'folder')
+                            : ((query = ''), (kind = 'all'), (source = 'all'), (folderFilter = ''));
                     "
                 >
-                    清除筛选
+                    {{ othersHaveProjections ? '查看版本文件夹内的所有' : '清除筛选' }}
                 </button>
             </div>
             <div

@@ -10,6 +10,7 @@ import type {
     InstanceWorld
 } from '@shared/instanceCenter';
 import type { ModChangePlan } from '@shared/modManagement';
+import UiGlyph from './UiGlyph.vue';
 import { instanceCenter } from '../instanceCenter';
 import { store, refreshInstalled, toast, openSettings } from '../store';
 import {
@@ -274,7 +275,7 @@ onUnmounted(() => {
                         </p>
                     </div>
                     <button class="btn btn-ghost" aria-label="关闭实例管理" @click="close">
-                        ✕
+                        <UiGlyph name="close" />
                     </button>
                 </header>
                 <nav class="ic-tabs" aria-label="实例功能">
@@ -639,7 +640,7 @@ onUnmounted(() => {
                                 }}
                             </h3>
                             <button class="btn btn-sm" aria-label="关闭操作确认" @click="form = ''">
-                                ✕
+                                <UiGlyph name="close" />
                             </button>
                         </header>
                         <template v-if="form === 'disable'"
@@ -774,7 +775,7 @@ onUnmounted(() => {
         <div v-if="image" class="ic-lightbox" role="dialog" aria-label="查看截图">
             <header>
                 <strong>{{ image.id }}</strong
-                ><button class="btn" @click="lightbox = -1">关闭 ✕</button>
+                ><button class="btn" @click="lightbox = -1">关闭</button>
             </header>
             <img :src="fullImage || image.image" alt="游戏截图大图" />
             <footer>

@@ -30,7 +30,8 @@ function update(event: Event) {
 </template>
 
 <style scoped>
-/* The track spans the input's complete width, including the two endpoint positions. */
+/* 视觉与全局 .slider / .mem-slider 统一（PCL 规格）：细轨 + 空心圆点，只变色不放大。
+   填充段仍用内联 --range-fill 渐变画在 input 背景上。 */
 .percent-slider.percent-slider[type='range'] {
     appearance: none;
     box-sizing: border-box;
@@ -38,7 +39,7 @@ function update(event: Event) {
     flex: 1;
     width: 100%;
     min-width: 30px;
-    height: 6px;
+    height: 12px;
     margin: 9px 0;
     padding: 0;
     border: 0;
@@ -46,24 +47,31 @@ function update(event: Event) {
     background: linear-gradient(
         to right,
         var(--accent) 0 var(--range-fill),
-        var(--border) var(--range-fill) 100%
+        color-mix(in srgb, var(--text-dim) 26%, transparent) var(--range-fill) 100%
     );
+    background-repeat: no-repeat;
     cursor: pointer;
 }
 .percent-slider::-webkit-slider-runnable-track {
-    height: 6px;
+    height: 4px;
     border-radius: 999px;
     background: transparent;
 }
 .percent-slider::-webkit-slider-thumb {
     appearance: none;
-    width: 16px;
-    height: 16px;
-    margin-top: -5px;
-    border: 2px solid var(--on-accent, #fff);
+    width: 12px;
+    height: 12px;
+    margin-top: -4px;
+    border: 2px solid var(--accent);
     border-radius: 50%;
+    background: var(--card-solid, var(--card));
+    transition:
+        background 0.15s ease,
+        border-color 0.15s ease;
+}
+.percent-slider:hover::-webkit-slider-thumb,
+.percent-slider:active::-webkit-slider-thumb {
     background: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent);
 }
 .percent-slider:focus-visible {
     outline: 2px solid var(--accent);

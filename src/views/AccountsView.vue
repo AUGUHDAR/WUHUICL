@@ -22,6 +22,7 @@ import {
 } from '../api';
 import { refreshAccounts, store, toast } from '../store';
 import Avatar from '../components/Avatar.vue';
+import ConfirmModal from '../components/ConfirmModal.vue';
 import { skinSiteIconUrl } from '../skinSiteIcons';
 const credentialNotice = ref('');
 const credentialsPersistent = ref<boolean | null>(null);
@@ -185,6 +186,7 @@ const dragLogin = reactive({
     provider: null as YggdrasilProvider | null
 });
 const dragIdentifierInput = ref<HTMLInputElement | null>(null);
+const providerAddInput = ref<HTMLInputElement | null>(null);
 
 /** 拖入皮肤站卡片后由 App.vue 调用：已保存的提供商直接弹登录，新的先探测保存再弹登录 */
 function openDragLogin(provider: YggdrasilProvider) {
@@ -253,23 +255,37 @@ function looksLikeProviderSource(text: string): boolean {
     );
 }
 
-/** 手动"添加提供商"：读剪贴板（玩家复制皮肤站地址后点按钮）走同一管道 */
-async function pasteToAddProvider() {
-    let text = '';
-    try {
-        text = await window.kamucl.invoke('app:readClipboard');
-    } catch {
-        toast('无法读取剪贴板，请先复制皮肤站地址或拖入卡片', 'error');
-        return;
+/** 手动"添加提供商"：展开输入行；预填剪贴板里的皮肤站地址（如有） */
+const providerAddOpen = ref(false);
+const providerAddText = ref('');
+const providerAddBusy = ref(false);
+async function toggleAddProvider() {
+    providerAddOpen.value = !providerAddOpen.value;
+    if (providerAddOpen.value && !providerAddText.value) {
+        try {
+            const text = String(await window.kamucl.invoke('app:readClipboard') ?? '');
+            if (looksLikeProviderSource(text)) providerAddText.value = text.trim();
+        } catch {
+            /* 剪贴板不可读就留空手填 */
+        }
     }
+    if (providerAddOpen.value) void nextTick(() => providerAddInput.value?.focus());
+}
+async function submitAddProvider() {
+    const text = providerAddText.value.trim();
+    if (!text || providerAddBusy.value) return;
     if (!looksLikeProviderSource(text)) {
-        toast(
-            '剪贴板里没有皮肤站地址；请复制 API 地址（如 littleskin.cn/api/yggdrasil）后重试',
-            'error'
-        );
+        toast('这不是有效的皮肤站地址；请输入 API 地址（如 littleskin.cn/api/yggdrasil）', 'error');
         return;
     }
-    await addProviderAndLogin({ kind: 'text', value: text });
+    providerAddBusy.value = true;
+    try {
+        await addProviderAndLogin({ kind: 'text', value: text });
+        providerAddOpen.value = false;
+        providerAddText.value = '';
+    } finally {
+        providerAddBusy.value = false;
+    }
 }
 
 async function onRemoveProvider(provider: YggdrasilProvider) {
@@ -437,6 +453,22 @@ async function onSelect(acc: Account) {
     }
 }
 
+/** 删除账号/提供商前先经 ConfirmModal 二次确认（破坏性操作） */
+const removeTarget = ref<null | { kind: 'account'; acc: Account } | { kind: 'provider'; provider: YggdrasilProvider }>(null);
+function requestRemove(acc: Account) {
+    removeTarget.value = { kind: 'account', acc };
+}
+function requestRemoveProvider(provider: YggdrasilProvider) {
+    removeTarget.value = { kind: 'provider', provider };
+}
+async function confirmRemove() {
+    const t = removeTarget.value;
+    if (!t) return;
+    if (t.kind === 'account') await onRemove(t.acc);
+    else await onRemoveProvider(t.provider);
+    removeTarget.value = null;
+}
+
 async function onRemove(acc: Account) {
     removingId.value = acc.id;
     try {
@@ -557,10 +589,31 @@ async function onRemove(acc: Account) {
                         >
                             {{ checkingRuntime ? '校验中…' : '检查运行组件' }}
                         </button>
-                        <button class="btn btn-ghost btn-sm" @click="pasteToAddProvider">
+                        <button
+                            class="btn btn-ghost btn-sm"
+                            :style="providerAddOpen ? { boxShadow: 'inset 0 0 0 1px var(--accent)' } : undefined"
+                            @click="toggleAddProvider"
+                        >
                             添加提供商
                         </button>
                     </div>
+                </div>
+                <div v-if="providerAddOpen" class="provider-add-row">
+                    <input
+                        ref="providerAddInput"
+                        v-model="providerAddText"
+                        class="input"
+                        placeholder="输入皮肤站 API 地址，如 littleskin.cn/api/yggdrasil"
+                        @keyup.enter="submitAddProvider"
+                        @keyup.esc="providerAddOpen = false"
+                    />
+                    <button
+                        class="btn btn-gold btn-sm"
+                        :disabled="providerAddBusy || !providerAddText.trim()"
+                        @click="submitAddProvider"
+                    >
+                        {{ providerAddBusy ? '识别中…' : '添加并登录' }}
+                    </button>
                 </div>
                 <div v-if="providers.length" class="provider-list">
                     <div v-for="provider in providers" :key="provider.id" class="provider-item">
@@ -581,7 +634,7 @@ async function onRemove(acc: Account) {
                             v-if="!provider.builtin"
                             class="btn btn-danger btn-sm"
                             :disabled="removingProviderId === provider.id"
-                            @click="onRemoveProvider(provider)"
+                            @click="requestRemoveProvider(provider)"
                         >
                             删除
                         </button>
@@ -707,7 +760,7 @@ async function onRemove(acc: Account) {
                     <button
                         class="btn btn-danger btn-sm remove-btn"
                         :disabled="removingId === acc.id"
-                        @click.stop="onRemove(acc)"
+                        @click.stop="requestRemove(acc)"
                     >
                         {{ removingId === acc.id ? '删除中…' : '删除' }}
                     </button>
@@ -849,6 +902,23 @@ async function onRemove(acc: Account) {
             </div>
         </Teleport>
     </div>
+    <ConfirmModal
+        :open="!!removeTarget"
+        :title="removeTarget?.kind === 'account' ? '删除账号' : '删除外置登录提供商'"
+        :message="
+            removeTarget?.kind === 'account'
+                ? `确定要删除账号「${removeTarget.acc.username}」吗？删除后可用同一方式重新添加。`
+                : `确定要删除提供商「${removeTarget.provider.name}」吗？使用该提供商登录的账号将无法再验证会话。`
+        "
+        confirm-text="删除"
+        :busy="
+            removeTarget?.kind === 'account'
+                ? removingId === removeTarget.acc.id
+                : removingProviderId === removeTarget.provider.id
+        "
+        @confirm="confirmRemove"
+        @cancel="removeTarget = null"
+    />
 </template>
 
 <style scoped>
@@ -994,6 +1064,14 @@ async function onRemove(acc: Account) {
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: var(--space-2);
+}
+.provider-add-row {
+    display: flex;
+    gap: var(--space-2);
+}
+.provider-add-row .input {
+    flex: 1;
+    min-width: 0;
 }
 .provider-head .mode-description {
     margin: var(--space-1) 0 0;

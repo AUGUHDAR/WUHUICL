@@ -3,6 +3,7 @@ import SupplementalModsResult from './components/SupplementalModsResult.vue';
 import { shouldReportGameCrash, signedExitCode } from '@shared/gameExit';
 const isMac = window.kamucl.platform === 'darwin';
 import LaunchNotice from './components/LaunchNotice.vue';
+import UiGlyph from './components/UiGlyph.vue';
 import { pollTickets } from './voxlinkTickets';
 import CreatorMotto from './components/CreatorMotto.vue';
 import ModpackSupplement from './components/ModpackSupplement.vue';
@@ -34,6 +35,7 @@ import {
     formatSpeed,
     getConfigStatus,
     getSettings,
+    getSkinAvatar,
     installModpack,
     onGameDirDone,
     onInstallDone,
@@ -86,6 +88,8 @@ import type {
 import { DEFAULT_CUSTOM_THEME, THEME_PRESETS } from '@shared/types';
 import { readableCustomColors } from '@shared/themeContrast';
 import { managedImageUrl } from './managedAssets';
+import { renderSkinHead } from './skin-render';
+import { skinRevision } from './skinRevision';
 import Toasts from './components/Toasts.vue';
 import { installVisualDesign, appearancePreview, designStageReady } from './visualDesign';
 import EditPanel from './components/EditPanel.vue';
@@ -127,14 +131,48 @@ function closeMascots() {
 const PacksView = defineAsyncComponent(() => import('./views/PacksView.vue'));
 const ShadersView = defineAsyncComponent(() => import('./views/ShadersView.vue'));
 const KeysView = defineAsyncComponent(() => import('./views/KeysView.vue'));
-const BridgeView = defineAsyncComponent(() => import('./views/BridgeView.vue'));
 const SkinsView = defineAsyncComponent(() => import('./views/SkinsView.vue'));
 const CommunityView = defineAsyncComponent(() => import('./views/CommunityView.vue'));
 const ServersView = defineAsyncComponent(() => import('./views/ServersView.vue'));
 const FriendConnectView = defineAsyncComponent(() => import('./views/FriendConnectView.vue'));
+const FeedbackView = defineAsyncComponent(() => import('./views/FeedbackView.vue'));
 const SettingsView = defineAsyncComponent(() => import('./views/SettingsView.vue'));
 const AccountsView = defineAsyncComponent(() => import('./views/AccountsView.vue'));
 import brandHead from './assets/splash-face.png';
+// 左上角图标：设置驱动（default=内置图 / account=当前账号皮肤 / custom=受管自定义头图）
+const brandFaceSrc = ref(brandHead);
+let brandFaceGen = 0;
+async function refreshBrandFace() {
+    const request = ++brandFaceGen;
+    const source = (store.settings?.logoFaceSource as string | undefined) ?? 'default';
+    const path = (store.settings?.logoFacePath as string | undefined) ?? '';
+    if (source === 'custom') {
+        brandFaceSrc.value = path ? managedImageUrl(path) : brandHead;
+        return;
+    }
+    if (source === 'account') {
+        const account = store.selectedAccount;
+        if (!account) {
+            brandFaceSrc.value = brandHead;
+            return;
+        }
+        const data = await getSkinAvatar(account.id).catch(() => null);
+        if (request !== brandFaceGen) return;
+        brandFaceSrc.value = data ? await renderSkinHead(data, 128) : brandHead;
+        return;
+    }
+    brandFaceSrc.value = brandHead;
+}
+watch(
+    [
+        () => store.settings?.logoFaceSource,
+        () => store.settings?.logoFacePath,
+        () => store.selectedAccount?.id,
+        skinRevision
+    ],
+    () => void refreshBrandFace(),
+    { immediate: true }
+);
 
 // Vite 的全局 define 在 script 中解析；模板直接访问会被 Vue 当作组件实例字段。
 const appVersion = __APP_VERSION__;
@@ -150,54 +188,92 @@ const viewMap: Record<ViewName, Component> = {
     projections: ProjectionsView,
     shaders: ShadersView,
     keys: KeysView,
-    bridge: BridgeView,
     skins: SkinsView,
     community: CommunityView,
     servers: ServersView,
     friends: FriendConnectView,
+    feedback: FeedbackView,
     settings: SettingsView,
     accounts: AccountsView
 };
 
 const currentComponent = computed(() => viewMap[store.currentView]);
 
-const navItems: Array<{ key: ViewName; label: string; icon: string }> = [
+/** 导航分组：顶级入口收敛成 4 组，组间插分组标题（对齐 PCL 的显式分节） */
+type NavGroup = 'start' | 'content' | 'social' | 'system';
+const navGroupLabels: Record<NavGroup, string> = {
+    start: '启动',
+    content: '内容',
+    social: '联机',
+    system: '系统'
+};
+const navItems: Array<{ key: ViewName; label: string; icon: string; group: NavGroup }> = [
     {
         key: 'home',
         label: '首页',
+        group: 'start',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9 21v-6h6v6"/></svg>'
     },
     {
         key: 'game',
         label: '游戏版本',
+        group: 'start',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="11" rx="5.5"/><path d="M7.5 10.8v3.4M5.8 12.5h3.4"/><circle cx="15.6" cy="11.9" r="0.6" fill="currentColor" stroke="none"/><circle cx="18" cy="13.6" r="0.6" fill="currentColor" stroke="none"/></svg>'
-    },
-    {
-        key: 'friends',
-        label: '联机',
-        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M2 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 4 5"/></svg>'
-    },
-    {
-        key: 'keys',
-        label: '默认配置',
-        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>'
-    },
-    {
-        key: 'skins',
-        label: '皮肤',
-        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 4-6 3 2 5 3-1v9h8v-9l3 1 2-5-6-3a3 3 0 0 1-6 0Z"/></svg>'
     },
     {
         key: 'community',
         label: '社区资源',
+        group: 'content',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a13.5 13.5 0 0 1 0 18"/><path d="M12 3a13.5 13.5 0 0 0 0 18"/></svg>'
+    },
+    {
+        key: 'skins',
+        label: '皮肤',
+        group: 'content',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 4-6 3 2 5 3-1v9h8v-9l3 1 2-5-6-3a3 3 0 0 1-6 0Z"/></svg>'
+    },
+    {
+        key: 'friends',
+        label: '联机',
+        group: 'social',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M2 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 4 5"/></svg>'
+    },
+    {
+        key: 'keys',
+        label: '游戏内配置',
+        group: 'system',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>'
+    },
+    {
+        key: 'feedback',
+        label: '反馈与建议',
+        group: 'system',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.9 8.9 0 0 1-3.8-.8L3 20l1-4.5a8.2 8.2 0 0 1-1-4 8.4 8.4 0 0 1 8.5-8.5A8.4 8.4 0 0 1 21 11.5Z"/><path d="M9 10.5h6M9 14h4"/></svg>'
     },
     {
         key: 'settings',
         label: '设置',
+        group: 'system',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06-.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06-.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>'
     }
 ];
+
+/** 导航渲染顺序：把「资源管理」组插在「游戏版本」之后、其它内容项之前 */
+const navGroupOrder: NavGroup[] = ['start', 'content', 'social', 'system'];
+
+/** 内容组渲染序列：资源管理组排在本组最前，其余项按 navItems 顺序 */
+type NavEntry = { kind: 'item'; item: (typeof navItems)[number] } | { kind: 'resources' };
+const navEntries = computed<Array<{ group: NavGroup; entries: NavEntry[] }>>(() =>
+    navGroupOrder
+        .map((group) => {
+            const items = visibleNavItems.value.filter((n) => n.group === group);
+            const entries: NavEntry[] = [];
+            if (group === 'content' && !isFeatureOff('resources')) entries.push({ kind: 'resources' });
+            entries.push(...items.map((item) => ({ kind: 'item' as const, item })));
+            return { group, entries };
+        })
+        .filter((section) => section.entries.length > 0)
+);
 
 /** 功能禁用判定 */
 const isFeatureOff = (key: string): boolean =>
@@ -240,11 +316,6 @@ const resourceSubItems: Array<{ key: ViewName; label: string; icon: string }> = 
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 9 5v8l-9 5-9-5V8zM3 8l9 5 9-5M12 13v8"/></svg>'
     },
     {
-        key: 'bridge',
-        label: 'MOD 面板',
-        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3.5"/></svg>'
-    },
-    {
         key: 'servers',
         label: '服务器',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>'
@@ -255,7 +326,7 @@ const resourceSubItems: Array<{ key: ViewName; label: string; icon: string }> = 
 const resourceExpanded = ref(localStorage.getItem('kamucl.resourceExpanded') === 'true');
 watch(resourceExpanded, (value) => localStorage.setItem('kamucl.resourceExpanded', String(value)));
 const inResourceGroup = computed(() =>
-    ['mods', 'packs', 'shaders', 'bridge', 'servers', 'recordings', 'projections'].includes(
+    ['mods', 'packs', 'shaders', 'servers', 'recordings', 'projections'].includes(
         store.currentView
     )
 );
@@ -1233,6 +1304,13 @@ function onEditKeydown(e: KeyboardEvent) {
     }
 }
 
+/** 顶栏浮层（通知/更新日志/下载中心）响应 ESC 关闭；弹窗打开时交给 modalFocus 处理 */
+function onGlobalKeydown(e: KeyboardEvent) {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    if (document.querySelector('.modal-mask')) return;
+    closeTopDropdowns();
+}
+
 // ---------------- 初始化与事件订阅 ----------------
 const offs: Array<() => void> = [];
 
@@ -1259,6 +1337,7 @@ onMounted(async () => {
     }
     void import('./plugins').then((m) => m.loadEnabledPlugins());
     window.addEventListener('keydown', onEditKeydown);
+    window.addEventListener('keydown', onGlobalKeydown);
     // Teleports are outside .shell; capture above their masks without accepting
     // internal text/image drags or invoking the import handler twice.
     const dragStart = () => {
@@ -1458,6 +1537,7 @@ onUnmounted(() => {
     stopDragWatchdog();
     clearInterval(bgSwitchTimer);
     window.removeEventListener('keydown', onEditKeydown);
+    window.removeEventListener('keydown', onGlobalKeydown);
     offs.forEach((off) => off());
 });
 </script>
@@ -1510,7 +1590,7 @@ onUnmounted(() => {
                             <img
                                 data-ui="App:0f39bd9dbfd2"
                                 class="brand-head"
-                                :src="brandHead"
+                                :src="brandFaceSrc"
                                 alt="AUGUHDAR 的 Minecraft 头像"
                             />
                         </button>
@@ -1551,38 +1631,42 @@ onUnmounted(() => {
                         aria-hidden="true"
                     ></div>
                     <div class="nav-selection" :style="selectionStyle" aria-hidden="true"></div>
-                    <template v-for="item in visibleNavItems" :key="item.key">
-                        <button
-                            data-ui="App:e2cd389fbd0f"
-                            class="nav-item"
-                            :data-nav="item.key"
-                            :class="{ active: store.currentView === item.key }"
-                            :aria-current="store.currentView === item.key ? 'page' : undefined"
-                            @click="store.currentView = item.key"
-                        >
-                            <span
-                                data-ui="App:1480740577df"
-                                class="nav-icon"
-                                v-html="item.icon"
-                            ></span>
-                            <span data-ui="App:f8a0bfe85bf9" class="nav-label">{{
-                                item.label
-                            }}</span>
-                        </button>
-
-                        <!-- 资源管理子级菜单（插在「游戏版本」之后） -->
-                        <template v-if="item.key === 'game'">
-                            <button
-                                data-ui="App:7080ad4eb8e0"
-                                class="nav-item nav-parent"
-                                data-nav="resources"
-                                :class="{ 'group-active': inResourceGroup }"
-                                :aria-expanded="resourceExpanded || inResourceGroup"
-                                aria-controls="resource-navigation"
-                                @click="resourceExpanded = !resourceExpanded"
-                            >
-                                <span data-ui="App:48f397d463e5" class="nav-icon">
+                    <template v-for="section in navEntries" :key="section.group">
+                        <!-- 分组标题（对齐 PCL 的分节小标题） -->
+                        <span class="nav-group-title" aria-hidden="true">{{
+                            navGroupLabels[section.group]
+                        }}</span>
+                        <template v-for="entry in section.entries" :key="entry.kind === 'item' ? entry.item.key : 'resources'">
+                            <!-- 资源管理组（内容组首位）：父项可展开，子项是 6 个内容页 -->
+                            <template v-if="entry.kind === 'resources'">
+                                <button
+                                    data-ui="App:7080ad4eb8e0"
+                                    class="nav-item nav-parent"
+                                    data-nav="resources"
+                                    :class="{ 'group-active': inResourceGroup }"
+                                    :aria-expanded="resourceExpanded || inResourceGroup"
+                                    aria-controls="resource-navigation"
+                                    @click="resourceExpanded = !resourceExpanded"
+                                >
+                                    <span data-ui="App:48f397d463e5" class="nav-icon">
+                                        <svg
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                        >
+                                            <path
+                                                d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"
+                                            />
+                                            <path d="M3 11h18" />
+                                        </svg>
+                                    </span>
+                                    <span data-ui="App:215ddb49217f" class="nav-label">资源管理</span>
                                     <svg
+                                        class="nav-caret"
+                                        :class="{ open: resourceExpanded || inResourceGroup }"
                                         viewBox="0 0 24 24"
                                         fill="none"
                                         stroke="currentColor"
@@ -1590,58 +1674,63 @@ onUnmounted(() => {
                                         stroke-linecap="round"
                                         stroke-linejoin="round"
                                     >
-                                        <path
-                                            d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"
-                                        />
-                                        <path d="M3 11h18" />
+                                        <path d="m9 6 6 6-6 6" />
                                     </svg>
-                                </span>
-                                <span data-ui="App:215ddb49217f" class="nav-label">资源管理</span>
-                                <svg
-                                    class="nav-caret"
+                                </button>
+                                <!-- 收起时 inert，键盘导航不会落入隐藏的资源菜单。 -->
+                                <div
+                                    data-ui="App:60e2cab1729e"
+                                    id="resource-navigation"
+                                    class="nav-sub"
                                     :class="{ open: resourceExpanded || inResourceGroup }"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
+                                    :inert="!(resourceExpanded || inResourceGroup)"
                                 >
-                                    <path d="m9 6 6 6-6 6" />
-                                </svg>
-                            </button>
-                            <!-- 收起时 inert，键盘导航不会落入隐藏的资源菜单。 -->
-                            <div
-                                data-ui="App:60e2cab1729e"
-                                id="resource-navigation"
-                                class="nav-sub"
-                                :class="{ open: resourceExpanded || inResourceGroup }"
-                                :inert="!(resourceExpanded || inResourceGroup)"
-                            >
-                                <div data-ui="App:23fdfa0f7cd4" class="nav-sub-inner">
-                                    <button
-                                        data-ui="App:98aaad3e10e8"
-                                        v-for="sub in visibleResourceSubItems"
-                                        :key="sub.key"
-                                        class="nav-item nav-sub-item"
-                                        :data-nav="sub.key"
-                                        :class="{ active: store.currentView === sub.key }"
-                                        :aria-current="
-                                            store.currentView === sub.key ? 'page' : undefined
-                                        "
-                                        @click="store.currentView = sub.key"
-                                    >
-                                        <span
-                                            data-ui="App:1025aa4e9a68"
-                                            class="nav-icon"
-                                            v-html="sub.icon"
-                                        ></span>
-                                        <span data-ui="App:6f84d207dfdd" class="nav-label">{{
-                                            sub.label
-                                        }}</span>
-                                    </button>
+                                    <div data-ui="App:23fdfa0f7cd4" class="nav-sub-inner">
+                                        <button
+                                            data-ui="App:98aaad3e10e8"
+                                            v-for="sub in visibleResourceSubItems"
+                                            :key="sub.key"
+                                            class="nav-item nav-sub-item"
+                                            :data-nav="sub.key"
+                                            :class="{ active: store.currentView === sub.key }"
+                                            :aria-current="
+                                                store.currentView === sub.key ? 'page' : undefined
+                                            "
+                                            @click="store.currentView = sub.key"
+                                        >
+                                            <span
+                                                data-ui="App:1025aa4e9a68"
+                                                class="nav-icon"
+                                                v-html="sub.icon"
+                                            ></span>
+                                            <span data-ui="App:6f84d207dfdd" class="nav-label">{{
+                                                sub.label
+                                            }}</span>
+                                        </button>
+                                    </div>
                                 </div>
-                            </div>
+                            </template>
+                            <!-- 普通导航项 -->
+                            <button
+                                v-else
+                                data-ui="App:e2cd389fbd0f"
+                                class="nav-item"
+                                :data-nav="entry.item.key"
+                                :class="{ active: store.currentView === entry.item.key }"
+                                :aria-current="
+                                    store.currentView === entry.item.key ? 'page' : undefined
+                                "
+                                @click="store.currentView = entry.item.key"
+                            >
+                                <span
+                                    data-ui="App:1480740577df"
+                                    class="nav-icon"
+                                    v-html="entry.item.icon"
+                                ></span>
+                                <span data-ui="App:f8a0bfe85bf9" class="nav-label">{{
+                                    entry.item.label
+                                }}</span>
+                            </button>
                         </template>
                     </template>
                 </nav>
@@ -2078,7 +2167,7 @@ onUnmounted(() => {
                                             title="移除记录"
                                             @click="dismissTask(t.id)"
                                         >
-                                            ×
+                                            <UiGlyph name="close" :size="14" />
                                         </button>
                                     </div>
                                     <div data-ui="App:a1b294f53a4e" class="dl-sub muted">
@@ -2913,6 +3002,22 @@ onUnmounted(() => {
 }
 .nav-parent .nav-caret.open {
     transform: rotate(90deg);
+}
+/* 分组小标题：低对比、小字，只做分节提示不抢焦点（对齐 PCL 的分节标题） */
+.nav-group-title {
+    display: block;
+    margin: 14px 0 4px;
+    padding: 0 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    opacity: 0.72;
+    text-transform: none;
+    user-select: none;
+}
+.nav > .nav-group-title:first-of-type {
+    margin-top: 4px;
 }
 /* 子菜单统一展开，避免多次延迟让最后几项迟迟不可用。 */
 .nav-sub {

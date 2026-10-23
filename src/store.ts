@@ -34,11 +34,11 @@ export type ViewName =
     | 'recordings'
     | 'projections'
     | 'keys'
-    | 'bridge'
     | 'skins'
     | 'community'
     | 'servers'
     | 'friends'
+    | 'feedback'
     | 'settings'
     | 'accounts';
 export type ToastType = 'success' | 'error' | 'info';

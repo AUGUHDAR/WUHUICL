@@ -80,6 +80,39 @@ fn persist_keys(app: &tauri::AppHandle, keys: &Value) {
     }
 }
 
+/// 对应原版 keybindings.ts mergeKeysIntoOptions + syncKeysToGameDir：
+/// 把默认键位写进实例 options.txt 的 key_* 项，其余行原样保留。返回是否有改动。
+pub fn sync_keys_to_game_dir(app: &tauri::AppHandle, game_dir: &str) -> bool {
+    let keys = default_keys(app);
+    let file = std::path::Path::new(game_dir).join("options.txt");
+    let before = std::fs::read_to_string(&file).unwrap_or_default();
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut out: Vec<String> = Vec::new();
+    for line in before.split('\n') {
+        let id = line.split(':').next().unwrap_or("");
+        let value = keys[id].as_str().filter(|_| id.starts_with("key_"));
+        match value {
+            Some(v) if !seen.contains(id) => {
+                seen.insert(id);
+                out.push(format!("{id}:{v}"));
+            }
+            Some(_) => {} // 重复行直接丢弃（原版同语义）
+            None => out.push(line.to_string()),
+        }
+    }
+    for (id, def) in VANILLA_KEYBINDS {
+        let current = keys[*id].as_str().unwrap_or(def);
+        if !seen.contains(id) {
+            out.push(format!("{id}:{current}"));
+        }
+    }
+    let after = format!("{}\n", out.join("\n").trim_end_matches('\n'));
+    if after == before {
+        return false;
+    }
+    std::fs::write(&file, after).is_ok()
+}
+
 // ---------------- 默认游戏选项（defaultGameOptions.ts） ----------------
 
 // ---------------- 默认资源包（defaultResourcePacks.ts） ----------------
@@ -135,7 +168,7 @@ fn exit_history_file(app: &tauri::AppHandle) -> PathBuf {
     crate::settings::user_data_dir(app).join("exit-history.json")
 }
 
-fn load_exit_history(app: &tauri::AppHandle) -> Vec<Value> {
+pub(crate) fn load_exit_history(app: &tauri::AppHandle) -> Vec<Value> {
     std::fs::read(exit_history_file(app))
         .ok()
         .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
@@ -203,9 +236,10 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             Ok(keys)
         })()),
         "keys:reset" => Some((|| {
-            let keys = default_keys(app);
-            persist_keys(app, &keys);
-            Ok(keys)
+            // default_keys() 是"原版默认 + 已存覆盖"的合并结果；重置必须清掉覆盖文件，
+            // 否则等于把当前值原样存回，用户看到"已恢复"实际没变。
+            let _ = std::fs::remove_file(default_keys_file(app));
+            Ok(default_keys(app))
         })()),
 
         // 默认游戏选项：形状与校验语义对齐原版 defaultGameOptions.ts
@@ -398,11 +432,181 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             Ok(Value::Null)
         })()),
 
-        // 内存整理（memoryOrganizer：EmptyWorkingSet 简化版——跳过游戏进程）
-        "memory:organize" => Some(Ok(json!({ "freedMB": 0, "processed": 0 }))),
+        // 内存整理（memoryOrganizer：EnumProcesses + EmptyWorkingSet，跳过游戏与系统进程）
+        "memory:organize" => Some(crate::installer::run_blocking(organize_memory)),
 
         _ => None,
     }
+}
+
+// ---------------- 内存整理（对应原版 core/memoryOrganizer.ts） ----------------
+// 用 PSAPI 的 EmptyWorkingSet 把各进程的工作集换出，回收待机内存；
+// 跳过正在运行的游戏（换出会让游戏掉帧）与系统关键进程（dwm/csrss/lsass/…）。
+
+#[cfg(windows)]
+mod mem_organize {
+    use serde_json::{json, Value};
+    use std::collections::BTreeMap;
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::System::ProcessStatus::{EmptyWorkingSet, EnumProcesses};
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA,
+    };
+
+    /// 系统目录（用于跳过 Windows 自身的进程）
+    fn windows_dir() -> String {
+        std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string())
+    }
+
+    /// 对应 shouldSkipMemoryProcess：pid≤4、运行中游戏、系统关键进程、Windows 目录下的进程
+    fn should_skip(pid: u32, executable: &str, protected: &[u32]) -> bool {
+        let path = executable.replace('\\', "/").to_lowercase();
+        let name = path.rsplit('/').next().unwrap_or("").to_string();
+        if pid <= 4 || protected.contains(&pid) || name.is_empty() {
+            return true;
+        }
+        let critical = regex::Regex::new(
+            r"^(javaw?|minecraft.*|dwm|csrss|lsass|smss|wininit|winlogon|services)\.exe$",
+        )
+        .map(|re| re.is_match(&name))
+        .unwrap_or(false);
+        if critical {
+            return true;
+        }
+        let system = windows_dir().replace('\\', "/").to_lowercase();
+        let system = system.trim_end_matches('/').to_string();
+        !system.is_empty() && path.starts_with(&format!("{system}/"))
+    }
+
+    /// 取进程可执行文件全路径（失败返回 None）
+    fn process_image(handle: HANDLE) -> Option<String> {
+        let mut buf = vec![0u16; 32768];
+        let mut size = buf.len() as u32;
+        unsafe {
+            QueryFullProcessImageNameW(
+                handle,
+                PROCESS_NAME_FORMAT(0),
+                windows::core::PWSTR(buf.as_mut_ptr()),
+                &mut size,
+            )
+            .ok()?;
+        }
+        buf.truncate(size as usize);
+        Some(String::from_utf16_lossy(&buf))
+    }
+
+    pub fn run() -> Result<Value, String> {
+        let started = std::time::Instant::now();
+        let before = crate::sysinfo::available_memory_mb();
+        let mut processed = 0u64;
+        let mut skipped = 0u64;
+        let mut failures: BTreeMap<String, u64> = BTreeMap::new();
+        let protected = crate::launch::running_game_pids();
+
+        // EnumProcesses：进程清单可能变大，循环扩容直到装得下
+        let mut buf = vec![0u32; 1024];
+        let mut needed = 0u32;
+        loop {
+            unsafe {
+                EnumProcesses(
+                    buf.as_mut_ptr(),
+                    (buf.len() * std::mem::size_of::<u32>()) as u32,
+                    &mut needed,
+                )
+                .map_err(|e| format!("无法枚举进程：{e}"))?;
+            }
+            if (needed as usize) < buf.len() * std::mem::size_of::<u32>() {
+                break;
+            }
+            if buf.len() >= 262_144 {
+                return Err("进程清单超过上限".into());
+            }
+            buf.resize(buf.len() * 2, 0);
+        }
+        let count = needed as usize / std::mem::size_of::<u32>();
+
+        for (i, pid) in buf[..count].iter().copied().enumerate() {
+            if i % 8 == 0 {
+                std::thread::yield_now();
+            }
+            if pid == 0 || pid <= 4 || protected.contains(&pid) {
+                skipped += 1;
+                continue;
+            }
+            // PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_QUOTA，不提权
+            let handle = match unsafe {
+                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_QUOTA, false, pid)
+            } {
+                Ok(h) => h,
+                Err(_) => {
+                    skipped += 1;
+                    *failures.entry("打开进程失败（权限不足）".to_string()).or_insert(0) += 1;
+                    continue;
+                }
+            };
+            let Some(path) = process_image(handle) else {
+                skipped += 1;
+                *failures.entry("无法识别进程".to_string()).or_insert(0) += 1;
+                unsafe {
+                    let _ = CloseHandle(handle);
+                }
+                continue;
+            };
+            if should_skip(pid, &path, &protected) {
+                skipped += 1;
+                unsafe {
+                    let _ = CloseHandle(handle);
+                }
+                continue;
+            }
+            let ok = unsafe { EmptyWorkingSet(handle) }.is_ok();
+            unsafe {
+                let _ = CloseHandle(handle);
+            }
+            if ok {
+                processed += 1;
+            } else {
+                skipped += 1;
+                *failures.entry("整理失败".to_string()).or_insert(0) += 1;
+            }
+        }
+
+        // 换出后等一小段再测可用内存，否则读到的还是换出前的值
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let after = crate::sysinfo::available_memory_mb();
+        Ok(json!({
+            "applicable": true,
+            "beforeMB": before,
+            "afterMB": after,
+            "processed": processed,
+            "skipped": skipped,
+            "failures": failures,
+            "elapsedMs": started.elapsed().as_millis() as u64
+        }))
+    }
+}
+
+#[cfg(not(windows))]
+mod mem_organize {
+    use serde_json::{json, Value};
+    pub fn run() -> Result<Value, String> {
+        Ok(json!({
+            "applicable": false,
+            "beforeMB": 0, "afterMB": 0,
+            "processed": 0, "skipped": 0,
+            "failures": {}, "elapsedMs": 0
+        }))
+    }
+}
+
+fn organize_memory() -> Result<Value, String> {
+    mem_organize::run()
+}
+
+/// 供启动流程调用（「启动前整理内存」开关）：对应原版 launch.ts 里的 organizeMemory()
+pub fn run_memory_organize() -> Result<Value, String> {
+    mem_organize::run()
 }
 
 fn import_packs_from(app: &tauri::AppHandle, files: Vec<Value>) -> Result<Value, String> {

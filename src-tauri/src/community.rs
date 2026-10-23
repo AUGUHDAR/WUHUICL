@@ -533,6 +533,25 @@ pub fn filter_from_value(v: Option<&Value>) -> FileFilter {
     }
 }
 
+/// 资源文件版本兼容：v ≤ 实例 且同一 minor 线（严格相等会把区间标记法误判为不支持）
+fn resource_version_compatible(file_version: &str, instance_version: &str) -> bool {
+    let v = file_version.trim();
+    let m = instance_version.trim();
+    if v == m {
+        return true;
+    }
+    if compare_versions(v, m) != std::cmp::Ordering::Less {
+        return false;
+    }
+    let va: Vec<&str> = v.split('.').collect();
+    let ma: Vec<&str> = m.split('.').collect();
+    if va.len() < 2 || ma.len() < 2 {
+        return false;
+    }
+    let shared = va.len().saturating_sub(1).max(1);
+    va[..shared.min(va.len())].join(".") == ma[..shared.min(ma.len())].join(".") && va.len() >= ma.len()
+}
+
 /// matchesCommunityFilter()
 pub fn matches_community_filter(file: &Value, filter: &FileFilter) -> bool {
     let filter = effective_filter(filter);
@@ -545,10 +564,15 @@ pub fn matches_community_filter(file: &Value, filter: &FileFilter) -> bool {
             }
         }
     }
+    let is_resource = matches!(filter.kind.as_deref(), Some("resourcepack") | Some("shader") | Some("datapack"));
     let mc_ok = match &filter.mc_version {
         None => true,
-        Some(mc) => file.get("gameVersions").and_then(|v| v.as_array()).map(|a| {
+        Some(mc) if !is_resource => file.get("gameVersions").and_then(|v| v.as_array()).map(|a| {
             a.iter().any(|v| v.as_str().map(|s| compare_versions(s, mc) == std::cmp::Ordering::Equal).unwrap_or(false))
+        }).unwrap_or(false),
+        // 资源包/光影包：文件支持的版本列表里有 v ≤ 实例 且同 minor 线（1.21 任一 ≤ 1.21.4）
+        Some(mc) => file.get("gameVersions").and_then(|v| v.as_array()).map(|a| {
+            a.iter().any(|v| v.as_str().map(|s| resource_version_compatible(s, mc)).unwrap_or(false))
         }).unwrap_or(false),
     };
     if !mc_ok {

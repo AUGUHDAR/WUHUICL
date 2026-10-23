@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiGlyph from './UiGlyph.vue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { IPC, type InstalledVersion, type LoaderName } from '@shared/types';
 import type { ModMigrationPlan } from '@shared/modMigration';
@@ -105,7 +106,7 @@ async function start() {
                         :disabled="starting"
                         @click="emit('close')"
                     >
-                        ×
+                        <UiGlyph name="close" :size="14" />
                     </button>
                 </header>
                 <div class="migration-body">

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * 通用文件管理视图：模组 / 资源包 / 光影包共用。
- * 通过 IPC fs:list / fs:remove / app:openDir 管理游戏目录下的子目录。
+ * 两种内容范围：当前实例 = versions/<id>/<rel>（后端按隔离状态折算）；
+ * 版本文件夹内的所有 = 共享根目录 + 每个已装实例的该子目录聚合（按行标注所属实例）。
  */
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import {
@@ -13,8 +14,13 @@ import {
     errText,
     fsPath,
     listFs,
+    listFsAggregate,
+    modCatalogAt,
+    modIconsAt,
     openDir,
     removeFs,
+    setModsEnabledAt,
+    setModsLockedAt,
     toggleDisableFs
 } from '../api';
 import {
@@ -30,20 +36,38 @@ import ContentSkeleton from './ContentSkeleton.vue';
 import ModMigrationModal from './ModMigrationModal.vue';
 import ModVersionModal from './ModVersionModal.vue';
 import type { ManagedMod, ModOperationResult } from '@shared/modManagement';
+import type { AggregatedFs } from '../api';
 import ConfirmModal from './ConfirmModal.vue';
 import DupCleanModal from './DupCleanModal.vue';
 import SelectMenu from './SelectMenu.vue';
 import type { FsEntry, ModUpdateReport } from '@shared/types';
 
-function dragResource(event: DragEvent, entry: FsEntry) {
+/** 聚合视图里的每一行：FsEntry 携带 instanceId/instanceName/directory */
+type Row = FsEntry & { instanceId?: string; instanceName?: string };
+
+/** 行身份键：聚合视图里同名文件可能属于不同实例，必须带上实例区分 */
+const rowKey = (e: Row) => (e.instanceId ? e.instanceId + '/' + e.name : e.name);
+/** 行的资源目录（聚合视图用后端返回的绝对目录；实例视图用解析出的目录） */
+const rowDir = (e: Row) => e.directory || '';
+
+function dragResource(event: DragEvent, entry: Row) {
     event.preventDefault();
     event.stopPropagation();
     if (store.editMode || batchBusy.value || loading.value || !currentVersion.value) return;
-    const names = selection.value.has(entry.name) ? [...selection.value] : [entry.name];
+    // 拖出走实例目录形状（versions/<id>/<rel>）；聚合行用后端给的目录反推
+    const files = selection.value.has(rowKey(entry))
+        ? visibleEntries.value.filter((e) => selection.value.has(rowKey(e)))
+        : [entry];
+    if (scope.value === 'folder') {
+        for (const file of files) {
+            window.kamucl.send('fs:dragAt', rowDir(file), [file.name]);
+        }
+        return;
+    }
     window.kamucl.send(
         'fs:drag',
         effectiveRel.value,
-        names,
+        files.map((f) => f.name),
         currentVersion.value.folder || activeFolder.value
     );
 }
@@ -62,7 +86,7 @@ const props = defineProps<{
 
 const page = ref(1);
 const PAGE_SIZE = 100;
-const entries = ref<FsEntry[]>([]);
+const entries = ref<Row[]>([]);
 const loading = ref(true);
 const loadError = ref('');
 const resolvedPath = ref('');
@@ -78,20 +102,44 @@ const currentVersion = computed(() => {
     return list.find((v) => v.id === store.resourceVersionId) ?? list[0];
 });
 
-/** 实际管理的相对目录：隔离版本 → versions/<id>/<rel>；共享版本 → <rel> */
+/** 内容范围：instance=只看当前实例；folder=版本文件夹根的共享目录 */
+const scope = ref<'instance' | 'folder'>(
+    localStorage.getItem('kamucl.fileScope.' + props.rel) === 'folder' ? 'folder' : 'instance'
+);
+watch(scope, (v) => localStorage.setItem('kamucl.fileScope.' + props.rel, v));
+const scopeOptions = [
+    { value: 'instance', label: '当前实例', description: '只看所选实例的该子目录' },
+    {
+        value: 'folder',
+        label: '版本文件夹内的所有',
+        description: '共享目录 + 每个实例分别列出，操作按行定位回所属实例'
+    }
+];
+
+/** 实际管理的相对目录：实例视图 = versions/<id>/<rel>（后端按隔离状态折算）；
+ * 文件夹视图 = <rel>（版本文件夹根的共享目录） */
 const effectiveRel = computed(() => {
     const v = currentVersion.value;
-    return v ? `versions/${v.id}/${props.rel}` : '';
+    if (!v) return '';
+    return scope.value === 'folder' ? props.rel : `versions/${v.id}/${props.rel}`;
 });
 
 /** 目录不存在时视为空列表（隔离版本刚开启、尚未产生该子目录） */
 let loadedContext = '';
 let loadGeneration = 0;
 let updateOperation = 0;
+/** 聚合视图的实例清单与告警（实例视图为空） */
+const aggregateInstances = ref<AggregatedFs['instances']>([]);
+const aggregateWarnings = ref<string[]>([]);
+
 async function load() {
     const generation = ++loadGeneration;
     const v = currentVersion.value;
-    const context = JSON.stringify([effectiveRel.value, v?.folder || activeFolder.value]);
+    const context = JSON.stringify([
+        effectiveRel.value,
+        v?.folder || activeFolder.value,
+        scope.value
+    ]);
     if (context !== loadedContext) {
         entries.value = [];
         resolvedPath.value = '';
@@ -107,17 +155,40 @@ async function load() {
     }
     loading.value = true;
     try {
-        const folder = v.folder || activeFolder.value,
-            rel = effectiveRel.value;
-        const [result, directory] = await Promise.all([listFs(rel, folder), fsPath(rel, folder)]);
-        if (generation === loadGeneration) {
-            entries.value = result;
-            resolvedPath.value = directory;
-            page.value = Math.min(page.value, pageCount.value);
-            selection.value = new Set(
-                [...selection.value].filter((name) => result.some((e) => e.name === name))
-            );
-            void loadCatalog(generation);
+        const folder = v.folder || activeFolder.value;
+        if (scope.value === 'folder') {
+            // 版本文件夹内的所有：共享根 + 各实例聚合
+            const agg = await listFsAggregate(props.rel, folder);
+            if (generation === loadGeneration) {
+                entries.value = agg.entries;
+                aggregateInstances.value = agg.instances;
+                aggregateWarnings.value = agg.warnings;
+                resolvedPath.value = `${folder}\\${props.rel}`;
+                page.value = Math.min(page.value, pageCount.value);
+                selection.value = new Set(
+                    [...selection.value].filter((key) =>
+                        agg.entries.some((e) => rowKey(e as Row) === key)
+                    )
+                );
+                void loadCatalog(generation);
+            }
+        } else {
+            const rel = effectiveRel.value;
+            const [result, directory] = await Promise.all([
+                listFs(rel, folder),
+                fsPath(rel, folder)
+            ]);
+            if (generation === loadGeneration) {
+                entries.value = result;
+                aggregateInstances.value = [];
+                aggregateWarnings.value = [];
+                resolvedPath.value = directory;
+                page.value = Math.min(page.value, pageCount.value);
+                selection.value = new Set(
+                    [...selection.value].filter((name) => result.some((e) => e.name === name))
+                );
+                void loadCatalog(generation);
+            }
         }
     } catch (e) {
         if (generation === loadGeneration) loadError.value = errText(e);
@@ -195,11 +266,11 @@ const displayPath = computed(() =>
         ? fullPath.value.slice(0, 38) + '…' + fullPath.value.slice(-36)
         : fullPath.value
 );
-const pageMods = computed(() => visibleEntries.value.filter(isModEntry).map((e) => e.name));
+const pageMods = computed(() => visibleEntries.value.filter(isModEntry).map((e) => rowKey(e)));
 const pageChecked = computed(() => pageSelection(pageMods.value, selection.value));
 function togglePageSelection() {
     const next = new Set(selection.value);
-    for (const name of pageMods.value) pageChecked.value.all ? next.delete(name) : next.add(name);
+    for (const key of pageMods.value) pageChecked.value.all ? next.delete(key) : next.add(key);
     selection.value = next;
 }
 const resourceCount = computed(() =>
@@ -209,6 +280,15 @@ const resourceCount = computed(() =>
 );
 const readableName = (e: FsEntry) =>
     props.rel === 'resourcepacks' ? resourceDisplayName(e.name) : e.name;
+
+/** 聚合视图的标题栏说明：N 个实例 */
+const scopeSummary = computed(() =>
+    scope.value === 'folder'
+        ? aggregateInstances.value.length
+            ? `共享目录 + ${aggregateInstances.value.length} 个实例`
+            : '仅共享目录（各实例使用共享目录）'
+        : '当前实例'
+);
 
 async function copyPath() {
     if (!fullPath.value) {
@@ -225,23 +305,26 @@ const batchResults = ref<ModOperationResult[]>([]),
 const localSearch = ref(''),
     modFilter = ref('all'),
     sortBy = ref('name'),
+    /** 目录 → 该目录的模组清单（聚合视图下按实例目录分别缓存） */
     catalog = ref<Record<string, ManagedMod>>({}),
     selection = ref(new Set<string>()),
     batchBusy = ref(false),
     switchFile = ref('');
 const keyword = computed(() => (localSearch.value || store.searchKeyword).trim().toLowerCase());
+/** 取某一行的目录清单条目（聚合视图按 rowKey 分桶：实例/文件名） */
+const catalogOf = (e: Row) => catalog.value[rowKey(e)];
 const filtered = computed(() => {
     const rows = entries.value.filter(
         (e) =>
             (!keyword.value ||
-                (e.name + ' ' + (catalog.value[e.name]?.name || ''))
+                (e.name + ' ' + (catalogOf(e)?.name || ''))
                     .toLowerCase()
                     .includes(keyword.value)) &&
             (props.rel !== 'mods' ||
                 modFilter.value === 'all' ||
                 (modFilter.value === 'enabled' && /\.jar$/i.test(e.name)) ||
                 (modFilter.value === 'disabled' && /\.jar\.disabled$/i.test(e.name)) ||
-                (modFilter.value === 'locked' && catalog.value[e.name]?.locked))
+                (modFilter.value === 'locked' && catalogOf(e)?.locked))
     );
     return rows.sort((a, b) =>
         sortBy.value === 'date'
@@ -251,20 +334,46 @@ const filtered = computed(() => {
               : a.name.localeCompare(b.name, 'zh-CN', { numeric: true })
     );
 });
+/** 聚合视图按目录分组：批量操作必须逐目录调用，不能整页传一个实例 */
+function groupByDir(rows: Row[]): Map<string, Row[]> {
+    const map = new Map<string, Row[]>();
+    for (const row of rows) {
+        const dir = rowDir(row) || resolvedPath.value;
+        map.set(dir, [...(map.get(dir) || []), row]);
+    }
+    return map;
+}
 async function loadCatalog(generation: number) {
     if (props.rel !== 'mods') return;
     const v = currentVersion.value;
     if (!v) return;
     try {
-        const list = (await window.kamucl.invoke(
-            'mods:catalog',
-            v.id,
-            v.folder || activeFolder.value
-        )) as ManagedMod[];
-        if (generation === loadGeneration) {
-            catalog.value = Object.fromEntries(list.map((m) => [m.fileName, m]));
-            catalogError.value = '';
+        // 目录 → 实例 id（聚合视图按行定位；实例视图只有一个目录）
+        const dirToInstance = new Map<string, string>();
+        for (const e of entries.value) dirToInstance.set(rowDir(e), e.instanceId ?? '');
+        const dirs = scope.value === 'folder' ? [...dirToInstance.keys()].filter(Boolean) : [''];
+        const buckets = await Promise.all(
+            dirs.map(async (dir) =>
+                dir
+                    ? { dir, list: await modCatalogAt(dir) }
+                    : {
+                          dir: '',
+                          list: (await window.kamucl.invoke(
+                              'mods:catalog',
+                              v.id,
+                              v.folder || activeFolder.value
+                          )) as ManagedMod[]
+                      }
+            )
+        );
+        if (generation !== loadGeneration) return;
+        const next: Record<string, ManagedMod> = {};
+        for (const { dir, list } of buckets) {
+            const instanceId = dir ? (dirToInstance.get(dir) ?? '') : '';
+            for (const m of list) next[instanceId ? instanceId + '/' + m.fileName : m.fileName] = m;
         }
+        catalog.value = next;
+        catalogError.value = '';
     } catch (e) {
         if (generation === loadGeneration) {
             catalog.value = {};
@@ -272,45 +381,57 @@ async function loadCatalog(generation: number) {
         }
     }
 }
-function selectMod(name: string, checked: boolean) {
+function selectMod(key: string, checked: boolean) {
     const s = new Set(selection.value);
-    checked ? s.add(name) : s.delete(name);
+    checked ? s.add(key) : s.delete(key);
     selection.value = s;
 }
 function selectAll(all = false) {
     const s = new Set(selection.value);
-    for (const e of (all ? filtered.value : visibleEntries.value).filter(isModEntry)) s.add(e.name);
+    for (const e of (all ? filtered.value : visibleEntries.value).filter(isModEntry))
+        s.add(rowKey(e));
     selection.value = s;
 }
-async function batch(
-    action: 'enable' | 'disable' | 'lock' | 'unlock',
-    names = [...selection.value]
-) {
+/** 批量启停/锁定：从选择键还原出行，再按目录分组逐目录调用（聚合视图不能整页传一个实例） */
+async function batch(action: 'enable' | 'disable' | 'lock' | 'unlock') {
     const v = currentVersion.value;
     if (!v || batchBusy.value || loading.value || loadError.value) return;
     const generation = loadGeneration;
     batchBusy.value = true;
     try {
-        const results = (await window.kamucl.invoke(
-            action === 'lock' || action === 'unlock' ? 'mods:setLocked' : 'mods:setEnabled',
-            v.id,
-            v.folder || activeFolder.value,
-            names,
-            action === 'lock' || action === 'enable'
-        )) as ModOperationResult[];
-        const failed = results.filter((r) => !r.ok);
+        const rows = entries.value.filter((e) => selection.value.has(rowKey(e)));
+        const byDir = groupByDir(rows);
+        const channel =
+            action === 'lock' || action === 'unlock' ? 'mods:setLockedAt' : 'mods:setEnabledAt';
+        const flag = action === 'lock' || action === 'enable';
+        const all: ModOperationResult[] = [];
+        for (const [dir, group] of byDir) {
+            const results = (await window.kamucl.invoke(
+                channel,
+                dir,
+                group.map((e) => e.name),
+                flag
+            )) as ModOperationResult[];
+            // 回填实例前缀，保证结果里的 fileName 仍能定位回选中键
+            const prefix = scope.value === 'folder' ? (group[0]?.instanceId ?? '') : '';
+            for (const r of results)
+                all.push(prefix ? { ...r, fileName: prefix + '/' + r.fileName } : r);
+        }
+        const failed = all.filter((r) => !r.ok);
         toast(
             '已处理 ' +
-                (results.length - failed.length) +
+                (all.length - failed.length) +
                 ' 项' +
                 (failed.length ? '；' + failed.length + ' 项失败：' + failed[0].error : ''),
             failed.length ? 'error' : 'success'
         );
         if (generation === loadGeneration) {
-            batchResults.value = results;
+            batchResults.value = all.map((r) => ({
+                ...r,
+                fileName: r.fileName.split('/').pop() || r.fileName
+            }));
             const remaining = new Set(selection.value);
-            for (const r of results)
-                r.ok ? remaining.delete(r.fileName) : remaining.add(r.fileName);
+            for (const r of all) r.ok ? remaining.delete(r.fileName) : remaining.add(r.fileName);
             selection.value = remaining;
             await load();
         }
@@ -320,7 +441,40 @@ async function batch(
         batchBusy.value = false;
     }
 }
-watch([effectiveRel, activeFolder], () => {
+/** 单行锁定/解锁：按该行所在目录调用（实例视图与聚合视图统一） */
+async function toggleLock(entry: Row) {
+    const v = currentVersion.value;
+    if (!v || batchBusy.value) return;
+    const locked = !catalogOf(entry)?.locked;
+    const generation = loadGeneration;
+    batchBusy.value = true;
+    try {
+        const results = (
+            scope.value === 'folder'
+                ? await setModsLockedAt(rowDir(entry), [entry.name], locked)
+                : ((await window.kamucl.invoke(
+                      'mods:setLocked',
+                      v.id,
+                      v.folder || activeFolder.value,
+                      [entry.name],
+                      locked
+                  )) as ModOperationResult[])
+        ) as ModOperationResult[];
+        const failed = results.filter((r) => !r.ok);
+        toast(
+            failed.length
+                ? '操作失败：' + failed[0].error
+                : `${locked ? '已锁定' : '已解除锁定'} ${entry.name}`,
+            failed.length ? 'error' : 'success'
+        );
+        if (generation === loadGeneration) await load();
+    } catch (e) {
+        toast(errText(e), 'error');
+    } finally {
+        batchBusy.value = false;
+    }
+}
+watch([effectiveRel, activeFolder, scope], () => {
     selection.value = new Set();
     batchResults.value = [];
     catalog.value = {};
@@ -338,19 +492,39 @@ const visibleEntries = computed(() =>
 const modIcons = ref<Record<string, string>>({});
 let iconGeneration = 0;
 let iconTimer: ReturnType<typeof setTimeout> | undefined;
-watch([visibleEntries, effectiveRel, activeFolder], () => {
+watch([visibleEntries, effectiveRel, activeFolder, scope], () => {
     const generation = ++iconGeneration;
     clearTimeout(iconTimer);
     modIcons.value = {};
     const version = currentVersion.value;
     if (!version) return;
-    const names = visibleEntries.value
-        .filter((e) => !e.isDir && /\.(?:jar(?:\.disabled)?|zip)$/i.test(e.name))
-        .map((e) => e.name);
-    if (!names.length) return;
+    const rows = visibleEntries.value.filter(
+        (e) => !e.isDir && /\.(?:jar(?:\.disabled)?|zip)$/i.test(e.name)
+    );
+    if (!rows.length) return;
     const folder = version.folder || activeFolder.value;
     iconTimer = setTimeout(() => {
-        void getModIcons(version.id, names, folder, props.rel)
+        // 聚合视图按每行所属目录分别取图标（图标缓存按目录身份区分）
+        const request =
+            scope.value === 'folder'
+                ? Promise.all(
+                      [...new Map(rows.map((r) => [rowDir(r), r])).keys()].map(async (dir) => {
+                          const names = rows.filter((r) => rowDir(r) === dir).map((r) => r.name);
+                          const icons = await modIconsAt(dir, names, props.rel);
+                          const instanceId = rows.find((r) => rowDir(r) === dir)?.instanceId ?? '';
+                          return Object.entries(icons).map(
+                              ([name, icon]) =>
+                                  [instanceId ? instanceId + '/' + name : name, icon] as const
+                          );
+                      })
+                  ).then((groups) => Object.fromEntries(groups.flat()))
+                : getModIcons(
+                      version.id,
+                      rows.map((r) => r.name),
+                      folder,
+                      props.rel
+                  );
+        void Promise.resolve(request)
             .then((icons) => {
                 if (generation === iconGeneration) modIcons.value = icons;
             })
@@ -369,7 +543,9 @@ async function onOpenDir() {
     if (!currentVersion.value) return;
     opening.value = true;
     try {
-        await openDir(effectiveRel.value, currentVersion.value?.folder || activeFolder.value);
+        // 实例视图打开该实例的资源目录；聚合视图打开共享根目录
+        const rel = scope.value === 'folder' ? props.rel : effectiveRel.value;
+        await openDir(rel, currentVersion.value?.folder || activeFolder.value);
     } catch (e) {
         toast('打开文件夹失败：' + errText(e), 'error');
     } finally {
@@ -377,39 +553,52 @@ async function onOpenDir() {
     }
 }
 
-const delModal = reactive({ open: false, target: null as FsEntry | null, busy: false });
+const delModal = reactive({ open: false, target: null as Row | null, busy: false });
 
-function onRemove(entry: FsEntry) {
+function onRemove(entry: Row) {
     delModal.open = true;
     delModal.target = entry;
 }
 
 // ---------------- 模组禁用/启用（仅模组页；.jar ↔ .jar.disabled，运行中由主进程阻止） ----------------
-const isModEntry = (e: FsEntry) =>
+const isModEntry = (e: Row) =>
     props.rel === 'mods' && !e.isDir && /\.jar(\.disabled)?$/i.test(e.name);
-const isDisabledMod = (e: FsEntry) => /\.jar\.disabled$/i.test(e.name);
+const isDisabledMod = (e: Row) => /\.jar\.disabled$/i.test(e.name);
 const toggling = ref('');
 
-async function onToggleDisable(entry: FsEntry, event?: Event) {
+async function onToggleDisable(entry: Row, event?: Event) {
     if (event?.target) (event.target as HTMLInputElement).checked = !isDisabledMod(entry);
     if (!currentVersion.value) return;
     if (toggling.value) return;
-    toggling.value = entry.name;
+    toggling.value = rowKey(entry);
     const generation = loadGeneration;
     try {
-        const result = await toggleDisableFs(
-            effectiveRel.value,
-            entry.name,
-            currentVersion.value?.folder || activeFolder.value
-        );
-        if (generation !== loadGeneration) return;
-        entries.value = result;
-        toast(
-            isDisabledMod(entry)
-                ? `已启用 ${entry.name.replace(/\.disabled$/i, '')}`
-                : `已禁用 ${entry.name}`,
-            'success'
-        );
+        // 聚合视图按行的目录定位；实例视图走 versions/<id>/<rel>
+        if (scope.value === 'folder') {
+            await window.kamucl.invoke('fs:toggleDisableAt', rowDir(entry), entry.name);
+            if (generation !== loadGeneration) return;
+            toast(
+                isDisabledMod(entry)
+                    ? `已启用 ${entry.name.replace(/\.disabled$/i, '')}`
+                    : `已禁用 ${entry.name}`,
+                'success'
+            );
+            await load();
+        } else {
+            const result = await toggleDisableFs(
+                effectiveRel.value,
+                entry.name,
+                currentVersion.value?.folder || activeFolder.value
+            );
+            if (generation !== loadGeneration) return;
+            entries.value = result as Row[];
+            toast(
+                isDisabledMod(entry)
+                    ? `已启用 ${entry.name.replace(/\.disabled$/i, '')}`
+                    : `已禁用 ${entry.name}`,
+                'success'
+            );
+        }
     } catch (e) {
         toast(errText(e), 'error');
     } finally {
@@ -424,6 +613,14 @@ async function onConfirmRemove() {
     delModal.busy = true;
     const generation = loadGeneration;
     try {
+        // 聚合视图按行的目录定位；实例视图走 versions/<id>/<rel>
+        if (scope.value === 'folder') {
+            await window.kamucl.invoke('fs:removeAt', rowDir(entry), entry.name);
+            if (generation !== loadGeneration) return;
+            delModal.open = false;
+            await load();
+            return;
+        }
         const result = await removeFs(
             effectiveRel.value,
             entry.name,
@@ -588,7 +785,6 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
     <div
         class="page file-manager"
         :data-resource="props.rel"
-        :class="{ 'resource-page': props.rel !== 'mods' }"
     >
         <header class="fm-head">
             <div data-ui="FileManager:9ace27a3aaa9" class="page-head fm-head-left">
@@ -601,14 +797,16 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                 <button
                     v-if="props.rel === 'mods'"
                     class="btn btn-gold"
-                    :disabled="updatePanel.checking || !currentVersion"
+                    :disabled="updatePanel.checking || !currentVersion || scope === 'folder'"
+                    :title="
+                        scope === 'folder' ? '更新检测只针对当前实例，请先切回「当前实例」' : ''
+                    "
                     @click="onCheckUpdates"
                 >
                     {{ updatePanel.checking ? '检测中…' : '检测更新' }}
                 </button>
                 <button
-                    class="btn"
-                    :class="props.rel === 'shaderpacks' ? 'btn-gold' : 'btn-ghost'"
+                    class="btn btn-ghost"
                     :disabled="opening || !currentVersion"
                     @click="onOpenDir"
                 >
@@ -632,13 +830,23 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                     >
                         <button
                             class="btn btn-ghost"
-                            :disabled="!currentVersion"
+                            :disabled="!currentVersion || scope === 'folder'"
+                            :title="
+                                scope === 'folder'
+                                    ? '版本迁移只针对当前实例，请先切回「当前实例」'
+                                    : ''
+                            "
                             @click="migrationOpen = true"
                         >
                             版本迁移</button
                         ><button
                             class="btn btn-ghost"
-                            :disabled="!currentVersion"
+                            :disabled="!currentVersion || scope === 'folder'"
+                            :title="
+                                scope === 'folder'
+                                    ? '清理重复只针对当前实例，请先切回「当前实例」'
+                                    : ''
+                            "
                             @click="dupOpen = true"
                         >
                             清理重复
@@ -648,6 +856,9 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
             </div>
         </header>
         <div v-if="availableVersions.length" class="fm-context">
+            <label
+                >内容范围<SelectMenu v-model="scope" class="fm-ver-select" :options="scopeOptions"
+            /></label>
             <label
                 >游戏实例<SelectMenu
                     v-model="store.resourceVersionId"
@@ -667,6 +878,12 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                         }))
                     "
             /></label>
+            <span
+                v-if="scope === 'folder'"
+                data-ui="FileManager:fm-scope-summary"
+                class="fm-scope-summary muted"
+                >{{ scopeSummary }}（同名文件按实例分别列出）</span
+            >
             <button
                 v-if="props.rel !== 'mods'"
                 class="btn btn-ghost"
@@ -947,6 +1164,16 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
         <p data-ui="FileManager:080a7432d0c7" v-if="catalogError" class="muted" role="alert">
             模组识别或锁定记录读取失败：{{ catalogError }}。可刷新重试，写入操作仍会由后端校验。
         </p>
+        <p
+            data-ui="FileManager:fm-aggregate-warnings"
+            v-if="scope === 'folder' && aggregateWarnings.length"
+            class="muted"
+            role="status"
+        >
+            有 {{ aggregateWarnings.length }} 个实例的目录未能读取：{{
+                aggregateWarnings.join('；')
+            }}。可刷新重试。
+        </p>
         <details
             data-ui="FileManager:3bdbccefe0d1"
             v-if="batchResults.length"
@@ -1023,9 +1250,12 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                     v-html="props.icon"
                 ></span>
                 <span>{{ props.emptyText }}</span>
-                <small v-if="props.rel === 'shaderpacks'" class="muted"
-                    >将光影包 ZIP 放入上方文件夹，然后刷新列表。</small
+                <!-- 聚合范围才需要补充说明；实例视图提示拖拽导入这条更短路径 -->
+                <small v-if="scope === 'folder'" class="muted"
+                    >已查找共享目录与
+                    {{ aggregateInstances.length }} 个实例的该子目录，都没有文件。</small
                 >
+                <small v-else class="muted">也可以直接把文件拖进本页面导入。</small>
             </div>
             <div data-ui="FileManager:40d26ad64938" v-else-if="!filtered.length" class="empty">
                 <span>当前搜索或筛选条件没有匹配的文件</span>
@@ -1052,7 +1282,7 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                 <div
                     data-ui="FileManager:9628c4638932"
                     v-for="e in visibleEntries"
-                    :key="e.name"
+                    :key="rowKey(e)"
                     class="fm-row"
                     :class="{ 'fm-row-disabled': isDisabledMod(e) }"
                 >
@@ -1061,9 +1291,9 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                         v-if="isModEntry(e)"
                         type="checkbox"
                         :aria-label="'选择 ' + e.name"
-                        :checked="selection.has(e.name)"
+                        :checked="selection.has(rowKey(e))"
                         :disabled="batchBusy"
-                        @change="selectMod(e.name, ($event.target as HTMLInputElement).checked)"
+                        @change="selectMod(rowKey(e), ($event.target as HTMLInputElement).checked)"
                     />
                     <span v-if="props.rel === 'mods' && !isModEntry(e)" aria-hidden="true"></span>
                     <span
@@ -1074,11 +1304,11 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                     >
                         <img
                             data-ui="FileManager:e82feec99cd2"
-                            v-if="modIcons[e.name]"
-                            :src="modIcons[e.name]"
+                            v-if="modIcons[rowKey(e)]"
+                            :src="modIcons[rowKey(e)]"
                             draggable="false"
                             alt=""
-                            @error="delete modIcons[e.name]"
+                            @error="delete modIcons[rowKey(e)]"
                         />
                         <svg
                             v-else-if="e.isDir"
@@ -1120,20 +1350,26 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                             class="fm-internal"
                             >{{ e.name }}</small
                         ><small
-                            v-else-if="catalog[e.name]?.name && catalog[e.name].name !== e.name"
+                            v-else-if="catalogOf(e)?.name && catalogOf(e).name !== e.name"
                             class="fm-internal"
-                            >{{ catalog[e.name].name }}</small
+                            >{{ catalogOf(e)!.name }}</small
                         ><small
-                            v-if="isDisabledMod(e) || catalog[e.name]?.locked"
+                            v-if="isDisabledMod(e) || catalogOf(e)?.locked"
                             class="fm-internal"
                             >{{
                                 [
                                     isDisabledMod(e) ? '已禁用' : '',
-                                    catalog[e.name]?.locked ? '已锁定' : ''
+                                    catalogOf(e)?.locked ? '已锁定' : ''
                                 ]
                                     .filter(Boolean)
                                     .join(' · ')
                             }}</small
+                        ><small
+                            v-if="scope === 'folder' && e.instanceId"
+                            data-ui="FileManager:fm-instance"
+                            class="fm-instance"
+                            :title="'所属实例：' + e.instanceName"
+                            >{{ e.instanceName }}</small
                         ></span
                     >
 
@@ -1187,18 +1423,16 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                                 class="btn btn-ghost btn-sm"
                                 :disabled="batchBusy"
                                 :aria-label="
-                                    (catalog[e.name]?.locked ? '解除锁定 ' : '锁定版本 ') + e.name
+                                    (catalogOf(e)?.locked ? '解除锁定 ' : '锁定版本 ') + e.name
                                 "
                                 :title="
-                                    catalog[e.name]?.locked
+                                    catalogOf(e)?.locked
                                         ? '已锁定：不参与自动更新'
                                         : '锁定此模组版本'
                                 "
-                                @click="
-                                    batch(catalog[e.name]?.locked ? 'unlock' : 'lock', [e.name])
-                                "
+                                @click="toggleLock(e)"
                             >
-                                {{ catalog[e.name]?.locked ? '已锁定' : '锁定' }}</button
+                                {{ catalogOf(e)?.locked ? '已锁定' : '锁定' }}</button
                             ><button
                                 data-ui="FileManager:fd277c185a8b"
                                 v-if="isModEntry(e)"
@@ -1375,6 +1609,22 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
     font-size: 11px;
     margin-top: 4px;
 }
+/* 聚合视图：标注该行来自哪个实例 */
+.fm-instance {
+    display: inline-block;
+    margin-top: 4px;
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--card-2);
+    color: var(--text-dim);
+    font-size: 10px;
+    line-height: 1.6;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .fm-row input[type='checkbox'] {
     accent-color: var(--accent);
     flex-shrink: 0;
@@ -1429,17 +1679,7 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
     margin: 0 auto;
 }
 
-.resource-page .fm-head {
-    flex-direction: column;
-    align-items: stretch;
-}
-.resource-page .fm-head-left {
-    flex: none;
-    width: 100%;
-}
-.resource-page .fm-actions {
-    width: 100%;
-}
+/* 三页（模组/资源包/光影包）头部结构保持一致：标题在左、操作在右 */
 .fm-head {
     display: flex;
     align-items: flex-end;
@@ -1711,6 +1951,11 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
     width: 100%;
     max-width: none;
 }
+/* 聚合范围说明：一句话讲清这次列的是哪些目录 */
+.fm-scope-summary {
+    flex-basis: 100%;
+    font-size: 12px;
+}
 .fm-context .fm-path {
     flex-basis: 100%;
     text-align: left;
@@ -1884,9 +2129,6 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
 }
 .fm-actions .file-more > summary {
     font-size: 14px;
-}
-.resource-page .fm-actions {
-    width: auto;
 }
 .fm-head {
     flex-wrap: wrap;

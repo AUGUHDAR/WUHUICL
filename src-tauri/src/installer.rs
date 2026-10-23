@@ -4513,6 +4513,34 @@ pub fn sha1_file_hex_pub(bytes: &[u8]) -> String {
     crate::net::net_sha1_hex(bytes)
 }
 
+/// mods.rs 迁移安装钩子（run_migration_install 的实现）：模组迁移到未安装的目标版本时
+/// 现场安装实例（原版 modMigration 内部走版本安装器）。
+pub fn migration_install_hook(
+    app: &AppHandle,
+    rec: &std::sync::Arc<crate::tasks::TaskRecord>,
+    emit: &(dyn Fn(&Value) + Send + Sync),
+    folder: &str,
+    mc_version: &str,
+    loader: &str,
+    loader_version: &str,
+    instance_name: &str,
+) -> Result<(), String> {
+    let loader_opt = if loader.is_empty() { None } else { Some(loader) };
+    let loader_version_opt = if loader_version.is_empty() { None } else { Some(loader_version) };
+    let name_opt = if instance_name.is_empty() { None } else { Some(instance_name) };
+    install_vanilla_public(
+        app,
+        Some(rec.as_ref()),
+        mc_version,
+        folder,
+        name_opt,
+        loader_opt,
+        loader_version_opt,
+        |event| emit(event),
+    )
+    .map(|_| ())
+}
+
 pub fn install_vanilla_public(
     app: &AppHandle,
     rec: Option<&TaskRecord>,

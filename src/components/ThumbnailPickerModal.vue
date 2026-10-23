@@ -6,6 +6,7 @@ import {
     setVersionThumbnailFit,
     uploadVersionThumbnail
 } from '../api';
+import UiGlyph from './UiGlyph.vue';
 import { refreshInstalled, toast } from '../store';
 import { managedImageUrl } from '../managedAssets';
 import type { ImageFit } from '@shared/types';
@@ -101,7 +102,7 @@ async function resetImage() {
                         <h3 class="modal-title">启动卡缩略图 · {{ versionId }}</h3>
                         <p class="modal-label">实例图片优先于个性化设置中的全局默认图片。</p>
                     </div>
-                    <button class="icon-btn" title="关闭" @click="emit('close')">×</button>
+                    <button class="icon-btn" title="关闭" @click="emit('close')"><UiGlyph name="close" :size="14" /></button>
                 </div>
 
                 <div v-if="imagePath && !previewFailed" class="thumbnail-preview">

@@ -4,6 +4,7 @@
  */
 import { computed, onMounted, reactive, ref } from 'vue';
 import { errText, findModCrossDuplicates, findModDuplicates, removeFs } from '../api';
+import UiGlyph from './UiGlyph.vue';
 import { store, toast } from '../store';
 import type { ModCrossDuplicate, ModDuplicateGroup } from '@shared/types';
 
@@ -132,7 +133,7 @@ onMounted(() => {
                         title="关闭"
                         @click="emit('close')"
                     >
-                        ✕
+                        <UiGlyph name="close" />
                     </button>
                 </div>
 
@@ -159,7 +160,7 @@ onMounted(() => {
                         <span class="spin"></span><span class="muted">正在解析 MOD 文件…</span>
                     </div>
                     <div v-else-if="!groups.length" class="dup-empty muted">
-                        该版本没有重复的 MOD ✓
+                        该版本没有重复的 MOD <UiGlyph name="check" :size="12" />
                     </div>
                     <template v-else>
                         <p class="muted dup-hint">
@@ -233,7 +234,7 @@ onMounted(() => {
                     </button>
                     <div v-if="crossResults" class="dup-list dup-list-cross">
                         <div v-if="!crossResults.length" class="dup-empty muted">
-                            所选版本间没有重复 MOD ✓
+                            所选版本间没有重复 MOD <UiGlyph name="check" :size="12" />
                         </div>
                         <div v-for="g in crossResults" :key="g.modId" class="dup-group">
                             <div class="dup-group-head">

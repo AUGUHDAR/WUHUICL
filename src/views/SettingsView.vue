@@ -31,6 +31,7 @@ import {
 } from '../api';
 import { store, toast } from '../store';
 import AppearanceThemeCard from '../components/AppearanceThemeCard.vue';
+import BrandFaceCard from '../components/BrandFaceCard.vue';
 import UpdateSources from '../components/UpdateSources.vue';
 import { autoMemoryMB } from '@shared/memory';
 import MemoryOrganizer from '../components/MemoryOrganizer.vue';
@@ -54,6 +55,7 @@ const systemMotionHelp =
           : '若需要动画，请检查本机桌面的辅助功能或动画设置。';
 import HomeLayoutEditor from '../components/HomeLayoutEditor.vue';
 import SelectMenu from '../components/SelectMenu.vue';
+import UiGlyph from '../components/UiGlyph.vue';
 import {
     settingsCatalog,
     settingsCategories,
@@ -376,11 +378,10 @@ const featureToggles = [
     { key: 'packs', label: '资源包' },
     { key: 'shaders', label: '光影包' },
     { key: 'recordings', label: '录像' },
-    { key: 'bridge', label: 'MOD 面板' },
     { key: 'servers', label: '服务器' },
     { key: 'friends', label: '联机' },
-    { key: 'keys', label: '默认配置' },
-    { key: 'skins', label: '皮肤与披风' },
+    { key: 'keys', label: '游戏内配置' },
+    { key: 'skins', label: '皮肤' },
     { key: 'community', label: '社区资源' }
 ];
 
@@ -492,9 +493,10 @@ const javaLabel = (j: { major: number; path: string; version: string; architectu
 const MEM_MIN = 1024;
 /** 滑块步长 512MB（0.5GB，粗调节）；精细调节用数值输入框（0.25GB 精度） */
 const MEM_STEP = 512;
-/** 给系统预留的内存（手动上限 = 可用内存 - 预留） */
+/** 给系统预留的内存（信息展示与“启动前整理”提示用） */
 const SYS_RESERVE_MB = 1024;
-/** 上限 = 当前可用内存 - 系统预留，向下取 512MB 整（随可用内存浮动） */
+/** 滑块上限：按物理总量分档（照 PCL），不随当前可用内存浮动——
+ *  否则系统后台一忙，上限就缩到已分配值以下，滑块会"越拉越小"。 */
 const memMax = ref(16384);
 /** 物理内存总量（自动分配与信息展示用） */
 const memTotal = ref(0);
@@ -504,20 +506,24 @@ const memFree = ref(0);
 const fmtMem = (mb: number) =>
     mb % 1024 === 0 ? `${mb / 1024}G` : `${mb}MB（${(mb / 1024).toFixed(2)}G）`;
 
+/** 物理总量 → 可分配上限（MB）：留 1GB 给系统与其它程序，向下取 512MB 整 */
+function memoryCeiling(totalMB: number): number {
+    if (totalMB <= 0) return 16384;
+    const usable = Math.max(MEM_MIN, totalMB - SYS_RESERVE_MB);
+    return Math.floor(usable / MEM_STEP) * MEM_STEP;
+}
+
 async function refreshSystemInfo(): Promise<void> {
     try {
         const info = await getSystemInfo();
         memTotal.value = info.totalMemMB;
         memFree.value = info.freeMemMB;
-        memMax.value = Math.max(
-            MEM_MIN,
-            Math.floor((info.freeMemMB - SYS_RESERVE_MB) / MEM_STEP) * MEM_STEP
-        );
-        // 手动值超出真实内存（换机/降配后）时夹回物理总量；显示范围随可用内存浮动
+        memMax.value = memoryCeiling(info.totalMemMB);
+        // 手动值超出真实内存（换机/降配后）时夹回物理上限
         const s = store.settings;
-        if (s && s.memoryMB > info.totalMemMB) {
-            s.memoryMB = info.totalMemMB;
-            void save({ memoryMB: info.totalMemMB });
+        if (s && s.memoryMB > memMax.value) {
+            s.memoryMB = memMax.value;
+            void save({ memoryMB: memMax.value });
         }
     } catch {
         /* 读不到就保持保守上限 */
@@ -807,6 +813,9 @@ async function onRemovePlugin(p: PluginInfo) {
             <template v-else>
                 <!-- 外观主题（PCL 式折叠卡片：标题行 + 箭头，展开内容统一内边距） -->
                 <AppearanceThemeCard v-show="category === 'appearance'" />
+
+                <!-- 启动形象：开屏头像与左上角图标的来源配置 -->
+                <BrandFaceCard v-show="category === 'appearance'" />
 
                 <!-- 功能管理 -->
                 <details
@@ -1782,7 +1791,7 @@ async function onRemovePlugin(p: PluginInfo) {
                                 data-ui="SettingsView:cd41281572d3"
                                 v-if="updateCheckState === 'latest'"
                                 class="upd-latest"
-                                >已是最新 ✓</span
+                                ><UiGlyph name="check" :size="12" /> 已是最新</span
                             >
                         </div>
                         <!-- 检查失败：明确是连不上 GitHub 更新源，并提供重试入口（不再误报「无更新」） -->
@@ -1874,8 +1883,9 @@ async function onRemovePlugin(p: PluginInfo) {
                             </div>
                         </details>
                         <p data-ui="SettingsView:108b83a3465d" class="muted group-hint">
-                            更新包同时发布在 GitHub 与 Gitee（国内镜像）；下载较慢时可在设置 →
-                            更新源里改用镜像，或到 WUHUICL 群（{{
+                            更新包同时发布在 GitHub 与
+                            Gitee（国内镜像）；下载较慢时可在上方更新源里改用镜像测速，或到 WUHUICL
+                            群（{{
                                 store.settings.qqGroupNumber?.trim() || QQ_GROUP_NUMBER
                             }}）获取，两处文件与 GitHub 版本一致。
                         </p>
@@ -2033,7 +2043,7 @@ async function onRemovePlugin(p: PluginInfo) {
                 </p>
             </template>
             <p data-ui="SettingsView:e60d0b9f406f" class="upd-risk">
-                ⚠ 旧版本可能不兼容新配置格式。回退前将自动备份当前版本，可随时还原。
+                <UiGlyph name="warning" :size="13" /> 旧版本可能不兼容新配置格式。回退前将自动备份当前版本，可随时还原。
             </p>
             <div data-ui="SettingsView:057bbe26b76d" v-if="rollback.loading" class="empty">
                 <span data-ui="SettingsView:4f0800807c40" class="spin"></span>
@@ -2132,10 +2142,10 @@ async function onRemovePlugin(p: PluginInfo) {
                     data-ui="SettingsView:152ca71f54e0"
                     v-if="localUpdate.check.versionOk"
                     class="upd-ok"
-                    >v{{ localUpdate.check.version }} ≥ 当前 v{{ appVersion }} ✓</span
+                    ><UiGlyph name="check" :size="12" /> v{{ localUpdate.check.version }} ≥ 当前 v{{ appVersion }}</span
                 >
                 <span data-ui="SettingsView:e950885a700c" v-else class="upd-warn"
-                    >⚠
+                    ><UiGlyph name="warning" :size="12" />
                     {{
                         localUpdate.check.version
                             ? `v${localUpdate.check.version} 低于当前 v${appVersion}`
@@ -2149,16 +2159,16 @@ async function onRemovePlugin(p: PluginInfo) {
                     data-ui="SettingsView:9df9b415ad42"
                     v-if="localUpdate.check.sha256 === 'match'"
                     class="upd-ok"
-                    >SHA256 与 GitHub Release 一致 ✓</span
+                    ><UiGlyph name="check" :size="12" /> SHA256 与 GitHub Release 一致</span
                 >
                 <span
                     data-ui="SettingsView:5b6de8db67a7"
                     v-else-if="localUpdate.check.sha256 === 'mismatch'"
                     class="upd-warn"
-                    >⚠ SHA256 不一致！文件可能被篡改（{{ localUpdate.check.detail }}）</span
+                    ><UiGlyph name="warning" :size="12" /> SHA256 不一致！文件可能被篡改（{{ localUpdate.check.detail }}）</span
                 >
                 <span data-ui="SettingsView:f5a9e52452b4" v-else class="upd-warn"
-                    >⚠ 无法联网校验，请确认文件来自官方渠道，风险自担</span
+                    ><UiGlyph name="warning" :size="12" /> 无法联网校验，请确认文件来自官方渠道，风险自担</span
                 >
             </div>
             <template #footer
@@ -2240,7 +2250,8 @@ async function onRemovePlugin(p: PluginInfo) {
 }
 .settings-page [data-section]:focus {
     outline: 2px solid var(--accent);
-    outline-offset: 3px;
+    /* 定位卡片的聚焦指示画在卡片内沿：外描边会溢出到相邻卡片上 */
+    outline-offset: -2px;
 }
 .settings-page .group {
     margin-bottom: 0;
@@ -2481,7 +2492,8 @@ async function onRemovePlugin(p: PluginInfo) {
 }
 .setting-target:focus {
     outline: 2px solid var(--accent);
-    outline-offset: var(--space-1);
+    /* 定位卡片的聚焦指示画在卡片内沿：外描边会溢出到相邻卡片上 */
+    outline-offset: -2px;
 }
 .page {
     display: flex;
@@ -2786,20 +2798,21 @@ async function onRemovePlugin(p: PluginInfo) {
     left: 0;
     right: 0;
     top: 50%;
-    height: 6px;
+    /* 规格对齐 PCL：轨道是细分隔线而不是粗胶囊 */
+    height: 4px;
     transform: translateY(-50%);
     border-radius: 999px;
-    background: var(--card-2);
+    background: color-mix(in srgb, var(--text-dim) 26%, transparent);
     pointer-events: none;
 }
 .mem-slider-fill {
     position: absolute;
     left: 0;
     top: 50%;
-    height: 6px;
+    height: 4px;
     transform: translateY(-50%);
     border-radius: 999px;
-    background: linear-gradient(90deg, var(--accent-2), var(--accent));
+    background: var(--accent);
     pointer-events: none;
     /* 拖动中禁用过渡：否则填充追着指针值跑=前后抽搐闪现（用户实测报告） */
     transition: width 0.12s ease;
@@ -2807,25 +2820,27 @@ async function onRemovePlugin(p: PluginInfo) {
 .mem-slider:has(.mem-slider-thumb.dragging) .mem-slider-fill {
     transition: none;
 }
+/* 圆点：12px 空心，hover/拖动只变色不放大（PCL 手感，避免拖动时忽大忽小） */
 .mem-slider-thumb {
     position: absolute;
     top: 50%;
-    width: 16px;
-    height: 16px;
+    width: 12px;
+    height: 12px;
     transform: translate(-50%, -50%);
     border-radius: 50%;
-    background: var(--accent);
-    border: 2px solid var(--on-accent);
-    box-shadow: 0 1px 6px color-mix(in srgb, var(--accent) 45%, transparent);
+    background: var(--card-solid, var(--card));
+    border: 2px solid var(--accent);
     cursor: grab;
-    transition: transform 0.12s ease;
+    transition:
+        background 0.15s ease,
+        border-color 0.15s ease;
 }
-.mem-slider-thumb:hover {
-    transform: translate(-50%, -50%) scale(1.12);
+.mem-slider-thumb:hover,
+.mem-slider-thumb.dragging {
+    background: var(--accent);
 }
 .mem-slider-thumb.dragging {
     cursor: grabbing;
-    transform: translate(-50%, -50%) scale(1.18);
 }
 .memory-warn {
     margin-top: var(--space-2);

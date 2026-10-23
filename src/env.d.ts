@@ -20,6 +20,8 @@ interface KamuclBridge {
 
 interface Window {
     kamucl: KamuclBridge;
+    /** 主进程注入的自定义开屏头像 data URL；空串/未注入 = 用内置默认图 */
+    __KAMUCL_SPLASH_FACE__?: string;
     kamuclSplash: {
         ready(): void;
         assembled(): void;
