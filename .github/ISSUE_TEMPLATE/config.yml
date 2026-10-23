@@ -1,0 +1,17 @@
+blank_issues_enabled: false
+contact_links:
+    - name: 报安全问题（不要开公开 issue）
+      url: https://github.com/AUGUHDAR/WUHUICL/security/policy
+      about: 令牌泄漏、下载校验被绕、路径穿越、联机鉴权等，看安全策略
+    - name: QQ 群 1045554684
+      url: https://qm.qq.com/cgi-bin/qm/qr?k=DPtuiKA-iNNM41kEjsEZNxBWUm8iYeTE&jump_from=webapi&authKey=agi9ZieszTBXoQNO6wNb4D/hmTY6rmi2yAdvEubPQoq2tz4cPi1XI/DNUMoaxyWj
+      about: 加群链接，群文件里也有最新安装包
+    - name: B 站私信
+      url: https://space.bilibili.com/526277131
+      about: 原作者主页，私信能直达
+    - name: 原版 KAMUCL
+      url: https://github.com/kamubaba-i/KAMUCL
+      about: 界面与行为合同来自它；原版自身的问题请到那边提
+    - name: VoxLink（联机模组与 P2P 引擎）
+      url: https://github.com/AUGUHDAR/VoxLink
+      about: 联机引擎本身的问题多半在这里，不在启动器

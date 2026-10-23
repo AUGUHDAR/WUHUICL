@@ -1,0 +1,73 @@
+[package]
+name = "wuhuicl"
+version = "1.0.1"
+description = "WUHUICL - 简约美观的一键式 Minecraft 启动器"
+edition = "2021"
+rust-version = "1.82"
+
+# 本地 wry 补丁：Windows 上 OS 文本拖拽（authlib-injector 皮肤站卡片拖入）被上游
+# 只认 CF_HDROP 的 IDropTarget 静默丢弃。vendor/wry 里加 CF_UNICODETEXT 分支，
+# 文本以 `wuhuicl-text:<内容>` 伪路径进入既有 DragDropEvent.paths，协议不变。
+[patch.crates-io]
+wry = { path = "vendor/wry" }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+base64 = "0.22"
+sha2 = "0.10"
+sha1 = "0.10"
+hmac = "0.12"
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
+md-5 = "0.10"
+hex = "0.4"
+chrono = "0.4"
+dirs = "6"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "gzip", "blocking"] }
+bytes = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "fs", "process", "io-util", "time", "net"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+regex = "1"
+url = "2"
+rand = "0.9"
+flate2 = "1"
+windows-registry = "0.5"
+# 原生拖出（DoDragDrop + CF_HDROP）：与 vendor/wry 同版本，特性保持最小集
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_Memory",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Ole",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+windows-core = "0.62"
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_System_SystemInformation",
+  "Win32_System_IO",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_System_Threading",
+  "Win32_NetworkManagement_IpHelper",
+  "Win32_NetworkManagement_Ndis",
+  "Win32_Networking_WinSock",
+  "Win32_Storage_FileSystem",
+] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
