@@ -15,7 +15,8 @@ const realLogos: Record<string, string> = {
     neoforge: 'loaders/neoforge.png',
     optifine: 'loaders/optifine.png',
     vanilla: 'loaders/grass.png',
-    snapshot: 'loaders/command.png'
+    snapshot: 'loaders/command.png',
+    stone: 'loaders/stone.png'
 };
 const logoSrc = computed(() => realLogos[props.name] ?? '');
 

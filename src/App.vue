@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import SupplementalModsResult from './components/SupplementalModsResult.vue';
+import Avatar from './components/Avatar.vue';
 import { shouldReportGameCrash, signedExitCode } from '@shared/gameExit';
 const isMac = window.kamucl.platform === 'darwin';
+// Android：无窗口化概念，窗口三键（最小化/最大化/关闭）整组隐藏
+const isAndroid = window.kamucl.platform === 'android';
 import LaunchNotice from './components/LaunchNotice.vue';
 import UiGlyph from './components/UiGlyph.vue';
 import { pollTickets } from './voxlinkTickets';
@@ -103,7 +106,10 @@ const InstanceCenter = defineAsyncComponent(() => import('./components/InstanceC
 const GameView = defineAsyncComponent(() => import('./views/GameView.vue'));
 const ModsView = defineAsyncComponent(() => import('./views/ModsView.vue'));
 const RecordingsView = defineAsyncComponent(() => import('./views/RecordingsView.vue'));
+const ScreenshotsView = defineAsyncComponent(() => import('./views/ScreenshotsView.vue'));
 const ProjectionsView = defineAsyncComponent(() => import('./views/ProjectionsView.vue'));
+const SeedMapView = defineAsyncComponent(() => import('./views/SeedMapView.vue'));
+const WorldMapView = defineAsyncComponent(() => import('./views/WorldMapView.vue'));
 const MascotStage = defineAsyncComponent(() => import('./components/MascotStage.vue'));
 const mascotOpen = ref(false);
 const mascotReady = ref(false);
@@ -185,7 +191,10 @@ const viewMap: Record<ViewName, Component> = {
     mods: ModsView,
     packs: PacksView,
     recordings: RecordingsView,
+    screenshots: ScreenshotsView,
     projections: ProjectionsView,
+    seedmap: SeedMapView,
+    worldmap: WorldMapView,
     shaders: ShadersView,
     keys: KeysView,
     skins: SkinsView,
@@ -279,8 +288,13 @@ const navEntries = computed<Array<{ group: NavGroup; entries: NavEntry[] }>>(() 
 const isFeatureOff = (key: string): boolean =>
     (store.settings?.disabledFeatures ?? []).includes(key);
 
+/** Android：联机（VoxLink 引擎仅 Windows）与游戏内配置（依赖游戏进程）在移动端不可用，导航整组隐藏 */
+const MOBILE_HIDDEN_NAV: readonly string[] = isAndroid ? ['friends', 'keys'] : [];
+
 /** 过滤禁用功能后的主导航 */
-const visibleNavItems = computed(() => navItems.filter((n) => !isFeatureOff(n.key)));
+const visibleNavItems = computed(() =>
+    navItems.filter((n) => !isFeatureOff(n.key) && !MOBILE_HIDDEN_NAV.includes(n.key))
+);
 
 /** 过滤禁用功能后的资源管理子项 */
 const visibleResourceSubItems = computed(() =>
@@ -311,9 +325,24 @@ const resourceSubItems: Array<{ key: ViewName; label: string; icon: string }> = 
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="14" height="14" rx="3"/><path d="m17 10 4-3v10l-4-3"/></svg>'
     },
     {
+        key: 'screenshots',
+        label: '截图',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z"/><circle cx="12" cy="13" r="3"/></svg>'
+    },
+    {
         key: 'projections',
         label: '投影',
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 9 5v8l-9 5-9-5V8zM3 8l9 5 9-5M12 13v8"/></svg>'
+    },
+    {
+        key: 'seedmap',
+        label: '种子地图',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/></svg>'
+    },
+    {
+        key: 'worldmap',
+        label: '世界地图',
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z"/><path d="M9 4v14M15 6v14"/></svg>'
     },
     {
         key: 'servers',
@@ -326,7 +355,7 @@ const resourceSubItems: Array<{ key: ViewName; label: string; icon: string }> = 
 const resourceExpanded = ref(localStorage.getItem('kamucl.resourceExpanded') === 'true');
 watch(resourceExpanded, (value) => localStorage.setItem('kamucl.resourceExpanded', String(value)));
 const inResourceGroup = computed(() =>
-    ['mods', 'packs', 'shaders', 'servers', 'recordings', 'projections'].includes(
+    ['mods', 'packs', 'shaders', 'servers', 'recordings', 'screenshots', 'projections', 'seedmap', 'worldmap'].includes(
         store.currentView
     )
 );
@@ -568,7 +597,7 @@ const looksLikeYggdrasilProvider = (value: string): boolean => {
 };
 
 const resourceDropPage = () =>
-    ['keys', 'mods', 'packs', 'shaders', 'projections'].includes(store.currentView);
+    ['keys', 'mods', 'packs', 'shaders', 'projections', 'screenshots'].includes(store.currentView);
 function onDragEnter(e: DragEvent) {
     if (store.editMode) {
         e.preventDefault();
@@ -630,6 +659,12 @@ function onDrop(e: DragEvent) {
         Array.from(e.dataTransfer?.files ?? []).some((file) => /\.mrpack$/i.test(file.name));
     if (mrpackDrop) e.stopPropagation();
     if (resourceDropPage() && !mrpackDrop) {
+        // 渲染工坊子页有自己的拖放导入（拖入 .litematic/.schem 直接渲染），
+        // 捕获阶段放行，不走路面级导入。
+        if ((e.target as Element | null)?.closest?.('.schematic-page')) {
+            endDrag();
+            return;
+        }
         endDrag();
         e.preventDefault();
         e.stopPropagation();
@@ -1268,7 +1303,8 @@ function applyCustomVars(custom: CustomTheme, theme: ThemeName) {
     st.setProperty('--glass-blur', '28px');
     // 图一布局是全部主题共享的固定骨架；旧 layout 字段只保留兼容，不再改变结构。
     st.setProperty('--sidebar-w', '208px');
-    st.setProperty('--banner-h', '430px');
+    // 手机横屏可视高度 ~360px，横幅等比压缩；桌面保持 430px 不变
+    st.setProperty('--banner-h', isAndroid ? '200px' : '430px');
     st.setProperty('--radius', '14px');
 }
 
@@ -1637,7 +1673,7 @@ onUnmounted(() => {
                             navGroupLabels[section.group]
                         }}</span>
                         <template v-for="entry in section.entries" :key="entry.kind === 'item' ? entry.item.key : 'resources'">
-                            <!-- 资源管理组（内容组首位）：父项可展开，子项是 6 个内容页 -->
+                            <!-- 资源管理组（内容组首位）：父项可展开，子项是内容页（模组/资源包/光影/录像/截图/投影/种子地图/服务器） -->
                             <template v-if="entry.kind === 'resources'">
                                 <button
                                     data-ui="App:7080ad4eb8e0"
@@ -1901,7 +1937,7 @@ onUnmounted(() => {
                             ></span>
                         </button>
 
-                        <template v-if="!isMac">
+                        <template v-if="!isMac && !isAndroid">
                             <span data-ui="App:2d64ba8e392c" class="top-divider"></span>
 
                             <button
@@ -3827,5 +3863,120 @@ onUnmounted(() => {
     justify-content: flex-end;
     gap: var(--space-3);
     margin-top: var(--space-5);
+}
+
+/* ---------------- 移动端适配（Android 横屏手机） ----------------
+   设计原则：应用感 = 固定一屏 + 常驻侧栏 + 局部滚动。
+   侧栏常驻为 64px 图标竖条（FCL/ZL2 同款），不做折叠抽屉；
+   资源管理子项以浮层 popover 展开（局部交互）。
+   桌面端不受影响：本块全部挂在 html[data-platform='android'] 下。 */
+.nav-toggle,
+.nav-backdrop {
+    display: none;
+}
+
+html[data-platform='android'] .shell {
+    border: none;
+    border-radius: 0;
+}
+/* 侧栏常驻：图标 + 文字（对应桌面端左侧选择条，宽度收敛） */
+html[data-platform='android'] .sidebar {
+    width: 168px;
+    flex-shrink: 0;
+    /* 背景延伸进状态栏后面（全屏），logo 避开挖孔/时钟——随主题变色，无割裂 */
+    padding-top: var(--sat, 0px);
+}
+html[data-platform='android'] .logo-area {
+    height: 52px;
+    padding: 0 var(--space-3);
+    gap: var(--space-2);
+}
+html[data-platform='android'] .brand-head {
+    width: 28px;
+    height: 28px;
+}
+html[data-platform='android'] .logo-text .logo-name {
+    font-size: var(--text-md);
+}
+html[data-platform='android'] .logo-text .logo-version {
+    font-size: 10px;
+}
+html[data-platform='android'] .nav {
+    padding: 4px 8px;
+}
+html[data-platform='android'] .nav-group-title {
+    display: none;
+}
+html[data-platform='android'] .nav-item {
+    height: 40px;
+    padding: 0 12px;
+    gap: var(--space-2);
+}
+html[data-platform='android'] .nav-item .nav-icon svg {
+    width: 17px;
+    height: 17px;
+}
+html[data-platform='android'] .nav-label {
+    font-size: var(--text-sm);
+}
+html[data-platform='android'] .nav-caret {
+    display: none;
+}
+/* 资源管理子菜单：侧栏内联展开（桌面同款交互，不做覆盖式 popover） */
+html[data-platform='android'] .nav {
+    overflow-y: auto;
+    scrollbar-width: none;
+}
+/* 状态条在竖条里放不下，通知入口已在顶栏铃铛 */
+html[data-platform='android'] .sidebar-health {
+    display: none;
+}
+/* 顶栏：48px 窄条 + 账号 chip */
+html[data-platform='android'] .topbar {
+    height: calc(48px + var(--sat, 0px));
+    padding: var(--sat, 0px) var(--space-2) 0;
+    gap: var(--space-1);
+    -webkit-app-region: no-drag;
+}
+html[data-platform='android'] .top-btn {
+    padding: 0 var(--space-2);
+}
+html[data-platform='android'] .topbar-spacer {
+    visibility: hidden;
+}
+html[data-platform='android'] .top-back {
+    width: 40px;
+    height: 40px;
+}
+/* 账号 chip（仅 Android 模板渲染） */
+.top-account .top-account-name {
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-sm);
+    font-weight: 650;
+}
+html[data-platform='android'] .content {
+    position: relative;
+    padding: 8px;
+    /* 底部让出手势条区域（背景为页面底色，随主题） */
+    padding-bottom: calc(var(--space-2) + var(--sab, 0px));
+}
+/* 下载/通知下拉面板在手机上全宽贴顶 */
+html[data-platform='android'] .notice-panel {
+    max-width: calc(100vw - 16px);
+}
+/* 功能页页头压缩：手机横屏高度宝贵，标题降级、页头占高减半 */
+html[data-platform='android'] .page-title {
+    font-size: var(--text-lg);
+}
+html[data-platform='android'] .page-head {
+    margin-bottom: 8px;
+}
+/* 控件高度回落到 40px（保持触控下限，给列表更多可视行数） */
+html[data-platform='android'] {
+  --ctl-h: 40px;
+  --row-h: 40px;
 }
 </style>

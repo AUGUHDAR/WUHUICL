@@ -1,21 +1,28 @@
 <script setup lang="ts">
-/** 加入房间：房号、密码、必装模组门控。 */
+/** 加入房间：房号、密码、必装模组门控。大厅点加入的密码房会带码直达这里。 */
 import { onMounted, ref } from 'vue';
-import { call, join, pendingJoinCode, refresh, section, vl } from './useVoxlink';
+import { call, join, pendingJoinCode, pendingJoinError, refresh, section, vl } from './useVoxlink';
 import './voxlink.css';
 
 const code = ref('');
 const password = ref('');
+const passwordInput = ref<HTMLInputElement | null>(null);
 const skipGate = ref(false);
 const busy = ref(false);
 const error = ref('');
 const preview = ref<Record<string, unknown> | null>(null);
 
 onMounted(() => {
+    if (pendingJoinError.value) {
+        error.value = pendingJoinError.value;
+        pendingJoinError.value = '';
+    }
     if (pendingJoinCode.value) {
         code.value = pendingJoinCode.value;
         pendingJoinCode.value = '';
         void lookup();
+        // 从大厅带码过来通常只差密码，光标直接落在密码框
+        passwordInput.value?.focus();
     }
 });
 
@@ -64,7 +71,7 @@ async function submit() {
         <div class="vl-card-head">
             <div>
                 <h2>加入房间</h2>
-                <p>输入朋友发给你的 6 位房号。房主开了密码就一起填上。</p>
+                <p>输入朋友发给你的 6 位房号。房主开了密码就一起填上；没密码的房间在大厅点「加入」就能直接进。</p>
             </div>
         </div>
 
@@ -83,12 +90,12 @@ async function submit() {
 
         <label class="vl-field">
             <span>房间密码（没有就留空）</span>
-            <input v-model="password" class="input" type="password" :disabled="busy" />
+            <input ref="passwordInput" v-model="password" class="input" type="password" :disabled="busy" />
         </label>
 
         <label class="vl-row" style="margin-bottom: 12px">
             <input id="vl-skip-gate" v-model="skipGate" type="checkbox" :disabled="busy" />
-            <span class="vl-hint">跳过必装模组检查，直接进房</span>
+            <span class="vl-hint">跳过必装模组检查，直接进房（模组不齐可能进不去游戏）</span>
         </label>
 
         <div v-if="preview" class="vl-notice">
@@ -101,7 +108,7 @@ async function submit() {
         <div v-if="error" class="vl-error">{{ error }}</div>
 
         <div class="vl-actions">
-            <button class="btn" :disabled="busy" @click="submit">
+            <button class="btn btn-gold" :disabled="busy" @click="submit">
                 {{ busy ? '正在加入…' : '加入房间' }}
             </button>
             <button class="btn btn-ghost" :disabled="busy" @click="section = 'lobby'">去大厅看看</button>

@@ -2,7 +2,7 @@
 export const VOXLINK_LINKS = [
     {
         label: '官网',
-        url: 'https://p2p.wuhui.icu/'
+        url: 'https://p2p.voxdev.top/'
     },
     {
         label: 'MC百科',

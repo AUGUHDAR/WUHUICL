@@ -6,7 +6,12 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, Window, WindowEvent};
 
 /// ipc_send 路由的窗口动作（from_main = 调用方是否主窗口，对应原版 event.sender === win.webContents）
-pub fn command(app: &AppHandle, from_main: bool, channel: &str, args: &[serde_json::Value]) -> Result<(), String> {
+pub fn command(
+    app: &AppHandle,
+    from_main: bool,
+    channel: &str,
+    args: &[serde_json::Value],
+) -> Result<(), String> {
     if !from_main && channel.starts_with("window:") {
         return Ok(()); // 原版：非主窗口发来的一律忽略
     }
@@ -15,10 +20,12 @@ pub fn command(app: &AppHandle, from_main: bool, channel: &str, args: &[serde_js
     };
     match channel {
         "window:minimize" => {
+            #[cfg(desktop)]
             let _ = win.minimize();
         }
         "window:maximize" => {
             // 原版 toggleMaximize：最大化↔还原
+            #[cfg(desktop)]
             if win.is_maximized().unwrap_or(false) {
                 let _ = win.unmaximize();
             } else {
@@ -119,16 +126,26 @@ pub fn palette_blocked() -> bool {
 
 /// 原版 index.ts:143：仅「只卡在写偏好」时，写完后补一次关窗
 pub fn note_deferred_close() {
-    DEFERRED_CLOSE.store(prefs_pending() && !SKIN_DIRTY.load(SeqCst) && !busy_pending(), SeqCst);
+    DEFERRED_CLOSE.store(
+        prefs_pending() && !SKIN_DIRTY.load(SeqCst) && !busy_pending(),
+        SeqCst,
+    );
 }
 
 /// 原版 index.ts:327：退出流程卡在写偏好时，写完后补一次退出
 pub fn note_deferred_quit() {
-    DEFERRED_QUIT.store(prefs_pending() && !SKIN_DIRTY.load(SeqCst) && !busy_pending(), SeqCst);
+    DEFERRED_QUIT.store(
+        prefs_pending() && !SKIN_DIRTY.load(SeqCst) && !busy_pending(),
+        SeqCst,
+    );
 }
 
 pub fn emit_palette_close(app: &AppHandle, quit: bool) {
-    let payload = if quit { json!({ "quit": true }) } else { json!({}) };
+    let payload = if quit {
+        json!({ "quit": true })
+    } else {
+        json!({})
+    };
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.emit_to("main", "window:skinEditorClose", payload);
     }
@@ -139,7 +156,11 @@ pub fn mascot_pending() -> bool {
 }
 
 pub fn emit_mascot_close(app: &AppHandle, quit: bool) {
-    let payload = if quit { json!({ "quit": true }) } else { json!({}) };
+    let payload = if quit {
+        json!({ "quit": true })
+    } else {
+        json!({})
+    };
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.emit_to("main", "window:mascotClose", payload);
     }
@@ -169,7 +190,9 @@ fn owner_flag(args: &[serde_json::Value]) -> Option<(String, bool)> {
     let pending = value.get("pending").and_then(|v| v.as_bool())?;
     if owner.is_empty()
         || owner.len() > 64
-        || !owner.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        || !owner
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
     {
         return None;
     }
@@ -185,6 +208,10 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
         WindowEvent::Focused(focused) => {
             let visible = *focused || window.is_visible().unwrap_or(false);
             let _ = window.emit_to("main", "window:visibility", visible);
+            // 还原/激活兜底：最小化整理后若 Resized 时序没踩中，靠激活事件补 Resume
+            if *focused {
+                maybe_resume_from_trim(window);
+            }
         }
         WindowEvent::CloseRequested { api, .. } => {
             // 原版 index.ts:143-144：编辑器脏态/待写偏好/写入中 → 拦下关窗，改让渲染层确认
@@ -208,10 +235,151 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
         WindowEvent::Resized(_) => {
             schedule_apply(window.app_handle());
             schedule_frameless(window.app_handle());
+            self_mem_trim_on_resize(window);
         }
         _ => {}
     }
 }
+
+/// 最小化自整理（memTrimOnMinimize，默认开）：
+/// ① 前端瘦身广播（idleTrim 注册表释放可重建缓存）；
+/// ② 无后台任务时：挂起 WebView2 渲染进程（TrySuspend）+ 释放三类扫描目录 + 换出自身工作集。
+/// 有任务在跑时跳过 ②：进度事件会排队在挂起的 WebView2 里，恢复瞬间才集中回放。
+/// 恢复窗口时页面按需重建/换回，代价是一点恢复延迟。
+fn self_mem_trim_on_resize(window: &Window) {
+    if !window.is_minimized().unwrap_or(false) {
+        maybe_resume_from_trim(window);
+        return;
+    }
+    if TRIMMED_WHILE_MINIMIZED.swap(true, SeqCst) {
+        return; // 已处理过这次最小化，不重复整理
+    }
+    let app = window.app_handle();
+    let enabled = crate::settings::get_arc(app)
+        .get("memTrimOnMinimize")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    if !enabled {
+        return;
+    }
+    let _ = window.emit_to("main", "kamucl:mem-trim", Value::Null);
+    if crate::tasks::has_active_tasks() {
+        return;
+    }
+    crate::screenshots::release_catalog();
+    crate::recordings::release_catalog();
+    crate::projections::release_catalog();
+    set_webview_suspended(app, true);
+    crate::misc::empty_self_working_set();
+    spawn_restore_watcher(window);
+}
+
+/// 还原看门狗：挂起后轮询 IsIconic（400ms），翻转即经主线程恢复 WebView2。
+/// 不能只靠窗口事件：restore 时尺寸未变会被 tao 去重不发 Resized，
+/// "还原但未激活"（如第三方 SW_SHOWNOACTIVATE）也不会有 Focused(true)。
+#[cfg(windows)]
+fn spawn_restore_watcher(window: &Window) {
+    use tauri::Manager as _;
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    let app = window.app_handle().clone();
+    let hwnd_raw = hwnd.0 as isize;
+    std::thread::spawn(move || {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::IsIconic;
+        let hwnd = HWND(hwnd_raw as *mut core::ffi::c_void);
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            if !unsafe { IsIconic(hwnd) }.as_bool() {
+                break;
+            }
+        }
+        // COM 恢复必须回主线程（WebView2 控制器是 UI 线程对象）
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Some(win) = app2.get_webview_window("main") {
+                if !win.is_minimized().unwrap_or(false) && TRIMMED_WHILE_MINIMIZED.swap(false, SeqCst)
+                {
+                    set_webview_suspended(&app2, false);
+                }
+            }
+        });
+    });
+}
+
+#[cfg(not(windows))]
+fn spawn_restore_watcher(_window: &Window) {}
+
+/// 还原兜底：Resized 与 Focused 任一到达且窗口已非最小化时，恢复 WebView2。
+/// （restore 时 tao 的 Resized 可能在 is_minimized 翻转前到达，Focused 保险）
+fn maybe_resume_from_trim(window: &Window) {
+    if window.is_minimized().unwrap_or(false) {
+        return;
+    }
+    if TRIMMED_WHILE_MINIMIZED.swap(false, SeqCst) {
+        set_webview_suspended(window.app_handle(), false);
+    }
+}
+
+/// 最小化自整理去重：最小化/还原途中 Resized 会连发，只在状态翻转时各处理一次
+static TRIMMED_WHILE_MINIMIZED: AtomicBool = AtomicBool::new(false);
+
+/// 主窗口的 WebView2 控制器（setup 阶段捕获）。
+/// 不在事件回调里临时 with_webview：那条路径走 user-message 泵，
+/// 最小化/还原的嵌套消息循环期间不可靠。
+/// COM 指针仅主线程解引用（事件回调与 setup 都在主线程），包装只为满足 static 约束。
+#[cfg(windows)]
+struct SendController(webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller);
+#[cfg(windows)]
+unsafe impl Send for SendController {}
+#[cfg(windows)]
+unsafe impl Sync for SendController {}
+
+#[cfg(windows)]
+static MAIN_CONTROLLER: std::sync::OnceLock<SendController> = std::sync::OnceLock::new();
+
+/// setup 阶段捕获主窗口 WebView2 控制器（仅 Windows）。
+#[cfg(windows)]
+pub fn capture_main_controller(win: &tauri::WebviewWindow) {
+    let _ = win.with_webview(|platform| {
+        let controller = platform.controller();
+        let _ = MAIN_CONTROLLER.set(SendController(controller));
+    });
+}
+
+/// WebView2 渲染进程挂起/恢复（ICoreWebView2_3::TrySuspend / Resume，官方为
+/// 「WebView 不可见时省内存」提供的机制）。宿主须先自行把控制器 IsVisible 置 false
+/// （wry 不会随窗口最小化代管），否则 TrySuspend 以「webview 可见」为由直接失败；
+/// 挂起失败（如正弹对话框）静默忽略，不影响功能。恢复时先 Resume 再显示。
+#[cfg(windows)]
+fn set_webview_suspended(_app: &AppHandle, suspend: bool) {
+    let Some(controller) = MAIN_CONTROLLER.get() else {
+        return;
+    };
+    unsafe {
+        use webview2_com::Microsoft::Web::WebView2::Win32::{
+            ICoreWebView2TrySuspendCompletedHandler, ICoreWebView2_3,
+        };
+        use windows_core::Interface as _;
+        // ICoreWebView2_3 挂在 CoreWebView2 上，不是 controller 上：先取 webview 再 cast
+        let Ok(webview) = controller.0.CoreWebView2() else {
+            return;
+        };
+        let Ok(wv) = webview.cast::<ICoreWebView2_3>() else {
+            return;
+        };
+        let _ = controller.0.SetIsVisible(!suspend);
+        if suspend {
+            let _ = wv.TrySuspend(None::<&ICoreWebView2TrySuspendCompletedHandler>);
+        } else {
+            let _ = wv.Resume();
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn set_webview_suspended(_app: &AppHandle, _suspend: bool) {}
 
 /// 启动后当前可见性查询（window:visibility handle）
 pub fn visibility(app: &AppHandle) -> serde_json::Value {
@@ -355,15 +523,27 @@ pub fn schedule_frameless(app: &AppHandle) {
 
 /// 对应原版 nativeAppearance.ts applyNativeAppearance：DWM 帧延入客户区 + 主题染色 + 圆角 + Acrylic。
 /// 不做帧扩展时 DWM 不会把桌面模糊合成进客户区，玻璃层只剩窗口底色，比原版暗约 80 灰度。
+/// DWM 部分仅 Windows；macOS/Linux 只锁 WebView 主题（毛玻璃效果后续按平台补）。
 pub fn apply_native_appearance(win: &tauri::WebviewWindow, settings: &serde_json::Value) {
     let light = is_light_theme(settings);
     // 对应原版 nativeTheme.themeSource = light ? 'light' : 'dark'：
-    // 不锁死的话 WebView2 跟随系统深色，prefers-color-scheme/滚动条/输入框全部走暗色
+    // 不锁死的话 WebView 跟随系统深色，prefers-color-scheme/滚动条/输入框全部走暗色
     let _ = win.set_theme(Some(if light {
         tauri::Theme::Light
     } else {
         tauri::Theme::Dark
     }));
+    #[cfg(windows)]
+    {
+        apply_dwm_appearance(win, light);
+        // 圆角与「隐藏原生边框/标题/文字色」统一由 ensure_frameless 按最大化状态处理
+        ensure_frameless(win);
+    }
+}
+
+/// DWM 帧延入客户区 + 深色属性 + Acrylic 背景（仅 Windows）
+#[cfg(windows)]
+fn apply_dwm_appearance(win: &tauri::WebviewWindow, light: bool) {
     let Ok(hwnd) = win.hwnd() else { return };
     let h = hwnd.0 as *mut std::ffi::c_void;
     let dark: u32 = if light { 0 } else { 1 };
@@ -376,7 +556,10 @@ pub fn apply_native_appearance(win: &tauri::WebviewWindow, settings: &serde_json
         b: i32,
     }
     extern "system" {
-        fn DwmExtendFrameIntoClientArea(hwnd: *mut std::ffi::c_void, margins: *const Margins) -> i32;
+        fn DwmExtendFrameIntoClientArea(
+            hwnd: *mut std::ffi::c_void,
+            margins: *const Margins,
+        ) -> i32;
         fn DwmSetWindowAttribute(
             hwnd: *mut std::ffi::c_void,
             attr: u32,
@@ -395,8 +578,6 @@ pub fn apply_native_appearance(win: &tauri::WebviewWindow, settings: &serde_json
         DwmSetWindowAttribute(h, 38, &acrylic, 4);
         DwmSetWindowAttribute(h, 20, &dark, 4);
     }
-    // 圆角与「隐藏原生边框/标题/文字色」统一由 ensure_frameless 按最大化状态处理
-    ensure_frameless(win);
 }
 
 /// 隐藏 DWM 画的原生边框与标题栏（对应 Axolotl apps/app/src/window_frame.rs 的做法）。
@@ -409,7 +590,54 @@ pub fn apply_native_appearance(win: &tauri::WebviewWindow, settings: &serde_json
 /// Axolotl 用 DWM 属性从根上关掉：把边框色、标题色、文字色都设为 DWMWA_COLOR_NONE，
 /// 不去碰样式位，DWM 自然不再画那段 caption，也就没有需要反复复位的东西。
 /// 圆角按「非最大化」设置（最大化窗口不该有圆角）。
+/// 非 Windows：无 DWM，直接空实现（macOS 走原生装饰，Linux 由 WM 决定）。
 pub fn ensure_frameless(win: &tauri::WebviewWindow) {
+    #[cfg(windows)]
+    ensure_frameless_win(win);
+    #[cfg(not(windows))]
+    let _ = win;
+}
+
+/// 剥掉 WS_SYSMENU 的窗口子类：tao 0.37 在 to_window_styles 里无条件写回
+/// WS_CAPTION|WS_SYSMENU（maximize/show/DPI 变化都会触发样式重算），而只要
+/// WS_SYSMENU 在，DWM 就会在右上角画原生的最小化/最大化/关闭幽灵按钮，
+/// 叠在自绘按钮上（「双重按钮」故障：曾只在最大化/全屏/DPI 变化后出现）。
+/// 这里装一个子类过程：样式一变就把 WS_SYSMENU 摘掉（保留 WS_CAPTION 供
+/// acrylic 阴影条使用，webview 客户区会盖住它）。
+#[cfg(windows)]
+fn strip_caption_sysmenu(hwnd: isize) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, GWL_STYLE, WS_SYSMENU,
+    };
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd as _, GWL_STYLE);
+        if style & WS_SYSMENU as isize != 0 {
+            SetWindowLongPtrW(hwnd as _, GWL_STYLE, style & !(WS_SYSMENU as isize));
+        }
+    }
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn frame_subclass_proc(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    msg: u32,
+    wparam: windows_sys::Win32::Foundation::WPARAM,
+    lparam: windows_sys::Win32::Foundation::LPARAM,
+    _id: usize,
+    _data: usize,
+) -> windows_sys::Win32::Foundation::LRESULT {
+    use windows_sys::Win32::UI::Shell::DefSubclassProc;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_STYLE, WM_STYLECHANGED};
+    // wparam 高位 = GWL_STYLE 时表示窗口样式刚被改写，重新剥一次 WS_SYSMENU
+    if msg == WM_STYLECHANGED && wparam as i32 == GWL_STYLE {
+        strip_caption_sysmenu(hwnd as isize);
+    }
+    DefSubclassProc(hwnd, msg, wparam, lparam)
+}
+
+#[cfg(windows)]
+fn ensure_frameless_win(win: &tauri::WebviewWindow) {
+    use windows_sys::Win32::UI::Shell::SetWindowSubclass;
     let Ok(hwnd) = win.hwnd() else { return };
     let maximized = win.is_maximized().unwrap_or(false);
     let h = hwnd.0 as *mut std::ffi::c_void;
@@ -428,7 +656,16 @@ pub fn ensure_frameless(win: &tauri::WebviewWindow) {
     const DWMWA_COLOR_NONE: u32 = 0xFFFF_FFFE;
     const DWMWCP_DEFAULT: u32 = 0;
     const DWMWCP_ROUND: u32 = 2;
-    let round = if maximized { DWMWCP_DEFAULT } else { DWMWCP_ROUND };
+    let round = if maximized {
+        DWMWCP_DEFAULT
+    } else {
+        DWMWCP_ROUND
+    };
+    // 装子类并立即剥一次 WS_SYSMENU（幂等：同 id 重复 SetWindowSubclass 只是替换）
+    unsafe {
+        SetWindowSubclass(hwnd.0, Some(frame_subclass_proc), 0x5748_4353, 0);
+    }
+    strip_caption_sysmenu(hwnd.0 as isize);
     unsafe {
         DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &round, 4);
         // 三者一起设才有效：只设其一仍会留下原生 caption 的一段

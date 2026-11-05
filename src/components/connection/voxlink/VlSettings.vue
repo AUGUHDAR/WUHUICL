@@ -1,8 +1,8 @@
 <script setup lang="ts">
-/** 设置：联机组件状态、中继偏好、本机在听的端口。 */
-import { onMounted, ref } from 'vue';
+/** 设置：联机组件版本与后台更新状态、中继偏好、本机在听的端口。 */
+import { computed, onMounted, ref } from 'vue';
 import { toast } from '../../../store';
-import { vl, call, ensure } from './useVoxlink';
+import { vl, call, ensure, vlCheckUpdate } from './useVoxlink';
 import './voxlink.css';
 
 type Row = Record<string, unknown>;
@@ -10,7 +10,6 @@ type Row = Record<string, unknown>;
 const relay = ref(false);
 const relayBusy = ref(false);
 const ports = ref<unknown[]>([]);
-const checking = ref(false);
 const compError = ref('');
 const prefError = ref('');
 const portError = ref('');
@@ -64,18 +63,40 @@ async function toggleRelay(): Promise<void> {
     toast(relay.value ? '允许走玩家中继' : '只走直连，不通就失败', 'success');
 }
 
-async function recheck(): Promise<void> {
-    checking.value = true;
+/** 检查更新不阻塞：点一下就丢给后台，结果反映在下面的状态行里。 */
+async function checkNow(): Promise<void> {
     compError.value = '';
-    const ok = await ensure(true);
-    checking.value = false;
-    if (ok) toast('联机组件已是最新', 'success');
-    else compError.value = vl.prepareError || '联机组件没准备好';
+    await vlCheckUpdate();
 }
+
+const updateBusy = computed(() => vl.update.phase === 'checking' || vl.update.phase === 'downloading');
+
+const updateLine = computed(() => {
+    const u = vl.update;
+    switch (u.phase) {
+        case 'checking':
+            return '正在检查更新…';
+        case 'downloading':
+            return u.progress !== null && u.progress !== undefined
+                ? `正在后台更新到 ${u.latest || '新版本'}（${u.progress}%），不影响现在的使用。`
+                : `正在后台更新到 ${u.latest || '新版本'}，不影响现在的使用。`;
+        case 'pending':
+            return `新版本 ${u.latest || ''} 已就绪，联机空闲时自动替换。`;
+        case 'failed':
+            return `更新源暂时连不上，稍后会自动重试。${u.message ? `（${u.message}）` : ''}`;
+        case 'latest':
+            return u.latest && u.latest !== vl.version
+                ? `已取到最新版 ${u.latest}，正在就位。`
+                : '已是最新版本。更新检查在后台自动进行。';
+        default:
+            return '更新检查在后台自动进行，有新版本会静默下载、空闲时替换。';
+    }
+});
 
 onMounted(() => {
     void loadSettings();
     void loadPorts();
+    void ensure();
 });
 </script>
 
@@ -85,8 +106,8 @@ onMounted(() => {
             <div class="vl-card-head">
                 <div><h2>联机组件</h2><p>大厅、建房、工单都靠它，玩家不用管。</p></div>
                 <div class="vl-row">
-                    <button class="btn btn-ghost btn-sm" :disabled="checking" @click="recheck">
-                        {{ checking ? '检查中…' : '检查更新' }}
+                    <button class="btn btn-ghost btn-sm" :disabled="updateBusy" @click="checkNow">
+                        {{ updateBusy ? (vl.update.phase === 'downloading' ? '更新中…' : '检查中…') : '检查更新' }}
                     </button>
                 </div>
             </div>
@@ -95,6 +116,7 @@ onMounted(() => {
                 <span class="vl-pill">协议 {{ vl.protocol || '未知' }}</span>
                 <span v-for="c in vl.capabilities" :key="c" class="vl-pill">{{ c }}</span>
             </div>
+            <p class="vl-hint" style="margin-top: 10px">{{ updateLine }}</p>
             <div v-if="compError" class="vl-error">{{ compError }}</div>
         </div>
 

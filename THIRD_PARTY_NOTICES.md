@@ -51,6 +51,51 @@ The version and integrity are fixed in package-lock.json.
 KAMUCL's preview interaction adapter is an original MIT contribution.
 The previous HMCL/FCL-derived preview and conversion are no longer used.
 
+## Seed map & schematic workshop — GPL-3.0-only (Axolotl Launcher)
+
+The 种子地图 (seed map) and 投影工坊 (schematic workshop) features are ported from
+Axolotl Launcher. Upstream: https://github.com/Mystic-Stars/Axolotl
+Revision: v1.9.8 (tag). Authors: Mystic-Stars / Axolotl contributors.
+Axolotl Launcher itself is built on the Modrinth App; its GPL-3.0-only notice
+continues to apply to the ported code.
+
+The adaptation covers src-tauri/src/seed_map/ (cubiomes bridge, ore prediction),
+src-tauri/src/schematic_preview.rs (preview sessions/parse/export), src/lab/seed-map/,
+src/lab/schematic-preview/, src/lab/ui/ (compatibility layer for the @modrinth/ui
+subset these tools use), src/views/SeedMapView.vue, src/views/SchematicWorkshopView.vue,
+src/components/lab/ and the bundled assets under public/seed-map-assets and
+src/lab/schematic-preview/assets. Adaptations for this launcher: IPC channels routed
+through the wuhuicl bridge (base64 binary payloads), Chinese locale strings inlined
+from Axolotl's zh-CN language pack, wuhuicl theming, and replacement of plugin-based
+dialogs with launcher equivalents. These files are distributed under GPL-3.0-only.
+
+Full terms: licenses/GPL-3.0.txt. cubiomes is vendored unmodified at
+src-tauri/vendor/cubiomes (MIT, Copyright (c) 2020 Cubitect, pinned revision
+e61f90580cbdd883214a8054670dacae655e59c0 of https://github.com/xpple/cubiomes);
+its MIT notice ships alongside the sources.
+
+## Hero pixel-art scenes — AGPL-3.0 (LumilioCL)
+
+首页启动卡的像素动画场景（黎明 / 洞穴 / 红石 / 传送门 / 炉火）vendor 自
+LumilioCL。Upstream: https://github.com/EdwinZhanCN/LumilioCL
+Revision: v0.2.3 (tag). Author: EdwinZhanCN / LumilioCL contributors.
+
+Vendored under src-tauri/src/hero_scenes/: noise.rs, raster.rs, transition.rs and
+scenes/{dawn,caves,redstone,portal,hearth}.rs are upstream sources with only the
+module paths adjusted and the upstream test submodule dropped; every file carries
+a provenance header. The registry (scenes/mod.rs, from upstream scenes/scene.rs —
+HUD strings inlined as Chinese, showcase order extended to all scenes), the
+rasterize/IPC glue (mod.rs, from upstream hero_carousel.rs, minus the GPUI page
+dissolve), and the frontend player (src/heroScenes.ts, src/components/
+HeroSceneCanvas.vue, including the hearth landmark hint from upstream
+live/library.rs seed_of) are adaptations for this launcher. The 起飞 (Takeoff)
+scene (scenes/takeoff.rs) is an original WUHUICL scene in the same style,
+GPL-3.0-or-later like the rest of this launcher.
+
+The vendored files remain AGPL-3.0 and are offered under those terms; the
+corresponding source is the vendored tree in this repository at the revision
+used to build the binary.
+
 ## Other bundled libraries
 
 ws 8.22.0 (MIT) provides native WebSocket control frames. Full terms: licenses/ws.txt.
@@ -58,6 +103,11 @@ minecraft-data 3.117.0 declares MIT in its package metadata. The generated snaps
 retains factual registry fields only; attribution and MIT terms: licenses/minecraft-data.txt.
 Mojang 26.2/26.3 block names and valid property values were extracted using the
 official server data generator. No Mojang JAR is distributed in this launcher.
+deepslate 0.26.2 (MIT) renders schematic meshes in the schematic workshop.
+Full terms: https://github.com/misode/deepslate (MIT).
+lucide icons (ISC, https://lucide.dev): the lab tools' icon set in src/lab/icons.ts
+embeds lucide SVG path data unmodified (via Axolotl's @modrinth/assets copy and
+lucide-static 0.562.0).
 
 ## System memory organization
 

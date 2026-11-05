@@ -5,8 +5,8 @@ withDefaults(
         label?: string;
         rows?: number;
         retry?: boolean;
-        /** rows = 通用行式列表（默认）；grid = 卡片网格（社区资源搜索用，与结果卡片同构） */
-        variant?: 'rows' | 'grid';
+        /** rows = 通用行式列表（默认）；grid = 卡片网格（社区资源搜索用）；groups = 折叠分组列表（版本下载页用，与分组+行结构同构） */
+        variant?: 'rows' | 'grid' | 'groups';
     }>(),
     {
         label: '正在加载…',
@@ -41,6 +41,22 @@ onUnmounted(() => clearTimeout(timer));
         <template v-if="variant === 'rows'">
             <div v-for="row in rows" :key="row" class="skeleton-row" aria-hidden="true">
                 <i /><span /><b />
+            </div>
+        </template>
+        <!-- 分组：组头（图标+标题+徽标）+ 若干行（图标+名称+类型+按钮），与版本下载页同构 -->
+        <template v-else-if="variant === 'groups'">
+            <div
+                v-for="g in Math.max(2, Math.round(rows / 4))"
+                :key="g"
+                class="skeleton-group"
+                aria-hidden="true"
+            >
+                <div class="skeleton-group-head">
+                    <i class="gi" /><span class="title" /><span class="chip" />
+                </div>
+                <div v-for="r in 4" :key="r" class="skeleton-group-row">
+                    <i class="icon" /><span class="line" /><span class="tag" /><b class="btn" />
+                </div>
             </div>
         </template>
         <!-- 网格：与社区资源结果卡片同构（46px 图标 + 两行标题 + 描述 + 底部按钮条） -->
@@ -84,6 +100,64 @@ onUnmounted(() => clearTimeout(timer));
     margin-left: auto;
     width: 76px;
     height: 32px;
+}
+
+/* 分组变体：组头 22px 图标 + 标题 + 徽标；行 30px 图标 + 名称 + 类型徽标 + 按钮（对齐版本下载页行） */
+.skeleton-group {
+    display: grid;
+    gap: 4px;
+}
+.skeleton-group i,
+.skeleton-group span,
+.skeleton-group b {
+    display: block;
+    background: color-mix(in srgb, var(--text) 9%, var(--card));
+    border-radius: var(--radius-sm);
+}
+.skeleton-group-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 34px;
+    padding: 0 4px;
+}
+.skeleton-group-head .gi {
+    width: 22px;
+    height: 22px;
+}
+.skeleton-group-head .title {
+    width: 150px;
+    height: 15px;
+}
+.skeleton-group-head .chip {
+    width: 64px;
+    height: 14px;
+    border-radius: 999px;
+}
+.skeleton-group-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 44px;
+    padding: 0 12px;
+}
+.skeleton-group-row .icon {
+    width: 30px;
+    height: 30px;
+}
+.skeleton-group-row .line {
+    width: 190px;
+    height: 14px;
+}
+.skeleton-group-row .tag {
+    width: 46px;
+    height: 18px;
+    border-radius: 999px;
+}
+.skeleton-group-row .btn {
+    margin-left: auto;
+    width: 64px;
+    height: 28px;
 }
 
 /* 网格变体：列宽/间距与社区资源结果网格一致（auto-fit, minmax(300px), gap 16px） */

@@ -38,7 +38,14 @@ const STAGE_RANGES: &[(&str, f64, f64)] = &[
     ("done", 1.0, 1.0),
 ];
 /// 隔离迁移白名单（对应原版 core/isolationFiles.ts）
-const ISOLATION_DIRS: &[&str] = &["saves", "mods", "config", "resourcepacks", "shaderpacks", "screenshots"];
+const ISOLATION_DIRS: &[&str] = &[
+    "saves",
+    "mods",
+    "config",
+    "resourcepacks",
+    "shaderpacks",
+    "screenshots",
+];
 const ISOLATION_FILES: &[&str] = &["options.txt", "servers.dat"];
 const GAME_WIDTH_MIN: i64 = 854;
 const GAME_WIDTH_MAX: i64 = 7680;
@@ -169,7 +176,12 @@ pub fn all_folders(app: &AppHandle) -> Vec<String> {
     let s = settings::get(app);
     let list: Vec<String> = s["folders"]
         .as_array()
-        .map(|a| a.iter().filter_map(|f| f["path"].as_str()).map(str::to_string).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|f| f["path"].as_str())
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default();
     if list.is_empty() {
         vec![game_dir(app)]
@@ -259,7 +271,10 @@ pub fn natives_dir_in(folder: &str, id: &str) -> PathBuf {
 }
 
 pub fn base_version_dir_in(default_folder: &str, id: &str) -> PathBuf {
-    Path::new(default_folder).join(DATA_DIR_NAME).join("base").join(id)
+    Path::new(default_folder)
+        .join(DATA_DIR_NAME)
+        .join("base")
+        .join(id)
 }
 
 pub fn base_version_json_path_in(default_folder: &str, id: &str) -> PathBuf {
@@ -275,7 +290,7 @@ pub fn libraries_dir(app: &AppHandle) -> PathBuf {
 }
 
 pub fn library_path(app: &AppHandle, rel: &str) -> PathBuf {
-    libraries_dir(app).join(rel.replace('/', "\\"))
+    crate::platform::join_rel(&libraries_dir(app), rel)
 }
 
 pub fn assets_dir(app: &AppHandle) -> PathBuf {
@@ -283,11 +298,16 @@ pub fn assets_dir(app: &AppHandle) -> PathBuf {
 }
 
 pub fn asset_index_path(app: &AppHandle, index_id: &str) -> PathBuf {
-    assets_dir(app).join("indexes").join(format!("{}.json", index_id))
+    assets_dir(app)
+        .join("indexes")
+        .join(format!("{}.json", index_id))
 }
 
 pub fn asset_object_path(app: &AppHandle, hash: &str) -> PathBuf {
-    assets_dir(app).join("objects").join(&hash[..2.min(hash.len())]).join(hash)
+    assets_dir(app)
+        .join("objects")
+        .join(&hash[..2.min(hash.len())])
+        .join(hash)
 }
 
 pub fn virtual_legacy_dir(app: &AppHandle) -> PathBuf {
@@ -312,14 +332,30 @@ pub fn asset_repair_tasks(
         let path = idx_path.clone();
         let mirror2 = mirror.to_string();
         run_blocking(move || {
-            download_file(app, rec, None, &url, &path, None, None, &mirror2, None, &[], &[])
+            download_file(
+                app,
+                rec,
+                None,
+                &url,
+                &path,
+                None,
+                None,
+                &mirror2,
+                None,
+                &[],
+                &[],
+            )
         })?;
     }
     if !idx_path.exists() {
         return Ok(Vec::new());
     }
     let idx = read_version_json_from(&idx_path)?;
-    let objects = idx.get("objects").and_then(|o| o.as_object()).cloned().unwrap_or_default();
+    let objects = idx
+        .get("objects")
+        .and_then(|o| o.as_object())
+        .cloned()
+        .unwrap_or_default();
     let folders = all_folders(app);
     let mut seen: HashSet<String> = HashSet::new();
     let mut tasks: Vec<DownloadItem> = Vec::new();
@@ -336,7 +372,11 @@ pub fn asset_repair_tasks(
         }
         tasks.push(DownloadItem {
             label: name.clone(),
-            url: format!("https://resources.download.minecraft.net/{}/{}", &hash[..2], hash),
+            url: format!(
+                "https://resources.download.minecraft.net/{}/{}",
+                &hash[..2],
+                hash
+            ),
             dest,
             sha1: Some(hash.clone()),
             size: o.get("size").and_then(|v| v.as_u64()),
@@ -357,7 +397,9 @@ pub fn asset_repair_tasks(
 }
 
 pub fn icons_dir(app: &AppHandle) -> PathBuf {
-    Path::new(&default_folder_path(app)).join(DATA_DIR_NAME).join("icons")
+    Path::new(&default_folder_path(app))
+        .join(DATA_DIR_NAME)
+        .join("icons")
 }
 
 /// 泛型 AppHandle 版本（assetproto 的 UriSchemeContext 里拿到的是 &AppHandle<R>）
@@ -451,7 +493,13 @@ pub struct Sha1 {
 impl Sha1 {
     pub fn new() -> Self {
         Self {
-            state: [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476, 0xC3D2_E1F0],
+            state: [
+                0x6745_2301,
+                0xEFCD_AB89,
+                0x98BA_DCFE,
+                0x1032_5476,
+                0xC3D2_E1F0,
+            ],
             total: 0,
             buffer: [0u8; 64],
             buffered: 0,
@@ -500,13 +548,23 @@ impl Sha1 {
     fn compress(&mut self, block: &[u8; 64]) {
         let mut w = [0u32; 80];
         for i in 0..16 {
-            w[i] = u32::from_be_bytes([block[i * 4], block[i * 4 + 1], block[i * 4 + 2], block[i * 4 + 3]]);
+            w[i] = u32::from_be_bytes([
+                block[i * 4],
+                block[i * 4 + 1],
+                block[i * 4 + 2],
+                block[i * 4 + 3],
+            ]);
         }
         for i in 16..80 {
             w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
         }
-        let (mut a, mut b, mut c, mut d, mut e) =
-            (self.state[0], self.state[1], self.state[2], self.state[3], self.state[4]);
+        let (mut a, mut b, mut c, mut d, mut e) = (
+            self.state[0],
+            self.state[1],
+            self.state[2],
+            self.state[3],
+            self.state[4],
+        );
         for (i, wi) in w.iter().enumerate() {
             let (f, k) = match i {
                 0..=19 => ((b & c) | (!b & d), 0x5A82_7999u32),
@@ -554,9 +612,12 @@ pub fn sha1_file_hex(path: &Path) -> Result<String, String> {
     Ok(hex::encode(h.finish()))
 }
 
-// ---------------- rules 评估（对应原版 rulesAllow；Windows 平台） ----------------
+// ---------------- rules 评估（对应原版 rulesAllow；Mojang 的 os 名：windows/osx/linux） ----------------
 
-pub const OS_NAME: &str = "windows";
+/// Mojang 规则与 natives 分类器用的当前 OS（windows / osx / linux）
+pub fn os_name() -> &'static str {
+    crate::platform::mojang_os()
+}
 
 pub fn rules_allow(rules: Option<&Value>) -> bool {
     let Some(rules) = rules.and_then(|r| r.as_array()) else {
@@ -572,7 +633,7 @@ pub fn rules_allow(rules: Option<&Value>) -> bool {
         }
         if let Some(os) = rule.get("os") {
             if let Some(name) = os.get("name").and_then(|v| v.as_str()) {
-                if name != OS_NAME {
+                if name != os_name() {
                     continue;
                 }
             }
@@ -687,12 +748,28 @@ pub fn mirror_url(input: &str, mirror: &str) -> String {
     if host == "resources.download.minecraft.net" {
         return format!("{}/assets{}{}", base, path, query);
     }
-    if ["libraries.minecraft.net", "maven.fabricmc.net", "maven.minecraftforge.net"].contains(&host) {
-        return format!("{}{}{}", BMCL_MAVEN_ROOT, path.trim_start_matches('/'), query);
+    if [
+        "libraries.minecraft.net",
+        "maven.fabricmc.net",
+        "maven.minecraftforge.net",
+    ]
+    .contains(&host)
+    {
+        return format!(
+            "{}{}{}",
+            BMCL_MAVEN_ROOT,
+            path.trim_start_matches('/'),
+            query
+        );
     }
     if host == "maven.neoforged.net" && path.starts_with("/releases/") {
         // bmclapi 的 maven 代理根在 /maven/，原版 DlSource* 与美西螈均如此映射
-        return format!("{}{}{}", BMCL_MAVEN_ROOT, path.trim_start_matches("/releases"), query);
+        return format!(
+            "{}{}{}",
+            BMCL_MAVEN_ROOT,
+            path.trim_start_matches("/releases"),
+            query
+        );
     }
     if host == "files.minecraftforge.net" && path.starts_with("/maven/") {
         return format!("{}{}{}", base, path, query);
@@ -818,14 +895,24 @@ fn ranged_parallel_download(
     let cancelled = rec.map(|r| r.cancelled.clone());
     std::thread::scope(|scope| {
         for (i, (start, end)) in spans.iter().enumerate() {
-            let (url2, part2, done2, report2, errors2, cancelled2) =
-                (url, part, done.clone(), last_report.clone(), &errors, &cancelled);
+            let (url2, part2, done2, report2, errors2, cancelled2) = (
+                url,
+                part,
+                done.clone(),
+                last_report.clone(),
+                &errors,
+                &cancelled,
+            );
             let (start, end) = (*start, *end);
             scope.spawn(move || {
                 if i > 0 {
                     std::thread::sleep(std::time::Duration::from_millis(RANGED_STAGGER_MS));
                 }
-                if cancelled2.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
+                if cancelled2
+                    .as_ref()
+                    .map(|c| c.load(Ordering::SeqCst))
+                    .unwrap_or(false)
+                {
                     return;
                 }
                 let mut resp = match net::open_download_stream_range(url2, start, end) {
@@ -852,7 +939,11 @@ fn ranged_parallel_download(
                 }
                 let mut pos = start;
                 loop {
-                    if cancelled2.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
+                    if cancelled2
+                        .as_ref()
+                        .map(|c| c.load(Ordering::SeqCst))
+                        .unwrap_or(false)
+                    {
                         return;
                     }
                     match net::read_download_chunk(&mut resp) {
@@ -863,7 +954,8 @@ fn ranged_parallel_download(
                                 return;
                             }
                             pos += chunk.len() as u64;
-                            let d = done2.fetch_add(chunk.len() as u64, Ordering::Relaxed) + chunk.len() as u64;
+                            let d = done2.fetch_add(chunk.len() as u64, Ordering::Relaxed)
+                                + chunk.len() as u64;
                             // 256KB 节流：4 线程各自按块回调会刷爆事件通道
                             if d - report2.load(Ordering::Relaxed) >= 256 * 1024 {
                                 report2.store(d, Ordering::Relaxed);
@@ -879,10 +971,11 @@ fn ranged_parallel_download(
                     }
                 }
                 if pos != end + 1 {
-                    errors2
-                        .lock()
-                        .unwrap()
-                        .push(format!("分片不完整：{}/{} 字节", pos - start, end - start + 1));
+                    errors2.lock().unwrap().push(format!(
+                        "分片不完整：{}/{} 字节",
+                        pos - start,
+                        end - start + 1
+                    ));
                 }
             });
         }
@@ -951,7 +1044,9 @@ pub fn download_file(
     // 一级目录扫描复用（大小匹配 → sha1 校验 → 复制；对应原版 reuseDirs）
     if sha1.is_some() {
         'dirs: for dir in reuse_dirs {
-            let Ok(rd) = std::fs::read_dir(dir) else { continue };
+            let Ok(rd) = std::fs::read_dir(dir) else {
+                continue;
+            };
             for entry in rd.flatten() {
                 if !entry.path().is_file() {
                     continue;
@@ -1004,13 +1099,14 @@ pub fn download_file(
         }
         for candidate in &candidates {
             check_cancel(rec)?;
-            let mut resp: Option<reqwest::Response> = Some(match net::open_download_stream(candidate) {
-                Ok(r) => r,
-                Err(e) => {
-                    last_err = e;
-                    continue;
-                }
-            });
+            let mut resp: Option<reqwest::Response> =
+                Some(match net::open_download_stream(candidate) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        last_err = e;
+                        continue;
+                    }
+                });
             let total = resp.as_ref().and_then(|r| r.content_length()).or(size);
 
             // 大文件分片并行（≥4MB 且服务器已知大小）：单连接被慢链路压死时成倍提速。
@@ -1146,12 +1242,17 @@ pub fn download_all(
     }
     let s = settings::get(app);
     SPEED_LIMIT_BPS.store(
-        s["downloadSpeedKBps"].as_u64().unwrap_or(0).saturating_mul(1024),
+        s["downloadSpeedKBps"]
+            .as_u64()
+            .unwrap_or(0)
+            .saturating_mul(1024),
         Ordering::Relaxed,
     );
     let threads = (s["downloadThreads"].as_u64().unwrap_or(16) as usize).clamp(1, 64);
     // 全部任务的 size 已知才给 bytesTotal，否则 indeterminate（与原版 tracker 一致）
-    let bytes_total: Option<u64> = items.iter().try_fold(0u64, |acc, t| t.size.map(|n| acc + n));
+    let bytes_total: Option<u64> = items
+        .iter()
+        .try_fold(0u64, |acc, t| t.size.map(|n| acc + n));
     let queue: Mutex<Vec<DownloadItem>> = Mutex::new(items);
     let errors: Mutex<Vec<String>> = Mutex::new(Vec::new());
     let done = AtomicU64::new(0);
@@ -1325,10 +1426,20 @@ pub fn collect_libraries(vj: &Value) -> Vec<LibEntry> {
             if let (Some(n), Some(base)) = (name, lib.get("url").and_then(|v| v.as_str())) {
                 // Fabric/Quilt profile 的 maven 坐标形式
                 if let Some(rel) = maven_path(n) {
-                    let base = if base.ends_with('/') { base.to_string() } else { format!("{}/", base) };
+                    let base = if base.ends_with('/') {
+                        base.to_string()
+                    } else {
+                        format!("{}/", base)
+                    };
                     push_lib(
-                        &mut out, &mut seen, &mut coordinates, &rel,
-                        Some(&format!("{}{}", base, rel)), None, None, false,
+                        &mut out,
+                        &mut seen,
+                        &mut coordinates,
+                        &rel,
+                        Some(&format!("{}{}", base, rel)),
+                        None,
+                        None,
+                        false,
                         coordinate.as_deref(),
                     );
                 }
@@ -1344,8 +1455,14 @@ pub fn collect_libraries(vj: &Value) -> Vec<LibEntry> {
                     };
                     let lib_url = repo_base.as_deref().map(|b| format!("{}{}", b, rel));
                     push_lib(
-                        &mut out, &mut seen, &mut coordinates, &rel,
-                        lib_url.as_deref(), None, None, false,
+                        &mut out,
+                        &mut seen,
+                        &mut coordinates,
+                        &rel,
+                        lib_url.as_deref(),
+                        None,
+                        None,
+                        false,
                         coordinate.as_deref(),
                     );
                 }
@@ -1354,7 +1471,7 @@ pub fn collect_libraries(vj: &Value) -> Vec<LibEntry> {
         // natives classifier（${arch} 展开为 64）
         if let Some(natives) = lib
             .get("natives")
-            .and_then(|n| n.get(OS_NAME))
+            .and_then(|n| n.get(os_name()))
             .and_then(|v| v.as_str())
         {
             let key = natives.replace("${arch}", "64");
@@ -1365,7 +1482,10 @@ pub fn collect_libraries(vj: &Value) -> Vec<LibEntry> {
                 if let Some(rel) = art.get("path").and_then(|v| v.as_str()) {
                     let coord = maven_identity(name, Some(&key));
                     push_lib(
-                        &mut out, &mut seen, &mut coordinates, rel,
+                        &mut out,
+                        &mut seen,
+                        &mut coordinates,
+                        rel,
                         art.get("url").and_then(|v| v.as_str()),
                         art.get("sha1").and_then(|v| v.as_str()),
                         art.get("size").and_then(|v| v.as_u64()),
@@ -1420,12 +1540,12 @@ pub fn library_tasks(app: &AppHandle, vj: &Value) -> Vec<DownloadItem> {
         .map(|e| DownloadItem {
             label: e.rel.clone(),
             url: e.url.clone().unwrap_or_default(),
-            dest: libs_dir.join(e.rel.replace('/', "\\")),
+            dest: crate::platform::join_rel(&libs_dir, &e.rel),
             sha1: e.sha1,
             size: e.size,
             reuse_files: folders
                 .iter()
-                .map(|f| Path::new(f).join("libraries").join(e.rel.replace('/', "\\")))
+                .map(|f| crate::platform::join_rel(&Path::new(f).join("libraries"), &e.rel))
                 .collect(),
             reuse_dirs: Vec::new(),
         })
@@ -1441,7 +1561,10 @@ pub struct ProgressGuard {
 
 impl ProgressGuard {
     pub fn new() -> Self {
-        Self { last_overall: 0.0, last_stage: String::new() }
+        Self {
+            last_overall: 0.0,
+            last_stage: String::new(),
+        }
     }
 
     /// 追踪 lastStage（跳过 error/done，对应 ipc.ts taskEmit）
@@ -1458,7 +1581,11 @@ impl ProgressGuard {
     /// 归一化：overall 单调不减、按阶段权重映射、ETA 取整去 NaN
     pub fn normalize(&mut self, event: &Value) -> Value {
         let mut e = event.as_object().cloned().unwrap_or_default();
-        let stage = e.get("stage").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let stage = e
+            .get("stage")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let progress = e
             .get("progress")
             .and_then(|v| v.as_f64())
@@ -1583,7 +1710,10 @@ pub struct ResolvedMeta {
 }
 
 /// 解析实例真实 MC 版本与加载器（继承链 + 启动参数 + 库坐标）
-pub fn resolve_instance_metadata(j: &Value, read_parent: &dyn Fn(&str) -> Option<Value>) -> ResolvedMeta {
+pub fn resolve_instance_metadata(
+    j: &Value,
+    read_parent: &dyn Fn(&str) -> Option<Value>,
+) -> ResolvedMeta {
     let mut chain: Vec<Value> = vec![j.clone()];
     let mut seen: HashSet<String> = HashSet::new();
     if let Some(id) = j.get("id").and_then(|v| v.as_str()) {
@@ -1609,7 +1739,11 @@ pub fn resolve_instance_metadata(j: &Value, read_parent: &dyn Fn(&str) -> Option
     // 启动参数收集（arguments.game + minecraftArguments）
     let mut args: Vec<String> = Vec::new();
     for c in &chain {
-        if let Some(game) = c.get("arguments").and_then(|a| a.get("game")).and_then(|g| g.as_array()) {
+        if let Some(game) = c
+            .get("arguments")
+            .and_then(|a| a.get("game"))
+            .and_then(|g| g.as_array())
+        {
             for a in game {
                 match a {
                     Value::String(s) => args.push(s.clone()),
@@ -1649,7 +1783,12 @@ pub fn resolve_instance_metadata(j: &Value, read_parent: &dyn Fn(&str) -> Option
     };
     let libs: Vec<Vec<String>> = chain
         .iter()
-        .flat_map(|c| c.get("libraries").and_then(|l| l.as_array()).cloned().unwrap_or_default())
+        .flat_map(|c| {
+            c.get("libraries")
+                .and_then(|l| l.as_array())
+                .cloned()
+                .unwrap_or_default()
+        })
         .map(|l| {
             l.get("name")
                 .and_then(|n| n.as_str())
@@ -1710,21 +1849,35 @@ pub fn resolve_instance_metadata(j: &Value, read_parent: &dyn Fn(&str) -> Option
                 None
             }
         });
-    let forge = lib("net.minecraftforge", "forge").or_else(|| lib("net.minecraftforge", "fmlloader"));
+    let forge =
+        lib("net.minecraftforge", "forge").or_else(|| lib("net.minecraftforge", "fmlloader"));
     let base = chain.last().cloned().unwrap_or(Value::Null);
-    let vanilla_id = if base.get("inheritsFrom").is_none() && (loader.is_none() || chain.len() > 1) {
+    let vanilla_id = if base.get("inheritsFrom").is_none() && (loader.is_none() || chain.len() > 1)
+    {
         base.get("id").and_then(|v| v.as_str()).map(str::to_string)
     } else {
         None
     };
     let mut candidates: Vec<Option<String>> = vec![arg("--fml.mcVersion")];
     for c in &chain {
-        candidates.push(c.get("clientVersion").and_then(|v| v.as_str()).map(str::to_string));
-        candidates.push(c.get("_mcVersion").and_then(|v| v.as_str()).map(str::to_string));
+        candidates.push(
+            c.get("clientVersion")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+        );
+        candidates.push(
+            c.get("_mcVersion")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+        );
     }
     candidates.push(vanilla_id);
     for c in &chain {
-        candidates.push(c.get("inheritsFrom").and_then(|v| v.as_str()).map(str::to_string));
+        candidates.push(
+            c.get("inheritsFrom")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+        );
     }
     candidates.push(lib("net.fabricmc", "intermediary"));
     candidates.push(lib("org.quiltmc", "hashed"));
@@ -1739,7 +1892,9 @@ pub fn resolve_instance_metadata(j: &Value, read_parent: &dyn Fn(&str) -> Option
         .flatten()
         .unwrap_or_else(|| "未知".to_string());
     let raw_loader = match loader {
-        Some("neoforge") => arg("--fml.neoForgeVersion").or_else(|| lib("net.neoforged", "neoforge")),
+        Some("neoforge") => {
+            arg("--fml.neoForgeVersion").or_else(|| lib("net.neoforged", "neoforge"))
+        }
         Some("forge") => arg("--fml.forgeVersion").or(forge),
         Some("fabric") => lib("net.fabricmc", "fabric-loader"),
         Some("quilt") => lib("org.quiltmc", "quilt-loader"),
@@ -1771,7 +1926,12 @@ fn normalize_loader(v: &str) -> Option<&'static str> {
 // ---------------- 版本清单查找（getVersionJson 依赖 catalog 模块） ----------------
 
 /// 对应原版 getVersionJson：本地不存在时经清单（含强制刷新重试）下载
-pub fn get_version_json(app: &AppHandle, rec: Option<&TaskRecord>, dest: &Path, version_id: &str) -> Result<Value, String> {
+pub fn get_version_json(
+    app: &AppHandle,
+    rec: Option<&TaskRecord>,
+    dest: &Path,
+    version_id: &str,
+) -> Result<Value, String> {
     if !dest.exists() {
         let catalog = crate::catalog::fetch_version_catalog(app, false)?;
         let mut entry = catalog["versions"]
@@ -1796,7 +1956,21 @@ pub fn get_version_json(app: &AppHandle, rec: Option<&TaskRecord>, dest: &Path, 
         let mirror = mirror_pref(app).to_string();
         let app2 = app.clone();
         let dest2 = dest.to_path_buf();
-        run_blocking(move || download_file(&app2, rec, None, &url, &dest2, None, None, &mirror, None, &[], &[]))?;
+        run_blocking(move || {
+            download_file(
+                &app2,
+                rec,
+                None,
+                &url,
+                &dest2,
+                None,
+                None,
+                &mirror,
+                None,
+                &[],
+                &[],
+            )
+        })?;
     }
     read_version_json_from(dest)
 }
@@ -1847,7 +2021,9 @@ pub fn install_vanilla(
     }
     std::fs::write(&mark, now_iso()).map_err(|e| e.to_string())?;
     let result = (|| -> Result<(), String> {
-        emit(&json!({ "stage": "version-json", "progress": 0, "text": format!("获取版本信息 {}", version_id), "source": source }));
+        emit(
+            &json!({ "stage": "version-json", "progress": 0, "text": format!("获取版本信息 {}", version_id), "source": source }),
+        );
         let mut vj = get_version_json(app, Some(rec), &json_path, version_id)?;
         // 自定义实例名：json id 同步改写，并记录真实 MC 版本
         if final_id != version_id {
@@ -1876,7 +2052,9 @@ pub fn install_vanilla(
                     "source": source
                 }));
             };
-            run_blocking(move || download_all(&app2, Some(rec), lib_tasks, &mirror2, &lib_progress))?;
+            run_blocking(move || {
+                download_all(&app2, Some(rec), lib_tasks, &mirror2, &lib_progress)
+            })?;
         }
 
         // 2. 客户端 jar
@@ -1886,7 +2064,10 @@ pub fn install_vanilla(
             .cloned()
             .unwrap_or(Value::Null);
         if let Some(client_url) = client.get("url").and_then(|v| v.as_str()) {
-            let sha1 = client.get("sha1").and_then(|v| v.as_str()).map(str::to_string);
+            let sha1 = client
+                .get("sha1")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             let size = client.get("size").and_then(|v| v.as_u64());
             let jar = jar_path.clone();
             let app2 = app.clone();
@@ -1905,7 +2086,19 @@ pub fn install_vanilla(
                 }));
             };
             run_blocking(move || {
-                download_file(&app2, Some(rec), None, client_url, &jar, sha1.as_deref(), size, &mirror2, Some(progress), &[], &[])
+                download_file(
+                    &app2,
+                    Some(rec),
+                    None,
+                    client_url,
+                    &jar,
+                    sha1.as_deref(),
+                    size,
+                    &mirror2,
+                    Some(progress),
+                    &[],
+                    &[],
+                )
             })?;
         }
 
@@ -1914,22 +2107,46 @@ pub fn install_vanilla(
         let idx_ref = vj.get("assetIndex").cloned().filter(|v| !v.is_null());
         if let Some(idx_ref) = idx_ref {
             if let Some(idx_url) = idx_ref.get("url").and_then(|v| v.as_str()) {
-                let index_id = idx_ref.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let index_id = idx_ref
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let idx_path = asset_index_path(app, &index_id);
                 let reuse: Vec<PathBuf> = all_folders(app)
                     .iter()
-                    .map(|f| Path::new(f).join("assets").join("indexes").join(format!("{}.json", index_id)))
+                    .map(|f| {
+                        Path::new(f)
+                            .join("assets")
+                            .join("indexes")
+                            .join(format!("{}.json", index_id))
+                    })
                     .collect();
                 {
                     let app2 = app.clone();
                     let mirror2 = mirror.clone();
                     let idx_url2 = idx_url.to_string();
-                    let idx_sha1 = idx_ref.get("sha1").and_then(|v| v.as_str()).map(str::to_string);
+                    let idx_sha1 = idx_ref
+                        .get("sha1")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string);
                     let idx_size = idx_ref.get("size").and_then(|v| v.as_u64());
                     let idx_path2 = idx_path.clone();
                     let reuse2 = reuse.clone();
                     run_blocking(move || {
-                        download_file(&app2, Some(rec), None, &idx_url2, &idx_path2, idx_sha1.as_deref(), idx_size, &mirror2, None, &reuse2, &[])
+                        download_file(
+                            &app2,
+                            Some(rec),
+                            None,
+                            &idx_url2,
+                            &idx_path2,
+                            idx_sha1.as_deref(),
+                            idx_size,
+                            &mirror2,
+                            None,
+                            &reuse2,
+                            &[],
+                        )
                     })?;
                 }
                 let idx: Value = read_version_json_from(&idx_path)?;
@@ -1952,7 +2169,11 @@ pub fn install_vanilla(
                     seen.insert(hash.clone());
                     tasks.push(DownloadItem {
                         label: name.clone(),
-                        url: format!("https://resources.download.minecraft.net/{}/{}", &hash[..2], hash),
+                        url: format!(
+                            "https://resources.download.minecraft.net/{}/{}",
+                            &hash[..2],
+                            hash
+                        ),
                         dest: asset_object_path(app, &hash),
                         sha1: Some(hash.clone()),
                         size: o.get("size").and_then(|v| v.as_u64()),
@@ -1974,20 +2195,23 @@ pub fn install_vanilla(
                     let app2 = app.clone();
                     let mirror2 = mirror.clone();
                     let emit2 = |event: &Value| emit(event);
-                    let asset_progress = move |d: usize, t: usize, _speed: f64, detail: &DownloadDetail| {
-                        emit2(&json!({
-                            "stage": "assets",
-                            "progress": detail.fraction,
-                            "text": format!("下载资源文件 {}/{}", d, t.max(assets_total)),
-                            "speed": if detail.speed_bps > 0.0 { json!(detail.speed_bps) } else { Value::Null },
-                            "etaSeconds": detail.eta_seconds.map(|e| json!(e)).unwrap_or(Value::Null),
-                            "bytesDone": detail.bytes_done,
-                            "bytesTotal": detail.bytes_total.map(|b| json!(b)).unwrap_or(Value::Null),
-                            "indeterminate": detail.indeterminate,
-                            "source": source
-                        }));
-                    };
-                    run_blocking(move || download_all(&app2, Some(rec), tasks, &mirror2, &asset_progress))?;
+                    let asset_progress =
+                        move |d: usize, t: usize, _speed: f64, detail: &DownloadDetail| {
+                            emit2(&json!({
+                                "stage": "assets",
+                                "progress": detail.fraction,
+                                "text": format!("下载资源文件 {}/{}", d, t.max(assets_total)),
+                                "speed": if detail.speed_bps > 0.0 { json!(detail.speed_bps) } else { Value::Null },
+                                "etaSeconds": detail.eta_seconds.map(|e| json!(e)).unwrap_or(Value::Null),
+                                "bytesDone": detail.bytes_done,
+                                "bytesTotal": detail.bytes_total.map(|b| json!(b)).unwrap_or(Value::Null),
+                                "indeterminate": detail.indeterminate,
+                                "source": source
+                            }));
+                        };
+                    run_blocking(move || {
+                        download_all(&app2, Some(rec), tasks, &mirror2, &asset_progress)
+                    })?;
                 }
 
                 // legacy 版本需要把资源复制到 assets/virtual/legacy 下
@@ -1998,9 +2222,11 @@ pub fn install_vanilla(
                     let vlegacy = virtual_legacy_dir(app);
                     for (name, o) in &objects {
                         check_cancel(Some(rec))?;
-                        let Some(hash) = o.get("hash").and_then(|v| v.as_str()) else { continue };
+                        let Some(hash) = o.get("hash").and_then(|v| v.as_str()) else {
+                            continue;
+                        };
                         let from = asset_object_path(app, hash);
-                        let to = vlegacy.join(name.replace('/', "\\"));
+                        let to = crate::platform::join_rel(&vlegacy, name);
                         if from.exists() && !to.exists() {
                             if let Some(dir) = to.parent() {
                                 let _ = std::fs::create_dir_all(dir);
@@ -2013,9 +2239,13 @@ pub fn install_vanilla(
         }
 
         if final_event {
-            emit(&json!({ "stage": "done", "progress": 1, "text": format!("校验完成，{} 安装成功", version_id) }));
+            emit(
+                &json!({ "stage": "done", "progress": 1, "text": format!("校验完成，{} 安装成功", version_id) }),
+            );
         } else {
-            emit(&json!({ "stage": "assets", "progress": 1, "text": format!("原版 {} 依赖准备完成", version_id) }));
+            emit(
+                &json!({ "stage": "assets", "progress": 1, "text": format!("原版 {} 依赖准备完成", version_id) }),
+            );
         }
         // 全部步骤成功：移除事务标记
         let _ = std::fs::remove_file(&mark);
@@ -2030,12 +2260,20 @@ pub fn install_vanilla(
 
 // ---------------- 继承链合并（对应原版 resolveVersionChain / flattenInstance） ----------------
 
-pub fn resolve_version_chain(app: &AppHandle, folder: &str, id: &str) -> Result<(Value, String), String> {
+pub fn resolve_version_chain(
+    app: &AppHandle,
+    folder: &str,
+    id: &str,
+) -> Result<(Value, String), String> {
     let mut chain: Vec<Value> = Vec::new();
     let mut cur = Some(read_version_json(app, folder, id)?);
     let mut seen = HashSet::new();
     while let Some(c) = cur {
-        let cid = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let cid = c
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if seen.contains(&cid) || chain.len() >= 32 {
             return Err("版本继承链循环或过长".into());
         }
@@ -2052,7 +2290,9 @@ pub fn resolve_version_chain(app: &AppHandle, folder: &str, id: &str) -> Result<
         .unwrap_or(id)
         .to_string();
     let child_first = |key: &str| -> Option<Value> {
-        chain.iter().find_map(|c| c.get(key).cloned().filter(|v| !v.is_null()))
+        chain
+            .iter()
+            .find_map(|c| c.get(key).cloned().filter(|v| !v.is_null()))
     };
     let mut merged = json!({
         "id": id,
@@ -2066,15 +2306,28 @@ pub fn resolve_version_chain(app: &AppHandle, folder: &str, id: &str) -> Result<
     });
     let libs: Vec<Value> = chain
         .iter()
-        .flat_map(|c| c.get("libraries").and_then(|l| l.as_array()).cloned().unwrap_or_default())
+        .flat_map(|c| {
+            c.get("libraries")
+                .and_then(|l| l.as_array())
+                .cloned()
+                .unwrap_or_default()
+        })
         .collect();
     let mut game_args: Vec<Value> = Vec::new();
     let mut jvm_args: Vec<Value> = Vec::new();
     for c in chain.iter().rev() {
-        if let Some(g) = c.get("arguments").and_then(|a| a.get("game")).and_then(|g| g.as_array()) {
+        if let Some(g) = c
+            .get("arguments")
+            .and_then(|a| a.get("game"))
+            .and_then(|g| g.as_array())
+        {
             game_args.extend(g.iter().cloned());
         }
-        if let Some(j) = c.get("arguments").and_then(|a| a.get("jvm")).and_then(|j| j.as_array()) {
+        if let Some(j) = c
+            .get("arguments")
+            .and_then(|a| a.get("jvm"))
+            .and_then(|j| j.as_array())
+        {
             jvm_args.extend(j.iter().cloned());
         }
     }
@@ -2111,9 +2364,11 @@ pub fn flatten_instance(app: &AppHandle, folder: &str, id: &str) -> Result<bool,
             }
         }
     }
-    let base_mc = read_version_json(app, folder, &base_id)
-        .ok()
-        .and_then(|b| b.get("_mcVersion").and_then(|v| v.as_str()).map(str::to_string));
+    let base_mc = read_version_json(app, folder, &base_id).ok().and_then(|b| {
+        b.get("_mcVersion")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    });
     let mc = own
         .get("_mcVersion")
         .and_then(|v| v.as_str())
@@ -2181,7 +2436,10 @@ pub fn compare_version_desc(a: &str, b: &str) -> std::cmp::Ordering {
                 let a_num = !xa.is_empty() && xa.chars().all(|c| c.is_ascii_digit());
                 let b_num = !xb.is_empty() && xb.chars().all(|c| c.is_ascii_digit());
                 if a_num && b_num {
-                    let d = xb.parse::<u64>().unwrap_or(0).cmp(&xa.parse::<u64>().unwrap_or(0));
+                    let d = xb
+                        .parse::<u64>()
+                        .unwrap_or(0)
+                        .cmp(&xa.parse::<u64>().unwrap_or(0));
                     if d != O::Equal {
                         return d;
                     }
@@ -2238,25 +2496,58 @@ pub fn list_loader_versions(loader: &str, mc_version: &str) -> Result<Vec<String
     let mut list: Vec<String> = Vec::new();
     match loader {
         "fabric" => {
-            let arr = fetch_json(format!("https://meta.fabricmc.net/v2/versions/loader/{}", mc_version), 15)?;
+            let arr = fetch_json(
+                format!(
+                    "https://meta.fabricmc.net/v2/versions/loader/{}",
+                    mc_version
+                ),
+                15,
+            )?;
             if let Some(a) = arr.as_array() {
-                list = a.iter().filter_map(|x| x["loader"]["version"].as_str()).map(str::to_string).collect();
+                list = a
+                    .iter()
+                    .filter_map(|x| x["loader"]["version"].as_str())
+                    .map(str::to_string)
+                    .collect();
             }
         }
         "quilt" => {
-            let arr = fetch_json(format!("https://meta.quiltmc.org/v3/versions/loader/{}", mc_version), 15)?;
+            let arr = fetch_json(
+                format!("https://meta.quiltmc.org/v3/versions/loader/{}", mc_version),
+                15,
+            )?;
             if let Some(a) = arr.as_array() {
-                list = a.iter().filter_map(|x| x["loader"]["version"].as_str()).map(str::to_string).collect();
+                list = a
+                    .iter()
+                    .filter_map(|x| x["loader"]["version"].as_str())
+                    .map(str::to_string)
+                    .collect();
             }
         }
         "forge" => {
-            let arr = fetch_json(format!("https://bmclapi2.bangbang93.com/forge/minecraft/{}", mc_version), 15)?;
+            let arr = fetch_json(
+                format!(
+                    "https://bmclapi2.bangbang93.com/forge/minecraft/{}",
+                    mc_version
+                ),
+                15,
+            )?;
             if let Some(a) = arr.as_array() {
-                list = a.iter().filter_map(|x| x["version"].as_str()).map(str::to_string).collect();
+                list = a
+                    .iter()
+                    .filter_map(|x| x["version"].as_str())
+                    .map(str::to_string)
+                    .collect();
             }
         }
         "neoforge" => {
-            match fetch_json(format!("https://bmclapi2.bangbang93.com/neoforge/list/{}", mc_version), 15) {
+            match fetch_json(
+                format!(
+                    "https://bmclapi2.bangbang93.com/neoforge/list/{}",
+                    mc_version
+                ),
+                15,
+            ) {
                 Ok(data) => {
                     if let Some(a) = data.as_array() {
                         list = a
@@ -2265,7 +2556,9 @@ pub fn list_loader_versions(loader: &str, mc_version: &str) -> Result<Vec<String
                                 if let Some(s) = x.as_str() {
                                     Some(s.to_string())
                                 } else {
-                                    x.get("version").and_then(|v| v.as_str()).map(str::to_string)
+                                    x.get("version")
+                                        .and_then(|v| v.as_str())
+                                        .map(str::to_string)
                                 }
                             })
                             .collect();
@@ -2281,10 +2574,17 @@ pub fn list_loader_versions(loader: &str, mc_version: &str) -> Result<Vec<String
                     )
                     .map_err(|_| "HTTP 0: neoforge maven-metadata".to_string())?;
                     let re = regex::Regex::new(r"<version>([^<]+)</version>").unwrap();
-                    let all: Vec<String> =
-                        re.captures_iter(&xml).filter_map(|c| c.get(1)).map(|m| m.as_str().to_string()).collect();
+                    let all: Vec<String> = re
+                        .captures_iter(&xml)
+                        .filter_map(|c| c.get(1))
+                        .map(|m| m.as_str().to_string())
+                        .collect();
                     let prefix = mc_version.replacen("1.", "", 1);
-                    list = all.into_iter().filter(|v| v.starts_with(&prefix)).rev().collect();
+                    list = all
+                        .into_iter()
+                        .filter(|v| v.starts_with(&prefix))
+                        .rev()
+                        .collect();
                 }
             }
         }
@@ -2303,12 +2603,14 @@ fn resolve_forge_installer_url(mc_version: &str, loader_version: &str, mirror: &
             coordinate, coordinate
         )
     };
-    let modern =
-        !regex::Regex::new(r"^1\.(?:[1-9]|1[0-2])(?:\.\d+)?$").unwrap().is_match(mc_version);
+    let modern = !regex::Regex::new(r"^1\.(?:[1-9]|1[0-2])(?:\.\d+)?$")
+        .unwrap()
+        .is_match(mc_version);
     if modern || loader_version.contains('-') {
         return installer_url(&base);
     }
-    let metadata = "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml".to_string();
+    let metadata =
+        "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml".to_string();
     for source in download_candidates(std::slice::from_ref(&metadata), mirror) {
         if let Ok(xml) = fetch_text(source, 4) {
             let re = regex::Regex::new(r"<version>([^<]+)</version>").unwrap();
@@ -2329,7 +2631,13 @@ fn resolve_forge_installer_url(mc_version: &str, loader_version: &str, mirror: &
             let coordinate = branches
                 .iter()
                 .find(|v| **v == format!("{}-{}", base, mc_version))
-                .or_else(|| if branches.len() == 1 { branches.first() } else { None });
+                .or_else(|| {
+                    if branches.len() == 1 {
+                        branches.first()
+                    } else {
+                        None
+                    }
+                });
             if let Some(c) = coordinate {
                 return installer_url(c);
             }
@@ -2359,7 +2667,9 @@ fn run_installer(
     jar: &Path,
     target: &str,
 ) -> Result<(), String> {
-    emit(&json!({ "stage": "loader-process", "progress": 0, "indeterminate": true, "text": "正在启动加载器安装器…" }));
+    emit(
+        &json!({ "stage": "loader-process", "progress": 0, "indeterminate": true, "text": "正在启动加载器安装器…" }),
+    );
     let use_mirror = mirror_pref(app) == "bmclapi";
     let build_args = |with_mirror: bool| -> Vec<String> {
         let mut args = vec![
@@ -2382,8 +2692,14 @@ fn run_installer(
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("未找到可用的 Java 运行环境，请在设置中配置 Java：{}", e))?;
-        let mut stdout = child.stdout.take().ok_or_else(|| "无法读取安装器输出".to_string())?;
-        let mut stderr = child.stderr.take().ok_or_else(|| "无法读取安装器输出".to_string())?;
+        let mut stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "无法读取安装器输出".to_string())?;
+        let mut stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "无法读取安装器输出".to_string())?;
         let lines: std::sync::Arc<Mutex<Vec<String>>> = std::sync::Arc::new(Mutex::new(Vec::new()));
         {
             let lines = lines.clone();
@@ -2435,7 +2751,12 @@ fn run_installer(
                 let _ = std::fs::create_dir_all(&log_dir);
                 let _ = std::fs::write(
                     log_dir.join("installer.log"),
-                    format!("{}\n\n[退出码 {}] {}\n", all_lines.join("\n"), code, args.join(" ")),
+                    format!(
+                        "{}\n\n[退出码 {}] {}\n",
+                        all_lines.join("\n"),
+                        code,
+                        args.join(" ")
+                    ),
                 );
                 if rec.cancelled.load(Ordering::SeqCst) {
                     return Err("已取消".into());
@@ -2476,7 +2797,9 @@ fn run_installer(
                 if e == "已取消" || rec.cancelled.load(Ordering::SeqCst) {
                     return Err("已取消".into());
                 }
-                emit(&json!({ "stage": "loader", "progress": 0.7, "text": "镜像模式安装失败，改用官方源重试…" }));
+                emit(
+                    &json!({ "stage": "loader", "progress": 0.7, "text": "镜像模式安装失败，改用官方源重试…" }),
+                );
                 run_once(&build_args(false))
             }
         }
@@ -2486,7 +2809,12 @@ fn run_installer(
 }
 
 /// 对应原版 findInstalledDir：扫描 versions/ 找安装器生成的版本目录名（最新 mtime）
-fn find_installed_dir(active: &str, loader: &str, mc_version: &str, loader_version: &str) -> Option<String> {
+fn find_installed_dir(
+    active: &str,
+    loader: &str,
+    mc_version: &str,
+    loader_version: &str,
+) -> Option<String> {
     let dir = versions_dir_in(active);
     let mut candidates: Vec<(String, std::time::SystemTime)> = Vec::new();
     let entries = std::fs::read_dir(&dir).ok()?;
@@ -2502,7 +2830,8 @@ fn find_installed_dir(active: &str, loader: &str, mc_version: &str, loader_versi
             read_version_json_from(&version_json_path_in(active, pid)).ok()
         });
         let want = normalize_loader(loader);
-        let loader_match = meta.loader == want || j.get("_loader").and_then(|v| v.as_str()) == Some(loader);
+        let loader_match =
+            meta.loader == want || j.get("_loader").and_then(|v| v.as_str()) == Some(loader);
         if loader_match
             && meta.mc_version == mc_version
             && meta.loader_version.as_deref() == Some(loader_version)
@@ -2519,7 +2848,12 @@ fn find_installed_dir(active: &str, loader: &str, mc_version: &str, loader_versi
     candidates.into_iter().next().map(|(n, _)| n)
 }
 
-fn tag_loader_json(folder: &str, id: &str, loader: &str, loader_version: &str) -> Result<(), String> {
+fn tag_loader_json(
+    folder: &str,
+    id: &str,
+    loader: &str,
+    loader_version: &str,
+) -> Result<(), String> {
     let p = version_json_path_in(folder, id);
     let mut j = read_version_json_from(&p)?;
     j["_loader"] = json!(loader);
@@ -2529,7 +2863,10 @@ fn tag_loader_json(folder: &str, id: &str, loader: &str, loader_version: &str) -
 
 // ---------------- Fabric API（对应原版 loaders.ts Modrinth 数据源 + MCIM 镜像回退） ----------------
 
-const MODRINTH_BASES: &[&str] = &["https://api.modrinth.com/v2", "https://mod.mcimirror.top/modrinth/v2"];
+const MODRINTH_BASES: &[&str] = &[
+    "https://api.modrinth.com/v2",
+    "https://mod.mcimirror.top/modrinth/v2",
+];
 const MODRINTH_UA: &str = "WUHUICL/0.1.0 (wuhuicl launcher)";
 
 fn fetch_fabric_api_versions(mc_version: &str) -> Result<Vec<Value>, String> {
@@ -2537,7 +2874,10 @@ fn fetch_fabric_api_versions(mc_version: &str) -> Result<Vec<Value>, String> {
     let ld = urlencoding_lite(&serde_json::to_string(&["fabric"]).unwrap_or_default());
     let mut last_err = String::new();
     for base in MODRINTH_BASES {
-        let url = format!("{}/project/fabric-api/version?game_versions={}&loaders={}", base, gv, ld);
+        let url = format!(
+            "{}/project/fabric-api/version?game_versions={}&loaders={}",
+            base, gv, ld
+        );
         match fetch_json_with_ua(url, MODRINTH_UA) {
             Ok(v) => {
                 if let Some(a) = v.as_array() {
@@ -2557,7 +2897,11 @@ fn fetch_json_with_ua(url: String, ua: &str) -> Result<Value, String> {
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .map_err(|e| e.to_string())?;
-        let resp = client.get(&url).header("User-Agent", ua).send().map_err(|e| e.to_string())?;
+        let resp = client
+            .get(&url)
+            .header("User-Agent", ua)
+            .send()
+            .map_err(|e| e.to_string())?;
         let status = resp.status().as_u16();
         let text = resp.text().map_err(|e| e.to_string())?;
         if !(200..300).contains(&status) {
@@ -2572,7 +2916,9 @@ fn urlencoding_lite(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{:02X}", b)),
         }
     }
@@ -2586,7 +2932,10 @@ pub fn list_fabric_api_versions(mc_version: &str) -> Result<Vec<Value>, String> 
         .iter()
         .filter_map(|v| {
             let version = v.get("version_number").and_then(|x| x.as_str())?;
-            let date = v.get("date_published").and_then(|x| x.as_str()).unwrap_or("");
+            let date = v
+                .get("date_published")
+                .and_then(|x| x.as_str())
+                .unwrap_or("");
             Some(json!({ "version": version, "date": date }))
         })
         .collect())
@@ -2601,9 +2950,13 @@ fn install_fabric_api(
     version: &str,
     mods_dir: &Path,
 ) -> Result<(), String> {
-    emit(&json!({ "stage": "fabric-api", "progress": 0, "text": format!("查询 Fabric API {}", version) }));
+    emit(
+        &json!({ "stage": "fabric-api", "progress": 0, "text": format!("查询 Fabric API {}", version) }),
+    );
     let arr = fetch_fabric_api_versions(mc_version)?;
-    let v = arr.iter().find(|x| x.get("version_number").and_then(|y| y.as_str()) == Some(version));
+    let v = arr
+        .iter()
+        .find(|x| x.get("version_number").and_then(|y| y.as_str()) == Some(version));
     let file = v
         .and_then(|v| v.get("files").and_then(|f| f.as_array()))
         .and_then(|files| {
@@ -2614,17 +2967,46 @@ fn install_fabric_api(
         })
         .cloned()
         .unwrap_or(Value::Null);
-    let url = file.get("url").and_then(|x| x.as_str()).unwrap_or("").to_string();
-    let filename = file.get("filename").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let url = file
+        .get("url")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let filename = file
+        .get("filename")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
     if url.is_empty() || filename.is_empty() {
-        return Err(format!("未找到适配 {} 的 Fabric API {} 文件", mc_version, version));
+        return Err(format!(
+            "未找到适配 {} 的 Fabric API {} 文件",
+            mc_version, version
+        ));
     }
     let dest = mods_dir.join(&filename);
-    emit(&json!({ "stage": "fabric-api", "progress": 0.2, "text": format!("下载 Fabric API {}", version) }));
-    let sha1 = file.get("hashes").and_then(|h| h.get("sha1")).and_then(|s| s.as_str()).map(str::to_string);
+    emit(
+        &json!({ "stage": "fabric-api", "progress": 0.2, "text": format!("下载 Fabric API {}", version) }),
+    );
+    let sha1 = file
+        .get("hashes")
+        .and_then(|h| h.get("sha1"))
+        .and_then(|s| s.as_str())
+        .map(str::to_string);
     let app2 = app.clone();
     run_blocking(move || {
-        download_file(&app2, Some(rec), None, &url, &dest, sha1.as_deref(), None, "official", None, &[], &[])
+        download_file(
+            &app2,
+            Some(rec),
+            None,
+            &url,
+            &dest,
+            sha1.as_deref(),
+            None,
+            "official",
+            None,
+            &[],
+            &[],
+        )
     })?;
     emit(&json!({ "stage": "fabric-api", "progress": 1, "text": "Fabric API 已放入 mods 文件夹" }));
     Ok(())
@@ -2654,7 +3036,9 @@ fn legacy_record(value: Option<&Value>, label: &str) -> Result<Value, String> {
 }
 
 fn legacy_safe_name(value: Option<&str>, label: &str) -> Result<String, String> {
-    let Some(v) = value else { return Err(format!("旧版 Forge {} 不安全", label)) };
+    let Some(v) = value else {
+        return Err(format!("旧版 Forge {} 不安全", label));
+    };
     let bad = v.is_empty()
         || v.len() > 180
         || v == "."
@@ -2673,19 +3057,27 @@ fn legacy_safe_name(value: Option<&str>, label: &str) -> Result<String, String> 
 }
 
 fn legacy_maven_path(name: &Value) -> Result<(String, String, String), String> {
-    let Some(name) = name.as_str() else { return Err("旧版 Forge 依赖坐标无效".into()) };
+    let Some(name) = name.as_str() else {
+        return Err("旧版 Forge 依赖坐标无效".into());
+    };
     let parts: Vec<&str> = name.split(':').collect();
     if parts.len() != 3 && parts.len() != 4 {
         return Err("旧版 Forge 依赖坐标无效".into());
     }
     let group_ok = !parts[0].is_empty()
-        && parts[0]
-            .split('.')
-            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'));
+        && parts[0].split('.').all(|p| {
+            !p.is_empty()
+                && p.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        });
     let rest_ok = parts[1..].iter().all(|p| {
         !p.is_empty()
-            && p.chars().next().map(|c| c.is_ascii_alphanumeric()).unwrap_or(false)
-            && p.chars().all(|c| c.is_ascii_alphanumeric() || "._+-".contains(c))
+            && p.chars()
+                .next()
+                .map(|c| c.is_ascii_alphanumeric())
+                .unwrap_or(false)
+            && p.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._+-".contains(c))
     });
     if !group_ok || !rest_ok {
         return Err("旧版 Forge 依赖坐标不安全".into());
@@ -2705,9 +3097,15 @@ fn legacy_maven_path(name: &Value) -> Result<(String, String, String), String> {
 }
 
 fn legacy_repository(input: Option<&Value>) -> Result<String, String> {
-    let Some(input) = input else { return Ok("https://libraries.minecraft.net/".into()) };
-    let Some(s) = input.as_str() else { return Err("旧版 Forge 依赖仓库无效".into()) };
-    let Ok(u) = reqwest::Url::parse(s) else { return Err("旧版 Forge 依赖仓库无效".into()) };
+    let Some(input) = input else {
+        return Ok("https://libraries.minecraft.net/".into());
+    };
+    let Some(s) = input.as_str() else {
+        return Err("旧版 Forge 依赖仓库无效".into());
+    };
+    let Ok(u) = reqwest::Url::parse(s) else {
+        return Err("旧版 Forge 依赖仓库无效".into());
+    };
     if !["http", "https"].contains(&u.scheme())
         || !u.username().is_empty()
         || u.password().is_some()
@@ -2720,7 +3118,11 @@ fn legacy_repository(input: Option<&Value>) -> Result<String, String> {
     if u.host_str() == Some("files.minecraftforge.net") && u.path() == "/maven/" {
         return Ok("https://maven.minecraftforge.net/".into());
     }
-    if u.host_str().map(|h| ["maven.minecraftforge.net", "libraries.minecraft.net"].contains(&h)).unwrap_or(false) && u.path() == "/" {
+    if u.host_str()
+        .map(|h| ["maven.minecraftforge.net", "libraries.minecraft.net"].contains(&h))
+        .unwrap_or(false)
+        && u.path() == "/"
+    {
         return Ok(format!("https://{}", u.host_str().unwrap_or_default()));
     }
     Err("旧版 Forge 依赖仓库不受支持".into())
@@ -2728,17 +3130,25 @@ fn legacy_repository(input: Option<&Value>) -> Result<String, String> {
 
 fn legacy_hashes(value: Option<&Value>) -> Result<Vec<String>, String> {
     let Some(v) = value else { return Ok(vec![]) };
-    let Some(arr) = v.as_array() else { return Err("旧版 Forge 依赖校验值无效".into()) };
+    let Some(arr) = v.as_array() else {
+        return Err("旧版 Forge 依赖校验值无效".into());
+    };
     let re = regex::Regex::new(r"^[a-f\d]{40}$").unwrap();
     if arr.is_empty()
         || arr.len() > 16
-        || arr
-            .iter()
-            .any(|h| !h.as_str().map(|s| re.is_match(&s.to_lowercase())).unwrap_or(false))
+        || arr.iter().any(|h| {
+            !h.as_str()
+                .map(|s| re.is_match(&s.to_lowercase()))
+                .unwrap_or(false)
+        })
     {
         return Err("旧版 Forge 依赖校验值无效".into());
     }
-    let set: HashSet<String> = arr.iter().filter_map(|h| h.as_str()).map(|s| s.to_lowercase()).collect();
+    let set: HashSet<String> = arr
+        .iter()
+        .filter_map(|h| h.as_str())
+        .map(|s| s.to_lowercase())
+        .collect();
     Ok(set.into_iter().collect())
 }
 
@@ -2755,11 +3165,14 @@ fn read_legacy_forge_installer(
         return Err("Forge 安装器不是有效的普通文件".into());
     }
     let file = std::fs::File::open(jar).map_err(|e| e.to_string())?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("Forge 安装器无法解析：{}", e))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("Forge 安装器无法解析：{}", e))?;
     let profile_name = (0..archive.len())
         .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().to_string()))
         .find(|n| n.to_lowercase() == "install_profile.json");
-    let Some(profile_name) = profile_name else { return Ok(None) };
+    let Some(profile_name) = profile_name else {
+        return Ok(None);
+    };
     let mut entry = archive.by_name(&profile_name).map_err(|e| e.to_string())?;
     if entry.size() > 8 * 1024 * 1024 {
         return Err("Forge 安装器包含冲突、不安全或过大的元数据".into());
@@ -2769,14 +3182,28 @@ fn read_legacy_forge_installer(
     drop(entry);
     let metadata: Value =
         serde_json::from_str(&data).map_err(|_| "旧版 Forge 安装元数据 格式无效".to_string())?;
-    let has_install = metadata.get("install").map(|v| v.is_object()).unwrap_or(false);
-    let has_version_info = metadata.get("versionInfo").map(|v| v.is_object()).unwrap_or(false);
+    let has_install = metadata
+        .get("install")
+        .map(|v| v.is_object())
+        .unwrap_or(false);
+    let has_version_info = metadata
+        .get("versionInfo")
+        .map(|v| v.is_object())
+        .unwrap_or(false);
     if !has_install && !has_version_info {
         return Ok(None);
     }
-    let modern_keys = ["processors", "data", "spec", "libraries", "json", "optionals"];
-    let legacy_mc =
-        regex::Regex::new(r"^1\.(?:[1-9]|1[0-2])(?:\.\d+)?$").unwrap().is_match(mc_version);
+    let modern_keys = [
+        "processors",
+        "data",
+        "spec",
+        "libraries",
+        "json",
+        "optionals",
+    ];
+    let legacy_mc = regex::Regex::new(r"^1\.(?:[1-9]|1[0-2])(?:\.\d+)?$")
+        .unwrap()
+        .is_match(mc_version);
     if !legacy_mc || modern_keys.iter().any(|k| metadata.get(*k).is_some()) {
         return Err("不支持混合或非旧版 Forge 安装器格式".into());
     }
@@ -2802,7 +3229,8 @@ fn read_legacy_forge_installer(
     };
     if !installer_url_str.starts_with("https://maven.minecraftforge.net")
         || coordinate_name != format!("net.minecraftforge:forge:{}", expected_coordinate)
-        || !(coordinate_version == expected || coordinate_version.starts_with(&format!("{}-", expected)))
+        || !(coordinate_version == expected
+            || coordinate_version.starts_with(&format!("{}-", expected)))
         || install.get("minecraft").and_then(|v| v.as_str()) != Some(mc_version)
     {
         return Err("旧版 Forge 安装器与请求版本不一致".into());
@@ -2810,14 +3238,19 @@ fn read_legacy_forge_installer(
     let id = legacy_safe_name(version.get("id").and_then(|v| v.as_str()), "版本名称")?;
     if install.get("target").and_then(|v| v.as_str()) != Some(id.as_str())
         || version.get("inheritsFrom").and_then(|v| v.as_str()) != Some(mc_version)
-        || (version.get("jar").is_some() && version.get("jar").and_then(|v| v.as_str()) != Some(mc_version))
+        || (version.get("jar").is_some()
+            && version.get("jar").and_then(|v| v.as_str()) != Some(mc_version))
     {
         return Err("旧版 Forge 版本继承或目标不一致".into());
     }
     let main_class_ok = version
         .get("mainClass")
         .and_then(|v| v.as_str())
-        .map(|s| regex::Regex::new(r"^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$").unwrap().is_match(s))
+        .map(|s| {
+            regex::Regex::new(r"^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$")
+                .unwrap()
+                .is_match(s)
+        })
         .unwrap_or(false);
     let mc_args = version.get("minecraftArguments").and_then(|v| v.as_str());
     if !main_class_ok
@@ -2827,11 +3260,18 @@ fn read_legacy_forge_installer(
     {
         return Err("旧版 Forge 启动配置无效".into());
     }
-    let libs = version.get("libraries").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let libs = version
+        .get("libraries")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     if libs.is_empty() || libs.len() > 256 {
         return Err("旧版 Forge 依赖列表无效".into());
     }
-    let file_path = legacy_safe_name(install.get("filePath").and_then(|v| v.as_str()), "内嵌文件名称")?;
+    let file_path = legacy_safe_name(
+        install.get("filePath").and_then(|v| v.as_str()),
+        "内嵌文件名称",
+    )?;
     if file_path != format!("forge-{}-universal.jar", expected_coordinate) {
         return Err("旧版 Forge 内嵌文件与坐标不一致".into());
     }
@@ -2853,7 +3293,8 @@ fn read_legacy_forge_installer(
             // 解析中央目录检测截断（不执行其字节码）；块结束即释放对 buf 的借用
             {
                 let cursor = std::io::Cursor::new(&buf);
-                let mut z = zip::ZipArchive::new(cursor).map_err(|_| "旧版 Forge 内嵌 JAR 无效".to_string())?;
+                let mut z = zip::ZipArchive::new(cursor)
+                    .map_err(|_| "旧版 Forge 内嵌 JAR 无效".to_string())?;
                 if z.is_empty() {
                     return Err("旧版 Forge 内嵌 JAR 为空".into());
                 }
@@ -2871,7 +3312,8 @@ fn read_legacy_forge_installer(
     let mut universal_count = 0usize;
     for input in &libs {
         let lib = legacy_record(Some(input), "依赖")?;
-        let (name, relative, _version) = legacy_maven_path(lib.get("name").unwrap_or(&Value::Null))?;
+        let (name, relative, _version) =
+            legacy_maven_path(lib.get("name").unwrap_or(&Value::Null))?;
         for key in ["clientreq", "serverreq"] {
             if let Some(v) = lib.get(key) {
                 if !v.is_boolean() {
@@ -2880,7 +3322,10 @@ fn read_legacy_forge_installer(
             }
         }
         let checksums = legacy_hashes(lib.get("checksums"))?;
-        if lib.get("downloads").is_some() || lib.get("natives").is_some() || lib.get("rules").is_some() {
+        if lib.get("downloads").is_some()
+            || lib.get("natives").is_some()
+            || lib.get("rules").is_some()
+        {
             return Err("不支持混合的旧版 Forge 依赖格式".into());
         }
         if lib.get("clientreq").and_then(|v| v.as_bool()) == Some(false) {
@@ -2910,7 +3355,13 @@ fn read_legacy_forge_installer(
         } else {
             let repo = legacy_repository(lib.get("url"))?;
             let url = format!("{}{}", repo, relative);
-            libraries.push(LegacyLibrary { name, relative, url, checksums, embedded: None });
+            libraries.push(LegacyLibrary {
+                name,
+                relative,
+                url,
+                checksums,
+                embedded: None,
+            });
         }
     }
     if universal_count != 1 {
@@ -2940,7 +3391,9 @@ fn read_legacy_forge_installer(
 
 /// 旧版 Forge 依赖 sidecar SHA-1（url + ".sha1"，镜像候选轮询）
 fn legacy_sidecar_hashes(url: &str, mirror: &str) -> Result<Vec<String>, String> {
-    let path_part = reqwest::Url::parse(url).map(|u| u.path().to_string()).unwrap_or_default();
+    let path_part = reqwest::Url::parse(url)
+        .map(|u| u.path().to_string())
+        .unwrap_or_default();
     let urls = vec![url.to_string()];
     for source in download_candidates(&urls, mirror) {
         if let Ok(text) = fetch_text(format!("{}.sha1", source), 4) {
@@ -2953,11 +3406,17 @@ fn legacy_sidecar_hashes(url: &str, mirror: &str) -> Result<Vec<String>, String>
             }
         }
     }
-    Err(format!("旧版 Forge 依赖缺少可靠的 SHA-1 校验值：{}", path_part))
+    Err(format!(
+        "旧版 Forge 依赖缺少可靠的 SHA-1 校验值：{}",
+        path_part
+    ))
 }
 
 fn legacy_file_identity(path: &Path) -> Result<(String, u64), String> {
-    Ok((sha1_file_hex(path)?, std::fs::metadata(path).map_err(|e| e.to_string())?.len()))
+    Ok((
+        sha1_file_hex(path)?,
+        std::fs::metadata(path).map_err(|e| e.to_string())?.len(),
+    ))
 }
 
 /// 对应原版 prepareLegacyForgeInstaller：依赖全部下载校验后发布，再写实例目录
@@ -2973,11 +3432,20 @@ fn prepare_and_install_legacy_forge(
     instance_name: Option<&str>,
 ) -> Result<String, String> {
     let _ = std::fs::create_dir_all(library_root);
-    let work = library_root.join(format!(".wuhuicl-legacy-forge-{}", crate::accounts::uuid_v4()));
+    let work = library_root.join(format!(
+        ".wuhuicl-legacy-forge-{}",
+        crate::accounts::uuid_v4()
+    ));
     let _ = std::fs::create_dir_all(&work);
     let result = (|| -> Result<String, String> {
         // 逐库准备：checksums/sidecar、staged 文件、已落地身份
-        let mut resolved: Vec<(LegacyLibrary, Vec<String>, PathBuf, PathBuf, Option<(String, u64)>)> = Vec::new();
+        let mut resolved: Vec<(
+            LegacyLibrary,
+            Vec<String>,
+            PathBuf,
+            PathBuf,
+            Option<(String, u64)>,
+        )> = Vec::new();
         for (index, library) in plan.libraries.iter().enumerate() {
             check_cancel(Some(rec))?;
             let checksums = if !library.checksums.is_empty() {
@@ -2986,7 +3454,7 @@ fn prepare_and_install_legacy_forge(
                 legacy_sidecar_hashes(&library.url, mirror)?
             };
             let staged = work.join(format!("{}.jar", index));
-            let dest = library_root.join(library.relative.replace('/', "\\"));
+            let dest = crate::platform::join_rel(&library_root, &library.relative);
             let mut identity = None;
             if dest.exists() {
                 if let Ok(id) = legacy_file_identity(&dest) {
@@ -3009,7 +3477,11 @@ fn prepare_and_install_legacy_forge(
                 label: lib.relative.clone(),
                 url: lib.url.clone(),
                 dest: staged.clone(),
-                sha1: if checksums.len() == 1 { checksums.first().cloned() } else { None },
+                sha1: if checksums.len() == 1 {
+                    checksums.first().cloned()
+                } else {
+                    None
+                },
                 size: None,
                 reuse_files: vec![],
                 reuse_dirs: vec![],
@@ -3055,17 +3527,26 @@ fn prepare_and_install_legacy_forge(
                 }
             }
             if !staged.exists() {
-                return Err(format!("旧版 Forge 缓存校验期间发生变化，请重试：{}", lib.name));
+                return Err(format!(
+                    "旧版 Forge 缓存校验期间发生变化，请重试：{}",
+                    lib.name
+                ));
             }
             if let Some(dir) = dest.parent() {
                 std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
             }
-            let tmp = dest.with_extension(format!("legacy-forge-{}.tmp", crate::accounts::uuid_v4()));
+            let tmp =
+                dest.with_extension(format!("legacy-forge-{}.tmp", crate::accounts::uuid_v4()));
             std::fs::copy(staged, &tmp).map_err(|e| e.to_string())?;
             std::fs::rename(&tmp, dest).map_err(|e| e.to_string())?;
         }
         // 生成实例目录（独占 mkdir，失败清理不能波及既有实例）
-        let profile_id = plan.profile.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let profile_id = plan
+            .profile
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let id = legacy_safe_name(
             Some(
                 instance_name
@@ -3079,7 +3560,8 @@ fn prepare_and_install_legacy_forge(
         if directory.exists() {
             return Err("旧版 Forge 目标实例目录已存在，未覆盖；请更换实例名".into());
         }
-        std::fs::create_dir_all(directory.parent().unwrap_or(Path::new("/"))).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(directory.parent().unwrap_or(Path::new("/")))
+            .map_err(|e| e.to_string())?;
         std::fs::create_dir(&directory).map_err(|e| e.to_string())?;
         let write_result = (|| -> Result<(), String> {
             std::fs::write(directory.join(".installing"), crate::accounts::uuid_v4())
@@ -3102,7 +3584,9 @@ fn prepare_and_install_legacy_forge(
             let _ = std::fs::remove_dir_all(&directory);
             return Err(e);
         }
-        emit(&json!({ "stage": "loader-process", "progress": 1, "text": "旧版 Forge 运行配置与本体已校验并生成" }));
+        emit(
+            &json!({ "stage": "loader-process", "progress": 1, "text": "旧版 Forge 运行配置与本体已校验并生成" }),
+        );
         Ok(id)
     })();
     let _ = std::fs::remove_dir_all(&work);
@@ -3112,30 +3596,28 @@ fn prepare_and_install_legacy_forge(
 // ---------------- 版本删除（对应原版 versionRemoval.ts recycleVersion + versions.removeVersion） ----------------
 
 fn recycle_bin_delete(target: &Path) -> Result<(), String> {
-    // shell.trashItem 等价：PowerShell VisualBasic FileIO 回收站删除（不引入新依赖）
-    let target_s = target.to_string_lossy().replace('\'', "''");
-    let (method, arg2, arg3) = if target.is_dir() {
-        ("DeleteDirectory", "'OnlyErrorDialogs'", "'SendToRecycleBin'")
-    } else {
-        ("DeleteFile", "'OnlyErrorDialogs'", "'SendToRecycleBin'")
-    };
-    let script = format!(
-        "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::{}('{}', {}, {})",
-        method, target_s, arg2, arg3
-    );
-    let output = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if output.status.success() && !target.exists() {
-        return Ok(());
+    // shell.trashItem 等价：trash crate 跨平台（Windows IFileOperation / macOS Finder / Linux freedesktop）。
+    // trash crate 不支持 Android：Android 沙箱内无系统回收站，降级为直接删除。
+    #[cfg(not(target_os = "android"))]
+    {
+        trash::delete(target).map_err(|e| e.to_string())
     }
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    Err(stderr)
+    #[cfg(target_os = "android")]
+    {
+        if target.is_dir() {
+            std::fs::remove_dir_all(target).map_err(|e| e.to_string())
+        } else {
+            std::fs::remove_file(target).map_err(|e| e.to_string())
+        }
+    }
 }
 
 /// 对应原版 versions.ts removeVersion（注册校验 + 回收站删除）
-pub fn remove_version(app: &AppHandle, id: &str, requested_folder: Option<&str>) -> Result<(), String> {
+pub fn remove_version(
+    app: &AppHandle,
+    id: &str,
+    requested_folder: Option<&str>,
+) -> Result<(), String> {
     let s = settings::get(app);
     let folder = requested_folder
         .filter(|f| !f.is_empty())
@@ -3144,8 +3626,12 @@ pub fn remove_version(app: &AppHandle, id: &str, requested_folder: Option<&str>)
     let registered = s["folders"]
         .as_array()
         .map(|a| {
-            a.iter()
-                .any(|f| f["path"].as_str().map(|p| same_path(p, &folder)).unwrap_or(false))
+            a.iter().any(|f| {
+                f["path"]
+                    .as_str()
+                    .map(|p| same_path(p, &folder))
+                    .unwrap_or(false)
+            })
         })
         .unwrap_or(false);
     if !registered {
@@ -3168,7 +3654,11 @@ fn recycle_version(folder: &str, id: &str) -> Result<(), String> {
     }
     let parent = Path::new(folder).join("versions");
     let target = parent.join(id);
-    if target.parent().map(|p| p != parent.as_path()).unwrap_or(true) {
+    if target
+        .parent()
+        .map(|p| p != parent.as_path())
+        .unwrap_or(true)
+    {
         return Err("版本路径超出游戏目录".into());
     }
     let stat = match std::fs::symlink_metadata(&target) {
@@ -3215,7 +3705,11 @@ pub fn cleanup_partial_install(folder: &str, id: &str) -> Result<bool, String> {
 
 // ---------------- 实例名 / 重命名（对应原版 validateInstanceName / renameVersion） ----------------
 
-pub fn validate_instance_name(app: &AppHandle, name: &str, exclude_id: Option<&str>) -> Option<String> {
+pub fn validate_instance_name(
+    app: &AppHandle,
+    name: &str,
+    exclude_id: Option<&str>,
+) -> Option<String> {
     let n = name.trim();
     if n.is_empty() {
         return Some("实例名不能为空".into());
@@ -3247,7 +3741,12 @@ pub fn validate_instance_name(app: &AppHandle, name: &str, exclude_id: Option<&s
 }
 
 /// 对应原版 renameVersion：目录、json id、原版 jar 文件名同步改名
-pub fn rename_version(app: &AppHandle, folder: &str, id: &str, new_name: &str) -> Result<(), String> {
+pub fn rename_version(
+    app: &AppHandle,
+    folder: &str,
+    id: &str,
+    new_name: &str,
+) -> Result<(), String> {
     if let Some(err) = validate_instance_name(app, new_name, Some(id)) {
         return Err(err);
     }
@@ -3303,7 +3802,10 @@ fn tree_size(input: &Path) -> Result<(u64, u64), String> {
     }
     let mut files = 0u64;
     let mut bytes = 0u64;
-    for entry in std::fs::read_dir(input).map_err(|e| e.to_string())?.flatten() {
+    for entry in std::fs::read_dir(input)
+        .map_err(|e| e.to_string())?
+        .flatten()
+    {
         let (f, b) = tree_size(&entry.path())?;
         files += f;
         bytes += b;
@@ -3312,7 +3814,11 @@ fn tree_size(input: &Path) -> Result<(u64, u64), String> {
 }
 
 /// 对应原版 planIsolationFiles：仅规划固定白名单中的玩家数据，符号链接不计入
-pub fn plan_isolation_files(version_id: &str, source: &Path, destination: &Path) -> Result<Value, String> {
+pub fn plan_isolation_files(
+    version_id: &str,
+    source: &Path,
+    destination: &Path,
+) -> Result<Value, String> {
     let mut items: Vec<Value> = Vec::new();
     let mut conflicts: Vec<String> = Vec::new();
     for name in ISOLATION_DIRS.iter().chain(ISOLATION_FILES.iter()) {
@@ -3368,8 +3874,11 @@ fn write_isolation_flag(folder: &str, id: &str, isolated: bool) -> Result<(), St
         chrono::Utc::now().timestamp_millis()
     ));
     let write = (|| -> Result<(), String> {
-        std::fs::write(&temp, serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
+        std::fs::write(
+            &temp,
+            serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
         std::fs::copy(&temp, &json_path).map_err(|e| e.to_string())?;
         Ok(())
     })();
@@ -3387,7 +3896,10 @@ fn copy_tree_excl(source: &Path, dest: &Path) -> Result<(), String> {
         return Err(format!("目标已存在：{}", dest.to_string_lossy()));
     }
     std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
-    for entry in std::fs::read_dir(source).map_err(|e| e.to_string())?.flatten() {
+    for entry in std::fs::read_dir(source)
+        .map_err(|e| e.to_string())?
+        .flatten()
+    {
         let sp = entry.path();
         let dp = dest.join(entry.file_name());
         let stat = std::fs::symlink_metadata(&sp).map_err(|e| e.to_string())?;
@@ -3462,14 +3974,20 @@ fn commit_isolation_files(plan: &Value, folder: &str, id: &str) -> Result<(), St
 }
 
 /// 对应原版 instances.ts applyIsolation：用户确认后的事务式隔离迁移
-pub fn apply_isolation(app: &AppHandle, folder: &str, id: &str, isolated: bool) -> Result<Value, String> {
+pub fn apply_isolation(
+    app: &AppHandle,
+    folder: &str,
+    id: &str,
+    isolated: bool,
+) -> Result<Value, String> {
     let plan = isolation_migration_plan(app, folder, id)?;
     if !isolated {
         // 关闭时保留独立目录数据并写显式 false
         write_isolation_flag(folder, id, false)?;
         return Ok(plan);
     }
-    commit_isolation_files(&plan, folder, id).map_err(|e| format!("隔离迁移失败，已回滚：{}", e))?;
+    commit_isolation_files(&plan, folder, id)
+        .map_err(|e| format!("隔离迁移失败，已回滚：{}", e))?;
     Ok(plan)
 }
 
@@ -3488,11 +4006,15 @@ fn category_name_identity(name: &str) -> String {
 }
 
 fn validate_category_name(name: Option<&Value>) -> Result<String, String> {
-    let Some(name) = name.and_then(|v| v.as_str()) else { return Err("请输入分类名称".into()) };
+    let Some(name) = name.and_then(|v| v.as_str()) else {
+        return Err("请输入分类名称".into());
+    };
     let name = name.trim();
     if name.is_empty()
         || name.chars().count() > 40
-        || name.chars().any(|c| (c as u32) < 0x20 || (c as u32) == 0x7f)
+        || name
+            .chars()
+            .any(|c| (c as u32) < 0x20 || (c as u32) == 0x7f)
     {
         return Err("分类名称须为 1–40 个字符，且不能包含控制字符".into());
     }
@@ -3525,14 +4047,18 @@ pub fn update_version_categories(app: &AppHandle, action: &Value) -> Result<Valu
     let action_type = action["type"].as_str().unwrap_or("");
     match action_type {
         "create" => {
-            let mut categories = s["versionCategories"].as_array().cloned().unwrap_or_default();
+            let mut categories = s["versionCategories"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
             if categories.len() >= MAX_VERSION_CATEGORIES {
                 return Err(format!("最多可创建 {} 个分类", MAX_VERSION_CATEGORIES));
             }
             let name = validate_category_name(action.get("name"))?;
-            let exists = categories
-                .iter()
-                .any(|c| category_name_identity(c["name"].as_str().unwrap_or("")) == category_name_identity(&name));
+            let exists = categories.iter().any(|c| {
+                category_name_identity(c["name"].as_str().unwrap_or(""))
+                    == category_name_identity(&name)
+            });
             if exists {
                 return Err("已存在同名分类".into());
             }
@@ -3540,15 +4066,23 @@ pub fn update_version_categories(app: &AppHandle, action: &Value) -> Result<Valu
             s["versionCategories"] = Value::Array(categories);
         }
         "rename" | "remove" => {
-            let mut categories = s["versionCategories"].as_array().cloned().unwrap_or_default();
+            let mut categories = s["versionCategories"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
             let id = action["id"].as_str().unwrap_or("").to_string();
-            let Some(idx) = categories.iter().position(|c| c["id"].as_str() == Some(id.as_str())) else {
+            let Some(idx) = categories
+                .iter()
+                .position(|c| c["id"].as_str() == Some(id.as_str()))
+            else {
                 return Err("分类已不存在，请刷新后重试".into());
             };
             if action_type == "rename" {
                 let name = validate_category_name(action.get("name"))?;
                 if categories.iter().enumerate().any(|(i, c)| {
-                    i != idx && category_name_identity(c["name"].as_str().unwrap_or("")) == category_name_identity(&name)
+                    i != idx
+                        && category_name_identity(c["name"].as_str().unwrap_or(""))
+                            == category_name_identity(&name)
                 }) {
                     return Err("已存在同名分类".into());
                 }
@@ -3573,9 +4107,14 @@ pub fn update_version_categories(app: &AppHandle, action: &Value) -> Result<Valu
                 return Err("请选择有效实例".into());
             }
             let category_id = action["categoryId"].as_str().unwrap_or("");
-            let categories = s["versionCategories"].as_array().cloned().unwrap_or_default();
+            let categories = s["versionCategories"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
             if !category_id.is_empty()
-                && !categories.iter().any(|c| c["id"].as_str() == Some(category_id))
+                && !categories
+                    .iter()
+                    .any(|c| c["id"].as_str() == Some(category_id))
             {
                 return Err("分类已不存在，请刷新后重试".into());
             }
@@ -3583,7 +4122,10 @@ pub fn update_version_categories(app: &AppHandle, action: &Value) -> Result<Valu
                 .as_array()
                 .and_then(|a| {
                     a.iter().find(|f| {
-                        f["path"].as_str().map(|p| same_path(p, tfolder)).unwrap_or(false)
+                        f["path"]
+                            .as_str()
+                            .map(|p| same_path(p, tfolder))
+                            .unwrap_or(false)
                     })
                 })
                 .and_then(|f| f["path"].as_str())
@@ -3597,7 +4139,10 @@ pub fn update_version_categories(app: &AppHandle, action: &Value) -> Result<Valu
                         row["id"].as_str() == Some(tid)
                             && row["folder"]
                                 .as_str()
-                                .map(|f| version_category_key(f, row["id"].as_str().unwrap_or("")) == target_key)
+                                .map(|f| {
+                                    version_category_key(f, row["id"].as_str().unwrap_or(""))
+                                        == target_key
+                                })
                                 .unwrap_or(false)
                     })
                 })
@@ -3612,7 +4157,10 @@ pub fn update_version_categories(app: &AppHandle, action: &Value) -> Result<Valu
                 .and_then(|row| row["folder"].as_str())
                 .unwrap_or(root);
             let key = version_category_key(instance_folder, tid);
-            let mut assignments = s["versionCategoryAssignments"].as_object().cloned().unwrap_or_default();
+            let mut assignments = s["versionCategoryAssignments"]
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
             if category_id.is_empty() {
                 assignments.remove(&key);
             } else {
@@ -3630,15 +4178,27 @@ pub fn update_version_categories(app: &AppHandle, action: &Value) -> Result<Valu
 fn rename_side_effects(app: &AppHandle, folder: &str, old_id: &str, new_id: &str) {
     let s = settings::get(app);
     // 旧版 ID 收藏保留给其他目录同名实例，当前实例迁移到目录限定的键
-    let root = folder.replace('\\', "/").trim_end_matches('/').to_lowercase();
+    let root = folder
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase();
     let old_key = json!([root, old_id]).to_string();
     let next_key = json!([root, new_id]).to_string();
-    let favorite_versions = s["favoriteVersions"].as_array().cloned().unwrap_or_default();
-    let overrides = s["favoriteInstanceOverrides"].as_object().cloned().unwrap_or_default();
+    let favorite_versions = s["favoriteVersions"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let overrides = s["favoriteInstanceOverrides"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
     let old_in_favorites = favorite_versions.iter().any(|v| v.as_str() == Some(old_id));
     if old_in_favorites || overrides.contains_key(&old_key) {
         let mut next = overrides.clone();
-        let value = overrides.get(&old_key).cloned().unwrap_or(json!(old_in_favorites));
+        let value = overrides
+            .get(&old_key)
+            .cloned()
+            .unwrap_or(json!(old_in_favorites));
         next.insert(next_key, value);
         next.remove(&old_key);
         let _ = settings::save(app, json!({ "favoriteInstanceOverrides": next }));
@@ -3647,7 +4207,10 @@ fn rename_side_effects(app: &AppHandle, folder: &str, old_id: &str, new_id: &str
     let before = version_category_key(folder, old_id);
     let after = version_category_key(folder, new_id);
     if before != after {
-        let mut assignments = s["versionCategoryAssignments"].as_object().cloned().unwrap_or_default();
+        let mut assignments = s["versionCategoryAssignments"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
         if let Some(v) = assignments.remove(&before) {
             assignments.insert(after, v);
             let _ = settings::save(app, json!({ "versionCategoryAssignments": assignments }));
@@ -3660,8 +4223,12 @@ fn rename_side_effects(app: &AppHandle, folder: &str, old_id: &str, new_id: &str
 /// 对应原版 serverEditing.ts renamedServerBindings + servers.ts renameBinding
 fn rename_server_bindings(app: &AppHandle, folder: &str, old_id: &str, new_id: &str) {
     let store = settings::user_data_dir(app).join("servers.json");
-    let Ok(raw) = std::fs::read_to_string(&store) else { return };
-    let Ok(Value::Array(list)) = serde_json::from_str::<Value>(&raw) else { return };
+    let Ok(raw) = std::fs::read_to_string(&store) else {
+        return;
+    };
+    let Ok(Value::Array(list)) = serde_json::from_str::<Value>(&raw) else {
+        return;
+    };
     // ambiguous：其他游戏文件夹存在同名版本
     let all = crate::versions::list_installed(&settings::get(app), true);
     let ambiguous = all
@@ -3669,11 +4236,17 @@ fn rename_server_bindings(app: &AppHandle, folder: &str, old_id: &str, new_id: &
         .map(|a| {
             a.iter().any(|v| {
                 v["id"].as_str() == Some(old_id)
-                    && v["folder"].as_str().map(|f| !same_path(f, folder)).unwrap_or(false)
+                    && v["folder"]
+                        .as_str()
+                        .map(|f| !same_path(f, folder))
+                        .unwrap_or(false)
             })
         })
         .unwrap_or(false);
-    let root = folder.replace('\\', "/").trim_end_matches('/').to_lowercase();
+    let root = folder
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase();
     let changed = std::cell::Cell::new(false);
     let next: Vec<Value> = list
         .into_iter()
@@ -3706,12 +4279,21 @@ fn rename_server_bindings(app: &AppHandle, folder: &str, old_id: &str, new_id: &
                 entry["versionId"] = json!(new_id);
                 touched = true;
             }
-            if let Some(cands) = entry.get("candidateVersionIds").and_then(|v| v.as_array()).cloned() {
+            if let Some(cands) = entry
+                .get("candidateVersionIds")
+                .and_then(|v| v.as_array())
+                .cloned()
+            {
                 if cands.iter().any(|c| c.as_str() == Some(old_id)) {
                     entry["candidateVersionIds"] = Value::Array(
-                        cands.iter()
+                        cands
+                            .iter()
                             .map(|c| {
-                                json!(if c.as_str() == Some(old_id) { new_id } else { c.as_str().unwrap_or("") })
+                                json!(if c.as_str() == Some(old_id) {
+                                    new_id
+                                } else {
+                                    c.as_str().unwrap_or("")
+                                })
                             })
                             .collect(),
                     );
@@ -3725,7 +4307,10 @@ fn rename_server_bindings(app: &AppHandle, folder: &str, old_id: &str, new_id: &
         })
         .collect();
     if changed.get() {
-        let _ = std::fs::write(&store, serde_json::to_string_pretty(&next).unwrap_or_default());
+        let _ = std::fs::write(
+            &store,
+            serde_json::to_string_pretty(&next).unwrap_or_default(),
+        );
     }
 }
 
@@ -3734,7 +4319,10 @@ fn rename_server_bindings(app: &AppHandle, folder: &str, old_id: &str, new_id: &
 /// isolated 判定：recordingMod/favoriteMods 存在或全局 defaultIsolation
 /// （附加模组安装依赖 mods 模块，未接入时这两个选项不改变隔离判定之外的行为）
 fn install_isolated(app: &AppHandle, opts: &Value) -> bool {
-    if opts.get("recordingMod").map(|v| !v.is_null()).unwrap_or(false)
+    if opts
+        .get("recordingMod")
+        .map(|v| !v.is_null())
+        .unwrap_or(false)
         || opts
             .get("favoriteMods")
             .and_then(|v| v.as_array())
@@ -3743,7 +4331,9 @@ fn install_isolated(app: &AppHandle, opts: &Value) -> bool {
     {
         return true;
     }
-    settings::get(app)["defaultIsolation"].as_bool().unwrap_or(true)
+    settings::get(app)["defaultIsolation"]
+        .as_bool()
+        .unwrap_or(true)
 }
 
 /// 对应原版 paths.ts withDownloadFolder：注册 + 存在性校验后冻结目录
@@ -3757,7 +4347,12 @@ fn with_download_folder(app: &AppHandle, folder: Option<&str>) -> Result<String,
         .as_array()
         .and_then(|a| {
             a.iter()
-                .find(|f| f["path"].as_str().map(|p| same_path(p, &requested)).unwrap_or(false))
+                .find(|f| {
+                    f["path"]
+                        .as_str()
+                        .map(|p| same_path(p, &requested))
+                        .unwrap_or(false)
+                })
                 .and_then(|f| f["path"].as_str())
         })
         .map(str::to_string);
@@ -3782,8 +4377,12 @@ fn scoped_folder(app: &AppHandle, id: &str, folder: Option<&str>) -> Result<Stri
     let ok = s["folders"]
         .as_array()
         .map(|a| {
-            a.iter()
-                .any(|f| f["path"].as_str().map(|p| resolve_norm(p) == resolve_norm(&target)).unwrap_or(false))
+            a.iter().any(|f| {
+                f["path"]
+                    .as_str()
+                    .map(|p| resolve_norm(p) == resolve_norm(&target))
+                    .unwrap_or(false)
+            })
         })
         .unwrap_or(false);
     if !ok {
@@ -3839,14 +4438,20 @@ fn install_version_flow(
         }
         // Fabric：可选同时安装 Fabric API 到 mods 文件夹（目录跟随实例隔离状态）
         if loader == "fabric" {
-            if let Some(fapi) = opts.get("fabricApi").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            if let Some(fapi) = opts
+                .get("fabricApi")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+            {
                 let j = read_version_json(app, active, &installed_id)?;
                 let state = instance_directory_state(app, active, &installed_id, &j);
                 let mods_dir = Path::new(state["path"].as_str().unwrap_or("")).join("mods");
                 install_fabric_api(app, rec, emit, version_id, fapi, &mods_dir)?;
             }
         }
-        emit(&json!({ "stage": "done", "progress": 1, "text": format!("{} 安装完成", installed_id) }));
+        emit(
+            &json!({ "stage": "done", "progress": 1, "text": format!("{} 安装完成", installed_id) }),
+        );
         return Ok(installed_id);
     }
     let installed_id = install_vanilla(
@@ -3877,14 +4482,29 @@ fn install_loader_flow(
     loader_version: &str,
     instance_name: Option<&str>,
 ) -> Result<String, String> {
-    emit(&json!({ "stage": "version-json", "progress": 0, "text": format!("检查原版 {}", mc_version) }));
+    emit(
+        &json!({ "stage": "version-json", "progress": 0, "text": format!("检查原版 {}", mc_version) }),
+    );
     let vanilla_pre_existed = version_json_path_in(active, mc_version).exists();
     let installer_based = loader == "forge" || loader == "neoforge";
     let mirror = mirror_pref(app).to_string();
     // 原版环境准备：fabric/quilt 未预装时进 .wuhucl/base（不进版本列表）；
     // forge/neoforge 安装器强制要求 versions/ 下存在原版，先落地再运行安装器
-    let vanilla_dest = if vanilla_pre_existed || installer_based { "versions" } else { "base" };
-    install_vanilla(app, rec, emit, active, mc_version, vanilla_dest, None, false)?;
+    let vanilla_dest = if vanilla_pre_existed || installer_based {
+        "versions"
+    } else {
+        "base"
+    };
+    install_vanilla(
+        app,
+        rec,
+        emit,
+        active,
+        mc_version,
+        vanilla_dest,
+        None,
+        false,
+    )?;
     // ---- fabric / quilt：profile json 直写 ----
     if loader == "fabric" || loader == "quilt" {
         let base = if loader == "fabric" {
@@ -3892,16 +4512,27 @@ fn install_loader_flow(
         } else {
             "https://meta.quiltmc.org/v3"
         };
-        emit(&json!({ "stage": "loader", "progress": 0.1, "text": format!("获取 {} {} 配置", loader, loader_version) }));
+        emit(
+            &json!({ "stage": "loader", "progress": 0.1, "text": format!("获取 {} {} 配置", loader, loader_version) }),
+        );
         let mut profile = fetch_json(
-            format!("{}/versions/loader/{}/{}/profile/json", base, mc_version, loader_version),
+            format!(
+                "{}/versions/loader/{}/{}/profile/json",
+                base, mc_version, loader_version
+            ),
             20,
         )?;
         let id = instance_name
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string)
-            .unwrap_or_else(|| profile.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string());
+            .unwrap_or_else(|| {
+                profile
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            });
         if id.is_empty() {
             return Err(format!("{} profile 缺少 id", loader));
         }
@@ -3947,7 +4578,9 @@ fn install_loader_flow(
         chrono::Utc::now().timestamp_millis()
     ));
     let result = (|| -> Result<String, String> {
-        emit(&json!({ "stage": "loader", "progress": 0.2, "text": format!("下载 {} 安装器", loader) }));
+        emit(
+            &json!({ "stage": "loader", "progress": 0.2, "text": format!("下载 {} 安装器", loader) }),
+        );
         let official_url = if loader == "forge" {
             resolve_forge_installer_url(mc_version, loader_version, &mirror)
         } else {
@@ -3978,33 +4611,61 @@ fn install_loader_flow(
                 }));
             };
             run_blocking(move || {
-                download_file(&app2, Some(rec), None, &url2, &tmp2, sha1.as_deref(), None, &mirror2, Some(progress), &[], &[])
+                download_file(
+                    &app2,
+                    Some(rec),
+                    None,
+                    &url2,
+                    &tmp2,
+                    sha1.as_deref(),
+                    None,
+                    &mirror2,
+                    Some(progress),
+                    &[],
+                    &[],
+                )
             })?;
         }
         // 旧版 Forge（≤1.12 install/versionInfo 格式）特殊路径
         let legacy = read_legacy_forge_installer(&tmp, mc_version, loader_version, &official_url)?;
         let id = match legacy {
             Some(plan) => prepare_and_install_legacy_forge(
-                app, rec, emit, plan, &libraries_dir(app), &mirror, active, instance_name,
+                app,
+                rec,
+                emit,
+                plan,
+                &libraries_dir(app),
+                &mirror,
+                active,
+                instance_name,
             )?,
             None => {
                 // 现代安装器：java -jar installer --installClient <dir>
                 // （对应原版 prepareInstallerDependencies 未移植，安装器自行下载依赖，见偏差说明）
                 let java = pick_java_for_installer(app);
-                emit(&json!({ "stage": "loader-process", "progress": 0, "indeterminate": true, "text": "正在检查加载器所需的 Java 环境…" }));
+                emit(
+                    &json!({ "stage": "loader-process", "progress": 0, "indeterminate": true, "text": "正在检查加载器所需的 Java 环境…" }),
+                );
                 // Forge/NeoForge 安装器要求目标目录存在 launcher_profiles.json
                 let lp = Path::new(active).join("launcher_profiles.json");
                 if !lp.exists() {
                     let _ = std::fs::write(
                         &lp,
-                        serde_json::to_string_pretty(&json!({ "profiles": {}, "settings": {}, "version": 3 }))
-                            .unwrap_or_default(),
+                        serde_json::to_string_pretty(
+                            &json!({ "profiles": {}, "settings": {}, "version": 3 }),
+                        )
+                        .unwrap_or_default(),
                     );
                 }
-                emit(&json!({ "stage": "loader-process", "progress": 0, "indeterminate": true, "text": "生成加载器运行文件…" }));
+                emit(
+                    &json!({ "stage": "loader-process", "progress": 0, "indeterminate": true, "text": "生成加载器运行文件…" }),
+                );
                 run_installer(app, rec, emit, &java, &tmp, active)?;
-                emit(&json!({ "stage": "loader-process", "progress": 1, "text": "加载器运行文件已生成" }));
-                let Some(id0) = find_installed_dir(active, loader, mc_version, loader_version) else {
+                emit(
+                    &json!({ "stage": "loader-process", "progress": 1, "text": "加载器运行文件已生成" }),
+                );
+                let Some(id0) = find_installed_dir(active, loader, mc_version, loader_version)
+                else {
                     return Err("安装器运行结束，但未找到生成的版本目录".into());
                 };
                 let mut id = id0;
@@ -4023,10 +4684,13 @@ fn install_loader_flow(
         emit(&json!({ "stage": "loader", "progress": 0.92, "text": "校验依赖库完整性…" }));
         let profile_json = read_version_json(app, active, &id)?;
         let lib_tasks = library_tasks(app, &profile_json);
-        let missing: Vec<DownloadItem> = lib_tasks.into_iter().filter(|t| !t.dest.exists()).collect();
+        let missing: Vec<DownloadItem> =
+            lib_tasks.into_iter().filter(|t| !t.dest.exists()).collect();
         if !missing.is_empty() {
             let count = missing.len();
-            emit(&json!({ "stage": "loader", "progress": 0.94, "text": format!("补全 {} 个缺失依赖库…", count) }));
+            emit(
+                &json!({ "stage": "loader", "progress": 0.94, "text": format!("补全 {} 个缺失依赖库…", count) }),
+            );
             let total = missing.len();
             {
                 let app2 = app.clone();
@@ -4069,7 +4733,11 @@ fn arg_str(args: &[Value], i: usize) -> Option<&str> {
 }
 
 /// 统一入口（PORT_CONVENTIONS 铁律 2）：返回 None 表示本模块不认识该通道
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         "versions:install" => Some(versions_install(app, args)),
         "versions:remove" => Some(
@@ -4092,7 +4760,14 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             arg_str(args, 0)
                 .ok_or_else(|| "缺少参数".to_string())
                 .and_then(|id| scoped_folder(app, id, arg_str(args, 2)))
-                .and_then(|folder| set_version_icon(app, &folder, args[0].as_str().unwrap_or(""), arg_str(args, 1).unwrap_or("")))
+                .and_then(|folder| {
+                    set_version_icon(
+                        app,
+                        &folder,
+                        args[0].as_str().unwrap_or(""),
+                        arg_str(args, 1).unwrap_or(""),
+                    )
+                })
                 .map(|_| Value::Null),
         ),
         "versions:uploadIcon" => Some(versions_upload_icon(app, args)),
@@ -4102,7 +4777,11 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
                 .ok_or_else(|| "缺少参数".to_string())
                 .and_then(|id| scoped_folder(app, id, arg_str(args, 2)))
                 .and_then(|folder| {
-                    set_version_thumbnail_fit(&folder, args[0].as_str().unwrap_or(""), arg_str(args, 1).unwrap_or(""))
+                    set_version_thumbnail_fit(
+                        &folder,
+                        args[0].as_str().unwrap_or(""),
+                        arg_str(args, 1).unwrap_or(""),
+                    )
                 })
                 .map(|_| Value::Null),
         ),
@@ -4131,7 +4810,9 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             arg_str(args, 0)
                 .ok_or_else(|| "缺少参数".to_string())
                 .and_then(|id| scoped_folder(app, id, arg_str(args, 1)))
-                .and_then(|folder| isolation_migration_plan(app, &folder, args[0].as_str().unwrap_or(""))),
+                .and_then(|folder| {
+                    isolation_migration_plan(app, &folder, args[0].as_str().unwrap_or(""))
+                }),
         ),
         "versions:categoriesUpdate" => Some(
             args.first()
@@ -4166,7 +4847,11 @@ fn versions_install(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, Str
     let title = format!(
         "安装版本 {}{}",
         vid,
-        if loader_label.is_empty() { String::new() } else { format!(" + {}", loader_label) }
+        if loader_label.is_empty() {
+            String::new()
+        } else {
+            format!(" + {}", loader_label)
+        }
     );
     let rec = tasks::register_task(&title, "version");
     let task_id = rec.id.clone();
@@ -4194,13 +4879,26 @@ fn versions_install(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, Str
             }
             Err(e) => {
                 let cancelled = e == "已取消" || rec.cancelled.load(Ordering::SeqCst);
-                let text = if cancelled { "已取消".to_string() } else { e.clone() };
+                let text = if cancelled {
+                    "已取消".to_string()
+                } else {
+                    e.clone()
+                };
                 if !cancelled {
-                    emit(&json!({ "stage": "error", "progress": 0, "text": format!("安装失败: {}", text) }));
+                    emit(
+                        &json!({ "stage": "error", "progress": 0, "text": format!("安装失败: {}", text) }),
+                    );
                 }
                 // 保留本任务的 .installing 标记供续传/显式清理
                 let stage = if cancelled { None } else { Some(last_stage) };
-                tasks::task_done(&app2, &task_id, false, Some(text.clone()), cancelled, stage.clone());
+                tasks::task_done(
+                    &app2,
+                    &task_id,
+                    false,
+                    Some(text.clone()),
+                    cancelled,
+                    stage.clone(),
+                );
                 emit_event(
                     &app2,
                     "event:installDone",
@@ -4217,7 +4915,9 @@ fn versions_install(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, Str
 }
 
 fn versions_rename(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
-    let id = arg_str(args, 0).ok_or_else(|| "缺少参数".to_string())?.to_string();
+    let id = arg_str(args, 0)
+        .ok_or_else(|| "缺少参数".to_string())?
+        .to_string();
     let new_name = arg_str(args, 1).unwrap_or("").trim().to_string();
     let folder = scoped_folder(app, &id, arg_str(args, 2))?;
     // 前置校验：游戏运行中禁止改名（launch 模块移植后接入 getRunningVersionIds）
@@ -4228,7 +4928,9 @@ fn versions_rename(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, Stri
 
 /// 对应原版 versions.ts setVersionJava（写入 _javaPath；空串恢复自动匹配）
 fn versions_set_java(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
-    let id = arg_str(args, 0).ok_or_else(|| "缺少参数".to_string())?.to_string();
+    let id = arg_str(args, 0)
+        .ok_or_else(|| "缺少参数".to_string())?
+        .to_string();
     let java_path = arg_str(args, 1).unwrap_or("").trim().to_string();
     let automatic = args.get(2).and_then(|v| v.as_bool()).unwrap_or(false);
     // withGameFolder：无注册校验，仅冻结目录
@@ -4257,7 +4959,11 @@ fn normalize_resolution(res: &Value) -> Value {
     let mode = res.get("mode").and_then(|v| v.as_str()).unwrap_or("");
     let mode = if ["windowed", "maximized", "fullscreen"].contains(&mode) {
         mode.to_string()
-    } else if res.get("fullscreen").and_then(|v| v.as_bool()).unwrap_or(false) {
+    } else if res
+        .get("fullscreen")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         "fullscreen".to_string()
     } else {
         "windowed".to_string()
@@ -4284,17 +4990,25 @@ fn resolution_validation_error(res: &Value) -> Option<String> {
     let width = res["width"].as_i64().unwrap_or(0);
     let height = res["height"].as_i64().unwrap_or(0);
     if width < GAME_WIDTH_MIN || width > GAME_WIDTH_MAX {
-        return Some(format!("窗口宽度必须是 {}–{} 之间的整数", GAME_WIDTH_MIN, GAME_WIDTH_MAX));
+        return Some(format!(
+            "窗口宽度必须是 {}–{} 之间的整数",
+            GAME_WIDTH_MIN, GAME_WIDTH_MAX
+        ));
     }
     if height < GAME_HEIGHT_MIN || height > GAME_HEIGHT_MAX {
-        return Some(format!("窗口高度必须是 {}–{} 之间的整数", GAME_HEIGHT_MIN, GAME_HEIGHT_MAX));
+        return Some(format!(
+            "窗口高度必须是 {}–{} 之间的整数",
+            GAME_HEIGHT_MIN, GAME_HEIGHT_MAX
+        ));
     }
     None
 }
 
 /// 对应原版 versions.ts setVersionResolution（null = 删除覆盖并跟随全局；原子写）
 fn versions_set_resolution(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
-    let id = arg_str(args, 0).ok_or_else(|| "缺少参数".to_string())?.to_string();
+    let id = arg_str(args, 0)
+        .ok_or_else(|| "缺少参数".to_string())?
+        .to_string();
     let folder = scoped_folder(app, &id, arg_str(args, 2))?;
     let jp = version_json_path_in(&folder, &id);
     let mut j = read_version_json(app, &folder, &id)?;
@@ -4313,8 +5027,11 @@ fn versions_set_resolution(app: &tauri::AppHandle, args: &[Value]) -> Result<Val
         }
     }
     let temp = jp.with_extension(format!("window-size-{}.tmp", crate::accounts::uuid_v4()));
-    std::fs::write(&temp, serde_json::to_string_pretty(&j).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    std::fs::write(
+        &temp,
+        serde_json::to_string_pretty(&j).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     let r = std::fs::rename(&temp, &jp);
     let _ = std::fs::remove_file(&temp);
     r.map_err(|e| e.to_string())?;
@@ -4324,8 +5041,12 @@ fn versions_set_resolution(app: &tauri::AppHandle, args: &[Value]) -> Result<Val
 /// 对应原版 versions.ts setVersionIcon（'mob:<id>' / 'file:<名>' / '' 恢复默认）
 fn set_version_icon(app: &AppHandle, folder: &str, id: &str, icon: &str) -> Result<(), String> {
     if !icon.is_empty()
-        && !regex::Regex::new(r"^mob:[a-z0-9_]{1,32}$").unwrap().is_match(icon)
-        && !regex::Regex::new(r"^file:[\w.-]{1,64}$").unwrap().is_match(icon)
+        && !regex::Regex::new(r"^mob:[a-z0-9_]{1,32}$")
+            .unwrap()
+            .is_match(icon)
+        && !regex::Regex::new(r"^file:[\w.-]{1,64}$")
+            .unwrap()
+            .is_match(icon)
     {
         return Err("非法的图标标识".into());
     }
@@ -4351,14 +5072,18 @@ fn set_version_icon(app: &AppHandle, folder: &str, id: &str, icon: &str) -> Resu
 /// 对应原版 ipc.ts versionsUploadIcon：弹窗选图 → 校验大小 → 复制进 icons 目录 → 写 json
 fn versions_upload_icon(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
     use tauri_plugin_dialog::DialogExt;
-    let id = arg_str(args, 0).ok_or_else(|| "缺少参数".to_string())?.to_string();
+    let id = arg_str(args, 0)
+        .ok_or_else(|| "缺少参数".to_string())?
+        .to_string();
     let folder = scoped_folder(app, &id, arg_str(args, 1))?;
     let picked = app
         .dialog()
         .file()
         .add_filter("图片", &["png", "jpg", "jpeg", "webp", "gif"])
         .blocking_pick_file();
-    let Some(picked) = picked else { return Ok(Value::Null) };
+    let Some(picked) = picked else {
+        return Ok(Value::Null);
+    };
     let src = PathBuf::from(picked.to_string());
     let st = std::fs::metadata(&src).map_err(|e| e.to_string())?;
     if st.len() > 5 * 1024 * 1024 {
@@ -4379,7 +5104,12 @@ fn versions_upload_icon(app: &tauri::AppHandle, args: &[Value]) -> Result<Value,
 }
 
 /// 对应原版 versions.ts setVersionThumbnail：只接受受管目录中已验证图片
-fn set_version_thumbnail(folder: &str, id: &str, image_path: &str, fit: &str) -> Result<(), String> {
+fn set_version_thumbnail(
+    folder: &str,
+    id: &str,
+    image_path: &str,
+    fit: &str,
+) -> Result<(), String> {
     if !["fill", "fit", "crop"].contains(&fit) {
         return Err("非法的缩略图显示方式".into());
     }
@@ -4400,7 +5130,10 @@ fn set_version_thumbnail(folder: &str, id: &str, image_path: &str, fit: &str) ->
     }
     let jp = version_json_path_in(folder, id);
     let mut j = read_version_json_from(&jp).map_err(|e| e.to_string())?;
-    let previous = j.get("_thumbnail").and_then(|v| v.as_str()).map(str::to_string);
+    let previous = j
+        .get("_thumbnail")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     j["_thumbnail"] = json!(image_path);
     j["_thumbnailFit"] = json!(fit);
     write_version_json(&jp, &j)?;
@@ -4435,7 +5168,10 @@ fn set_version_thumbnail_fit(folder: &str, id: &str, fit: &str) -> Result<(), St
 fn reset_version_thumbnail(folder: &str, id: &str) -> Result<(), String> {
     let jp = version_json_path_in(folder, id);
     let mut j = read_version_json_from(&jp).map_err(|e| e.to_string())?;
-    let previous = j.get("_thumbnail").and_then(|v| v.as_str()).map(str::to_string);
+    let previous = j
+        .get("_thumbnail")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     if let Some(obj) = j.as_object_mut() {
         obj.remove("_thumbnail");
         obj.remove("_thumbnailFit");
@@ -4451,7 +5187,9 @@ fn reset_version_thumbnail(folder: &str, id: &str) -> Result<(), String> {
 /// （解码重编码为 PNG 落地受管目录；失败回滚删除）
 fn versions_upload_thumbnail(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
     use tauri_plugin_dialog::DialogExt;
-    let id = arg_str(args, 0).ok_or_else(|| "缺少参数".to_string())?.to_string();
+    let id = arg_str(args, 0)
+        .ok_or_else(|| "缺少参数".to_string())?
+        .to_string();
     let folder = scoped_folder(app, &id, arg_str(args, 1))?;
     let version = read_version_json(app, &folder, &id)?;
     let picked = app
@@ -4459,7 +5197,9 @@ fn versions_upload_thumbnail(app: &tauri::AppHandle, args: &[Value]) -> Result<V
         .file()
         .add_filter("图片", &["png", "jpg", "jpeg", "webp"])
         .blocking_pick_file();
-    let Some(picked) = picked else { return Ok(Value::Null) };
+    let Some(picked) = picked else {
+        return Ok(Value::Null);
+    };
     let source = PathBuf::from(picked.to_string());
     let data = std::fs::read(&source).map_err(|e| e.to_string())?;
     let img = image::load_from_memory(&data).map_err(|_| "图片已损坏".to_string())?;
@@ -4468,16 +5208,22 @@ fn versions_upload_thumbnail(app: &tauri::AppHandle, args: &[Value]) -> Result<V
     let dest = dir.join(format!("{}.png", crate::accounts::uuid_v4()));
     let tmp = dir.join(format!(
         ".{}.tmp",
-        dest.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
+        dest.file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default()
     ));
-    img.save_with_format(&tmp, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+    img.save_with_format(&tmp, image::ImageFormat::Png)
+        .map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())?;
     let imported = dest.to_string_lossy().to_string();
     match set_version_thumbnail(
         &folder,
         &id,
         &imported,
-        version.get("_thumbnailFit").and_then(|v| v.as_str()).unwrap_or("crop"),
+        version
+            .get("_thumbnailFit")
+            .and_then(|v| v.as_str())
+            .unwrap_or("crop"),
     ) {
         Ok(()) => Ok(json!(imported)),
         Err(e) => {
@@ -4525,9 +5271,21 @@ pub fn migration_install_hook(
     loader_version: &str,
     instance_name: &str,
 ) -> Result<(), String> {
-    let loader_opt = if loader.is_empty() { None } else { Some(loader) };
-    let loader_version_opt = if loader_version.is_empty() { None } else { Some(loader_version) };
-    let name_opt = if instance_name.is_empty() { None } else { Some(instance_name) };
+    let loader_opt = if loader.is_empty() {
+        None
+    } else {
+        Some(loader)
+    };
+    let loader_version_opt = if loader_version.is_empty() {
+        None
+    } else {
+        Some(loader_version)
+    };
+    let name_opt = if instance_name.is_empty() {
+        None
+    } else {
+        Some(instance_name)
+    };
     install_vanilla_public(
         app,
         Some(rec.as_ref()),

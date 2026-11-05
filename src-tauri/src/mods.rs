@@ -689,7 +689,7 @@ fn join_ranges(list: &[Value], key: &str) -> String {
 
 /// parseModArchive()：fabric.mod.json / quilt.mod.json / neoforge.mods.toml / mods.toml /
 /// mcmod.info + jarjar 嵌套 + 图标提取。错误写入 info.error（与原版一致不抛出）。
-pub fn parse_mod_archive(data: &[u8], file_path: &str, file_name: &str, depth: u32, include_icons: bool) -> Value {
+pub fn parse_mod_archive<R: std::io::Read + std::io::Seek>(data: R, file_path: &str, file_name: &str, depth: u32, include_icons: bool) -> Value {
     let mut info = json!({
         "filePath": file_path,
         "fileName": file_name,
@@ -705,7 +705,7 @@ pub fn parse_mod_archive(data: &[u8], file_path: &str, file_name: &str, depth: u
         e["error"] = json!(msg);
         e
     };
-    let mut archive = match zip::ZipArchive::new(std::io::Cursor::new(data)) {
+    let mut archive = match zip::ZipArchive::new(data) {
         Ok(a) => a,
         Err(_) => return build_error("未找到有效的 MOD 元数据 / mod id"),
     };
@@ -1030,7 +1030,7 @@ pub fn parse_mod_archive(data: &[u8], file_path: &str, file_name: &str, depth: u
                 };
                 // 嵌套归档只贡献依赖身份，不提取图标
                 if let Ok(child) = std::thread::scope(|s| {
-                    let handle = s.spawn(|| parse_mod_archive(&entry.bytes, file_path, &name, depth + 1, false));
+                    let handle = s.spawn(|| parse_mod_archive(std::io::Cursor::new(&entry.bytes[..]), file_path, &name, depth + 1, false));
                     handle.join()
                 }) {
                     if let Some(provs) = child.get("provides").and_then(|v| v.as_array()) {
@@ -1081,11 +1081,12 @@ pub fn parse_mod_archive(data: &[u8], file_path: &str, file_name: &str, depth: u
     }
 }
 
-/// parseModFile()：单文件解析；损坏 jar → 固定错误文案
+/// parseModFile()：单文件解析；损坏 jar → 固定错误文案。
+/// 只按需读 zip 内的元数据/图标条目，不整包读入内存（大 jar 循环解析时避免堆尖峰）。
 pub fn parse_mod_file(file_path: &str) -> Value {
     let file_name = installer::basename_of(file_path);
-    match std::fs::read(file_path) {
-        Ok(bytes) => parse_mod_archive(&bytes, file_path, &file_name, 0, true),
+    match std::fs::File::open(file_path) {
+        Ok(f) => parse_mod_archive(std::io::BufReader::new(f), file_path, &file_name, 0, true),
         Err(_) => json!({
             "filePath": file_path,
             "fileName": file_name,
@@ -1174,7 +1175,7 @@ pub fn scan_mod_directory(dir: &str, hash: bool, names: Option<&[String]>, purpo
         let file_str = file.to_string_lossy().into_owned();
         match std::fs::read(&file) {
             Ok(data) => {
-                let mut info = parse_mod_archive(&data, &file_str, &name, 0, include_icons);
+                let mut info = parse_mod_archive(std::io::Cursor::new(&data[..]), &file_str, &name, 0, include_icons);
                 if include_icons && info.get("iconDataUrl").is_none() {
                     if let Ok(bytes) = read_zip_entry(&data, "pack.png", 512 * 1024) {
                         use base64::Engine;
@@ -3598,7 +3599,8 @@ pub fn get_mod_icons_in_dir(app: &tauri::AppHandle, dir: &Path, requested: &[Str
         }
         result.insert(name.clone(), json!(icon));
         if let Some(cache_path) = keys.get(&name) {
-            let payload = json!({ "icon": icon, "expires": now_ms() + if remote { 7 * 86_400_000 } else { 60_000 } });
+            // 缓存键已含 size+mtime+ctime，文件一变即失效，本地图标可与远程同寿
+            let payload = json!({ "icon": icon, "expires": now_ms() + 7 * 86_400_000 });
             let _ = std::fs::write(cache_path, payload.to_string());
         }
     }

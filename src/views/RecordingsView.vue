@@ -10,7 +10,11 @@ import { errText } from '../api';
 import { activeInstalled, store, toast } from '../store';
 import ContentSkeleton from '../components/ContentSkeleton.vue';
 import SelectMenu from '../components/SelectMenu.vue';
+import ResourceScopeFields from '../components/ResourceScopeFields.vue';
+import ResourcePathChip from '../components/ResourcePathChip.vue';
+import ResourcePagination from '../components/ResourcePagination.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import { useSweepSelect } from '../composables/sweepSelect';
 const data = ref<RecordingCatalog>({ entries: [], warnings: [], library: '', instances: [] });
 const loading = ref(false),
     busy = ref(false),
@@ -22,6 +26,9 @@ const loading = ref(false),
     selected = ref<string[]>([]),
     target = ref(''),
     confirm = ref<'trash' | 'dispatch' | ''>('');
+/** 排序跨会话记忆（与截图页同口径） */
+const sort = ref(localStorage.getItem('kamucl.recordingSort') || 'new');
+watch(sort, (v) => localStorage.setItem('kamucl.recordingSort', v));
 const results = ref<RecordingResult[]>([]);
 let generation = 0,
     disposed = false;
@@ -39,8 +46,12 @@ const currentTarget = computed(() => {
     return inst ? { id: inst, folder } : null;
 });
 const scopeOptions = [
-    { value: 'instance', label: '当前实例' },
-    { value: 'folder', label: '版本文件夹内的所有' }
+    { value: 'instance', label: '当前实例', description: '只看所选实例的录像' },
+    {
+        value: 'folder',
+        label: '版本文件夹内的所有',
+        description: '聚合文件夹内全部实例与集中收藏的录像'
+    }
 ];
 watch(
     () => JSON.stringify([activeFolder.value, store.resourceVersionId, scope.value]),
@@ -73,14 +84,21 @@ const filtered = computed(() =>
                 .includes(query.value.trim().toLowerCase())
     )
 );
-const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / 40)));
-const rows = computed(() => filtered.value.slice((page.value - 1) * 40, page.value * 40));
+const sorted = computed(() => {
+    const list = [...filtered.value];
+    if (sort.value === 'name') list.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+    else if (sort.value === 'old') list.sort((a, b) => a.modified - b.modified);
+    else list.sort((a, b) => b.modified - a.modified);
+    return list;
+});
+const pages = computed(() => Math.max(1, Math.ceil(sorted.value.length / 40)));
+const rows = computed(() => sorted.value.slice((page.value - 1) * 40, page.value * 40));
 const targets = computed(() =>
     data.value.instances.map((i) => ({ value: JSON.stringify([i.folder, i.id]), label: i.name }))
 );
 const size = (n: number) =>
     n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
-watch([query, kind, source, scope], () => {
+watch([query, kind, source, sort, scope], () => {
     page.value = 1;
     selected.value = [];
 });
@@ -107,6 +125,8 @@ async function refresh(silent = false) {
     }
 }
 function drag(event: DragEvent, entry: RecordingEntry) {
+    // 纵向拖 = 扫选接管；横向仍走文件拖出
+    if (interceptFileDrag(event)) return;
     event.preventDefault();
     event.stopPropagation();
     if (busy.value || loading.value || store.editMode) return;
@@ -115,6 +135,20 @@ function drag(event: DragEvent, entry: RecordingEntry) {
         selected.value.includes(entry.id) ? [...selected.value] : [entry.id]
     );
 }
+
+/** PCL 式扫选：按住行纵向拖 = 沿途选中/反选 */
+const workspaceEl = ref<HTMLElement | null>(null);
+const { interceptFileDrag } = useSweepSelect({
+    container: () => workspaceEl.value,
+    itemSelector: '.recording-row',
+    enabled: () => !busy.value && !loading.value && !store.editMode,
+    isSelected: (key) => selected.value.includes(key),
+    setMany: (keys, want) => {
+        const set = new Set(selected.value);
+        for (const k of keys) want ? set.add(k) : set.delete(k);
+        selected.value = [...set];
+    }
+});
 function autoRefresh() {
     if (
         !busy.value &&
@@ -130,6 +164,45 @@ function selectPage() {
     selected.value = ids.every((id) => selected.value.includes(id))
         ? selected.value.filter((id) => !ids.includes(id))
         : [...new Set([...selected.value, ...ids])];
+}
+/** 两个选择按钮同一套状态感知语义：标签永远说明下一次点击的结果（与截图页同款） */
+const pageAllSelected = computed(
+    () => rows.value.length > 0 && rows.value.every((e) => selected.value.includes(e.id))
+);
+const filteredAllSelected = computed(
+    () => sorted.value.length > 0 && sorted.value.every((e) => selected.value.includes(e.id))
+);
+function toggleAllFiltered() {
+    selected.value = filteredAllSelected.value ? [] : sorted.value.map((e) => e.id);
+}
+/** 拖入录像文件直接导入集中收藏（recordings:importAt，与按钮导入同一条路径） */
+const dragActive = ref(false);
+async function dropImport(event: DragEvent) {
+    dragActive.value = false;
+    if (busy.value) return;
+    const files = Array.from(event.dataTransfer?.files ?? [])
+        .map((f) => window.kamucl.getFilePath(f))
+        .filter(Boolean);
+    if (!files.length) return;
+    busy.value = true;
+    try {
+        const result = await invoke<RecordingResult[] | null>('recordings:importAt', files);
+        if (result) {
+            results.value = result;
+            const failed = result.filter((r) => !r.ok);
+            toast(
+                `已导入 ${result.length - failed.length} 个${
+                    failed.length ? `，${failed.length} 个未完成` : ''
+                }`,
+                failed.length ? 'error' : 'success'
+            );
+        }
+        await refresh(true);
+    } catch (e) {
+        toast('导入失败：' + errText(e), 'error');
+    } finally {
+        busy.value = false;
+    }
 }
 async function open(entry?: RecordingEntry) {
     try {
@@ -182,6 +255,7 @@ onMounted(() => {
     window.addEventListener('keydown', escape);
     window.addEventListener('focus', autoRefresh);
     refreshTimer = setInterval(autoRefresh, 15000);
+    store.resourceDropHandler = dropImport;
 });
 onUnmounted(() => {
     disposed = true;
@@ -189,6 +263,7 @@ onUnmounted(() => {
     clearInterval(refreshTimer);
     window.removeEventListener('keydown', escape);
     window.removeEventListener('focus', autoRefresh);
+    if (store.resourceDropHandler === dropImport) store.resourceDropHandler = null;
 });
 </script>
 
@@ -221,9 +296,24 @@ onUnmounted(() => {
                 </button>
             </div>
         </header>
+        <div class="recording-context">
+            <ResourceScopeFields
+                v-model:scope="scope"
+                :scope-options="scopeOptions"
+                v-model:instance-id="store.resourceVersionId"
+                :instance-options="
+                    data.instances.map((i) => ({
+                        value: i.id,
+                        label: i.name,
+                        description: i.isolated ? '已隔离' : '共享'
+                    }))
+                "
+                :instance-locked="scope === 'folder'"
+                :disabled="busy"
+            />
+        </div>
         <div class="recording-library" data-ui="recordings:library">
-            <span data-ui="RecordingsView:2931d23fc4f5" class="muted">导入与收藏保存位置：</span
-            ><span class="path" :title="data.library">{{ data.library || '正在读取…' }}</span>
+            <ResourcePathChip label="导入与收藏保存位置" :path="data.library" />
             <details class="recording-help">
                 <summary>使用说明</summary>
                 <p>
@@ -231,9 +321,14 @@ onUnmounted(() => {
                 </p>
             </details>
         </div>
-        <section class="recording-workspace card">
+        <section
+            ref="workspaceEl"
+            class="recording-workspace card"
+            :class="{ 'drop-hot': dragActive }"
+            @dragover.prevent="dragActive = true"
+            @dragleave.self="dragActive = false"
+        >
             <div class="recording-filters" data-ui="recordings:filters">
-                <SelectMenu v-model="scope" :disabled="busy" :options="scopeOptions" />
                 <input
                     data-ui="RecordingsView:a4bc662c17f4"
                     v-model="query"
@@ -258,6 +353,15 @@ onUnmounted(() => {
                         { value: 'all', label: '全部位置' },
                         { value: 'library', label: '集中收藏' },
                         { value: 'instances', label: '游戏目录' }
+                    ]"
+                />
+                <SelectMenu
+                    v-model="sort"
+                    :disabled="busy"
+                    :options="[
+                        { value: 'new', label: '最新优先' },
+                        { value: 'old', label: '最旧优先' },
+                        { value: 'name', label: '按名称' }
                     ]"
                 />
             </div>
@@ -289,14 +393,18 @@ onUnmounted(() => {
                         :disabled="busy || !rows.length"
                         @click="selectPage"
                     >
-                        选择当前页</button
+                        {{ pageAllSelected ? '取消选择当前页' : '选择当前页' }}</button
                     ><button
                         data-ui="RecordingsView:8436cfb2245d"
                         class="btn btn-ghost"
-                        :disabled="busy || !filtered.length"
-                        @click="selected = filtered.map((e) => e.id)"
+                        :disabled="busy || !sorted.length"
+                        @click="toggleAllFiltered"
                     >
-                        全选筛选结果（{{ filtered.length }}）</button
+                        {{
+                            filteredAllSelected
+                                ? '取消全选'
+                                : `全选筛选结果（${sorted.length}）`
+                        }}</button
                     ><span>已选 {{ selected.length }} 项</span
                     ><button
                         data-ui="RecordingsView:ed589ee8e06c"
@@ -319,7 +427,7 @@ onUnmounted(() => {
                         :disabled="busy"
                         @click="execute('collect')"
                     >
-                        收集到当前文件夹收藏</button
+                        复制到收藏</button
                     ><button
                         data-ui="RecordingsView:000f81fa6db3"
                         class="btn btn-ghost"
@@ -380,7 +488,6 @@ onUnmounted(() => {
                         query = '';
                         kind = 'all';
                         source = 'all';
-                        folderFilter = '';
                     "
                 >
                     清除筛选
@@ -397,6 +504,8 @@ onUnmounted(() => {
                     v-for="entry in rows"
                     :key="entry.id"
                     class="recording-row"
+                    :class="{ selected: selected.includes(entry.id) }"
+                    :data-sweep-key="entry.id"
                 >
                     <input
                         data-ui="RecordingsView:d29a579f673a"
@@ -441,24 +550,7 @@ onUnmounted(() => {
                     </button>
                 </article>
             </div>
-            <div data-ui="RecordingsView:419803271708" v-if="pages > 1" class="actions pagination">
-                <button
-                    data-ui="RecordingsView:0fa04d3df515"
-                    class="btn btn-ghost"
-                    :disabled="page <= 1"
-                    @click="page--"
-                >
-                    上一页</button
-                ><span>{{ page }} / {{ pages }} · {{ filtered.length }} 个录像</span
-                ><button
-                    data-ui="RecordingsView:6380222140de"
-                    class="btn btn-ghost"
-                    :disabled="page >= pages"
-                    @click="page++"
-                >
-                    下一页
-                </button>
-            </div>
+            <ResourcePagination v-model:page="page" :page-count="pages" :total="sorted.length" />
         </section>
         <details
             data-ui="RecordingsView:d26a22685a69"
@@ -510,9 +602,10 @@ onUnmounted(() => {
 }
 .recording-library {
     display: flex;
-    justify-content: space-between;
+    align-items: flex-start;
     gap: 20px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    min-width: 0;
 }
 .recording-library h3 {
     margin: 0;
@@ -523,9 +616,15 @@ onUnmounted(() => {
     gap: 10px;
     flex-wrap: wrap;
 }
+.recording-context {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
 .recording-filters {
     display: grid;
-    grid-template-columns: minmax(200px, 1fr) minmax(180px, 1fr) 150px 150px;
+    grid-template-columns: minmax(200px, 1.6fr) 150px 150px;
     gap: 12px;
 }
 .recording-controls {
@@ -636,14 +735,26 @@ onUnmounted(() => {
     min-width: 0;
     overflow-wrap: anywhere;
 }
+/* 使用说明与路径条并排：开关钉在右侧、整条可点；展开/收起时开关位置不变（控件不得因交互跳动） */
 .recording-help {
     margin-left: auto;
-    max-width: 100%;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: min(640px, 55%);
     line-height: 1.7;
 }
 .recording-help summary {
+    display: block;
+    text-align: right;
     cursor: pointer;
     white-space: nowrap;
+}
+/* display:block 会吃掉 <summary> 默认三角，这里显式补回展开方向箭头 */
+.recording-help summary::after {
+    content: " ▸";
+}
+.recording-help[open] summary::after {
+    content: " ▾";
 }
 .recording-workspace {
     padding: 16px;
@@ -652,15 +763,32 @@ onUnmounted(() => {
     min-height: 240px;
     align-content: start;
 }
+.recording-workspace.drop-hot {
+    outline: 2px dashed var(--accent);
+    outline-offset: -4px;
+}
+.recording-workspace.drop-hot::after {
+    content: '松开导入到集中收藏';
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent);
+    color: var(--on-accent);
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    z-index: 5;
+    pointer-events: none;
+}
+.recording-workspace {
+    position: relative;
+}
+.recording-workspace.sweeping {
+    user-select: none;
+}
 .recording-filters {
-    grid-template-columns: minmax(190px, 1.5fr) minmax(160px, 1fr) 130px 130px;
-}
-.recording-filters > input {
-    grid-column: 1;
-    grid-row: 1;
-}
-.recording-filters > :first-child {
-    grid-column: 2;
+    grid-template-columns: minmax(190px, 1.5fr) 130px 130px 130px;
 }
 .recording-controls {
     padding: 8px 0;
@@ -673,6 +801,12 @@ onUnmounted(() => {
 .recording-row {
     padding: 12px 0;
     min-height: 72px;
+}
+.recording-row:hover {
+    background: var(--hover);
+}
+.recording-row.selected {
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 .recording-info strong {
     word-break: normal;
@@ -696,10 +830,6 @@ onUnmounted(() => {
     }
     .recording-filters > input {
         grid-column: 1/-1;
-    }
-    .recording-filters > :first-child {
-        grid-row: 2;
-        grid-column: 1;
     }
 }
 @media (max-width: 650px) {

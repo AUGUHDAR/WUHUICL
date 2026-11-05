@@ -16,7 +16,8 @@ import {
     communitySearch,
     errText,
     getManifest,
-    getModTargets
+    getModTargets,
+    selectDir
 } from '../api';
 import { store, toast, selectedInstance, displayVersionName as versionLabel } from '../store';
 import { instanceKey } from '@shared/modCompatibility';
@@ -49,7 +50,7 @@ import type {
     CommunitySource,
     LoaderName
 } from '@shared/types';
-import type { InstalledVersion } from '@shared/types';
+import type { InstalledVersion, RemoteVersion } from '@shared/types';
 
 // ---------------- 资源外链（源页面 + MC 百科介绍） ----------------
 /** CurseForge 的 URL 分类段（按当前搜索分类推断） */
@@ -185,7 +186,7 @@ const loaderOptions: Array<{ value: '' | LoaderName; label: string }> = [
 ];
 
 /** 完整 MC 版本列表（与游戏下载页同一数据源：远程版本清单，正式版为主） */
-const manifestVersions = ref<string[]>([]);
+const manifestVersions = ref<Array<{ id: string; type: RemoteVersion['type'] }>>([]);
 const manifestLoading = ref(false);
 
 async function loadManifest() {
@@ -193,12 +194,28 @@ async function loadManifest() {
     manifestLoading.value = true;
     try {
         const list = await getManifest();
-        manifestVersions.value = list.filter((v) => v.type === 'release').map((v) => v.id);
+        // 全量清单（正式版+快照+旧版），排序：正式版在前按新到旧，其余按新到旧缀后；类型供彩色角标
+        const rank: Record<RemoteVersion['type'], number> = {
+            release: 0,
+            snapshot: 1,
+            old_beta: 2,
+            old_alpha: 3
+        };
+        manifestVersions.value = [...list]
+            .sort((a, b) => {
+                const r = rank[a.type] - rank[b.type];
+                if (r) return r;
+                return a.releaseTime < b.releaseTime ? 1 : -1;
+            })
+            .map((v) => ({ id: v.id, type: v.type }));
     } catch {
         /* 清单失败时回退到已安装版本 */
         const set = new Set<string>();
         for (const v of store.installed) if (v.mcVersion) set.add(v.mcVersion);
-        manifestVersions.value = [...set].sort().reverse();
+        manifestVersions.value = [...set]
+            .sort()
+            .reverse()
+            .map((id) => ({ id, type: 'release' as const }));
     } finally {
         manifestLoading.value = false;
     }
@@ -207,6 +224,32 @@ async function loadManifest() {
 const versionInput = ref(previousSession?.versionInput ?? '');
 
 onMounted(() => void loadManifest());
+
+/** 消费资源页的语境交接（模组/资源包/光影包页「下载X…」跳入）：预填资源类型与目标实例 */
+function consumeCommunityHandoff() {
+    const handoff = store.communityHandoff;
+    if (!handoff) return;
+    store.communityHandoff = null;
+    query.kind = handoff.kind;
+    const inst = store.installed.find(
+        (v) => v.id === handoff.versionId && usableCommunityInstance(v)
+    );
+    if (!inst) return;
+    versionSelection.source = 'installed';
+    versionSelection.instance = instanceKey(inst);
+    versionSelection.loaderSource = 'instance';
+    query.mcVersion = inst.mcVersion || '';
+    query.loader = inst.loader || '';
+    versionInput.value = inst.mcVersion || '';
+}
+watch(
+    () => store.installed.length,
+    () => consumeCommunityHandoff()
+);
+onMounted(() => {
+    consumeCommunityHandoff();
+    void loadManifest();
+});
 
 const query = reactive(initialCommunityQuery(previousSession));
 const versionSelection = reactive(initialCommunityVersionSelection(previousSession));
@@ -254,6 +297,8 @@ const sortOptions = [
 // ---------------- 搜索与列表 ----------------
 const results = ref<CommunityResult[]>(previousSession?.results ?? []);
 const loading = ref(false);
+/** 结果切换淡入标记（无感刷新：旧结果在位，新结果轻淡入） */
+const swapAnim = ref('');
 const loadingMore = ref(false);
 const searched = ref(previousSession?.searched ?? false); // 是否已发起过搜索（区分初始空态）
 const loadError = ref(previousSession?.error ?? '');
@@ -326,8 +371,22 @@ async function doSearch(reset: boolean, page = currentPage.value) {
         });
         if (generation !== searchGeneration) return;
         const list = response.items;
-        if (first) results.value = list;
-        else results.value = [...results.value, ...list];
+        if (first) {
+            // 结果有变化才淡入；同结果重搜不闪
+            const prevKey = results.value.map(itemKey).join('|');
+            const nextKey = list.map(itemKey).join('|');
+            if (prevKey !== nextKey && results.value.length) {
+                swapAnim.value = false;
+                void nextTick(() => {
+                    swapAnim.value = true;
+                    setTimeout(() => (swapAnim.value = ''), 240);
+                });
+            } else if (!results.value.length) {
+                swapAnim.value = true;
+                setTimeout(() => (swapAnim.value = ''), 240);
+            }
+            results.value = list;
+        } else results.value = [...results.value, ...list];
         totalResults.value = response.total;
         searchWarnings.value = response.warnings ?? [];
         hasMore.value = requestedOffset + PAGE_SIZE < response.total;
@@ -546,7 +605,9 @@ const modal = reactive({
     fileId: '',
     versionId: '',
     mcVersion: '',
-    loader: '' as LoaderName | ''
+    loader: '' as LoaderName | '',
+    /** 外部目录（PCL 同款）：设置后资源直落该文件夹，不走实例 */
+    externalDir: ''
 });
 
 const isModpack = computed(() => modal.kind === 'modpack');
@@ -631,22 +692,45 @@ const canConfirm = computed(
     () =>
         !!selectedFile.value &&
         !modal.loadingFiles &&
-        (isModpack.value || targetOptions.value.some((v) => instanceKey(v) === modal.versionId))
+        (isModpack.value ||
+            !!modal.externalDir ||
+            targetOptions.value.some((v) => instanceKey(v) === modal.versionId))
 );
+
+/** 选外部目录（app:selectDir），选中后清实例选择 */
+async function pickExternalDir() {
+    try {
+        const dir = await selectDir();
+        if (!dir) return;
+        modal.externalDir = dir;
+        modal.versionId = '';
+    } catch {
+        /* 取消选择 */
+    }
+}
 
 function confirmDownload() {
     const file = selectedFile.value;
     if (!file || !canConfirm.value) return;
+    const external = !isModpack.value && modal.externalDir ? modal.externalDir : '';
     const target = isModpack.value
         ? undefined
-        : targetOptions.value.find((v) => instanceKey(v) === modal.versionId);
+        : external
+          ? undefined
+          : targetOptions.value.find((v) => instanceKey(v) === modal.versionId);
     try {
         const folder =
             target?.folder ||
             store.settings?.folders.find((folder) => folder.isDefault)?.path ||
             store.settings?.gameDir ||
             '';
-        const { added } = downloadQueue.enqueue({ file, kind: modal.kind, target, folder });
+        const { added } = downloadQueue.enqueue({
+            file,
+            kind: modal.kind,
+            target,
+            folder,
+            externalDir: external || undefined
+        });
         modal.open = false;
         fileGeneration++;
         openGeneration++;
@@ -654,7 +738,9 @@ function confirmDownload() {
             added
                 ? modal.kind === 'mod'
                     ? '已加入社区队列，检测完成后请在队列确认前置与安装'
-                    : '已加入社区下载队列，可继续浏览资源'
+                    : external
+                      ? '已加入社区下载队列，将保存到所选文件夹'
+                      : '已加入社区下载队列，可继续浏览资源'
                 : '该文件已在目标实例的社区队列中',
             'info'
         );
@@ -1000,6 +1086,7 @@ function confirmDownload() {
                     <div
                         data-ui="CommunityView:ea58bb908a86"
                         class="result-list"
+                        :class="{ 'swap-in': !!swapAnim }"
                         :inert="loading || !!loadError"
                         :aria-busy="loading"
                     >
@@ -1310,7 +1397,7 @@ function confirmDownload() {
                                 @change="loadFiles"
                         /></label>
                         <datalist data-ui="CommunityView:3ea5bc9c8890" id="mod-minecraft-versions">
-                            <option v-for="v in manifestVersions" :key="v" :value="v" />
+                            <option v-for="v in manifestVersions" :key="v.id" :value="v.id" />
                         </datalist>
                     </div>
 
@@ -1382,26 +1469,51 @@ function confirmDownload() {
                     <!-- 目标版本（整合包安装即新实例，无需选择） -->
                     <template v-if="!isModpack">
                         <p class="modal-label">下载到版本</p>
-                        <SelectMenu
-                            aria-label="下载目标实例"
-                            v-if="targetOptions.length"
-                            v-model="modal.versionId"
-                            :options="
-                                targetOptions.map((v) => ({
-                                    value: instanceKey(v),
-                                    label:
-                                        v.id +
-                                        ' · ' +
-                                        v.mcVersion +
-                                        ' / ' +
-                                        (v.loader || '纯净版') +
-                                        ' · ' +
-                                        v.folder
-                                }))
-                            "
-                        />
-                        <p data-ui="CommunityView:ab12acbb18fe" v-else class="files-error">
-                            没有与所选文件兼容的已安装实例；可调整文件筛选，或在游戏版本页安装。
+                        <div class="target-row">
+                            <SelectMenu
+                                aria-label="下载目标实例"
+                                v-if="targetOptions.length && !modal.externalDir"
+                                v-model="modal.versionId"
+                                :options="
+                                    targetOptions.map((v) => ({
+                                        value: instanceKey(v),
+                                        label:
+                                            v.id +
+                                            ' · ' +
+                                            v.mcVersion +
+                                            ' / ' +
+                                            (v.loader || '纯净版') +
+                                            ' · ' +
+                                            v.folder
+                                    }))
+                                "
+                            />
+                            <span v-if="modal.externalDir" class="muted external-dir" :title="modal.externalDir">{{
+                                modal.externalDir
+                            }}</span>
+                            <button
+                                class="btn btn-ghost btn-sm"
+                                :aria-label="modal.externalDir ? '改回下载到实例' : '下载到任意文件夹'"
+                                :title="
+                                    modal.externalDir
+                                        ? '改回下载到实例'
+                                        : '不进实例，直接保存到所选文件夹'
+                                "
+                                @click="
+                                    modal.externalDir
+                                        ? ((modal.externalDir = ''), (modal.versionId = ''))
+                                        : pickExternalDir()
+                                "
+                            >
+                                {{ modal.externalDir ? '改回实例' : '文件夹…' }}
+                            </button>
+                        </div>
+                        <p
+                            data-ui="CommunityView:ab12acbb18fe"
+                            v-if="!targetOptions.length && !modal.externalDir"
+                            class="files-error"
+                        >
+                            没有与所选文件兼容的已安装实例；可调整文件筛选、下载到任意文件夹，或在游戏版本页安装。
                         </p>
                     </template>
                     <p data-ui="CommunityView:a8e08b82f315" v-else class="muted pack-tip">
@@ -1868,6 +1980,26 @@ function confirmDownload() {
     color: var(--text-dim);
     margin: var(--space-4) 0 var(--space-2);
 }
+/* 目标行：实例选择器 + 外部目录开关/回显 */
+.target-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.target-row > :first-child {
+    flex: 1;
+    min-width: 0;
+}
+.external-dir {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
+}
 .files-loading {
     display: flex;
     align-items: center;
@@ -1989,6 +2121,18 @@ function confirmDownload() {
 .result-list {
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
     gap: 16px;
+}
+/* 无感刷新：条件变化重搜时旧结果保留在位，新结果就位后整列轻淡入（不闪白不跳动） */
+.result-list.swap-in {
+    animation: results-swap-in 0.18s ease;
+}
+@keyframes results-swap-in {
+    from {
+        opacity: 0.35;
+    }
+    to {
+        opacity: 1;
+    }
 }
 .result-card {
     box-shadow: none;

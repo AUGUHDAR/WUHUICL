@@ -34,8 +34,14 @@ export const settingsCatalog = [
     {
         id: 'thumbnail',
         category: 'appearance',
-        name: '首页启动卡图片',
-        keywords: '轮播 插画 缩略图 背景 停留时间'
+        name: '首页启动卡·像素动画',
+        keywords: '动画 像素 场景 背景 速度 停留 轮播 黎明 洞穴 红石 传送门 炉火 起飞'
+    },
+    {
+        id: 'thumbnail-images',
+        category: 'appearance',
+        name: '首页启动卡·图片轮播',
+        keywords: '图片 轮播 插画 缩略图 背景 停留时间 动图 gif 导入'
     },
     {
         id: 'motion',

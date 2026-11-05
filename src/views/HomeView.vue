@@ -8,6 +8,8 @@ import { CarouselPlayback } from '@shared/carouselPlayback';
 import {
     errText,
     exportLaunchLogs,
+    exportLaunchScript,
+    shareLogsToMclogs,
     getSkinProfile,
     getSettings,
     launchGame,
@@ -40,8 +42,13 @@ import {
 import Avatar from '../components/Avatar.vue';
 import { skinSiteIconUrl } from '../skinSiteIcons';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import HeroSceneCanvas from '../components/HeroSceneCanvas.vue';
+import type { HeroSceneEntry } from '../heroScenes';
 import SkinViewer3D from '../components/SkinViewer3D.vue';
 import CreatorCard from '../components/CreatorCard.vue';
+import LaunchHeatmap from '../components/LaunchHeatmap.vue';
+// 手机触屏没有 hover 引导，死按钮等于断路：无实例时按钮保持可点并给出引导
+const isAndroid = window.kamucl.platform === 'android';
 import type {
     ImageFit,
     InstalledVersion,
@@ -165,6 +172,10 @@ function stopBannerTimer() {
 function startBannerTimer() {
     stopBannerTimer();
     outgoingBanner.value = null;
+    if (showHeroAnimation.value) {
+        // 动画模式不渲染图片层；书签在切回图片模式时由下方 watch 重启轮播续播。
+        return;
+    }
     if (!banners.value.length) {
         playback = null;
         playbackKey = '';
@@ -238,6 +249,8 @@ function onBannerError(item: { custom: boolean; path: string }) {
 // ---------------- 启动、设置与日志 ----------------
 const launching = computed(() => store.launchState?.status === 'launching');
 const running = computed(() => store.launchState?.status === 'running');
+// 进程已拉起、游戏窗口尚未出现（PCL 同款阶段）
+const waitingWindow = computed(() => store.launchState?.status === 'waiting-window');
 const launchFailed = computed(
     () =>
         store.launchState?.status === 'error' ||
@@ -247,9 +260,48 @@ const percent = computed(() =>
     store.progress ? Math.round(progressMono(store.progress) * 100) : 0
 );
 const launchText = computed(() => {
-    if (launching.value) return store.progress?.text || '正在启动…';
+    if (launching.value || waitingWindow.value) return store.progress?.text || '正在启动…';
     return running.value ? '再次启动' : launchFailed.value ? '重新启动' : '开始游戏';
 });
+
+// ---------------- 首页启动卡像素动画（背景类型 = 像素动画时替代图片轮播） ----------------
+// 场景渲染在后端 hero_scenes（vendor 自 LumilioCL，起飞为 WUHUICL 原创）；
+// HeroSceneCanvas 持有时钟并画帧，这里只决定模式、联动悬停/启动进度。
+const heroAnimationMode = computed(() => appearancePreview.value?.launchThumbnail?.mode !== 'image');
+const heroFallback = ref(false);
+const showHeroAnimation = computed(() => heroAnimationMode.value && !heroFallback.value);
+const heroHovered = ref(false);
+const launchHovered = ref(false);
+/** 当前场景信息行（HeroSceneCanvas 上报；背景类型为像素动画时显示在卡片左侧）。 */
+const heroSceneInfo = ref<HeroSceneEntry | null>(null);
+const heroLoading = computed(() => ({
+    active: launching.value || waitingWindow.value,
+    progress: Math.min(1, Math.max(0, percent.value / 100))
+}));
+const heroDimmed = computed(() => running.value);
+const heroAnimationSpeed = computed(() => {
+    const speed = appearancePreview.value?.launchThumbnail.animation?.speed;
+    return typeof speed === 'number' && speed > 0 ? Math.min(3, speed) : 1;
+});
+const heroDwellSeconds = computed(() => {
+    const dwell = appearancePreview.value?.launchThumbnail.animation?.dwellSeconds;
+    return typeof dwell === 'number' && dwell > 0 ? Math.min(60, dwell) : 9.5;
+});
+const heroInstanceKey = computed(
+    () => `${currentVersion.value?.folder ?? ''}/${currentVersion.value?.id ?? ''}`
+);
+function onHeroFallback(reason: string) {
+    heroFallback.value = true;
+    toast('像素动画暂不可用，已切回图片轮播：' + reason, 'error');
+}
+watch(showHeroAnimation, (active) => {
+    // 动画↔图片模式切换：回到图片模式时重启轮播（含书签续播）。
+    if (!active) startBannerTimer();
+});
+watch(heroAnimationMode, (mode) => {
+    if (mode) heroFallback.value = false; // 切回动画模式时重置，给渲染器一次重试
+});
+
 // ---------------- 快捷行悬浮浮块（跟随指针在三格间平滑滑动） ----------------
 const runtimeHover = ref(-1);
 const runtimeStrip = ref<HTMLElement | null>(null);
@@ -273,6 +325,7 @@ const heroStatus = computed(() => {
     const version = currentVersion.value;
     if (!version) return { text: '等待选择', tone: 'idle' };
     if (running.value) return { text: '游戏运行中', tone: 'running' };
+    if (waitingWindow.value) return { text: '正在等待窗口出现', tone: 'running' };
     if (launching.value) return { text: '正在准备', tone: 'running' };
     if (launchFailed.value || version.failed || version.incomplete) {
         return { text: '需要检查', tone: 'error' };
@@ -280,12 +333,17 @@ const heroStatus = computed(() => {
     return { text: '就绪', tone: 'ready' };
 });
 
-async function startVersion(id: string, createCommandWorld = false) {
+const relaunchConfirm = ref<{ id: string; createCommandWorld: boolean } | null>(null);
+async function startVersion(id: string, createCommandWorld = false, force = false) {
     if (!id) return;
     selectedId.value = id;
-    // 多开支持：仅「正在启动」的重复点击拦截；已有游戏运行中仍可再启动新实例
-    if (launching.value) {
+    // 多开支持：「正在启动/等待窗口」重复点击拦截；已有游戏运行中再启动需二次确认
+    if (launching.value || waitingWindow.value) {
         toast('正在启动中，请稍候', 'info');
+        return;
+    }
+    if (running.value && !force) {
+        relaunchConfirm.value = { id, createCommandWorld };
         return;
     }
     if (!store.selectedAccount) {
@@ -334,7 +392,14 @@ async function cancelRestartPrompt() {
 }
 
 async function onLaunchClick() {
-    if (!launching.value) await startVersion(selectedId.value);
+    if (launching.value || waitingWindow.value) return;
+    // 移动端：未选实例不做静默 disabled，给出提示并直接带到版本管理
+    if (!currentVersion.value && isAndroid) {
+        toast('请先选择或下载一个游戏实例', 'info');
+        openVersionSettings();
+        return;
+    }
+    await startVersion(selectedId.value);
 }
 
 function openVersionSettings() {
@@ -365,6 +430,40 @@ async function exportFailureLogs() {
         toast(`导出失败：${errText(error)}`, 'error');
     } finally {
         exportingLogs.value = false;
+    }
+}
+
+/** 分享 latest.log 到 mclo.gs：成功后复制链接到剪贴板 */
+const sharingLogs = ref(false);
+async function shareLogs() {
+    if (sharingLogs.value) return;
+    sharingLogs.value = true;
+    try {
+        const result = await shareLogsToMclogs(store.launchingVersionId || selectedId.value);
+        await navigator.clipboard.writeText(result.url).catch(() => undefined);
+        toast(`已上传 mclo.gs，链接已复制：${result.url}`, 'success');
+    } catch (error) {
+        toast(errText(error), 'error');
+    } finally {
+        sharingLogs.value = false;
+    }
+}
+
+/** 导出最近一次启动的完整命令为 .bat（HMCL/PCL 同款排障利器） */
+const exportingScript = ref(false);
+async function exportScript() {
+    if (exportingScript.value) return;
+    exportingScript.value = true;
+    try {
+        const saved = await exportLaunchScript(
+            selectedId.value,
+            currentVersion.value?.folder
+        );
+        if (saved) toast(`启动脚本已导出：${saved}`, 'success');
+    } catch (error) {
+        toast(errText(error), 'error');
+    } finally {
+        exportingScript.value = false;
     }
 }
 
@@ -611,29 +710,200 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div data-ui="HomeView:a32c099bc136" class="home-dashboard">
+    <!-- ================= Android 启动台（移动端专属信息架构，参照 ZL2/FCL：
+         一屏一个主题：当前实例 + 启动 + 账号；其余功能各归各屏，不做桌面布局压缩） ================= -->
+    <div v-if="isAndroid" data-ui="HomeView:m000launchpad" class="m-launchpad">
+        <!-- 中：舞台 = 桌面首页横幅卡的移动化（背景图 + 版本元素 + 两角操作） -->
+        <section
+            data-ui="HomeView:m005stage"
+            class="m-stage"
+            :class="{
+                'has-bg': banners.length || showHeroAnimation,
+                'no-version': !currentVersion
+            }"
+            @mouseenter="heroHovered = true"
+            @mouseleave="heroHovered = false"
+        >
+            <HeroSceneCanvas
+                v-if="showHeroAnimation"
+                data-ui="HomeView:m005scene"
+                compact
+                :hover-paused="heroHovered"
+                :flare-target="launchHovered"
+                :loading="heroLoading"
+                :dimmed="heroDimmed"
+                :instance-key="heroInstanceKey"
+                @fallback="onHeroFallback"
+            />
+            <img
+                data-ui="HomeView:m024bg"
+                v-if="!showHeroAnimation && banners.length"
+                class="m-stage-bg"
+                :src="banners[0]?.src"
+                alt=""
+            />
+            <div
+                data-ui="HomeView:m025shade"
+                v-if="banners.length || showHeroAnimation"
+                class="m-stage-shade"
+            ></div>
+
+            <!-- 左上：当前版本 + 框起的版本名元素 -->
+            <div data-ui="HomeView:m006head" class="m-stage-head">
+                <span data-ui="HomeView:m007kicker" class="m-kicker">当前版本</span>
+                <button
+                    data-ui="HomeView:m008namechip"
+                    class="m-namechip"
+                    @click="openVersionSettings"
+                >
+                    {{ currentVersion ? heroName : '尚未选择实例' }}
+                </button>
+            </div>
+
+            <!-- 右上：运行状态 pill（一行紧凑） -->
+            <span
+                data-ui="HomeView:m018status"
+                class="m-status"
+                :class="`is-${heroStatus.tone}`"
+            >
+                <i></i>{{ heroStatus.text }} · {{ javaText }} · {{ memoryText }}
+            </span>
+
+            <!-- 左下：版本设置 / 右下：更改版本 -->
+            <div data-ui="HomeView:m040corner" class="m-stage-corner left">
+                <button
+                    data-ui="HomeView:m041settings"
+                    class="m-corner-btn"
+                    @click="openVersionSettings"
+                >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3" />
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06-.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06-.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+                    </svg>
+                    版本设置
+                </button>
+            </div>
+            <div data-ui="HomeView:m042corner" class="m-stage-corner right">
+                <button
+                    data-ui="HomeView:m043change"
+                    class="m-corner-btn"
+                    @click="openVersionSettings"
+                >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+                        <path d="M3 11h18" />
+                    </svg>
+                    更改版本
+                </button>
+            </div>
+        </section>
+
+        <!-- 右：操作坞（账号卡 → 皮肤预览 → 启动） -->
+        <aside data-ui="HomeView:m030dock" class="m-dock">
+            <button
+                data-ui="HomeView:m036account"
+                class="m-account"
+                @click="store.currentView = 'accounts'"
+            >
+                <Avatar :size="34" />
+                <span data-ui="HomeView:m037accinfo" class="m-account-info">
+                    <b>{{ accountName }}</b>
+                    <i>{{
+                        store.selectedAccount
+                            ? store.selectedAccount.type === 'offline'
+                                ? '离线账号'
+                                : '已登录'
+                            : '点击添加或选择账户'
+                    }}</i>
+                </span>
+            </button>
+
+            <div
+                data-ui="HomeView:m031skin"
+                class="m-skin"
+                @click="store.currentView = 'skins'"
+            >
+                <div data-ui="HomeView:m033stage2" class="m-skin-stage">
+                    <SkinViewer3D :src="skinSrc" :variant="skinVariant" :cape="activeCape" />
+                    <div data-ui="HomeView:m034loading" v-if="skinLoading" class="m-skin-overlay">
+                        <span class="spin"></span>
+                    </div>
+                </div>
+                <span data-ui="HomeView:m038hint" class="m-skin-hint">
+                    {{ currentSkin ? (skinVariant === 'slim' ? '纤细模型' : '经典模型') : '动态角色' }}
+                    · 拖动旋转 · 点击编辑
+                </span>
+            </div>
+
+            <button
+                data-ui="HomeView:m011launch"
+                class="m-launch"
+                :class="{ launching }"
+                @click="onLaunchClick"
+                @mouseenter="launchHovered = true"
+                @mouseleave="launchHovered = false"
+            >
+                <span
+                    data-ui="HomeView:m012progress"
+                    v-if="launching"
+                    class="launch-progress"
+                    :style="{ width: percent + '%' }"
+                ></span>
+                <svg data-ui="HomeView:m013icon" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                    <path d="M8 5.5v13l11-6.5-11-6.5Z" />
+                </svg>
+                <span data-ui="HomeView:m014text">{{
+                    currentVersion ? launchText : '选择实例启动'
+                }}</span>
+            </button>
+        </aside>
+    </div>
+
+    <!-- ================= 桌面端原布局（Android 不渲染，互不影响） ================= -->
+    <div v-else data-ui="HomeView:a32c099bc136" class="home-dashboard">
         <div data-ui="HomeView:5fc354f9fa6d" class="home-main">
             <section
                 data-ui="HomeView:53555cbc5ab3"
                 class="hero-card"
-                :class="{ 'no-banner': !banners.length }"
+                :class="{ 'no-banner': !banners.length && !showHeroAnimation }"
                 data-edit="banner"
+                @mouseenter="heroHovered = true"
+                @mouseleave="heroHovered = false"
             >
-                <img
-                    data-ui="HomeView:1182a4262184"
-                    v-for="item in bannerLayers"
-                    :key="item.path"
-                    :src="item.src"
-                    class="hero-image"
-                    :class="{ active: item.index === bannerIndex }"
-                    :style="{ objectFit: item.fit }"
-                    alt=""
-                    aria-hidden="true"
-                    @error="onBannerError(item)"
-                    @load="readyBanners.add(item.src)"
-                    @transitionend="finishBannerExit(item.index, $event)"
+                <HeroSceneCanvas
+                    v-if="showHeroAnimation"
+                    data-ui="HomeView:heroScene"
+                    :hover-paused="heroHovered"
+                    :flare-target="launchHovered"
+                    :loading="heroLoading"
+                    :dimmed="heroDimmed"
+                    :instance-key="heroInstanceKey"
+                    :speed="heroAnimationSpeed"
+                    :dwell-seconds="heroDwellSeconds"
+                    @scene="heroSceneInfo = $event"
+                    @fallback="onHeroFallback"
                 />
-                <div data-ui="HomeView:5838d59b9e2a" v-if="banners.length" class="hero-shade"></div>
+                <template v-if="!showHeroAnimation">
+                    <img
+                        data-ui="HomeView:1182a4262184"
+                        v-for="item in bannerLayers"
+                        :key="item.path"
+                        :src="item.src"
+                        class="hero-image"
+                        :class="{ active: item.index === bannerIndex }"
+                        :style="{ objectFit: item.fit }"
+                        alt=""
+                        aria-hidden="true"
+                        @error="onBannerError(item)"
+                        @load="readyBanners.add(item.src)"
+                        @transitionend="finishBannerExit(item.index, $event)"
+                    />
+                </template>
+                <div
+                    data-ui="HomeView:5838d59b9e2a"
+                    v-if="banners.length || showHeroAnimation"
+                    class="hero-shade"
+                ></div>
 
                 <div data-ui="HomeView:2e850cf13849" class="hero-content" data-edit="bannerText">
                     <span data-ui="HomeView:13616e708e66" class="hero-kicker">当前版本</span>
@@ -682,6 +952,18 @@ onUnmounted(() => {
                         </Transition>
                     </div>
 
+                    <!-- 像素动画场景文案块（色点 + 眉标 + 标题 + 注），随场景切换淡入 -->
+                    <Transition v-if="showHeroAnimation && heroSceneInfo" name="hero-scene-copy" mode="out-in">
+                        <div :key="heroSceneInfo.id" class="hero-scene-copy">
+                            <span class="hero-scene-eyebrow">
+                                <i :style="{ background: heroSceneInfo.accent }"></i>{{ heroSceneInfo.eyebrow }}
+                            </span>
+                            <strong class="hero-scene-title">{{ heroSceneInfo.title }}</strong>
+                            <span class="hero-scene-caption">{{ heroSceneInfo.caption
+                            }}<em v-if="heroSceneInfo.note"> · {{ heroSceneInfo.note }}</em></span>
+                        </div>
+                    </Transition>
+
                     <div data-ui="HomeView:b9457a1e78a6" class="hero-actions">
                         <div data-ui="HomeView:8079f9c9866a" class="hero-secondary-actions">
                             <button
@@ -729,8 +1011,10 @@ onUnmounted(() => {
                                 data-ui="HomeView:3fed5eb9ac9e"
                                 class="launch-main"
                                 :class="{ launching }"
-                                :disabled="launching || !currentVersion"
+                                :disabled="launching || waitingWindow || (!currentVersion && !isAndroid)"
                                 @click="onLaunchClick"
+                                @mouseenter="launchHovered = true"
+                                @mouseleave="launchHovered = false"
                             >
                                 <span
                                     data-ui="HomeView:62395e18f043"
@@ -1152,6 +1436,7 @@ onUnmounted(() => {
                 </button>
             </section>
             <CreatorCard class="home-creator" />
+            <LaunchHeatmap class="card home-heatmap" />
         </aside>
 
         <Teleport to="body">
@@ -1272,7 +1557,7 @@ onUnmounted(() => {
                     data-ui="HomeView:cc765cc95569"
                     class="menu-item"
                     title="新建允许命令的创造模式测试世界并自动进入（Minecraft 1.20+）"
-                    :disabled="running || launching || restartBusy"
+                    :disabled="running || launching || waitingWindow || restartBusy"
                     @click="
                         startVersion(cardMenuVersion.id, true);
                         cardMenu.id = '';
@@ -1287,6 +1572,13 @@ onUnmounted(() => {
                     @click="quickRestart(cardMenuVersion)"
                 >
                     快速重启游戏
+                </button>
+                <button
+                    class="menu-item"
+                    title="导出最近一次启动的完整命令为 .bat，可直接排障；先启动过一次才可用"
+                    @click="exportScript(); cardMenu.id = '';"
+                >
+                    导出启动脚本（.bat）
                 </button>
                 <button
                     data-ui="HomeView:a83bf9067bf3"
@@ -1349,13 +1641,23 @@ onUnmounted(() => {
                     </header>
                     <div data-ui="HomeView:1921d3d812a6" v-if="launchFailed" class="log-failure">
                         <span>检测到启动失败或异常退出</span>
-                        <button
-                            data-ui="HomeView:4e02813325fa"
-                            :disabled="exportingLogs"
-                            @click="exportFailureLogs"
-                        >
-                            {{ exportingLogs ? '导出中…' : '导出错误日志' }}
-                        </button>
+                        <span style="display: flex; gap: 8px">
+                            <button
+                                data-ui="HomeView:4e02813325fa"
+                                :disabled="exportingLogs"
+                                @click="exportFailureLogs"
+                            >
+                                {{ exportingLogs ? '导出中…' : '导出错误日志' }}
+                            </button>
+                            <button
+                                class="btn btn-ghost"
+                                :disabled="sharingLogs"
+                                title="脱敏后上传 mclo.gs 并复制链接，方便发给别人帮你看"
+                                @click="shareLogs"
+                            >
+                                {{ sharingLogs ? '上传中…' : '分享到 mclo.gs' }}
+                            </button>
+                        </span>
                     </div>
                     <div data-ui="HomeView:d816343842fa" ref="logBody" class="log-body">
                         <p
@@ -1520,6 +1822,41 @@ onUnmounted(() => {
             </section>
         </div>
     </Teleport>
+    <Teleport to="body"
+        ><div
+            v-if="relaunchConfirm"
+            class="modal-mask"
+            style="z-index: 10031"
+        >
+            <section class="modal" role="dialog" aria-modal="true" aria-label="再次启动确认">
+                <h3>已有游戏正在运行</h3>
+                <p>
+                    当前已有一个正在运行的游戏实例。再次启动会开启一个全新实例，
+                    两个实例同时写同一存档时可能产生冲突。
+                </p>
+                <p style="color: var(--danger)">
+                    如果两边进的是同一个世界，请先确认另一个实例已保存退出。
+                </p>
+                <div style="display: flex; gap: 12px; justify-content: flex-end">
+                    <button class="btn btn-ghost" @click="relaunchConfirm = null">
+                        取消</button
+                    ><button
+                        class="btn btn-gold"
+                        @click="
+                            startVersion(
+                                relaunchConfirm.id,
+                                relaunchConfirm.createCommandWorld,
+                                true
+                            );
+                            relaunchConfirm = null;
+                        "
+                    >
+                        仍要再启动一个
+                    </button>
+                </div>
+            </section>
+        </div></Teleport
+    >
     <Teleport to="body"
         ><div
             data-ui="HomeView:9d63fadc1ed6"
@@ -1728,12 +2065,67 @@ onUnmounted(() => {
     align-items: flex-start;
     color: var(--bn-text);
 }
+/* 像素动画场景文案块：色点 + 眉标 + 标题 + 注（对应上游 copy 列） */
+.hero-scene-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin: 20px 0 0;
+    max-width: 560px;
+}
+.hero-scene-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.hero-scene-eyebrow i {
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.25);
+}
+.hero-scene-title {
+    color: #fff;
+    font-size: 23px;
+    line-height: 1.3;
+    font-weight: 700;
+    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+.hero-scene-caption {
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 13px;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.hero-scene-caption em {
+    font-style: normal;
+    color: rgba(255, 255, 255, 0.45);
+}
+.hero-scene-copy-enter-active {
+    transition:
+        opacity 0.5s ease,
+        transform 0.5s ease;
+}
+.hero-scene-copy-enter-from {
+    opacity: 0;
+    transform: translateY(6px);
+}
+.hero-scene-copy-leave-active {
+    transition: opacity 0.18s ease;
+}
+.hero-scene-copy-leave-to {
+    opacity: 0;
+}
 .hero-kicker {
     display: inline-flex;
     align-items: center;
     min-height: 34px;
-    padding: 0 14px;
-    border: 1px solid rgba(255, 255, 255, 0.13);
+    padding: 0 14px;    border: 1px solid rgba(255, 255, 255, 0.13);
     border-radius: 7px;
     background: rgba(9, 13, 14, 0.48);
     backdrop-filter: blur(12px);
@@ -3070,5 +3462,299 @@ onUnmounted(() => {
 }
 .hero-card .hero-image {
     object-position: center 42%;
+}
+
+/* ---------------- Android 主页（按手绘布景落地） ----------------
+   中：舞台（背景图 + 框起的版本名 + 两角操作 + 状态 pill）；
+   右：操作坞（账号卡 → 皮肤预览(3D) → 启动按钮）。固定一屏不滚动。 */
+.m-launchpad {
+    position: absolute;
+    /* shell 的 padding 已消化系统栏安全区，这里只需要常规内边距 */
+    inset: 8px;
+    display: flex;
+    gap: 10px;
+    min-height: 0;
+    overflow: hidden;
+}
+/* ---------- 中：舞台 ---------- */
+.m-stage {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--border) 95%, white 4%);
+    border-radius: var(--radius-lg);
+    background: var(--surface-content);
+    box-shadow: var(--shadow);
+}
+.m-stage-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 42%;
+}
+.m-stage-shade {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(200deg, rgba(8, 12, 13, 0.42) 0%, rgba(8, 12, 13, 0.2) 45%, rgba(8, 12, 13, 0.66) 100%);
+}
+.m-stage-head {
+    position: absolute;
+    top: 12px;
+    left: 14px;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.m-kicker {
+    padding: 4px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 7px;
+    background: rgba(9, 13, 14, 0.5);
+    color: #f4f7f5;
+    font-size: var(--text-xs);
+    font-weight: 650;
+    backdrop-filter: blur(10px);
+}
+/* 版本名称：框起的胶囊元素（用户草稿要求） */
+.m-namechip {
+    max-width: 46vw;
+    height: 34px;
+    padding: 0 14px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 999px;
+    background: rgba(9, 13, 14, 0.56);
+    color: #fff;
+    font-family: inherit;
+    font-size: var(--text-md);
+    font-weight: 750;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+    transition: border-color 0.15s ease;
+}
+.m-namechip:hover {
+    border-color: rgba(255, 255, 255, 0.55);
+}
+.m-stage.no-version .m-namechip {
+    border-style: dashed;
+    color: rgba(244, 247, 245, 0.85);
+}
+/* 右上：运行状态 pill */
+.m-status {
+    position: absolute;
+    top: 15px;
+    right: 14px;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 56%;
+    height: 30px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    background: rgba(9, 13, 14, 0.5);
+    color: rgba(244, 247, 245, 0.88);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    backdrop-filter: blur(10px);
+}
+.m-status i {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-dim);
+}
+.m-status.is-running i {
+    background: var(--accent-2);
+}
+.m-status.is-ready i {
+    background: var(--ok);
+}
+.m-status.is-error i {
+    background: var(--danger);
+}
+/* 底部两角：版本设置 / 更改版本 */
+.m-stage-corner {
+    position: absolute;
+    bottom: 14px;
+    z-index: 1;
+}
+.m-stage-corner.left {
+    left: 14px;
+}
+.m-stage-corner.right {
+    right: 14px;
+}
+.m-corner-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 40px;
+    padding: 0 16px;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 999px;
+    background: rgba(9, 13, 14, 0.56);
+    color: #f4f7f5;
+    font-family: inherit;
+    font-size: var(--text-sm);
+    font-weight: 650;
+    cursor: pointer;
+    backdrop-filter: blur(12px);
+    transition:
+        background 0.15s ease,
+        border-color 0.15s ease;
+}
+.m-corner-btn:hover {
+    background: rgba(20, 30, 32, 0.7);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+.m-corner-btn svg {
+    width: 15px;
+    height: 15px;
+    opacity: 0.85;
+}
+/* ---------- 右：操作坞 ---------- */
+.m-dock {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    flex: none;
+    width: 180px;
+    min-height: 0;
+}
+.m-account {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+    height: 58px;
+    padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--card);
+    color: var(--text);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+}
+.m-account:hover {
+    border-color: var(--border-strong);
+}
+.m-account-info {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+.m-account-info b {
+    overflow: hidden;
+    font-size: var(--text-md);
+    font-weight: 750;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.m-account-info i {
+    overflow: hidden;
+    color: var(--text-dim);
+    font-size: var(--text-xs);
+    font-style: normal;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.m-skin {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--card);
+    cursor: pointer;
+    overflow: hidden;
+}
+.m-skin-stage {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--bg) 42%, transparent);
+}
+.m-skin-stage :deep(.viewer3d) {
+    width: 100%;
+    height: 100%;
+}
+.m-skin-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--bg) 40%, transparent);
+}
+.m-skin-overlay .spin {
+    width: 22px;
+    height: 22px;
+    border: 2px solid var(--accent);
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: mspin 0.8s linear infinite;
+}
+@keyframes mspin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+.m-skin-hint {
+    flex: none;
+    padding: 7px 12px;
+    color: var(--text-dim);
+    font-size: var(--text-xs);
+    text-align: center;
+    border-top: 1px solid var(--border);
+}
+/* 启动按钮 */
+.m-launch {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex: none;
+    width: 100%;
+    height: 54px;
+    border: none;
+    border-radius: var(--radius-lg);
+    background: var(--accent-grad);
+    color: var(--on-accent);
+    font-family: inherit;
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    overflow: hidden;
+    box-shadow: 0 10px 26px color-mix(in srgb, var(--accent) 36%, transparent);
+}
+.m-launch svg {
+    width: 20px;
+    height: 20px;
+    flex: none;
+}
+.m-launch:disabled {
+    filter: saturate(0.7);
+    cursor: not-allowed;
 }
 </style>

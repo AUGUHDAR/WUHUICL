@@ -27,16 +27,24 @@ const PROVIDER_TIMEOUT_MS: u64 = 30_000;
 const MAX_METADATA_BYTES: usize = 2 * 1024 * 1024;
 const MAX_ERROR_BYTES: usize = 4096;
 const MAX_AGENT_BYTES: usize = 32 * 1024 * 1024;
-const SECRET_KEYS: &[&str] = &["accessToken", "refreshToken", "clientToken", "loginIdentifier", "userProperties"];
+const SECRET_KEYS: &[&str] = &[
+    "accessToken",
+    "refreshToken",
+    "clientToken",
+    "loginIdentifier",
+    "userProperties",
+];
 
 // ---------------- DPAPI（对应 electron safeStorage.encryptString/decryptString） ----------------
 
+#[cfg(windows)]
 #[repr(C)]
 struct CryptBuffer {
     cb: u32,
     pb: *mut u8,
 }
 
+#[cfg(windows)]
 #[link(name = "crypt32")]
 extern "system" {
     fn CryptProtectData(
@@ -59,21 +67,30 @@ extern "system" {
     ) -> i32;
 }
 
+#[cfg(windows)]
 #[link(name = "kernel32")]
 extern "system" {
     fn LocalFree(hmem: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
 }
 
+#[cfg(windows)]
 const CRYPTPROTECT_UI_FORBIDDEN: u32 = 0x1;
 
-/// DPAPI 可用性探针（对应 Electron safeStorage.isAvailable）：
-/// sysinfo 的 credentialStorage 字段用它，声明统一留在这里，避免同符号在别处重复声明。
+/// DPAPI 可用性探针（对应 Electron safeStorage.isAvailability）：
+/// 声明统一留在这里，避免同符号在别处重复声明；平台层经 platform::credential_available 调用。
+#[cfg(windows)]
 pub fn dpapi_available() -> bool {
     let plain = b"wuhuicl";
-    let mut out = CryptBuffer { cb: 0, pb: core::ptr::null_mut() };
+    let mut out = CryptBuffer {
+        cb: 0,
+        pb: core::ptr::null_mut(),
+    };
     unsafe {
         let ok = CryptProtectData(
-            &CryptBuffer { cb: plain.len() as u32, pb: plain.as_ptr() as *mut u8 },
+            &CryptBuffer {
+                cb: plain.len() as u32,
+                pb: plain.as_ptr() as *mut u8,
+            },
             core::ptr::null(),
             core::ptr::null(),
             core::ptr::null(),
@@ -89,16 +106,27 @@ pub fn dpapi_available() -> bool {
 }
 
 /// 固定应用熵（WUHUICL 自有密文域，不与原版 KAMUCL 互解）
+#[cfg(windows)]
 fn entropy() -> Vec<u16> {
     "WUHUICL-account-secrets".encode_utf16().collect()
 }
 
-fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>, String> {
+#[cfg(windows)]
+pub(crate) fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>, String> {
     unsafe {
         let ent = entropy();
-        let mut input = CryptBuffer { cb: plain.len() as u32, pb: plain.as_ptr() as *mut u8 };
-        let mut entropy_buf = CryptBuffer { cb: (ent.len() * 2) as u32, pb: ent.as_ptr() as *mut u8 };
-        let mut out = CryptBuffer { cb: 0, pb: std::ptr::null_mut() };
+        let mut input = CryptBuffer {
+            cb: plain.len() as u32,
+            pb: plain.as_ptr() as *mut u8,
+        };
+        let mut entropy_buf = CryptBuffer {
+            cb: (ent.len() * 2) as u32,
+            pb: ent.as_ptr() as *mut u8,
+        };
+        let mut out = CryptBuffer {
+            cb: 0,
+            pb: std::ptr::null_mut(),
+        };
         if CryptProtectData(
             &mut input,
             std::ptr::null(),
@@ -118,12 +146,22 @@ fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>, String> {
     }
 }
 
-fn dpapi_unprotect(blob: &[u8]) -> Option<Vec<u8>> {
+#[cfg(windows)]
+pub(crate) fn dpapi_unprotect(blob: &[u8]) -> Option<Vec<u8>> {
     unsafe {
         let ent = entropy();
-        let mut input = CryptBuffer { cb: blob.len() as u32, pb: blob.as_ptr() as *mut u8 };
-        let mut entropy_buf = CryptBuffer { cb: (ent.len() * 2) as u32, pb: ent.as_ptr() as *mut u8 };
-        let mut out = CryptBuffer { cb: 0, pb: std::ptr::null_mut() };
+        let mut input = CryptBuffer {
+            cb: blob.len() as u32,
+            pb: blob.as_ptr() as *mut u8,
+        };
+        let mut entropy_buf = CryptBuffer {
+            cb: (ent.len() * 2) as u32,
+            pb: ent.as_ptr() as *mut u8,
+        };
+        let mut out = CryptBuffer {
+            cb: 0,
+            pb: std::ptr::null_mut(),
+        };
         if CryptUnprotectData(
             &mut input,
             std::ptr::null_mut(),
@@ -149,13 +187,15 @@ fn encrypt_secret(value: &Value) -> Result<String, String> {
     } else {
         value.to_string()
     };
-    let blob = dpapi_protect(plain.as_bytes())?;
+    let blob = crate::platform::credential_protect(plain.as_bytes())?;
     Ok(base64::engine::general_purpose::STANDARD.encode(blob))
 }
 
 fn decrypt_secret(value: &str) -> Option<String> {
-    let blob = base64::engine::general_purpose::STANDARD.decode(value).ok()?;
-    let plain = dpapi_unprotect(&blob)?;
+    let blob = base64::engine::general_purpose::STANDARD
+        .decode(value)
+        .ok()?;
+    let plain = crate::platform::credential_unprotect(&blob)?;
     String::from_utf8(plain).ok()
 }
 
@@ -319,13 +359,25 @@ pub fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Option<Result<V
             args.first()
                 .cloned()
                 .ok_or_else(|| "缺少参数".to_string())
-                .and_then(|input| probe_provider(app, &input, args.get(1).and_then(|v| v.as_bool()).unwrap_or(false))),
+                .and_then(|input| {
+                    probe_provider(
+                        app,
+                        &input,
+                        args.get(1).and_then(|v| v.as_bool()).unwrap_or(false),
+                    )
+                }),
         ),
         "accounts:yggSaveProvider" => Some(
             args.first()
                 .cloned()
                 .ok_or_else(|| "缺少参数".to_string())
-                .and_then(|candidate| save_provider(app, &candidate, args.get(1).and_then(|v| v.as_bool()).unwrap_or(false))),
+                .and_then(|candidate| {
+                    save_provider(
+                        app,
+                        &candidate,
+                        args.get(1).and_then(|v| v.as_bool()).unwrap_or(false),
+                    )
+                }),
         ),
         "accounts:yggRemoveProvider" => Some(
             arg_str(args, 0)
@@ -333,13 +385,11 @@ pub fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Option<Result<V
                 .and_then(|id| remove_provider(app, &id)),
         ),
         "accounts:yggLogin" => Some(ygg_login(app, args)),
-        "accounts:yggSelectProfile" => Some(
-            (|| {
-                let challenge_id = arg_str(args, 0).ok_or("缺少 challengeId")?;
-                let profile_id = arg_str(args, 1).ok_or("缺少 profileId")?;
-                complete_profile_selection(app, &challenge_id, &profile_id)
-            })(),
-        ),
+        "accounts:yggSelectProfile" => Some((|| {
+            let challenge_id = arg_str(args, 0).ok_or("缺少 challengeId")?;
+            let profile_id = arg_str(args, 1).ok_or("缺少 profileId")?;
+            complete_profile_selection(app, &challenge_id, &profile_id)
+        })()),
         "accounts:yggRuntime" => Some(runtime_info(app)),
         _ => None,
     }
@@ -363,7 +413,10 @@ fn http_client() -> reqwest::blocking::Client {
 }
 
 fn post_form(url: &str, body: &[(&str, &str)]) -> Result<Value, String> {
-    let params: Vec<(String, String)> = body.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+    let params: Vec<(String, String)> = body
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
     let resp = http_client()
         .post(url)
         .header("Content-Type", "application/x-www-form-urlencoded")
@@ -426,10 +479,23 @@ fn uuid_with_hyphens(id: &str) -> String {
     while hex.len() < 32 {
         hex.push('0');
     }
-    format!("{}-{}-{}-{}-{}", &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32])
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
 }
 
-fn complete_ms_login(app: &AppHandle, ms_access_token: &str, refresh_token: &str, expires_in: u64, select: bool) -> Result<Value, String> {
+fn complete_ms_login(
+    app: &AppHandle,
+    ms_access_token: &str,
+    refresh_token: &str,
+    expires_in: u64,
+    select: bool,
+) -> Result<Value, String> {
     // 1. XBL 认证
     let xbl = step(
         "Xbox Live 认证",
@@ -473,7 +539,9 @@ fn complete_ms_login(app: &AppHandle, ms_access_token: &str, refresh_token: &str
         .and_then(|u| u.as_str())
         .unwrap_or("");
     if xsts_token.is_empty() || uhs.is_empty() {
-        return Err("XSTS 授权失败（该账号可能尚未创建 Xbox 档案，请先在 xbox.com 登录一次）".into());
+        return Err(
+            "XSTS 授权失败（该账号可能尚未创建 Xbox 档案，请先在 xbox.com 登录一次）".into(),
+        );
     }
 
     // 3. MC 登录
@@ -493,17 +561,29 @@ fn complete_ms_login(app: &AppHandle, ms_access_token: &str, refresh_token: &str
     // 4. 拥有权检查
     let entitlements = step(
         "Minecraft 拥有权检查",
-        get_json("https://api.minecraftservices.com/entitlements/mcstore", &mc_token),
+        get_json(
+            "https://api.minecraftservices.com/entitlements/mcstore",
+            &mc_token,
+        ),
     )?;
-    let items = entitlements["items"].as_array().cloned().unwrap_or_default();
-    if !items.iter().any(|i| i["name"].as_str() == Some("product_minecraft")) {
+    let items = entitlements["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if !items
+        .iter()
+        .any(|i| i["name"].as_str() == Some("product_minecraft"))
+    {
         return Err("Minecraft 拥有权检查：该账号未拥有 Minecraft".into());
     }
 
     // 5. 档案
     let profile = step(
         "获取 Minecraft 档案",
-        get_json("https://api.minecraftservices.com/minecraft/profile", &mc_token),
+        get_json(
+            "https://api.minecraftservices.com/minecraft/profile",
+            &mc_token,
+        ),
     )?;
     let pid = profile["id"].as_str().unwrap_or("");
     let pname = profile["name"].as_str().unwrap_or("");
@@ -544,7 +624,12 @@ fn sleep_cancellable(ms: u64) -> Result<(), String> {
 }
 
 /// 后台轮询 token 端点直到成功/过期/取消（accounts.ts pollDeviceCode）
-fn poll_device_code(app: &AppHandle, device_code: &str, interval_sec: u64, expires_in_sec: u64) -> Result<Value, String> {
+fn poll_device_code(
+    app: &AppHandle,
+    device_code: &str,
+    interval_sec: u64,
+    expires_in_sec: u64,
+) -> Result<Value, String> {
     let client_id = crate::settings::get(app)["msClientId"]
         .as_str()
         .unwrap_or("")
@@ -602,7 +687,10 @@ fn ms_begin(app: &AppHandle) -> Result<Value, String> {
     )
     .map_err(|e| format!("获取设备码：{}", e))?;
     let Some(device_code) = dc["device_code"].as_str().map(str::to_string) else {
-        let message = dc["error_description"].as_str().unwrap_or("获取设备码失败").to_string();
+        let message = dc["error_description"]
+            .as_str()
+            .unwrap_or("获取设备码失败")
+            .to_string();
         return Err(format!("获取设备码：{}", message));
     };
 
@@ -809,7 +897,10 @@ fn normalize_url_simple(input: &str) -> Result<String, String> {
 }
 
 /// yggdrasilProvider.ts resolveProviderEndpoints
-fn resolve_provider_endpoints(descriptor: &ProviderDescriptor, resolved_api_root: &str) -> Result<Value, String> {
+fn resolve_provider_endpoints(
+    descriptor: &ProviderDescriptor,
+    resolved_api_root: &str,
+) -> Result<Value, String> {
     let api_root = normalize_url_simple(resolved_api_root)?;
     let resolve = |value: &str, fallback: &str| -> Result<String, String> {
         let raw = if value.is_empty() { fallback } else { value };
@@ -824,7 +915,11 @@ fn resolve_provider_endpoints(descriptor: &ProviderDescriptor, resolved_api_root
         }
     };
     let mut insecure_urls = vec![api_root.clone()];
-    for v in [&descriptor.auth_server, &descriptor.account_server, &descriptor.session_server] {
+    for v in [
+        &descriptor.auth_server,
+        &descriptor.account_server,
+        &descriptor.session_server,
+    ] {
         if !v.is_empty() {
             insecure_urls.push(v.clone());
         }
@@ -878,7 +973,13 @@ fn parse_provider_input(input: &Value) -> Result<ProviderDescriptor, String> {
                 return Err("仅支持 JSON、TXT、URL 或 .yggdrasil 提供商配置".into());
             }
             let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
-            descriptor_from_text(&text, &file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
+            descriptor_from_text(
+                &text,
+                &file
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+            )
         }
         _ => descriptor_from_text(value, "拖入或粘贴的文本"),
     }
@@ -888,12 +989,24 @@ fn parse_provider_input(input: &Value) -> Result<ProviderDescriptor, String> {
 fn find_string(record: &Value, aliases: &[&str]) -> Option<String> {
     let wanted: Vec<String> = aliases
         .iter()
-        .map(|a| a.to_lowercase().chars().filter(|c| c.is_ascii_alphanumeric()).collect())
+        .map(|a| {
+            a.to_lowercase()
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect()
+        })
         .collect();
     if let Some(obj) = record.as_object() {
         for (key, value) in obj {
-            let key_form: String = key.to_lowercase().chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-            if wanted.contains(&key_form) && value.is_string() && !value.as_str().unwrap_or("").trim().is_empty() {
+            let key_form: String = key
+                .to_lowercase()
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect();
+            if wanted.contains(&key_form)
+                && value.is_string()
+                && !value.as_str().unwrap_or("").trim().is_empty()
+            {
                 return Some(value.as_str().unwrap_or("").trim().to_string());
             }
         }
@@ -911,16 +1024,28 @@ fn find_string(record: &Value, aliases: &[&str]) -> Option<String> {
 fn find_strings(record: &Value, aliases: &[&str]) -> Vec<String> {
     let wanted: Vec<String> = aliases
         .iter()
-        .map(|a| a.to_lowercase().chars().filter(|c| c.is_ascii_alphanumeric()).collect())
+        .map(|a| {
+            a.to_lowercase()
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect()
+        })
         .collect();
     if let Some(obj) = record.as_object() {
         for (key, value) in obj {
-            let key_form: String = key.to_lowercase().chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+            let key_form: String = key
+                .to_lowercase()
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .collect();
             if !wanted.contains(&key_form) {
                 continue;
             }
             if let Some(arr) = value.as_array() {
-                return arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+                return arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect();
             }
             if let Some(s) = value.as_str() {
                 return s
@@ -944,7 +1069,11 @@ fn find_strings(record: &Value, aliases: &[&str]) -> Vec<String> {
 
 /// yggdrasilProvider.ts descriptorFromText
 fn descriptor_from_text(text: &str, source_label: &str) -> Result<ProviderDescriptor, String> {
-    let trimmed = text.trim().trim_start_matches('\u{feff}').trim().to_string();
+    let trimmed = text
+        .trim()
+        .trim_start_matches('\u{feff}')
+        .trim()
+        .to_string();
     if trimmed.is_empty() {
         return Err("拖入内容为空".into());
     }
@@ -962,24 +1091,41 @@ fn descriptor_from_text(text: &str, source_label: &str) -> Result<ProviderDescri
         });
     }
     if trimmed.starts_with('{') {
-        let data: Value = serde_json::from_str(&trimmed).map_err(|_| "提供商 JSON 格式无效".to_string())?;
+        let data: Value =
+            serde_json::from_str(&trimmed).map_err(|_| "提供商 JSON 格式无效".to_string())?;
         if !data.is_object() {
             return Err("提供商 JSON 顶层必须是对象".into());
         }
-        let api_root = find_string(&data, &["apiRoot", "yggdrasilApiRoot", "yggdrasilServer", "apiUrl", "serverUrl"])
-            .or_else(|| data["url"].as_str().map(str::to_string))
-            .ok_or("提供商 JSON 中缺少 API Root")?;
+        let api_root = find_string(
+            &data,
+            &[
+                "apiRoot",
+                "yggdrasilApiRoot",
+                "yggdrasilServer",
+                "apiUrl",
+                "serverUrl",
+            ],
+        )
+        .or_else(|| data["url"].as_str().map(str::to_string))
+        .ok_or("提供商 JSON 中缺少 API Root")?;
         return Ok(ProviderDescriptor {
             source_label: source_label.to_string(),
             name: find_string(&data, &["providerName", "serverName", "name"]).unwrap_or_default(),
             api_root: normalize_yggdrasil_url(&api_root)?,
-            auth_server: find_string(&data, &["authServer", "authenticationServer"]).unwrap_or_default(),
+            auth_server: find_string(&data, &["authServer", "authenticationServer"])
+                .unwrap_or_default(),
             account_server: find_string(&data, &["accountServer"]).unwrap_or_default(),
             session_server: find_string(&data, &["sessionServer"]).unwrap_or_default(),
-            services_url: find_string(&data, &["services", "servicesUrl", "metadataUrl"]).unwrap_or_default(),
-            skin_domains: normalize_skin_domains(find_strings(&data, &["skinDomains", "textureDomains"])),
-            register_url: find_string(&data, &["register", "registerUrl", "registerPage"]).unwrap_or_default(),
-            homepage_url: find_string(&data, &["homepage", "homepageUrl", "homePage"]).unwrap_or_default(),
+            services_url: find_string(&data, &["services", "servicesUrl", "metadataUrl"])
+                .unwrap_or_default(),
+            skin_domains: normalize_skin_domains(find_strings(
+                &data,
+                &["skinDomains", "textureDomains"],
+            )),
+            register_url: find_string(&data, &["register", "registerUrl", "registerPage"])
+                .unwrap_or_default(),
+            homepage_url: find_string(&data, &["homepage", "homepageUrl", "homePage"])
+                .unwrap_or_default(),
         });
     }
     let shortcut = regex::Regex::new(r"(?im)^URL\s*=\s*(.+)$")
@@ -991,11 +1137,12 @@ fn descriptor_from_text(text: &str, source_label: &str) -> Result<ProviderDescri
         .unwrap()
         .find(&trimmed)
         .map(|m| m.as_str().to_string());
-    let labeled_root = regex::Regex::new(r"(?:api\s*root|yggdrasil(?:\s*server)?)\s*[:=]\s*([^\s]+)")
-        .unwrap()
-        .captures(&trimmed)
-        .and_then(|c| c.get(1))
-        .map(|m| m.as_str().to_string());
+    let labeled_root =
+        regex::Regex::new(r"(?:api\s*root|yggdrasil(?:\s*server)?)\s*[:=]\s*([^\s]+)")
+            .unwrap()
+            .captures(&trimmed)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_string());
     let value = shortcut
         .or(embedded_url)
         .or(labeled_root)
@@ -1042,7 +1189,14 @@ fn clean_provider(value: &Value) -> Option<Value> {
         session_server: value["sessionServer"].as_str().unwrap_or("").to_string(),
         services_url: value["servicesUrl"].as_str().unwrap_or("").to_string(),
         skin_domains: normalize_skin_domains(
-            value["skinDomains"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default(),
+            value["skinDomains"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
         ),
         register_url: value["registerUrl"].as_str().unwrap_or("").to_string(),
         homepage_url: value["homepageUrl"].as_str().unwrap_or("").to_string(),
@@ -1061,7 +1215,10 @@ fn clean_provider(value: &Value) -> Option<Value> {
     out["skinDomains"] = json!(descriptor.skin_domains);
     out["registerUrl"] = json!(value["registerUrl"].as_str().unwrap_or(""));
     out["homepageUrl"] = json!(value["homepageUrl"].as_str().unwrap_or(""));
-    out["metadataFetchedAt"] = json!(value["metadataFetchedAt"].as_str().map(str::to_string).unwrap_or_else(|| "1970-01-01T00:00:00Z".into()));
+    out["metadataFetchedAt"] = json!(value["metadataFetchedAt"]
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| "1970-01-01T00:00:00Z".into()));
     Some(out)
 }
 
@@ -1075,9 +1232,11 @@ fn hostname_of(url: &str) -> String {
 
 /// yggdrasil.ts assertSecure
 fn assert_secure(urls: &[&str], allow_insecure: bool) -> Result<(), String> {
-    let insecure = urls
-        .iter()
-        .any(|u| normalize_yggdrasil_url(u).map(|n| n.starts_with("http:")).unwrap_or(false));
+    let insecure = urls.iter().any(|u| {
+        normalize_yggdrasil_url(u)
+            .map(|n| n.starts_with("http:"))
+            .unwrap_or(false)
+    });
     if insecure && !allow_insecure {
         return Err("INSECURE_YGGDRASIL:该认证服务使用明文 HTTP，账号和密码可能被窃听。勾选风险确认后才能继续。".into());
     }
@@ -1085,7 +1244,10 @@ fn assert_secure(urls: &[&str], allow_insecure: bool) -> Result<(), String> {
 }
 
 /// 限量读取响应体（yggdrasil.ts responseBufferLimited）
-fn read_limited(mut resp: reqwest::blocking::Response, max_bytes: usize) -> Result<Vec<u8>, String> {
+fn read_limited(
+    mut resp: reqwest::blocking::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, String> {
     if let Some(len) = resp.content_length() {
         if len as usize > max_bytes {
             return Err(format!("认证服务响应超过 {} KB 限制", max_bytes / 1024));
@@ -1109,13 +1271,19 @@ fn read_limited(mut resp: reqwest::blocking::Response, max_bytes: usize) -> Resu
     Ok(buf)
 }
 
-fn read_text_limited(resp: reqwest::blocking::Response, max_bytes: usize) -> Result<String, String> {
+fn read_text_limited(
+    resp: reqwest::blocking::Response,
+    max_bytes: usize,
+) -> Result<String, String> {
     let bytes = read_limited(resp, max_bytes)?;
-    Ok(String::from_utf8_lossy(&bytes).trim_start_matches('\u{feff}').to_string())
+    Ok(String::from_utf8_lossy(&bytes)
+        .trim_start_matches('\u{feff}')
+        .to_string())
 }
 
 fn parse_metadata(raw: &str) -> Result<Value, String> {
-    let data: Value = serde_json::from_str(raw).map_err(|_| "认证服务返回的元数据不是有效 JSON".to_string())?;
+    let data: Value =
+        serde_json::from_str(raw).map_err(|_| "认证服务返回的元数据不是有效 JSON".to_string())?;
     if !data.is_object() {
         return Err("认证服务元数据顶层必须是对象".into());
     }
@@ -1123,7 +1291,10 @@ fn parse_metadata(raw: &str) -> Result<Value, String> {
 }
 
 /// yggdrasil.ts fetchMetadataAt：x-authlib-injector-api-location 跟随
-fn fetch_metadata_at(input_url: &str, allow_insecure: bool) -> Result<(String, String, Value, bool), String> {
+fn fetch_metadata_at(
+    input_url: &str,
+    allow_insecure: bool,
+) -> Result<(String, String, Value, bool), String> {
     let initial = normalize_yggdrasil_url(input_url)?;
     assert_secure(&[&initial], allow_insecure)?;
     let first = http_client()
@@ -1132,7 +1303,10 @@ fn fetch_metadata_at(input_url: &str, allow_insecure: bool) -> Result<(String, S
         .send()
         .map_err(|e| e.to_string())?;
     if !first.status().is_success() {
-        return Err(format!("认证服务元数据请求失败（HTTP {}）", first.status().as_u16()));
+        return Err(format!(
+            "认证服务元数据请求失败（HTTP {}）",
+            first.status().as_u16()
+        ));
     }
     let first_url = normalize_yggdrasil_url(first.url().as_str())?;
     assert_secure(&[&first_url], allow_insecure)?;
@@ -1154,7 +1328,10 @@ fn fetch_metadata_at(input_url: &str, allow_insecure: bool) -> Result<(String, S
             .send()
             .map_err(|e| e.to_string())?;
         if !response.status().is_success() {
-            return Err(format!("认证服务 API Root 请求失败（HTTP {}）", response.status().as_u16()));
+            return Err(format!(
+                "认证服务 API Root 请求失败（HTTP {}）",
+                response.status().as_u16()
+            ));
         }
         let final_root = normalize_yggdrasil_url(response.url().as_str())?;
         assert_secure(&[&final_root], allow_insecure)?;
@@ -1180,7 +1357,10 @@ fn resolve_against(base: &str, location: &str) -> Result<String, String> {
     }
     if location.starts_with('/') {
         let host_end = base.find("://").map(|i| i + 3).unwrap_or(0);
-        let path_start = base[host_end..].find('/').map(|i| host_end + i).unwrap_or(base.len());
+        let path_start = base[host_end..]
+            .find('/')
+            .map(|i| host_end + i)
+            .unwrap_or(base.len());
         return normalize_yggdrasil_url(&format!("{}{}", &base[..path_start], location));
     }
     normalize_yggdrasil_url(&format!("{}{}", base, location))
@@ -1206,7 +1386,12 @@ fn probe_provider(app: &AppHandle, input: &Value, allow_insecure: bool) -> Resul
     let descriptor = parse_provider_input(input)?;
     {
         let mut urls: Vec<String> = vec![descriptor.api_root.clone()];
-        for v in [&descriptor.auth_server, &descriptor.account_server, &descriptor.session_server, &descriptor.services_url] {
+        for v in [
+            &descriptor.auth_server,
+            &descriptor.account_server,
+            &descriptor.session_server,
+            &descriptor.services_url,
+        ] {
             if !v.is_empty() {
                 urls.push(v.clone());
             }
@@ -1214,7 +1399,8 @@ fn probe_provider(app: &AppHandle, input: &Value, allow_insecure: bool) -> Resul
         let refs: Vec<&str> = urls.iter().map(String::as_str).collect();
         assert_secure(&refs, allow_insecure)?;
     }
-    let (api_root, raw, data, ali_redirected) = fetch_metadata_at(&descriptor.api_root, allow_insecure)?;
+    let (api_root, raw, data, ali_redirected) =
+        fetch_metadata_at(&descriptor.api_root, allow_insecure)?;
     let endpoints = resolve_provider_endpoints(&descriptor, &api_root)?;
     {
         let check: Vec<String> = ["apiRoot", "authServer", "accountServer", "sessionServer"]
@@ -1241,7 +1427,8 @@ fn probe_provider(app: &AppHandle, input: &Value, allow_insecure: bool) -> Resul
     let mut candidate = endpoints;
     candidate["id"] = json!(id);
     candidate["name"] = json!(if descriptor.name.is_empty() {
-        metadata_name(&data).unwrap_or_else(|| hostname_of(candidate["apiRoot"].as_str().unwrap_or("")))
+        metadata_name(&data)
+            .unwrap_or_else(|| hostname_of(candidate["apiRoot"].as_str().unwrap_or("")))
     } else {
         descriptor.name.clone()
     });
@@ -1265,7 +1452,8 @@ fn probe_provider(app: &AppHandle, input: &Value, allow_insecure: bool) -> Resul
         descriptor.homepage_url.clone()
     };
     candidate["homepageUrl"] = json!(homepage_url);
-    candidate["metadataFetchedAt"] = json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+    candidate["metadataFetchedAt"] =
+        json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
     candidate["sourceLabel"] = json!(descriptor.source_label);
     candidate["aliRedirected"] = json!(ali_redirected);
     Ok(candidate)
@@ -1281,7 +1469,8 @@ fn with_probed_metadata<T>(f: impl FnOnce(&mut HashMap<String, String>) -> T) ->
 /// LittleSkin 内置提供商（HMCL 同款：国内最常用皮肤站开箱即用，无需手动添加）。
 /// 登录/刷新/皮肤/注入全链路对它与其他提供商一视同仁；不可删除。
 pub fn builtin_provider() -> Value {
-    let id = provider_id("https://littleskin.cn/api/yggdrasil/").unwrap_or_else(|_| "ygg-builtin-littleskin".into());
+    let id = provider_id("https://littleskin.cn/api/yggdrasil/")
+        .unwrap_or_else(|_| "ygg-builtin-littleskin".into());
     json!({
         "id": id,
         "name": "LittleSkin",
@@ -1339,7 +1528,11 @@ fn find_provider(app: &AppHandle, id: &str) -> Result<Value, String> {
 }
 
 /// yggdrasil.ts saveProvider
-fn save_provider(app: &AppHandle, candidate: &Value, allow_insecure: bool) -> Result<Value, String> {
+fn save_provider(
+    app: &AppHandle,
+    candidate: &Value,
+    allow_insecure: bool,
+) -> Result<Value, String> {
     let cleaned = clean_provider(candidate).ok_or("提供商配置无效，请重新探测")?;
     if cleaned["id"] != candidate["id"] {
         return Err("提供商 API Root 与探测结果不一致".into());
@@ -1354,7 +1547,10 @@ fn save_provider(app: &AppHandle, candidate: &Value, allow_insecure: bool) -> Re
     }
     let mut list = list_providers(app);
     let id = cleaned["id"].as_str().unwrap_or("").to_string();
-    match list.iter().position(|p| p["id"].as_str() == Some(id.as_str())) {
+    match list
+        .iter()
+        .position(|p| p["id"].as_str() == Some(id.as_str()))
+    {
         Some(i) => list[i] = cleaned,
         None => list.push(cleaned),
     }
@@ -1443,7 +1639,11 @@ fn post_ygg(url: &str, body: &Value) -> Result<Value, String> {
 }
 
 fn clean_profile_choice(value: &Value) -> Option<Value> {
-    let id = value["id"].as_str().unwrap_or("").replace('-', "").to_lowercase();
+    let id = value["id"]
+        .as_str()
+        .unwrap_or("")
+        .replace('-', "")
+        .to_lowercase();
     let name = value["name"].as_str().unwrap_or("").trim().to_string();
     if !regex::Regex::new(r"^[0-9a-f]{32}$").unwrap().is_match(&id) || name.is_empty() {
         return None;
@@ -1480,7 +1680,12 @@ fn clean_properties(value: Option<&Value>) -> Value {
     json!(out)
 }
 
-fn account_from_response(provider: &Value, identifier: &str, response: &Value, fallback_client_token: &str) -> Result<Value, String> {
+fn account_from_response(
+    provider: &Value,
+    identifier: &str,
+    response: &Value,
+    fallback_client_token: &str,
+) -> Result<Value, String> {
     let profile = response
         .get("selectedProfile")
         .and_then(clean_profile_choice)
@@ -1525,14 +1730,24 @@ fn account_from_response(provider: &Value, identifier: &str, response: &Value, f
     Ok(account)
 }
 
-fn select_single_profile(provider: &Value, identifier: &str, access_token: &str, client_token: &str, profile: &Value, user: Option<&Value>) -> Result<Value, String> {
+fn select_single_profile(
+    provider: &Value,
+    identifier: &str,
+    access_token: &str,
+    client_token: &str,
+    profile: &Value,
+    user: Option<&Value>,
+) -> Result<Value, String> {
     let body = json!({
         "accessToken": access_token,
         "clientToken": client_token,
         "selectedProfile": profile,
         "requestUser": true
     });
-    let mut response = post_ygg(&endpoint_url(provider["authServer"].as_str().unwrap_or(""), "refresh"), &body)?;
+    let mut response = post_ygg(
+        &endpoint_url(provider["authServer"].as_str().unwrap_or(""), "refresh"),
+        &body,
+    )?;
     if response.get("user").is_none() {
         if let Some(u) = user {
             response["user"] = u.clone();
@@ -1578,7 +1793,10 @@ fn ygg_login(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
     }
     let client_token = crate::accounts::uuid_v4().replace('-', "");
     let response = post_ygg(
-        &endpoint_url(provider["authServer"].as_str().unwrap_or(""), "authenticate"),
+        &endpoint_url(
+            provider["authServer"].as_str().unwrap_or(""),
+            "authenticate",
+        ),
         &json!({
             "agent": { "name": "Minecraft", "version": 1 },
             "username": identifier,
@@ -1588,12 +1806,16 @@ fn ygg_login(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
         }),
     )?;
     let access_token = response["accessToken"].as_str().unwrap_or("").to_string();
-    let returned_client_token = response["clientToken"].as_str().unwrap_or(&client_token).to_string();
+    let returned_client_token = response["clientToken"]
+        .as_str()
+        .unwrap_or(&client_token)
+        .to_string();
     if access_token.is_empty() {
         return Err("认证服务未返回 accessToken".into());
     }
     if response.get("selectedProfile").is_some() {
-        let account = account_from_response(&provider, &identifier, &response, &returned_client_token)?;
+        let account =
+            account_from_response(&provider, &identifier, &response, &returned_client_token)?;
         let saved = save_yggdrasil_account(app, account)?;
         return Ok(json!({ "status": "complete", "account": saved }));
     }
@@ -1643,7 +1865,11 @@ fn ygg_login(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
 }
 
 /// accounts:yggSelectProfile（yggdrasil.ts completeProfileSelection）
-fn complete_profile_selection(app: &AppHandle, challenge_id: &str, profile_id_value: &str) -> Result<Value, String> {
+fn complete_profile_selection(
+    app: &AppHandle,
+    challenge_id: &str,
+    profile_id_value: &str,
+) -> Result<Value, String> {
     let pending = with_pending_profiles(|m| m.remove(challenge_id));
     let Some(pending) = pending else {
         return Err("角色选择已过期，请重新登录".into());
@@ -1670,7 +1896,10 @@ fn complete_profile_selection(app: &AppHandle, challenge_id: &str, profile_id_va
 
 fn validate_credentials(provider: &Value, access_token: &str, client_token: &str) -> bool {
     let response = http_client()
-        .post(endpoint_url(provider["authServer"].as_str().unwrap_or(""), "validate"))
+        .post(endpoint_url(
+            provider["authServer"].as_str().unwrap_or(""),
+            "validate",
+        ))
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
         .json(&json!({ "accessToken": access_token, "clientToken": client_token }))
@@ -1703,7 +1932,9 @@ pub fn refresh_yggdrasil(app: &AppHandle, account: &Value) -> Result<Value, Stri
     .map_err(|e| format!("外置登录已失效，请重新输入密码：{}", e))?;
     let refreshed = account_from_response(
         &provider,
-        account["loginIdentifier"].as_str().unwrap_or_else(|| account["username"].as_str().unwrap_or("")),
+        account["loginIdentifier"]
+            .as_str()
+            .unwrap_or_else(|| account["username"].as_str().unwrap_or("")),
         &response,
         client_token,
     )?;
@@ -1746,11 +1977,16 @@ fn clean_artifact(value: &Value) -> Option<Value> {
     if !value.is_object() {
         return None;
     }
-    let sha256 = value["checksums"]["sha256"].as_str().unwrap_or("").to_lowercase();
+    let sha256 = value["checksums"]["sha256"]
+        .as_str()
+        .unwrap_or("")
+        .to_lowercase();
     let download_url = value["download_url"].as_str().unwrap_or("");
     if !value["build_number"].is_number()
         || value["version"].as_str().unwrap_or("").trim().is_empty()
-        || !regex::Regex::new(r"^[0-9a-f]{64}$").unwrap().is_match(&sha256)
+        || !regex::Regex::new(r"^[0-9a-f]{64}$")
+            .unwrap()
+            .is_match(&sha256)
         || !download_url.starts_with("https://")
     {
         return None;
@@ -1776,16 +2012,29 @@ fn artifact_jar_path(app: &AppHandle, artifact: &Value) -> PathBuf {
         .as_str()
         .unwrap_or("")
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || "._-".contains(c) { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "._-".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
-    injector_directory(app).join(format!("authlib-injector-{}-{}.jar", version, artifact["build_number"].as_i64().unwrap_or(0)))
+    injector_directory(app).join(format!(
+        "authlib-injector-{}-{}.jar",
+        version,
+        artifact["build_number"].as_i64().unwrap_or(0)
+    ))
 }
 
 fn valid_cached_artifact(app: &AppHandle) -> Option<String> {
-    let manifest: Value = serde_json::from_slice(&std::fs::read(artifact_manifest_file(app)).ok()?).ok()?;
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(artifact_manifest_file(app)).ok()?).ok()?;
     let artifact = clean_artifact(&manifest)?;
     let jar = artifact_jar_path(app, &artifact);
-    if !jar.exists() || sha256_file(&jar).ok()? != artifact["checksums"]["sha256"].as_str().unwrap_or("") {
+    if !jar.exists()
+        || sha256_file(&jar).ok()? != artifact["checksums"]["sha256"].as_str().unwrap_or("")
+    {
         return None;
     }
     Some(jar.to_string_lossy().to_string())
@@ -1814,9 +2063,12 @@ fn fetch_injector_artifact(app: &AppHandle) -> Result<Value, String> {
                     continue;
                 }
                 let raw = read_text_limited(response, 128 * 1024)?;
-                match serde_json::from_str::<Value>(&raw).map_err(|e| e.to_string()).and_then(|j| {
-                    clean_artifact(&j).ok_or_else(|| "构件元数据缺少可信下载地址或 SHA-256".to_string())
-                }) {
+                match serde_json::from_str::<Value>(&raw)
+                    .map_err(|e| e.to_string())
+                    .and_then(|j| {
+                        clean_artifact(&j)
+                            .ok_or_else(|| "构件元数据缺少可信下载地址或 SHA-256".to_string())
+                    }) {
                     Ok(artifact) => return Ok(artifact),
                     Err(e) => errors.push(format!("{}: {}", host, e)),
                 }
@@ -1835,8 +2087,12 @@ fn download_injector(app: &AppHandle) -> Result<String, String> {
     let dir = injector_directory(app);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let jar = artifact_jar_path(app, &artifact);
-    if jar.exists() && sha256_file(&jar).ok().as_deref() == artifact["checksums"]["sha256"].as_str() {
-        let _ = std::fs::write(artifact_manifest_file(app), serde_json::to_vec_pretty(&artifact).unwrap_or_default());
+    if jar.exists() && sha256_file(&jar).ok().as_deref() == artifact["checksums"]["sha256"].as_str()
+    {
+        let _ = std::fs::write(
+            artifact_manifest_file(app),
+            serde_json::to_vec_pretty(&artifact).unwrap_or_default(),
+        );
         return Ok(jar.to_string_lossy().to_string());
     }
     let response = http_client()
@@ -1844,11 +2100,15 @@ fn download_injector(app: &AppHandle) -> Result<String, String> {
         .send()
         .map_err(|e| e.to_string())?;
     if !response.status().is_success() {
-        return Err(format!("authlib-injector 下载失败（HTTP {}）", response.status().as_u16()));
+        return Err(format!(
+            "authlib-injector 下载失败（HTTP {}）",
+            response.status().as_u16()
+        ));
     }
     let final_url = response.url().as_str().to_string();
     if !final_url.starts_with("https://")
-        || !["authlib-injector.yushi.moe", "bmclapi2.bangbang93.com"].contains(&hostname_of(&final_url).as_str())
+        || !["authlib-injector.yushi.moe", "bmclapi2.bangbang93.com"]
+            .contains(&hostname_of(&final_url).as_str())
     {
         return Err("authlib-injector 下载发生了不可信重定向".into());
     }
@@ -1864,15 +2124,20 @@ fn download_injector(app: &AppHandle) -> Result<String, String> {
     std::fs::write(&temp, &bytes).map_err(|e| e.to_string())?;
     std::fs::copy(&temp, &jar).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&temp);
-    let _ = std::fs::write(artifact_manifest_file(app), serde_json::to_vec_pretty(&artifact).unwrap_or_default());
+    let _ = std::fs::write(
+        artifact_manifest_file(app),
+        serde_json::to_vec_pretty(&artifact).unwrap_or_default(),
+    );
     Ok(jar.to_string_lossy().to_string())
 }
 
 /// accounts:yggRuntime（yggdrasil.ts runtimeInfo）
 fn runtime_info(app: &AppHandle) -> Result<Value, String> {
     let jar = download_injector(app)?;
-    let manifest: Value = serde_json::from_slice(&std::fs::read(artifact_manifest_file(app)).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let manifest: Value = serde_json::from_slice(
+        &std::fs::read(artifact_manifest_file(app)).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     let artifact = clean_artifact(&manifest).ok_or("authlib-injector 本地构件清单损坏")?;
     let actual = sha256_file(&PathBuf::from(&jar))?;
     if actual != artifact["checksums"]["sha256"].as_str().unwrap_or("") {
@@ -1895,9 +2160,12 @@ fn provider_metadata(app: &AppHandle, provider: &Value) -> Result<String, String
             Ok(raw)
         }
         Err(e) => {
-            let cached = std::fs::read(metadata_directory(app).join(format!("{}.json", provider["id"].as_str().unwrap_or(""))))
-                .ok()
-                .and_then(|raw| String::from_utf8(raw).ok());
+            let cached = std::fs::read(
+                metadata_directory(app)
+                    .join(format!("{}.json", provider["id"].as_str().unwrap_or(""))),
+            )
+            .ok()
+            .and_then(|raw| String::from_utf8(raw).ok());
             match cached {
                 Some(cached) if parse_metadata(&cached).is_ok() => Ok(cached),
                 _ => Err(format!(
@@ -1911,12 +2179,19 @@ fn provider_metadata(app: &AppHandle, provider: &Value) -> Result<String, String
 }
 
 /// yggdrasilProvider.ts buildAuthlibInjectorArguments
-fn build_authlib_injector_arguments(jar_path: &str, api_root: &str, metadata: &str) -> Result<Vec<String>, String> {
+fn build_authlib_injector_arguments(
+    jar_path: &str,
+    api_root: &str,
+    metadata: &str,
+) -> Result<Vec<String>, String> {
     if jar_path.trim().is_empty() {
         return Err("authlib-injector 路径为空".into());
     }
     let root = normalize_yggdrasil_url(api_root)?;
-    if serde_json::from_str::<Value>(metadata).map(|v| v.is_object()).unwrap_or(false) {
+    if serde_json::from_str::<Value>(metadata)
+        .map(|v| v.is_object())
+        .unwrap_or(false)
+    {
         // 元数据有效
     } else {
         return Err("authlib-injector 预取元数据无效".into());
@@ -1987,7 +2262,10 @@ pub fn external_profile_public(app: &tauri::AppHandle, account: &Value) -> Resul
         .send()
         .map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        return Err(format!("获取外置角色材质失败（HTTP {}）", resp.status().as_u16()));
+        return Err(format!(
+            "获取外置角色材质失败（HTTP {}）",
+            resp.status().as_u16()
+        ));
     }
     let data: Value = resp.json().map_err(|e| e.to_string())?;
     let texture_prop = data["properties"]
@@ -2001,10 +2279,15 @@ pub fn external_profile_public(app: &tauri::AppHandle, account: &Value) -> Resul
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(v)
             .map_err(|_| "外置角色的 textures 属性无效".to_string())?;
-        payload = serde_json::from_slice(&decoded).map_err(|_| "外置角色的 textures 属性无效".to_string())?;
+        payload = serde_json::from_slice(&decoded)
+            .map_err(|_| "外置角色的 textures 属性无效".to_string())?;
     }
-    let skin_url = payload["textures"]["SKIN"]["url"].as_str().map(str::to_string);
-    let cape_url = payload["textures"]["CAPE"]["url"].as_str().map(str::to_string);
+    let skin_url = payload["textures"]["SKIN"]["url"]
+        .as_str()
+        .map(str::to_string);
+    let cape_url = payload["textures"]["CAPE"]["url"]
+        .as_str()
+        .map(str::to_string);
     let skins = skin_url.map(|u| {
         // 方块头像走 skin:avatar → skins[0].dataUrl（微软通道同款口径：字符串 dataURL 或 null），
         // 下载失败保留 url 让 3D 预览仍可加载
@@ -2034,14 +2317,22 @@ mod tests {
     use super::*;
 
     fn test_jar_args(metadata: &str) -> Vec<String> {
-        build_authlib_injector_arguments("C:/injector.jar", "https://littleskin.cn/api/yggdrasil", metadata).unwrap()
+        build_authlib_injector_arguments(
+            "C:/injector.jar",
+            "https://littleskin.cn/api/yggdrasil",
+            metadata,
+        )
+        .unwrap()
     }
 
     #[test]
     fn injector_args_match_pcl_shape() {
         let meta = r#"{"meta":{"serverName":"LittleSkin"}}"#;
         let args = test_jar_args(meta);
-        assert_eq!(args[0], "-javaagent:C:/injector.jar=https://littleskin.cn/api/yggdrasil/");
+        assert_eq!(
+            args[0],
+            "-javaagent:C:/injector.jar=https://littleskin.cn/api/yggdrasil/"
+        );
         // PCL 同款：side=client + 信任 Windows 根证书 + prefetch base64
         assert_eq!(args[1], "-Dauthlibinjector.side=client");
         assert_eq!(args[2], "-Djavax.net.ssl.trustStoreType=WINDOWS-ROOT");
@@ -2068,7 +2359,10 @@ mod tests {
         .unwrap();
         let descriptor = ProviderDescriptor::default();
         let register_url = if descriptor.register_url.is_empty() {
-            data["meta"]["links"]["register"].as_str().unwrap_or_default().to_string()
+            data["meta"]["links"]["register"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
         } else {
             descriptor.register_url.clone()
         };
@@ -2079,11 +2373,13 @@ mod tests {
     fn profile_texture_data_url_is_unwrapped_to_string() {
         // external_profile_public 的 dataUrl 必须是字符串（skin:avatar 按字符串取）
         let texture = json!({ "dataUrl": "data:image/png;base64,AAA" });
-        let data_url = texture["dataUrl"].as_str().map(str::to_string).unwrap_or_default();
+        let data_url = texture["dataUrl"]
+            .as_str()
+            .map(str::to_string)
+            .unwrap_or_default();
         assert_eq!(data_url, "data:image/png;base64,AAA");
         // 下载失败 → 空串（不是嵌套对象/null），3D 预览仍可用 url
         let failed = crate::skins::fetch_texture_public("http://127.0.0.1:1/nope.png");
         assert!(failed["dataUrl"].as_str().is_none());
     }
 }
-

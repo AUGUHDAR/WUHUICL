@@ -12,6 +12,7 @@ import type {
 import type { ModChangePlan } from '@shared/modManagement';
 import UiGlyph from './UiGlyph.vue';
 import { instanceCenter } from '../instanceCenter';
+import { managedImageUrl } from '../managedAssets';
 import { store, refreshInstalled, toast, openSettings } from '../store';
 import {
     errText,
@@ -74,7 +75,7 @@ watch(image, async (selected) => {
     if (!selected) return;
     try {
         const data = await invoke<string>(IPC.centerFile, target, 'preview', selected.id);
-        if (image.value?.id === selected.id) fullImage.value = data;
+        if (image.value?.id === selected.id) fullImage.value = managedImageUrl(data);
     } catch (e) {
         error.value = errText(e);
     }
@@ -91,7 +92,10 @@ async function refresh() {
     error.value = '';
     try {
         overview.value = await invoke(IPC.centerOverview, target);
-        if (tab.value === 'worlds') worlds.value = await invoke(IPC.centerWorlds, target);
+        if (tab.value === 'worlds')
+            worlds.value = (await invoke<InstanceWorld[]>(IPC.centerWorlds, target)).map((w) =>
+                w.icon ? { ...w, icon: managedImageUrl(w.icon) } : w
+            );
         if (tab.value === 'backups') backups.value = await invoke(IPC.centerBackups, target);
         if (tab.value === 'screenshots') {
             const r = await invoke<{ total: number; items: InstanceScreenshot[] }>(
@@ -99,7 +103,9 @@ async function refresh() {
                 target,
                 page.value
             );
-            shots.value = r.items;
+            shots.value = r.items.map((s) =>
+                s.image ? { ...s, image: managedImageUrl(s.image) } : s
+            );
             shotTotal.value = r.total;
         }
     } catch (e) {
@@ -113,6 +119,25 @@ async function chooseTab(value: string) {
     form.value = '';
     await refresh();
 }
+/** 实例备注编辑 */
+const noteEditing = ref(false);
+const noteDraft = ref('');
+const noteSaving = ref(false);
+function startNoteEdit() {
+    noteDraft.value = overview.value?.note || '';
+    noteEditing.value = true;
+}
+async function saveNote() {
+    if (noteSaving.value) return;
+    noteSaving.value = true;
+    try {
+        await perform(() => invoke(IPC.centerSetNote, target, noteDraft.value));
+        noteEditing.value = false;
+    } finally {
+        noteSaving.value = false;
+    }
+}
+
 async function perform(action: () => Promise<unknown>) {
     busy.value = true;
     error.value = '';
@@ -133,6 +158,11 @@ const op = (operation: Omit<InstanceOperation, 'target'> & { planId?: string }) 
 function navigate(view: 'mods' | 'packs' | 'shaders' | 'game') {
     instanceCenter.target = null;
     store.currentView = view;
+}
+/** 跳到世界地图页并预选该存档（地图页挂载时消费 worldMapRequest） */
+function openWorldMap(worldId: string) {
+    store.worldMapRequest = { instanceId: target.id, world: worldId };
+    store.currentView = 'worldmap';
 }
 function close() {
     instanceCenter.target = null;
@@ -304,6 +334,38 @@ onUnmounted(() => {
                             <div>
                                 <h3>你的游戏，独立管理</h3>
                                 <p class="ic-path">{{ overview?.directory }}</p>
+                                <p
+                                    v-if="!noteEditing"
+                                    class="ic-note"
+                                    :title="overview?.note ? '点击编辑备注' : '点击添加备注'"
+                                    @click="startNoteEdit"
+                                >
+                                    <template v-if="overview?.note">{{ overview.note }}</template>
+                                    <template v-else>
+                                        <em>点击添加备注（给这个实例写点什么…）</em>
+                                    </template>
+                                </p>
+                                <div v-else class="ic-note-edit">
+                                    <textarea
+                                        v-model="noteDraft"
+                                        rows="2"
+                                        maxlength="500"
+                                        placeholder="给这个实例写点什么（≤500 字，仅自己可见）"
+                                    ></textarea>
+                                    <button
+                                        class="btn btn-ghost"
+                                        :disabled="noteSaving"
+                                        @click="noteEditing = false"
+                                    >
+                                        取消</button
+                                    ><button
+                                        class="btn btn-gold"
+                                        :disabled="noteSaving"
+                                        @click="saveNote"
+                                    >
+                                        {{ noteSaving ? '保存中…' : '保存备注' }}
+                                    </button>
+                                </div>
                             </div>
                             <button
                                 class="btn btn-ghost"
@@ -370,6 +432,14 @@ onUnmounted(() => {
                             </div>
                             <div class="ic-actions">
                                 <button
+                                    class="btn btn-sm"
+                                    data-ui="instance-center:world-map"
+                                    :disabled="!!w.error"
+                                    title="在世界地图页查看该存档的实际地形"
+                                    @click="openWorldMap(w.id)"
+                                >
+                                    地图</button
+                                ><button
                                     class="btn btn-sm"
                                     @click="
                                         perform(() => invoke(IPC.centerFile, target, 'world', w.id))
@@ -1128,5 +1198,52 @@ onUnmounted(() => {
     .ic-grid .ic-card {
         transition: none;
     }
+}
+</style>
+
+<style scoped>
+.ic-note {
+    margin: 6px 0 0;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--text-dim);
+    cursor: pointer;
+    max-width: 560px;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+.ic-note:hover {
+    color: var(--text);
+}
+.ic-note em {
+    color: var(--text-dim);
+    opacity: 0.7;
+}
+.ic-note-edit {
+    display: grid;
+    gap: 8px;
+    margin-top: 6px;
+    max-width: 560px;
+}
+.ic-note-edit textarea {
+    resize: vertical;
+    min-height: 56px;
+    padding: 8px 10px;
+    border-radius: var(--radius-md, 12px);
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 12.5px;
+    outline: none;
+}
+.ic-note-edit textarea:focus {
+    border-color: var(--accent);
+}
+.ic-note-edit {
+    justify-items: end;
+}
+.ic-note-edit textarea {
+    justify-self: stretch;
 }
 </style>

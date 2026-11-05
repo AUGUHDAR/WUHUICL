@@ -1,8 +1,18 @@
 <script setup lang="ts">
-/** 大厅：浏览公开房间，点加入把房号带去加入页。 */
+/** 大厅：浏览公开房间；无密码房间点「加入」直接进房，有密码才带码去加入页。 */
 import { onMounted, ref } from 'vue';
 import { natLabel } from '../../../../shared/voxlinkNat';
-import { call, categories, loadCategories, pendingJoinCode, section, type VlRoomCard } from './useVoxlink';
+import {
+    call,
+    categories,
+    join,
+    loadCategories,
+    pendingJoinCode,
+    pendingJoinError,
+    refresh,
+    section,
+    type VlRoomCard
+} from './useVoxlink';
 import './voxlink.css';
 
 const rooms = ref<VlRoomCard[]>([]);
@@ -12,6 +22,8 @@ const search = ref('');
 const category = ref('');
 const loading = ref(false);
 const error = ref('');
+/** 正在直加的房号（卡片按钮转忙碌），同一时刻只发一次加入 */
+const joiningCode = ref('');
 
 function pickList(data: unknown): VlRoomCard[] {
     if (Array.isArray(data)) return data as VlRoomCard[];
@@ -33,7 +45,7 @@ async function load(target = page.value) {
         category: category.value || undefined
     });
     if (!r.ok) {
-        error.value = r.message || '大厅没取回来';
+        error.value = r.message || '大厅加载失败，点击「刷新大厅」重试';
         rooms.value = [];
     } else {
         rooms.value = pickList(r.data);
@@ -55,9 +67,27 @@ function versionLine(room: VlRoomCard): string {
     return [room.gameVersion, room.loader].filter(Boolean).join(' · ') || '版本未标注';
 }
 
-function goJoin(room: VlRoomCard) {
-    pendingJoinCode.value = room.code;
-    section.value = 'join';
+async function goJoin(room: VlRoomCard) {
+    if (joiningCode.value) return;
+    if (room.hasPassword) {
+        // 有密码：直接跳加入页，房号已填好，只差密码
+        pendingJoinCode.value = room.code;
+        pendingJoinError.value = '';
+        section.value = 'join';
+        return;
+    }
+    joiningCode.value = room.code;
+    const r = await join(room.code, '', 'gate');
+    joiningCode.value = '';
+    if (!r.ok) {
+        // 直加没成（可能实际要密码）：带码转加入页，把原因带上
+        pendingJoinCode.value = room.code;
+        pendingJoinError.value = r.message || '加入没有完成，在这里再试一次';
+        section.value = 'join';
+        return;
+    }
+    section.value = 'room';
+    await refresh();
 }
 
 onMounted(() => {
@@ -118,7 +148,9 @@ onMounted(() => {
                     {{ versionLine(room) }} · {{ room.currentPlayers ?? '?' }}/{{ room.maxPlayers ?? '?' }} 人 · NAT
                     {{ natLabel('UNKNOWN', room.natType) }}
                 </div>
-                <button class="btn btn-sm" @click="goJoin(room)">加入 →</button>
+                <button class="btn btn-gold btn-sm" :disabled="!!joiningCode" @click="goJoin(room)">
+                    {{ joiningCode === room.code ? '正在加入…' : room.hasPassword ? '输入密码加入' : '加入' }}
+                </button>
             </div>
         </div>
 

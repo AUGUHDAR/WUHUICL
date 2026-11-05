@@ -18,7 +18,7 @@ export interface RecordingCatalog {
     entries: RecordingEntry[];
     warnings: string[];
     library: string;
-    instances: Array<InstanceTarget & { name: string }>;
+    instances: Array<InstanceTarget & { name: string; isolated: boolean }>;
 }
 export interface RecordingRequest {
     action: 'collect' | 'export' | 'dispatch' | 'trash';

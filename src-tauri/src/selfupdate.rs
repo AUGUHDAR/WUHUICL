@@ -18,9 +18,14 @@ const GH_DOWNLOAD: &str = "https://github.com/AUGUHDAR/WUHUICL/releases/download
 /// Gitee 下载基址
 const GITEE_DOWNLOAD: &str = "https://gitee.com/AUGUHDAR/WUHUICL/releases/download";
 /// 预设 gh 前缀镜像（与 shared/updateMirrors.ts 保持一致）
-const PRESET_MIRRORS: &[&str] = &["https://ghproxy.net/", "https://gh-proxy.com/", "https://ghfast.top/"];
+const PRESET_MIRRORS: &[&str] = &[
+    "https://ghproxy.net/",
+    "https://gh-proxy.com/",
+    "https://ghfast.top/",
+];
 
 /// 读取玩家设置的更新来源：('auto'|'direct'|'mirror', 镜像前缀列表)
+#[cfg(windows)]
 fn update_sources_config(app: &tauri::AppHandle) -> (String, Vec<String>) {
     let s = crate::settings::get(app);
     let source = s["updateSource"].as_str().unwrap_or("auto").to_string();
@@ -44,6 +49,7 @@ fn update_sources_config(app: &tauri::AppHandle) -> (String, Vec<String>) {
 
 /// 按 updateSource 设置拼出下载候选（label, url）；direct=仅 GitHub，gitee=仅 Gitee，
 /// mirror = Gitee + 预设/自定义 gh 前缀镜像，auto = 全部。
+#[cfg(windows)]
 fn download_candidates(app: &tauri::AppHandle, version: &str, name: &str) -> Vec<(String, String)> {
     let (source, custom) = update_sources_config(app);
     let gh = format!("{GH_DOWNLOAD}/{version}/{}", name);
@@ -58,8 +64,18 @@ fn download_candidates(app: &tauri::AppHandle, version: &str, name: &str) -> Vec
             let preset_iter = PRESET_MIRRORS.iter().copied();
             let custom_iter = custom.iter().map(|s| s.as_str());
             for m in preset_iter.chain(custom_iter) {
-                let base = if m.ends_with('/') { m.to_string() } else { format!("{m}/") };
-                out.push((format!("镜像 {}", base.trim_start_matches("https://").trim_end_matches('/')), format!("{base}{gh}")));
+                let base = if m.ends_with('/') {
+                    m.to_string()
+                } else {
+                    format!("{m}/")
+                };
+                out.push((
+                    format!(
+                        "镜像 {}",
+                        base.trim_start_matches("https://").trim_end_matches('/')
+                    ),
+                    format!("{base}{gh}"),
+                ));
             }
         }
     }
@@ -141,8 +157,7 @@ fn parse_tag(tag: &str) -> Option<String> {
 
 /// 把 GitHub/Gitee 的 release JSON 归一为 check 结果（两平台字段名一致：tag_name/assets/body）
 fn build_check_result(data: &Value) -> Value {
-    let tag = parse_tag(data["tag_name"].as_str().unwrap_or(""))
-        .unwrap_or_default();
+    let tag = parse_tag(data["tag_name"].as_str().unwrap_or("")).unwrap_or_default();
     let has_update = is_newer(&tag, &current_version());
     let assets: Vec<Value> = data["assets"]
         .as_array()
@@ -180,7 +195,13 @@ fn build_check_result(data: &Value) -> Value {
 fn is_newer(tag: &str, current: &str) -> bool {
     let parse = |s: &str| -> Vec<u64> {
         s.split('.')
-            .map(|p| p.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0))
+            .map(|p| {
+                p.chars()
+                    .filter(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse()
+                    .unwrap_or(0)
+            })
             .collect()
     };
     let (a, b) = (parse(tag), parse(current));
@@ -218,7 +239,9 @@ fn list_releases() -> Value {
     if !resp.status().is_success() {
         return json!([]);
     }
-    let Ok(data) = resp.json::<Value>() else { return json!([]) };
+    let Ok(data) = resp.json::<Value>() else {
+        return json!([]);
+    };
     Value::Array(
         data.as_array()
             .cloned()
@@ -239,24 +262,36 @@ fn list_releases() -> Value {
 
 /// 更新提示事件（启动检查发现新版本时推 updatePrompt——对应 index.ts 启动链）
 pub fn startup_check(app: &tauri::AppHandle) {
-    let handle = app.clone();
-    std::thread::spawn(move || {
-        let result = check(&handle, false);
-        if result["ok"] == true && result["hasUpdate"] == true {
-            if let Some(win) = handle.get_webview_window("main") {
-                let _ = win.emit_to("main", "event:updatePrompt", result["release"].clone());
+    // 非 Windows 无应用内更新流程，不做启动检查
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        return;
+    }
+    #[cfg(windows)]
+    {
+        let handle = app.clone();
+        std::thread::spawn(move || {
+            let result = check(&handle, false);
+            if result["ok"] == true && result["hasUpdate"] == true {
+                if let Some(win) = handle.get_webview_window("main") {
+                    let _ = win.emit_to("main", "event:updatePrompt", result["release"].clone());
+                }
             }
-        }
-    });
+        });
+    }
 }
 
 // ---------------- 下载与应用（update:start / update:apply） ----------------
+// 以下流程 = Windows 便携 exe 的就地替换（cmd/bat + tasklist 轮询），全部仅 Windows
 
+#[cfg(windows)]
 fn update_dir(app: &tauri::AppHandle) -> std::path::PathBuf {
     crate::settings::user_data_dir(app).join("update")
 }
 
 /// asset digest（"sha256:..."）→ hex
+#[cfg(windows)]
 fn asset_digest(asset: &Value) -> Option<String> {
     let d = asset["digest"].as_str()?;
     d.strip_prefix("sha256:")
@@ -268,6 +303,7 @@ fn asset_digest(asset: &Value) -> Option<String> {
 /// 双源竞速（方案 2）：GitHub 与 Gitee **同时**开下，各写各的临时文件，
 /// 先完成且 SHA-256 合法的一方胜出 → 把产物搬到位、通知另一方停止；失败方自动被忽略。
 /// 进度走 event:progress {taskId,...}，完成 event:taskDone + event:updateReady。
+#[cfg(windows)]
 fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Result<Value, String> {
     let version = release["version"].as_str().unwrap_or("").to_string();
     let assets = release["assets"].as_array().ok_or("更新包清单缺失")?;
@@ -319,9 +355,11 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
             let label3 = label.clone();
             let cancel3 = cancel2.clone();
             // (上次采样时刻, 上次字节数, 连续慢速起点)
-            let slow_state3 = std::sync::Arc::new(std::sync::Mutex::new(
-                (std::time::Instant::now(), 0u64, None::<std::time::Instant>),
-            ));
+            let slow_state3 = std::sync::Arc::new(std::sync::Mutex::new((
+                std::time::Instant::now(),
+                0u64,
+                None::<std::time::Instant>,
+            )));
             let slow_hint3 = slow_hint2.clone();
             let progress: crate::installer::FileProgress = &move |done: u64, total: Option<u64>| {
                 if cancel3.load(std::sync::atomic::Ordering::SeqCst) {
@@ -358,7 +396,11 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
                             && !slow_hint3.swap(true, std::sync::atomic::Ordering::SeqCst)
                         {
                             if let Some(win) = app3.get_webview_window("main") {
-                                let _ = win.emit_to("main", "event:updateSlowHint", json!({ "taskId": tid }));
+                                let _ = win.emit_to(
+                                    "main",
+                                    "event:updateSlowHint",
+                                    json!({ "taskId": tid }),
+                                );
                             }
                         }
                     }
@@ -385,10 +427,10 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
                 Ok(_) => {
                     // 校验：digest 缺失视为不可校验（Gitee 上传无 digest），信任 size 匹配
                     let ok = match (&expected2, size) {
-                        (Some(h), _) => {
-                            sha256_file_hex(&part).map(|a| a == *h).unwrap_or(false)
-                        }
-                        (None, Some(s)) => std::fs::metadata(&part).map(|m| m.len() == s).unwrap_or(false),
+                        (Some(h), _) => sha256_file_hex(&part).map(|a| a == *h).unwrap_or(false),
+                        (None, Some(s)) => std::fs::metadata(&part)
+                            .map(|m| m.len() == s)
+                            .unwrap_or(false),
                         (None, None) => true,
                     };
                     if ok {
@@ -397,7 +439,10 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
                             let _ = std::fs::remove_file(&part);
                             return;
                         }
-                        let _ = win_tx2.send((part.to_string_lossy().to_string(), std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0)));
+                        let _ = win_tx2.send((
+                            part.to_string_lossy().to_string(),
+                            std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0),
+                        ));
                     } else {
                         let _ = std::fs::remove_file(&part);
                     }
@@ -421,7 +466,14 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
             Ok((part_path, bytes)) => {
                 let ok = std::fs::rename(&part_path, &dest).is_ok();
                 if ok {
-                    crate::tasks::task_done(&app_handle, &task_id, true, None, false, Some("download".into()));
+                    crate::tasks::task_done(
+                        &app_handle,
+                        &task_id,
+                        true,
+                        None,
+                        false,
+                        Some("download".into()),
+                    );
                     if let Some(win) = app_handle.get_webview_window("main") {
                         let _ = win.emit_to(
                             "main",
@@ -430,7 +482,14 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
                         );
                     }
                 } else {
-                    crate::tasks::task_done(&app_handle, &task_id, false, Some("更新包落盘失败".into()), false, Some("download".into()));
+                    crate::tasks::task_done(
+                        &app_handle,
+                        &task_id,
+                        false,
+                        Some("更新包落盘失败".into()),
+                        false,
+                        Some("download".into()),
+                    );
                 }
             }
             Err(_) => {
@@ -449,6 +508,7 @@ fn start_download(app: &tauri::AppHandle, release: &Value, _mode: &str) -> Resul
     Ok(json!({ "taskId": task_id }))
 }
 
+#[cfg(windows)]
 fn sha256_file_hex(path: &std::path::Path) -> Result<String, String> {
     use sha2::{Digest, Sha256};
     // 流式读取：本地安装包可能非常大，一次性 read 全文件会直接把 32 位堆打爆
@@ -461,6 +521,7 @@ fn sha256_file_hex(path: &std::path::Path) -> Result<String, String> {
 
 /// update:apply(release)：写替换脚本（等当前进程退出 → 换 exe → 重启）然后退出。
 /// 原版 .kamuclupdate 的"下次启动替换"等价物；脚本内保留 .old 备份。
+#[cfg(windows)]
 fn apply_update(app: &tauri::AppHandle, release: &Value) -> Result<(), String> {
     let version = release["version"].as_str().unwrap_or("");
     let dir = update_dir(app);
@@ -524,6 +585,7 @@ exit /b 1
 }
 
 /// update:pickLocalFile：选择本地 exe 安装包并校验（版本号解析 + 与 Release 资产的 SHA-256 对照）
+#[cfg(windows)]
 fn pick_local_file(app: &tauri::AppHandle) -> Result<Value, String> {
     use tauri_plugin_dialog::DialogExt;
     let picked = app
@@ -578,7 +640,10 @@ fn pick_local_file(app: &tauri::AppHandle) -> Result<Value, String> {
                     .and_then(|a| {
                         a.iter()
                             .find(|a| {
-                                a["name"].as_str().map(|n| n.to_lowercase().ends_with(".exe")).unwrap_or(false)
+                                a["name"]
+                                    .as_str()
+                                    .map(|n| n.to_lowercase().ends_with(".exe"))
+                                    .unwrap_or(false)
                             })
                             .and_then(|a| a["digest"].as_str())
                     })
@@ -587,9 +652,15 @@ fn pick_local_file(app: &tauri::AppHandle) -> Result<Value, String> {
                 if let Some(expected) = digest {
                     match sha256_file_hex(std::path::Path::new(&file_path)) {
                         Ok(actual) => {
-                            sha256 = if actual == expected { "match" } else { "mismatch" };
+                            sha256 = if actual == expected {
+                                "match"
+                            } else {
+                                "mismatch"
+                            };
                             if sha256 == "mismatch" {
-                                detail = "与官方发布的 SHA-256 不一致：文件可能损坏或被改动，请重新下载".into();
+                                detail =
+                                    "与官方发布的 SHA-256 不一致：文件可能损坏或被改动，请重新下载"
+                                        .into();
                             }
                         }
                         Err(e) => detail = e,
@@ -616,6 +687,7 @@ fn pick_local_file(app: &tauri::AppHandle) -> Result<Value, String> {
 }
 
 /// update:applyLocal：本地安装包走与 update:apply 相同的备份-替换-重启脚本
+#[cfg(windows)]
 fn apply_local_file(app: &tauri::AppHandle, check: &Value) -> Result<(), String> {
     let path = check["filePath"].as_str().unwrap_or("");
     if path.is_empty() {
@@ -681,7 +753,38 @@ exit /b 1
 }
 
 /// 统一入口
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
+    // 应用内自更新 = Windows 便携 exe 的就地替换流程（cmd/bat + tasklist）。
+    // macOS/Linux 安装形态不同（dmg/AppImage/deb），后续按平台做；先诚实降级。
+    #[cfg(not(windows))]
+    {
+        let _ = (app, args);
+        match channel {
+            "update:check" => Some(Ok(json!({
+                "ok": false,
+                "hasUpdate": false,
+                "reason": "当前平台暂不支持应用内更新，请到 GitHub/Gitee 发布页下载新版本"
+            }))),
+            "update:getState" | "update:getPending" => Some(Ok(Value::Null)),
+            "update:getConfigStatus" => Some(Ok(config_status(app))),
+            "update:listReleases" => Some(Ok(list_releases())),
+            "update:skip" => Some(Ok(Value::Null)),
+            "update:start"
+            | "update:apply"
+            | "update:applyPending"
+            | "update:pickLocalFile"
+            | "update:applyLocal"
+            | "update:restoreBackup" => Some(Err(
+                "当前平台暂不支持应用内更新，请到发布页下载新版本".into(),
+            )),
+            _ => None,
+        }
+    }
+    #[cfg(windows)]
     match channel {
         "update:check" => Some(Ok(check(
             app,
@@ -708,8 +811,11 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
-            std::fs::write(&path, serde_json::to_vec_pretty(&def).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
+            std::fs::write(
+                &path,
+                serde_json::to_vec_pretty(&def).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
             Ok(Value::Null)
         })()),
         "update:start" => {

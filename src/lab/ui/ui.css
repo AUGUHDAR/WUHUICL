@@ -1,0 +1,586 @@
+
+/*
+ * 设计令牌桥：移植页面（Axolotl/@modrinth 风格）的 scoped CSS 引用 Omorphia 令牌
+ * （--surface-N / --color-text-* / --color-brand 等），这些名字在 wuhuicl 不存在，
+ * 不桥接则背景/边框全部解析失败变透明（违反「背景 UI 与总背景拉开色差」）。
+ * 全部映射到 wuhuicl 主题变量，浅色/深色/自定义主题自动跟随。
+ * 铺在地图/画布上的表面用实底（--surface-solid），避免半透明白底透出地图。
+ */
+:root {
+    --color-bg: var(--bg);
+    --surface-1: var(--surface-solid);
+    --surface-2: var(--surface-solid);
+    --surface-3: var(--surface-solid);
+    --surface-4: var(--hover);
+    --surface-5: var(--border);
+    --color-divider: var(--border);
+    --color-text-primary: var(--text);
+    --color-text-default: var(--text);
+    --color-text-secondary: var(--text-dim);
+    --color-text-tertiary: var(--text-dim);
+    --color-brand: var(--accent);
+    --color-brand-highlight: var(--accent-2);
+    --color-accent-contrast: var(--on-accent);
+    --color-red: var(--danger);
+    --color-red-highlight: var(--danger);
+    --color-orange: #e8912d;
+    --radius-sm: 8px;
+    --radius-md: var(--radius, 12px);
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+    --hover-brightness: 1.08;
+}
+/*
+ * 实验室兼容层样式（lab-ui）：对应 @modrinth/ui 组件在 wuhuicl 主题下的外观。
+ * 类名统一 lab- 前缀；由种子地图 / 投影工坊两个视图各自 import（无全局注册）。
+ */
+
+/* ---- Button 变体 ---- */
+.btn.btn-text {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-dim);
+}
+.btn.btn-text:hover {
+    background: var(--hover);
+    color: var(--text);
+}
+.btn.lab-btn-icon {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 16px;
+}
+.btn.lab-btn-icon svg {
+    width: 17px;
+    height: 17px;
+}
+.btn.lab-btn-chip {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 13px;
+}
+.btn.lab-btn-chip.active {
+    border-color: transparent;
+    background: var(--accent-soft);
+    color: var(--accent-2);
+    font-weight: 600;
+}
+
+/* ---- PopoutMenu / OverflowMenu 触发器 ---- */
+button.lab-popout-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    height: 34px;
+    min-width: 34px;
+    padding: 0 9px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--card);
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    transition: background 120ms, border-color 120ms;
+}
+button.lab-popout-trigger:hover {
+    background: var(--hover);
+}
+button.lab-popout-trigger svg {
+    width: 16px;
+    height: 16px;
+}
+.lab-overflow-trigger {
+    gap: 0.4rem;
+    padding-inline: 0.7rem;
+    border-radius: var(--radius-md, 12px);
+    white-space: nowrap;
+}
+
+/* ---- Checkbox ---- */
+.lab-check {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 8px;
+    cursor: pointer;
+    line-height: 1.5;
+    min-width: 0;
+}
+.lab-check.disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+.lab-check input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.lab-check-box {
+    flex: none;
+    width: 17px;
+    height: 17px;
+    margin-top: 1px;
+    border-radius: 5px;
+    border: 1.5px solid var(--border);
+    background: rgba(0, 0, 0, 0.25);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 120ms, border-color 120ms;
+    position: relative;
+}
+.lab-check input:checked + .lab-check-box {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+.lab-check input:checked + .lab-check-box::after {
+    content: '';
+    width: 9px;
+    height: 5px;
+    border-left: 2px solid var(--on-accent);
+    border-bottom: 2px solid var(--on-accent);
+    transform: rotate(-45deg) translate(0.5px, -1px);
+}
+.lab-check input:focus-visible + .lab-check-box {
+    outline: 2px solid var(--accent-2);
+    outline-offset: 1px;
+}
+.lab-check-text {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+}
+.lab-check-label {
+    color: var(--text);
+    font-size: 13.5px;
+}
+.lab-check-description {
+    color: var(--text-dim);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+/* ---- Toggle ---- */
+.lab-toggle {
+    flex: none;
+    width: 40px;
+    height: 22px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.3);
+    position: relative;
+    cursor: pointer;
+    transition: background 140ms, border-color 140ms;
+    padding: 0;
+}
+.lab-toggle.small {
+    width: 34px;
+    height: 19px;
+}
+.lab-toggle .lab-toggle-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: transform 140ms, background 140ms;
+}
+.lab-toggle.small .lab-toggle-thumb {
+    width: 13px;
+    height: 13px;
+}
+.lab-toggle.on {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+.lab-toggle.on .lab-toggle-thumb {
+    transform: translateX(18px);
+    background: var(--on-accent);
+}
+.lab-toggle.small.on .lab-toggle-thumb {
+    transform: translateX(15px);
+}
+.lab-toggle:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ---- Slider ---- */
+.lab-slider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.lab-slider input[type='range'] {
+    flex: 1;
+    min-width: 0;
+    appearance: none;
+    height: 5px;
+    border-radius: 999px;
+    background: linear-gradient(
+        to right,
+        var(--accent) var(--lab-slider-fill, 50%),
+        rgba(255, 255, 255, 0.14) var(--lab-slider-fill, 50%)
+    );
+    outline: none;
+    cursor: pointer;
+}
+.lab-slider input[type='range']::-webkit-slider-thumb {
+    appearance: none;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: var(--text);
+    border: 2px solid var(--accent);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.lab-slider-value {
+    flex: none;
+    min-width: 44px;
+    text-align: right;
+    font-size: 12px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---- StyledInput ---- */
+.lab-input {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    padding: 0 10px;
+    height: var(--ctl-h, 44px);
+    border-radius: var(--radius, 12px);
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    transition: border-color 120ms;
+}
+.lab-input:focus-within {
+    border-color: var(--accent);
+}
+.lab-input .lab-input-icon {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    color: var(--text-dim);
+}
+.lab-input-prefix {
+    flex: none;
+    color: var(--text-dim);
+    font-size: 0.72rem;
+    font-weight: 800;
+    pointer-events: none;
+}
+.lab-input input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    outline: none;
+    color: var(--text);
+    font: inherit;
+    height: 100%;
+}
+.lab-input input::placeholder {
+    color: var(--text-dim);
+}
+.lab-input-clear {
+    flex: none;
+    border: 0;
+    background: var(--hover);
+    color: var(--text-dim);
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+.lab-input-clear:hover {
+    color: var(--text);
+}
+
+/* ---- Admonition ---- */
+.lab-admonition {
+    border-radius: var(--radius, 12px);
+    border: 1px solid var(--danger-border);
+    background: var(--danger-soft);
+    padding: 10px 14px;
+    display: grid;
+    gap: 3px;
+}
+.lab-admonition.warning {
+    border-color: rgba(250, 179, 63, 0.35);
+    background: rgba(250, 179, 63, 0.1);
+}
+.lab-admonition.info {
+    border-color: var(--border);
+    background: var(--hover);
+}
+.lab-admonition-header {
+    margin: 0;
+    font-weight: 600;
+    font-size: 13.5px;
+}
+.lab-admonition-body {
+    margin: 0;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+/* ---- Accordion ---- */
+.lab-accordion {
+    min-width: 0;
+}
+.lab-accordion-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    background: transparent;
+    border: 0;
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+    padding: 6px 2px;
+    text-align: left;
+}
+.lab-accordion-chevron {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    color: var(--text-dim);
+    transition: transform 160ms;
+}
+.lab-accordion.open .lab-accordion-chevron {
+    transform: rotate(180deg);
+}
+.lab-accordion-content {
+    min-width: 0;
+}
+
+/* ---- Popout / Overflow 菜单 ---- */
+.lab-popout-menu {
+    position: fixed;
+    z-index: 90;
+    min-width: 120px;
+    max-width: min(34rem, calc(100vw - 1.5rem));
+    max-height: min(30rem, calc(100vh - 2rem));
+    overflow: auto;
+    border-radius: var(--radius, 12px);
+    border: 1px solid var(--border);
+    background: var(--card-solid, var(--bg));
+    box-shadow: var(--shadow-lg);
+    padding: 6px;
+}
+.lab-overflow-menu {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+}
+.lab-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+}
+.lab-menu-item svg {
+    width: 15px;
+    height: 15px;
+    flex: none;
+}
+.lab-menu-item:hover:not(.disabled) {
+    background: var(--hover);
+}
+.lab-menu-item.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.lab-menu-item.danger {
+    color: var(--danger);
+}
+.lab-menu-divider {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 4px 6px;
+}
+
+/* ---- NewModal ---- */
+.lab-modal-mask {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    background: var(--mask);
+    backdrop-filter: blur(3px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    opacity: 0;
+    transition: opacity 140ms;
+}
+.lab-modal-mask.shown {
+    opacity: 1;
+}
+.lab-modal {
+    max-height: calc(100vh - 40px);
+    display: flex;
+    flex-direction: column;
+    animation: lab-modal-pop 140ms ease-out;
+}
+@keyframes lab-modal-pop {
+    from {
+        transform: translateY(10px) scale(0.98);
+        opacity: 0;
+    }
+}
+.lab-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+}
+.lab-modal-head .modal-title {
+    margin: 0;
+}
+.lab-modal-body {
+    padding: 16px 20px 20px;
+    min-height: 0;
+    overflow: visible;
+}
+.lab-modal-body.scrollable {
+    overflow: auto;
+}
+
+/* ---- Tabs ---- */
+.lab-tabs {
+    display: inline-flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    padding: 0 4px;
+}
+.lab-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 12px;
+    background: transparent;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+    font: inherit;
+    font-size: 13.5px;
+    cursor: pointer;
+    margin-bottom: -1px;
+}
+.lab-tab svg {
+    width: 15px;
+    height: 15px;
+}
+.lab-tab:hover {
+    color: var(--text);
+}
+.lab-tab.active {
+    color: var(--accent-2);
+    border-bottom-color: var(--accent);
+}
+
+/* ---- EmptyState / Avatar ---- */
+.lab-empty {
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    text-align: center;
+    padding: 42px 20px;
+    color: var(--text-dim);
+}
+.lab-empty-icon svg {
+    width: 46px;
+    height: 46px;
+    opacity: 0.55;
+}
+.lab-empty-heading {
+    margin: 4px 0 0;
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 600;
+}
+.lab-empty-description {
+    margin: 0;
+    font-size: 12.5px;
+    max-width: 40ch;
+    line-height: 1.7;
+}
+.lab-avatar {
+    border-radius: 8px;
+    object-fit: cover;
+    background: var(--card-2);
+}
+
+.lab-avatar-fallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--card-2);
+    color: var(--text-dim);
+    font-size: 0.8em;
+    font-weight: 600;
+}
+
+.lab-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--hover);
+    color: var(--text-dim);
+    font-size: 11.5px;
+    line-height: 1.6;
+    white-space: nowrap;
+}
+.lab-empty-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+/* 实验室页面的展示图片禁用浏览器原生拖拽（图层图标等可被拖走非常奇怪） */
+.seed-map-page img,
+.schematic-page img,
+.schematic-page svg,
+.lab-popout-menu img,
+.layer-options img {
+    -webkit-user-drag: none;
+    user-select: none;
+}

@@ -1,38 +1,61 @@
 //! 原生文件拖出（Windows OLE DoDragDrop + CF_HDROP）。
 //! 对应原版 webContents.startDrag：资源管理器/模组页把文件拖到桌面、QQ 等任意接收窗口。
 //! 数据对象只承载 CF_HDROP（拖出文件列表），效果 = 复制。
+//! macOS/Linux 的原生拖出走 WebView 自带 drag-start（wry 侧），本模块仅 Windows。
 
-use std::cell::UnsafeCell;
 use std::path::Path;
+
+#[cfg(windows)]
+use std::cell::UnsafeCell;
+#[cfg(windows)]
 use std::ptr;
 
+#[cfg(windows)]
 use windows::core::{implement, BOOL, HRESULT};
-use windows::Win32::Foundation::{HANDLE, HGLOBAL, GlobalFree, POINT, S_OK};
+#[cfg(windows)]
+use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, POINT, S_OK};
+#[cfg(windows)]
 use windows::Win32::System::Com::{
-    DVASPECT_CONTENT, FORMATETC, IDataObject, IDataObject_Impl, IEnumFORMATETC,
-    IEnumFORMATETC_Impl, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL,
+    IDataObject, IDataObject_Impl, IEnumFORMATETC, IEnumFORMATETC_Impl, DVASPECT_CONTENT,
+    FORMATETC, STGMEDIUM, STGMEDIUM_0, TYMED_HGLOBAL,
 };
+#[cfg(windows)]
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+#[cfg(windows)]
 use windows::Win32::System::Ole::{
-    IDropSource, IDropSource_Impl, CF_HDROP,
-    DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_MOVE, DROPEFFECT_NONE,
+    IDropSource, IDropSource_Impl, CF_HDROP, DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_MOVE,
+    DROPEFFECT_NONE,
 };
+#[cfg(windows)]
 use windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS;
+#[cfg(windows)]
 use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
+#[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow};
 
+#[cfg(windows)]
 const DRAGDROP_S_DROP: HRESULT = HRESULT(0x0004_0100);
+#[cfg(windows)]
 const DRAGDROP_S_CANCEL: HRESULT = HRESULT(0x0004_0101);
+#[cfg(windows)]
 const S_FALSE: HRESULT = HRESULT(1);
+#[cfg(windows)]
 const E_POINTER: HRESULT = HRESULT(0x8000_4003_u32 as i32);
+#[cfg(windows)]
 const E_FAIL: HRESULT = HRESULT(0x8000_4005_u32 as i32);
+#[cfg(windows)]
 const E_OUTOFMEMORY: HRESULT = HRESULT(0x8007_000E_u32 as i32);
+#[cfg(windows)]
 const DV_E_FORMATETC: HRESULT = HRESULT(0x8004_0002_u32 as i32);
+#[cfg(windows)]
 const OLE_E_ADVISENOTSUPPORTED: HRESULT = HRESULT(0x8004_0001_u32 as i32);
+#[cfg(windows)]
 const DATADIR_GET: u32 = 1;
+#[cfg(windows)]
 const MK_LBUTTON: u32 = 0x0001;
 
 /// 构造 CF_HDROP 的 HGLOBAL（DROPFILES 头 + 宽字符路径表 + 双零终止）
+#[cfg(windows)]
 unsafe fn create_hdrop(paths: &[String]) -> Result<HANDLE, String> {
     let mut wide: Vec<u16> = Vec::new();
     for p in paths {
@@ -58,15 +81,18 @@ unsafe fn create_hdrop(paths: &[String]) -> Result<HANDLE, String> {
 }
 
 /// 释放 CF_HDROP HGLOBAL（拖放结束后数据对象里那份由我们自己释放）
+#[cfg(windows)]
 unsafe fn free_hdrop(handle: HANDLE) {
     let _ = GlobalFree(Some(HGLOBAL(handle.0)));
 }
 
 // ---------------- IDropSource 实现 ----------------
 
+#[cfg(windows)]
 #[implement(IDropSource)]
 struct DropSource;
 
+#[cfg(windows)]
 impl IDropSource_Impl for DropSource_Impl {
     fn QueryContinueDrag(&self, escape_pressed: BOOL, key_state: MODIFIERKEYS_FLAGS) -> HRESULT {
         if escape_pressed.as_bool() {
@@ -85,11 +111,13 @@ impl IDropSource_Impl for DropSource_Impl {
 
 // ---------------- IDataObject 实现（只发 CF_HDROP） ----------------
 
+#[cfg(windows)]
 #[implement(IDataObject)]
 struct FileDataObject {
     hdrop: UnsafeCell<HANDLE>,
 }
 
+#[cfg(windows)]
 fn supported_format(format: &FORMATETC) -> bool {
     format.cfFormat == CF_HDROP.0
         && (format.tymed as u32 & TYMED_HGLOBAL.0 as u32) != 0
@@ -97,6 +125,7 @@ fn supported_format(format: &FORMATETC) -> bool {
         && format.dwAspect == DVASPECT_CONTENT.0 as u32
 }
 
+#[cfg(windows)]
 fn hdrop_format() -> FORMATETC {
     FORMATETC {
         cfFormat: CF_HDROP.0,
@@ -108,6 +137,7 @@ fn hdrop_format() -> FORMATETC {
 }
 
 /// HDROP 内容总字节数：DROPFILES 头 + 路径表 + 双零
+#[cfg(windows)]
 unsafe fn hdrop_total_bytes(handle: HANDLE) -> usize {
     let hdrop = HDROP(handle.0);
     let count = DragQueryFileW(hdrop, u32::MAX, None);
@@ -120,6 +150,7 @@ unsafe fn hdrop_total_bytes(handle: HANDLE) -> usize {
     total
 }
 
+#[cfg(windows)]
 impl IDataObject_Impl for FileDataObject_Impl {
     fn GetData(&self, pformatetcin: *const FORMATETC) -> windows::core::Result<STGMEDIUM> {
         unsafe {
@@ -149,7 +180,11 @@ impl IDataObject_Impl for FileDataObject_Impl {
             })
         }
     }
-    fn GetDataHere(&self, _pformatetc: *const FORMATETC, _pmedium: *mut STGMEDIUM) -> windows::core::Result<()> {
+    fn GetDataHere(
+        &self,
+        _pformatetc: *const FORMATETC,
+        _pmedium: *mut STGMEDIUM,
+    ) -> windows::core::Result<()> {
         Err(DV_E_FORMATETC.into())
     }
     fn QueryGetData(&self, pformatetc: *const FORMATETC) -> HRESULT {
@@ -164,7 +199,11 @@ impl IDataObject_Impl for FileDataObject_Impl {
             }
         }
     }
-    fn GetCanonicalFormatEtc(&self, pformatectin: *const FORMATETC, pformatetcout: *mut FORMATETC) -> HRESULT {
+    fn GetCanonicalFormatEtc(
+        &self,
+        pformatectin: *const FORMATETC,
+        pformatetcout: *mut FORMATETC,
+    ) -> HRESULT {
         unsafe {
             if pformatetcout.is_null() {
                 return E_POINTER;
@@ -174,16 +213,29 @@ impl IDataObject_Impl for FileDataObject_Impl {
             S_FALSE // DATA_S_SAMEFORMATETC
         }
     }
-    fn SetData(&self, _pformatetc: *const FORMATETC, _pmedium: *const STGMEDIUM, _frelease: BOOL) -> windows::core::Result<()> {
+    fn SetData(
+        &self,
+        _pformatetc: *const FORMATETC,
+        _pmedium: *const STGMEDIUM,
+        _frelease: BOOL,
+    ) -> windows::core::Result<()> {
         Err(DV_E_FORMATETC.into())
     }
     fn EnumFormatEtc(&self, dwdirection: u32) -> windows::core::Result<IEnumFORMATETC> {
         if dwdirection != DATADIR_GET {
             return Err(DV_E_FORMATETC.into());
         }
-        Ok(FmtEnum { index: UnsafeCell::new(0) }.into())
+        Ok(FmtEnum {
+            index: UnsafeCell::new(0),
+        }
+        .into())
     }
-    fn DAdvise(&self, _pformatetc: *const FORMATETC, _advf: u32, _padvsink: windows::core::Ref<windows::Win32::System::Com::IAdviseSink>) -> windows::core::Result<u32> {
+    fn DAdvise(
+        &self,
+        _pformatetc: *const FORMATETC,
+        _advf: u32,
+        _padvsink: windows::core::Ref<windows::Win32::System::Com::IAdviseSink>,
+    ) -> windows::core::Result<u32> {
         Err(OLE_E_ADVISENOTSUPPORTED.into())
     }
     fn DUnadvise(&self, _dwconnection: u32) -> windows::core::Result<()> {
@@ -196,11 +248,13 @@ impl IDataObject_Impl for FileDataObject_Impl {
 
 // ---------------- IEnumFORMATETC 实现（只枚举 CF_HDROP 一项） ----------------
 
+#[cfg(windows)]
 #[implement(IEnumFORMATETC)]
 struct FmtEnum {
     index: UnsafeCell<u32>,
 }
 
+#[cfg(windows)]
 impl IEnumFORMATETC_Impl for FmtEnum_Impl {
     fn Next(&self, celt: u32, rgelt: *mut FORMATETC, pceltfetched: *mut u32) -> HRESULT {
         unsafe {
@@ -248,6 +302,7 @@ impl IEnumFORMATETC_Impl for FmtEnum_Impl {
 
 /// 启动一次模态的原生拖出（在调用线程进入 DoDragDrop 循环，直到玩家松开/取消）。
 /// 返回最终生效的效果（"copy" / "move" / "none"）。
+#[cfg(windows)]
 pub fn start_drag_out(paths: &[String]) -> Result<&'static str, String> {
     if paths.is_empty() {
         return Err("没有可拖出的文件".into());
@@ -268,18 +323,17 @@ pub fn start_drag_out(paths: &[String]) -> Result<&'static str, String> {
     }
 }
 
+#[cfg(windows)]
 unsafe fn start_drag_out_inner(paths: &[String]) -> Result<&'static str, String> {
     {
         let hdrop = create_hdrop(paths)?;
-        let data_obj: IDataObject = FileDataObject { hdrop: UnsafeCell::new(hdrop) }.into();
+        let data_obj: IDataObject = FileDataObject {
+            hdrop: UnsafeCell::new(hdrop),
+        }
+        .into();
         let source: IDropSource = DropSource.into();
         let mut effect = DROPEFFECT_NONE.0;
-        let hr = do_drag_drop_raw(
-            &data_obj,
-            &source,
-            DROPEFFECT_COPY.0,
-            &mut effect,
-        );
+        let hr = do_drag_drop_raw(&data_obj, &source, DROPEFFECT_COPY.0, &mut effect);
         // 数据对象自持的那份 hdrop 释放；接收方拿到的副本由其 ReleaseStgMedium 负责
         free_hdrop(hdrop);
         // 拖放完成后显式释放 COM 引用（Windows 会在事件循环里拿引用，这里只保证本地引用计数）
@@ -299,6 +353,7 @@ unsafe fn start_drag_out_inner(paths: &[String]) -> Result<&'static str, String>
 }
 
 // windows crate 未导出 DoDragDrop 的安全包装：直接链接 ole32
+#[cfg(windows)]
 #[link(name = "ole32")]
 unsafe extern "system" {
     fn DoDragDrop(
@@ -310,6 +365,7 @@ unsafe extern "system" {
 }
 
 /// 包装：把接口转裸指针调用（DoDragDrop 保持引用，返回后我们再释放）
+#[cfg(windows)]
 unsafe fn do_drag_drop_raw(
     data_obj: &IDataObject,
     source: &IDropSource,
@@ -324,6 +380,7 @@ unsafe fn do_drag_drop_raw(
     )
 }
 
+#[cfg(windows)]
 #[allow(dead_code)]
 fn cursor_point() -> POINT {
     let mut p = POINT::default();
@@ -333,9 +390,17 @@ fn cursor_point() -> POINT {
     p
 }
 
+#[cfg(windows)]
 #[allow(dead_code)]
 pub fn foreground_hwnd() -> isize {
     unsafe { GetForegroundWindow().0 as isize }
+}
+
+/// 非 Windows：WebView 自带 HTML5 drag-start 已能拖出文件（wry 支持），
+/// 走不到这里；保留入口返回明确错误，通道层原样提示。
+#[cfg(not(windows))]
+pub fn start_drag_out(_paths: &[String]) -> Result<&'static str, String> {
+    Err("当前平台不支持原生拖出（仅 Windows）".into())
 }
 
 /// 校验一批拖出路径：必须存在、数量 1–1000、去重（目录也允许）

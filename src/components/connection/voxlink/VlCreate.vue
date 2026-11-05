@@ -201,7 +201,7 @@ onMounted(() => {
         <div v-if="vl.lastError" class="vl-error">{{ vl.lastError }}</div>
 
         <div class="vl-actions">
-            <button class="btn" :disabled="busy" @click="submit">{{ busy ? '正在建房…' : '创建房间' }}</button>
+            <button class="btn btn-gold" :disabled="busy" @click="submit">{{ busy ? '正在建房…' : '创建房间' }}</button>
         </div>
     </div>
 </template>

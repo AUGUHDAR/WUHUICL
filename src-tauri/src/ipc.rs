@@ -6,7 +6,13 @@
 //! 启动关键通道（settings/accounts/versions/folders/systemInfo/exitHistory/…）
 //! 为真实现；未移植通道显式返回「未实现的通道」错误，便于移植期发现缺口。
 
-use crate::{accounts, appearance, bridge, catalog, direct, frp, selfupdate, centercmd, community, feedback, misc, modpacks, mods, projections, recordings, servers, skins, tasks, terracotta, voxlink, vlcli, worlds, exportlogs, gate, gamedir, gamefolders, installer, javaman, launch, mslogin, settings, sysinfo, versions, windowctl};
+use crate::{
+    accounts, appearance, bridge, catalog, centercmd, community, direct, exportlogs, feedback, frp,
+    gamedir, gamefolders, gate, hero_scenes, installer, javaman, launch, misc, modpacks, mods,
+    mslogin, projections, recordings, schematic_preview, screenshots, seed_map, selfupdate,
+    servers, settings, skins, sysinfo, tasks, terracotta, versions, vlcli, voxlink, windowctl,
+    world_map, worlds,
+};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, WebviewWindow};
 
@@ -38,9 +44,19 @@ pub fn ipc_send(
     send(&app, window.label() == "main", &channel, &args)
 }
 
+/// 当前平台（Electron 风格：win32 / darwin / linux / android）。
+/// shim 在挂载 bridge 前同步取用（渲染层所有 platform 分支的唯一事实源）。
+#[tauri::command]
+pub fn app_platform() -> &'static str {
+    crate::platform::electron_platform()
+}
+
 fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, String> {
     // 子系统模块优先：认领的通道直接返回（含 Err）
     if let Some(r) = gamefolders::invoke(app, channel, args) {
+        return r;
+    }
+    if let Some(r) = hero_scenes::invoke(app, channel, args) {
         return r;
     }
     if let Some(r) = installer::invoke(app, channel, args) {
@@ -100,7 +116,19 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
     if let Some(r) = projections::invoke(app, channel, args) {
         return r;
     }
+    if let Some(r) = seed_map::invoke(app, channel, args) {
+        return r;
+    }
+    if let Some(r) = schematic_preview::invoke(app, channel, args) {
+        return r;
+    }
+    if let Some(r) = world_map::invoke(app, channel, args) {
+        return r;
+    }
     if let Some(r) = recordings::invoke(app, channel, args) {
+        return r;
+    }
+    if let Some(r) = screenshots::invoke(app, channel, args) {
         return r;
     }
     if let Some(r) = launch::invoke(app, channel, args) {
@@ -131,7 +159,13 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
             if let Some(win) = app.get_webview_window("main") {
                 windowctl::apply_native_appearance(&win, &saved);
             }
-            windowctl::configure_auto_fit(app, saved.get("uiWindowAutoFit").and_then(|v| v.as_bool()).unwrap_or(false));
+            windowctl::configure_auto_fit(
+                app,
+                saved
+                    .get("uiWindowAutoFit")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+            );
             Ok(saved)
         }
         "app:systemInfo" => Ok(sysinfo::system_info()),
@@ -140,6 +174,14 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         "app:selectDir" => Ok(pick(app, true, &["全部文件|*"])),
         "app:selectFile" => Ok(pick(app, false, &["整合包|*.mrpack;*.zip"])),
         "app:selectImage" => Ok(pick(app, false, &["图片|*.png;*.jpg;*.jpeg;*.webp"])),
+        // 多选文件：filter 形如 ["模组|*.jar"]，资源页导入按钮按类型传过滤器
+        "app:selectFiles" => Ok(pick_files(
+            app,
+            &args.first()
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|f| f.as_str()).collect::<Vec<&str>>())
+                .unwrap_or_else(|| vec!["全部文件|*"]),
+        )),
 
         // ---------------- 游戏文件夹 ----------------
         "folders:list" => Ok(json!({
@@ -197,10 +239,7 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         }
         "folders:open" => {
             let path = args.first().and_then(|v| v.as_str()).ok_or("缺少 path")?;
-            std::process::Command::new("explorer.exe")
-                .arg(path)
-                .spawn()
-                .map_err(|e| e.to_string())?;
+            crate::platform::open_path(path)?;
             Ok(Value::Null)
         }
         "folders:contextMenu" => Ok(Value::Null), // 原生右键菜单：子系统阶段接
@@ -225,10 +264,11 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         "accounts:yggProviders" => Ok(json!([])),
         "accounts:refresh" => Err("令牌刷新未移植".into()),
         "accounts:yggRuntime" => Err("authlib-injector 运行时未移植".into()),
-        "accounts:yggProbe" | "accounts:yggLogin" | "accounts:yggSaveProvider"
-        | "accounts:yggRemoveProvider" | "accounts:yggSelectProfile" => {
-            Err("外置登录未移植".into())
-        }
+        "accounts:yggProbe"
+        | "accounts:yggLogin"
+        | "accounts:yggSaveProvider"
+        | "accounts:yggRemoveProvider"
+        | "accounts:yggSelectProfile" => Err("外置登录未移植".into()),
 
         // ---------------- 版本 ----------------
         "versions:installed" => {
@@ -238,12 +278,19 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         "versions:catalog" => Ok(json!({ "versions": [], "checkedAt": 0, "stale": true })),
         "versions:manifest" => Ok(json!([])),
         "versions:install" => Err("版本安装器未移植".into()),
-        "versions:remove" | "versions:rename" | "versions:cleanup" | "versions:setJava"
-        | "versions:setResolution" | "versions:setIsolation" | "versions:isolationPlan"
-        | "versions:setIcon" | "versions:uploadIcon" | "versions:uploadThumbnail"
-        | "versions:setThumbnailFit" | "versions:resetThumbnail" | "versions:categoriesUpdate" => {
-            Err("版本管理未移植".into())
-        }
+        "versions:remove"
+        | "versions:rename"
+        | "versions:cleanup"
+        | "versions:setJava"
+        | "versions:setResolution"
+        | "versions:setIsolation"
+        | "versions:isolationPlan"
+        | "versions:setIcon"
+        | "versions:uploadIcon"
+        | "versions:uploadThumbnail"
+        | "versions:setThumbnailFit"
+        | "versions:resetThumbnail"
+        | "versions:categoriesUpdate" => Err("版本管理未移植".into()),
         "loaders:list" | "loaders:fabricApi" => Err("加载器清单未移植".into()),
 
         // ---------------- Java ----------------
@@ -267,10 +314,13 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
             }))
         }
         "update:listReleases" => Ok(json!([])),
-        "update:skip" | "update:apply" | "update:applyPending" | "update:restoreBackup"
-        | "update:resetSettings" | "update:applyLocal" | "update:start" => {
-            Err("自更新未移植".into())
-        }
+        "update:skip"
+        | "update:apply"
+        | "update:applyPending"
+        | "update:restoreBackup"
+        | "update:resetSettings"
+        | "update:applyLocal"
+        | "update:start" => Err("自更新未移植".into()),
         "update:pickLocalFile" => Ok(Value::Null),
 
         // ---------------- 皮肤 ----------------
@@ -322,16 +372,15 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         }
         "fs:path" => {
             let (rel, folder) = two_strings_first_optional(args)?;
-            Ok(json!(fs_resolve(app, &rel, &folder)?.to_string_lossy().to_string()))
+            Ok(json!(fs_resolve(app, &rel, &folder)?
+                .to_string_lossy()
+                .to_string()))
         }
         "app:openDir" => {
             let rel = args.first().and_then(|v| v.as_str()).unwrap_or("");
             let dir = fs_resolve(app, rel, "")?;
             std::fs::create_dir_all(&dir).ok();
-            std::process::Command::new("explorer.exe")
-                .arg(dir.as_os_str())
-                .spawn()
-                .map_err(|e| e.to_string())?;
+            crate::platform::open_path(&dir.to_string_lossy())?;
             Ok(Value::Null)
         }
         "fs:remove" => {
@@ -339,10 +388,12 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
             let (rel, name) = two_strings(args)?;
             let folder = args.get(2).and_then(|v| v.as_str()).unwrap_or("");
             let parts: Vec<&str> = rel.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
-            let last_is_res = parts
-                .last()
-                .map_or(false, |k| matches!(*k, "mods" | "resourcepacks" | "shaderpacks"));
-            if !(((parts.len() == 1) || (parts.len() == 3 && parts[0] == "versions")) && last_is_res) {
+            let last_is_res = parts.last().map_or(false, |k| {
+                matches!(*k, "mods" | "resourcepacks" | "shaderpacks")
+            });
+            if !(((parts.len() == 1) || (parts.len() == 3 && parts[0] == "versions"))
+                && last_is_res)
+            {
                 return Err("不支持删除该目录中的文件".into());
             }
             let dir = fs_resolve(app, &rel, folder)?;
@@ -404,7 +455,11 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
             let files: Vec<String> = args
                 .first()
                 .and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default();
             let id = args.get(1).and_then(|v| v.as_str()).unwrap_or("");
             let folder = args.get(2).and_then(|v| v.as_str()).unwrap_or("");
@@ -424,24 +479,51 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         // ---------------- 服务器 / 整合包 / 世界 / 社区 / 模组 ----------------
         "servers:list" => Ok(json!([])),
         "servers:ping" => Err("服务器查询未移植".into()),
-        "servers:add" | "servers:remove" | "servers:edit" | "servers:favorite"
-        | "servers:bind" | "servers:syncFromDat" | "servers:prepareLaunch" => {
-            Err("服务器管理未移植".into())
-        }
-        "modpack:probe" | "modpack:install" | "modpack:supplyFiles" | "modpack:openFile"
+        "servers:add"
+        | "servers:remove"
+        | "servers:edit"
+        | "servers:favorite"
+        | "servers:bind"
+        | "servers:syncFromDat"
+        | "servers:prepareLaunch" => Err("服务器管理未移植".into()),
+        "modpack:probe"
+        | "modpack:install"
+        | "modpack:supplyFiles"
+        | "modpack:openFile"
         | "import:probe" => Err("整合包未移植".into()),
         "world:probe" | "world:import" => Err("世界导入未移植".into()),
         "community:search" | "community:project" | "community:files" | "community:download" => {
             Err("社区资源未移植".into())
         }
-        "mods:parse" | "mods:install" | "mods:duplicates" | "mods:crossDuplicates"
-        | "mods:icons" | "mods:targets" | "mods:prepare" | "mods:commit" | "mods:discard"
-        | "mods:checkUpdates" | "mods:applyUpdates" | "mods:favorites" | "mods:favorite"
-        | "mods:favoriteRemove" | "mods:favoriteLink" | "mods:favoriteVersions"
-        | "mods:favoriteVersionsCancel" | "mods:favoriteLocal" | "mods:catalog"
-        | "mods:setEnabled" | "mods:setLocked" | "mods:versionChoices" | "mods:versionPlan"
-        | "mods:versionApply" | "mods:versionDiscard" | "mods:migrationPlan"
-        | "mods:migrationApply" | "mods:supplementalList" | "mods:supplementalKeep"
+        "mods:parse"
+        | "mods:install"
+        | "mods:duplicates"
+        | "mods:crossDuplicates"
+        | "mods:icons"
+        | "mods:targets"
+        | "mods:prepare"
+        | "mods:commit"
+        | "mods:discard"
+        | "mods:checkUpdates"
+        | "mods:applyUpdates"
+        | "mods:favorites"
+        | "mods:favorite"
+        | "mods:favoriteRemove"
+        | "mods:favoriteLink"
+        | "mods:favoriteVersions"
+        | "mods:favoriteVersionsCancel"
+        | "mods:favoriteLocal"
+        | "mods:catalog"
+        | "mods:setEnabled"
+        | "mods:setLocked"
+        | "mods:versionChoices"
+        | "mods:versionPlan"
+        | "mods:versionApply"
+        | "mods:versionDiscard"
+        | "mods:migrationPlan"
+        | "mods:migrationApply"
+        | "mods:supplementalList"
+        | "mods:supplementalKeep"
         | "mods:supplementalRetry" => Err("模组管理未移植".into()),
 
         // ---------------- 插件 / 默认配置 / 玩偶 / 实例中心 / 外观 ----------------
@@ -453,35 +535,58 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         "gameOptions:get" => Ok(json!({ "enabled": false, "id": null, "value": null })),
         "gameOptions:set" => Err("默认游戏选项未移植".into()),
         "defaultPacks:get" => Ok(json!([])),
-        "defaultPacks:import" | "defaultPacks:pick" | "defaultPacks:remove"
-        | "defaultPacks:move" | "defaultPacks:setEnabled" | "defaultPacks:apply" => {
-            Err("默认资源包未移植".into())
+        "defaultPacks:import"
+        | "defaultPacks:pick"
+        | "defaultPacks:remove"
+        | "defaultPacks:move"
+        | "defaultPacks:setEnabled"
+        | "defaultPacks:apply" => Err("默认资源包未移植".into()),
+        "mascots:state" => {
+            Ok(json!({ "counts": {}, "order": [], "sound": { "muted": false, "volume": 0.5 } }))
         }
-        "mascots:state" => Ok(json!({ "counts": {}, "order": [], "sound": { "muted": false, "volume": 0.5 } })),
         "mascots:batch" | "mascots:slap" | "mascots:sound" | "mascots:reset" => {
             Err("玩偶状态未移植".into())
         }
-        "center:overview" | "center:worlds" | "center:screenshots" | "center:backups"
-        | "center:diagnose" | "center:operation" | "center:file"
-        | "center:dependencyPlan" | "center:dependencyApply" => Err("实例中心未移植".into()),
-        "appearance:resetTheme" | "appearance:exportTheme" | "appearance:importTheme"
-        | "appearance:draftRead" | "appearance:draftSave" | "appearance:draftDiscard"
-        | "appearance:draftApply" | "appearance:importBackground"
-        | "appearance:importBackgroundMulti" | "appearance:resetBackground"
-        | "appearance:importLaunchThumbnail" | "appearance:resetLaunchThumbnail" => {
-            Err("外观系统未移植".into())
-        }
+        "center:overview"
+        | "center:worlds"
+        | "center:screenshots"
+        | "center:backups"
+        | "center:diagnose"
+        | "center:operation"
+        | "center:file"
+        | "center:dependencyPlan"
+        | "center:dependencyApply" => Err("实例中心未移植".into()),
+        "appearance:resetTheme"
+        | "appearance:exportTheme"
+        | "appearance:importTheme"
+        | "appearance:draftRead"
+        | "appearance:draftSave"
+        | "appearance:draftDiscard"
+        | "appearance:draftApply"
+        | "appearance:importBackground"
+        | "appearance:importBackgroundMulti"
+        | "appearance:resetBackground"
+        | "appearance:importLaunchThumbnail"
+        | "appearance:resetLaunchThumbnail" => Err("外观系统未移植".into()),
         "memory:organize" => Ok(json!({ "freedMB": 0, "processed": 0 })),
 
         // ---------------- 联机：direct / tc / frp / voxlink 已各自接管，无占位分支 ----------------
-        "voxlink:tickets:pick" | "voxlink:tickets:release" | "voxlink:tickets:list"
-        | "voxlink:tickets:cancel" | "voxlink:tickets:poll" | "voxlink:tickets:detail"
-        | "voxlink:tickets:submit" | "voxlink:tickets:reply" | "voxlink:tickets:retract"
-        | "voxlink:tickets:delete" | "voxlink:mods:bypass" | "voxlink:mods:cancel"
-        | "voxlink:mods:check" | "voxlink:mods:download" => Err("工单系统未移植".into()),
+        "voxlink:tickets:pick"
+        | "voxlink:tickets:release"
+        | "voxlink:tickets:list"
+        | "voxlink:tickets:cancel"
+        | "voxlink:tickets:poll"
+        | "voxlink:tickets:detail"
+        | "voxlink:tickets:submit"
+        | "voxlink:tickets:reply"
+        | "voxlink:tickets:retract"
+        | "voxlink:tickets:delete"
+        | "voxlink:mods:bypass"
+        | "voxlink:mods:cancel"
+        | "voxlink:mods:check"
+        | "voxlink:mods:download" => Err("工单系统未移植".into()),
 
         // 投影 / 录像 / 桥接已由各模块 invoke 接管，不再有占位分支
-
         _ => Err(format!("未实现的通道：{}", channel)),
     }
 }
@@ -491,6 +596,9 @@ fn send(app: &AppHandle, from_main: bool, channel: &str, args: &[Value]) -> Resu
         return r;
     }
     if let Some(r) = recordings::send(app, channel, args) {
+        return r;
+    }
+    if let Some(r) = screenshots::send(app, channel, args) {
         return r;
     }
     match channel {
@@ -562,7 +670,8 @@ fn fs_drag(app: &AppHandle, args: &[Value]) {
             && !parts[1].contains('\\')
             && matches!(parts[2], "mods" | "resourcepacks" | "shaderpacks");
         // 「版本文件夹内的所有」视图里的共享根目录：单级 <rel>，目录按活动文件夹解析
-        let shared_shape = parts.len() == 1 && matches!(parts[0], "mods" | "resourcepacks" | "shaderpacks");
+        let shared_shape =
+            parts.len() == 1 && matches!(parts[0], "mods" | "resourcepacks" | "shaderpacks");
         if !instance_shape && !shared_shape {
             return "不支持拖出该目录".to_string();
         }
@@ -578,7 +687,12 @@ fn fs_drag(app: &AppHandle, args: &[Value]) {
             };
             dir.join(parts[2])
         } else {
-            let Ok(dir) = mods::checked_resource_dir(app, &std::path::Path::new(folder).join(parts[0]).to_string_lossy()) else {
+            let Ok(dir) = mods::checked_resource_dir(
+                app,
+                &std::path::Path::new(folder)
+                    .join(parts[0])
+                    .to_string_lossy(),
+            ) else {
                 return "资源目录无效".to_string();
             };
             dir
@@ -599,7 +713,8 @@ fn fs_drag(app: &AppHandle, args: &[Value]) {
     // 空 msg = 成功，不推 files:dragError
     if !msg.is_empty() {
         if let Some(win) = app.get_webview_window("main") {
-            let _ = tauri::Emitter::emit_to(&win, "main", "files:dragError", format!("Error: {}", msg));
+            let _ =
+                tauri::Emitter::emit_to(&win, "main", "files:dragError", format!("Error: {}", msg));
         }
     }
 }
@@ -623,7 +738,15 @@ fn toggle_disable_in_dir(dir: &std::path::Path, name: &str) -> Result<(), String
         return Err("文件不存在，请刷新后重试".into());
     }
     if to.exists() {
-        return Err("目标文件名已存在，请手动处理后重试".into());
+        // PCL 同款口径：把两个并存文件都点名，交给玩家自己裁决
+        let other = to
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        return Err(format!(
+            "目录里同时存在启用和禁用的两个文件：{} 与 {}。两者内容可能并不相同，请手动删除或重命名其中一个后再试。",
+            base, other
+        ));
     }
     std::fs::rename(&from, &to).map_err(|e| e.to_string())
 }
@@ -651,7 +774,8 @@ fn fs_drag_at(app: &AppHandle, args: &[Value]) {
     })();
     if !msg.is_empty() {
         if let Some(win) = app.get_webview_window("main") {
-            let _ = tauri::Emitter::emit_to(&win, "main", "files:dragError", format!("Error: {}", msg));
+            let _ =
+                tauri::Emitter::emit_to(&win, "main", "files:dragError", format!("Error: {}", msg));
         }
     }
 }
@@ -729,7 +853,9 @@ fn import_resource_files(files: &[String], target: &Value, kind: &str) -> Result
     let jar_re = regex::Regex::new(r"(?i)\.jar(\.disabled)?$").unwrap();
     let zip_re = regex::Regex::new(r"(?i)\.zip$").unwrap();
     let game_dir = match kind {
-        "mods" | "resourcepacks" | "shaderpacks" => target["gameDirectory"].as_str().filter(|s| !s.is_empty()),
+        "mods" | "resourcepacks" | "shaderpacks" => {
+            target["gameDirectory"].as_str().filter(|s| !s.is_empty())
+        }
         _ => None,
     };
     let Some(game_dir) = game_dir else {
@@ -751,7 +877,11 @@ fn import_resource_files(files: &[String], target: &Value, kind: &str) -> Result
         let unsupported = if meta.is_dir() {
             kind == "mods"
         } else {
-            !(if kind == "mods" { jar_re.is_match(&name) } else { zip_re.is_match(&name) })
+            !(if kind == "mods" {
+                jar_re.is_match(&name)
+            } else {
+                zip_re.is_match(&name)
+            })
         };
         if unsupported {
             return Err(format!("此页面不支持 {name}"));
@@ -799,10 +929,7 @@ fn copy_tree(src: &std::path::Path, dest: &std::path::Path) -> Result<(), String
     Ok(())
 }
 
-fn folders_mutate(
-    app: &AppHandle,
-    f: impl FnOnce(&mut Vec<Value>),
-) -> Result<Value, String> {
+fn folders_mutate(app: &AppHandle, f: impl FnOnce(&mut Vec<Value>)) -> Result<Value, String> {
     let mut s = settings::get(app);
     {
         let folders = s["folders"].as_array_mut().ok_or("设置损坏")?;
@@ -826,7 +953,10 @@ fn folders_add(app: &AppHandle, path: &str) -> Result<Value, String> {
     let mut s = settings::get(app);
     {
         let folders = s["folders"].as_array_mut().ok_or("设置损坏")?;
-        if folders.iter().any(|f| f["path"].as_str() == Some(canonical.as_str())) {
+        if folders
+            .iter()
+            .any(|f| f["path"].as_str() == Some(canonical.as_str()))
+        {
             return Err("该目录已登记".into());
         }
         folders.push(json!({ "path": canonical, "name": name, "isDefault": false }));
@@ -860,19 +990,26 @@ fn resolve_resource_directory(
         .join("versions")
         .join(id)
         .join(format!("{}.json", id));
-    let raw = std::fs::read_to_string(&json_path)
-        .map_err(|_| "所选游戏版本已移除或版本描述损坏，请到「游戏版本」页刷新或修复".to_string())?;
-    let j: Value = serde_json::from_str(raw.trim_start_matches('\u{feff}'))
-        .map_err(|_| "所选游戏版本已移除或版本描述损坏，请到「游戏版本」页刷新或修复".to_string())?;
+    let raw = std::fs::read_to_string(&json_path).map_err(|_| {
+        "所选游戏版本已移除或版本描述损坏，请到「游戏版本」页刷新或修复".to_string()
+    })?;
+    let j: Value = serde_json::from_str(raw.trim_start_matches('\u{feff}')).map_err(|_| {
+        "所选游戏版本已移除或版本描述损坏，请到「游戏版本」页刷新或修复".to_string()
+    })?;
     let state = crate::installer::instance_directory_state(app, folder, id, &j);
-    let game_dir = state["path"].as_str().ok_or("所选游戏版本已移除或版本描述损坏，请到「游戏版本」页刷新或修复")?;
+    let game_dir = state["path"]
+        .as_str()
+        .ok_or("所选游戏版本已移除或版本描述损坏，请到「游戏版本」页刷新或修复")?;
     Ok(std::path::Path::new(game_dir).join(kind))
 }
 
 /// 对应原版 ipc.ts 的 safeDir：允许 gameDir 下单级子目录，或 versions/<id>/<sub> 三级
 pub fn fs_resolve(app: &AppHandle, rel: &str, folder: &str) -> Result<std::path::PathBuf, String> {
     let s = settings::get(app);
-    let parts: Vec<&str> = rel.split(['/', '\\']).filter(|x| !x.is_empty() && *x != ".").collect();
+    let parts: Vec<&str> = rel
+        .split(['/', '\\'])
+        .filter(|x| !x.is_empty() && *x != ".")
+        .collect();
     if parts.iter().any(|x| *x == "..") {
         return Err("非法目录".into());
     }
@@ -884,9 +1021,10 @@ pub fn fs_resolve(app: &AppHandle, rel: &str, folder: &str) -> Result<std::path:
         let known = s["folders"]
             .as_array()
             .map(|arr| {
-                arr.iter()
-                    .any(|f| crate::installer::path_identity(f["path"].as_str().unwrap_or(""))
-                        == crate::installer::path_identity(folder))
+                arr.iter().any(|f| {
+                    crate::installer::path_identity(f["path"].as_str().unwrap_or(""))
+                        == crate::installer::path_identity(folder)
+                })
             })
             .unwrap_or(false);
         if !known {
@@ -908,7 +1046,10 @@ pub fn fs_resolve(app: &AppHandle, rel: &str, folder: &str) -> Result<std::path:
     if base.is_empty() {
         return Err("未配置游戏目录".into());
     }
-    if is_version_path && parts.len() == 3 && matches!(parts[2], "mods" | "resourcepacks" | "shaderpacks") {
+    if is_version_path
+        && parts.len() == 3
+        && matches!(parts[2], "mods" | "resourcepacks" | "shaderpacks")
+    {
         return resolve_resource_directory(app, &base, parts[1], parts[2]);
     }
     let mut out = std::path::PathBuf::from(&base);
@@ -946,7 +1087,9 @@ fn fs_list(app: &AppHandle, rel: &str, folder: &str) -> Result<Value, String> {
             .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        out.push(json!({ "name": name, "size": meta.len(), "isDir": meta.is_dir(), "mtime": mtime }));
+        out.push(
+            json!({ "name": name, "size": meta.len(), "isDir": meta.is_dir(), "mtime": mtime }),
+        );
     }
     out.sort_by(|a, b| {
         let da = a["isDir"].as_bool().unwrap_or(false);
@@ -1062,15 +1205,25 @@ fn fs_list_aggregate(app: &AppHandle, rel: &str, folder: &str) -> Result<Value, 
 /// 文件/目录选择（tauri-plugin-dialog 阻塞式，对应原版 dialog.showOpenDialog）
 fn pick(app: &AppHandle, directory: bool, filter: &[&str]) -> Value {
     use tauri_plugin_dialog::DialogExt;
-    let dialog = app.dialog().file();
     let picked = if directory {
-        dialog.blocking_pick_folder()
+        // 移动端 SAF 无系统文件夹选择器，按用户取消处理
+        #[cfg(mobile)]
+        {
+            None
+        }
+        #[cfg(desktop)]
+        {
+            app.dialog().file().blocking_pick_folder()
+        }
     } else {
         let mut d = app.dialog().file();
         for f in filter {
             let (title, patterns) = f.split_once('|').unwrap_or((f, "*"));
             let _ = title;
-            let exts: Vec<&str> = patterns.split(';').filter_map(|p| p.strip_prefix("*.")).collect();
+            let exts: Vec<&str> = patterns
+                .split(';')
+                .filter_map(|p| p.strip_prefix("*."))
+                .collect();
             if !exts.is_empty() {
                 d = d.add_filter(title.to_string(), &exts);
             }
@@ -1078,4 +1231,27 @@ fn pick(app: &AppHandle, directory: bool, filter: &[&str]) -> Value {
         d.blocking_pick_file()
     };
     picked.map(|p| json!(p.to_string())).unwrap_or(Value::Null)
+}
+
+/// 多选文件版 pick；返回路径数组，取消/未选返回空数组
+fn pick_files(app: &AppHandle, filter: &[&str]) -> Value {
+    use tauri_plugin_dialog::DialogExt;
+    let mut d = app.dialog().file();
+    for f in filter {
+        let (title, patterns) = f.split_once('|').unwrap_or((f, "*"));
+        let exts: Vec<&str> = patterns
+            .split(';')
+            .filter_map(|p| p.strip_prefix("*."))
+            .collect();
+        if !exts.is_empty() {
+            d = d.add_filter(title.to_string(), &exts);
+        }
+    }
+    let picked = d.blocking_pick_files();
+    json!(picked
+        .map(|ps| ps
+            .iter()
+            .map(|p| p.to_string())
+            .collect::<Vec<String>>())
+        .unwrap_or_default())
 }

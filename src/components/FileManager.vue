@@ -10,7 +10,6 @@ import {
     importResources,
     applyModUpdates,
     checkModUpdates,
-    copyText,
     errText,
     fsPath,
     listFs,
@@ -19,6 +18,7 @@ import {
     modIconsAt,
     openDir,
     removeFs,
+    selectFiles,
     setModsEnabledAt,
     setModsLockedAt,
     toggleDisableFs
@@ -40,10 +40,14 @@ import type { AggregatedFs } from '../api';
 import ConfirmModal from './ConfirmModal.vue';
 import DupCleanModal from './DupCleanModal.vue';
 import SelectMenu from './SelectMenu.vue';
-import type { FsEntry, ModUpdateReport } from '@shared/types';
+import ResourceScopeFields from './ResourceScopeFields.vue';
+import ResourcePathChip from './ResourcePathChip.vue';
+import ResourcePagination from './ResourcePagination.vue';
+import { useSweepSelect } from '../composables/sweepSelect';
+import type { FsEntry, ModUpdateEntry, ModUpdateReport } from '@shared/types';
 
-/** 聚合视图里的每一行：FsEntry 携带 instanceId/instanceName/directory */
-type Row = FsEntry & { instanceId?: string; instanceName?: string };
+/** 聚合视图里的每一行：FsEntry 携带 instanceId/instanceName/directory；「更新」分类行额外带更新信息 */
+type Row = FsEntry & { instanceId?: string; instanceName?: string; updateInfo?: ModUpdateEntry };
 
 /** 行身份键：聚合视图里同名文件可能属于不同实例，必须带上实例区分 */
 const rowKey = (e: Row) => (e.instanceId ? e.instanceId + '/' + e.name : e.name);
@@ -51,6 +55,8 @@ const rowKey = (e: Row) => (e.instanceId ? e.instanceId + '/' + e.name : e.name)
 const rowDir = (e: Row) => e.directory || '';
 
 function dragResource(event: DragEvent, entry: Row) {
+    // 纵向拖 = PCL 式扫选接管；横向仍走文件拖出
+    if (interceptFileDrag(event)) return;
     event.preventDefault();
     event.stopPropagation();
     if (store.editMode || batchBusy.value || loading.value || !currentVersion.value) return;
@@ -71,9 +77,26 @@ function dragResource(event: DragEvent, entry: Row) {
         currentVersion.value.folder || activeFolder.value
     );
 }
+
+/** PCL 式扫选（仅模组页有选择模型；资源包/光影包无批量操作不接） */
+const listCard = ref<HTMLElement | null>(null);
+const { interceptFileDrag } = useSweepSelect({
+    container: () => listCard.value,
+    itemSelector: '.fm-row',
+    enabled: () =>
+        props.rel === 'mods' && !batchBusy.value && !loading.value && !store.editMode,
+    isSelected: (key) => selection.value.has(key),
+    setMany: (keys, selected) => {
+        const next = new Set(selection.value);
+        for (const k of keys) selected ? next.add(k) : next.delete(k);
+        selection.value = next;
+    }
+});
 const props = defineProps<{
     /** 页面标题，如「模组」 */
     title: string;
+    /** 标题下的一句说明 */
+    subtitle?: string;
     /** 相对游戏目录的子目录：mods / resourcepacks / shaderpacks */
     rel: string;
     /** 打开目录按钮文字 */
@@ -163,7 +186,10 @@ async function load() {
                 entries.value = agg.entries;
                 aggregateInstances.value = agg.instances;
                 aggregateWarnings.value = agg.warnings;
-                resolvedPath.value = `${folder}\\${props.rel}`;
+                // 展示用的聚合视图路径，按平台选分隔符
+                resolvedPath.value = [folder, props.rel].join(
+                    window.kamucl.platform === 'win32' ? '\\' : '/'
+                );
                 page.value = Math.min(page.value, pageCount.value);
                 selection.value = new Set(
                     [...selection.value].filter((key) =>
@@ -198,28 +224,36 @@ async function load() {
 }
 
 const importing = ref(false);
-async function dropResources(event: DragEvent) {
+/** 拖拽与右上角「导入X…」共用同一条导入路径（同一功能一个入口，接受多种来源） */
+async function importFiles(files: string[]) {
     const v = currentVersion.value;
     if (!v) {
         toast('请先选择当前文件夹中的游戏版本', 'error');
         return;
     }
-    if (importing.value) return;
-    const folder = v.folder || activeFolder.value,
-        kind = props.rel;
-    const files = Array.from(event.dataTransfer?.files ?? [])
-        .map((f) => window.kamucl.getFilePath(f))
-        .filter(Boolean);
+    if (importing.value || !files.length) return;
     importing.value = true;
     try {
-        const count = await importResources(files, v.id, folder, kind);
-        toast('已导入 ' + count + ' 项到 ' + v.id + ' / ' + kind, 'success');
+        const count = await importResources(files, v.id, v.folder || activeFolder.value, props.rel);
+        toast(`已导入 ${count} 项到 ${v.id} · ${props.title}`, 'success');
         await load();
     } catch (e) {
         toast('导入失败：' + errText(e), 'error');
     } finally {
         importing.value = false;
     }
+}
+async function onPickImport() {
+    if (!currentVersion.value || importing.value) return;
+    const ext = props.rel === 'mods' ? 'jar' : 'zip';
+    const files = await selectFiles([`${props.title}|*.${ext}`]).catch(() => [] as string[]);
+    if (files.length) await importFiles(files);
+}
+async function dropResources(event: DragEvent) {
+    const files = Array.from(event.dataTransfer?.files ?? [])
+        .map((f) => window.kamucl.getFilePath(f))
+        .filter(Boolean);
+    await importFiles(files);
 }
 onUnmounted(() => {
     if (store.resourceDropHandler === dropResources) store.resourceDropHandler = null;
@@ -237,7 +271,6 @@ watch([effectiveRel, activeFolder], () => {
     updateOperation++;
     dupOpen.value = false;
     delModal.open = false;
-    updatePanel.open = false;
     updatePanel.checking = false;
     updatePanel.applying = false;
     updatePanel.report = null;
@@ -261,17 +294,21 @@ const updateIcons = ref<Record<string, string>>({});
 
 /** 中间省略的路径：versions/neo…2.0.75/mods */
 const fullPath = computed(() => resolvedPath.value);
-const displayPath = computed(() =>
-    fullPath.value.length > 80
-        ? fullPath.value.slice(0, 38) + '…' + fullPath.value.slice(-36)
-        : fullPath.value
-);
 const pageMods = computed(() => visibleEntries.value.filter(isModEntry).map((e) => rowKey(e)));
 const pageChecked = computed(() => pageSelection(pageMods.value, selection.value));
 function togglePageSelection() {
     const next = new Set(selection.value);
     for (const key of pageMods.value) pageChecked.value.all ? next.delete(key) : next.add(key);
     selection.value = next;
+}
+/** 批量条「全选筛选结果 ↔ 取消全选」同一按钮状态感知（与截图页同款语义） */
+const allFilteredSelected = computed(() => {
+    const keys = displayEntries.value.filter(isModEntry).map(rowKey);
+    return keys.length > 0 && keys.every((k) => selection.value.has(k));
+});
+function toggleAllFiltered() {
+    if (allFilteredSelected.value) selection.value = new Set();
+    else selectAll(true);
 }
 const resourceCount = computed(() =>
     props.rel === 'mods'
@@ -290,21 +327,17 @@ const scopeSummary = computed(() =>
         : '当前实例'
 );
 
-async function copyPath() {
-    if (!fullPath.value) {
-        toast('目录尚未读取，请刷新后重试', 'info');
-        return;
-    }
-    const ok = await copyText(fullPath.value);
-    toast(ok ? '已复制完整路径' : '复制失败', ok ? 'success' : 'error');
-}
-
 // ---------------- 顶栏搜索联动（过滤文件名） ----------------
 const batchResults = ref<ModOperationResult[]>([]),
     catalogError = ref('');
+/** 分类 tab 与排序跨会话记忆（内容组织：记住用户的选择）；恢复只认合法值，不直接落回「更新」tab */
+const storedFilter = localStorage.getItem('kamucl.' + props.rel + '.modFilter');
+const storedSort = localStorage.getItem('kamucl.' + props.rel + '.sort');
 const localSearch = ref(''),
-    modFilter = ref('all'),
-    sortBy = ref('name'),
+    modFilter = ref(
+        ['all', 'enabled', 'disabled'].includes(storedFilter) ? storedFilter : 'all'
+    ),
+    sortBy = ref(['name', 'date', 'size'].includes(storedSort) ? storedSort : 'name'),
     /** 目录 → 该目录的模组清单（聚合视图下按实例目录分别缓存） */
     catalog = ref<Record<string, ManagedMod>>({}),
     selection = ref(new Set<string>()),
@@ -323,8 +356,7 @@ const filtered = computed(() => {
             (props.rel !== 'mods' ||
                 modFilter.value === 'all' ||
                 (modFilter.value === 'enabled' && /\.jar$/i.test(e.name)) ||
-                (modFilter.value === 'disabled' && /\.jar\.disabled$/i.test(e.name)) ||
-                (modFilter.value === 'locked' && catalogOf(e)?.locked))
+                (modFilter.value === 'disabled' && /\.jar\.disabled$/i.test(e.name)))
     );
     return rows.sort((a, b) =>
         sortBy.value === 'date'
@@ -388,10 +420,17 @@ function selectMod(key: string, checked: boolean) {
 }
 function selectAll(all = false) {
     const s = new Set(selection.value);
-    for (const e of (all ? filtered.value : visibleEntries.value).filter(isModEntry))
+    for (const e of (all ? displayEntries.value : visibleEntries.value).filter(isModEntry))
         s.add(rowKey(e));
     selection.value = s;
 }
+/** 「更新」分类批量条：勾选即所选，更新操作只作用于其中可更新且未锁定的文件 */
+const selectedUpdatableCount = computed(
+    () =>
+        displayEntries.value.filter(
+            (e) => e.updateInfo && selection.value.has(rowKey(e)) && !catalogOf(e)?.locked
+        ).length
+);
 /** 批量启停/锁定：从选择键还原出行，再按目录分组逐目录调用（聚合视图不能整页传一个实例） */
 async function batch(action: 'enable' | 'disable' | 'lock' | 'unlock') {
     const v = currentVersion.value;
@@ -479,15 +518,74 @@ watch([effectiveRel, activeFolder, scope], () => {
     batchResults.value = [];
     catalog.value = {};
     catalogError.value = '';
-    localSearch.value = '';
-    modFilter.value = 'all';
+    // 搜索词/分类/排序是用户的选择，切实例或范围时保留（内容组织：记住用户的选择）
     switchFile.value = '';
 });
 watch([localSearch, modFilter, sortBy], () => (page.value = 1));
+watch(modFilter, (v) => localStorage.setItem('kamucl.' + props.rel + '.modFilter', v));
+watch(sortBy, (v) => localStorage.setItem('kamucl.' + props.rel + '.sort', v));
 
-const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)));
+// ---------------- MOD 更新检测状态（仅模组页；按 sha1 反查 Modrinth） ----------------
+// 「更新」分类与 全部/已启用/已禁用 完全同构：同一套行渲染、同样吃搜索/排序/批量/扫选，
+// 检测结果只作为列表的一个过滤面，不再有独立面板。
+const updatePanel = reactive({
+    checking: false,
+    error: '',
+    report: null as ModUpdateReport | null,
+    applying: false,
+    itemState: {} as Record<string, 'start' | 'ok' | 'error' | undefined>,
+    itemError: {} as Record<string, string>
+});
+const updatesTab = computed(() => props.rel === 'mods' && modFilter.value === 'updates');
+const updatableEntries = computed(() => updatePanel.report?.entries.filter((e) => e.update) ?? []);
+const unmatchedCount = computed(
+    () => updatePanel.report?.entries.filter((e) => !e.source).length ?? 0
+);
+const latestCount = computed(
+    () =>
+        updatePanel.report?.entries.filter((e) => e.alreadyLatest || (e.source && !e.update))
+            .length ?? 0
+);
+
+/** 「更新」分类的行来源：检测结果（可更新项）并回联本地文件的大小/时间 */
+const updateRows = computed<Row[]>(() => {
+    const report = updatePanel.report;
+    if (!report) return [];
+    const byName = new Map(entries.value.map((e) => [e.name, e] as const));
+    return report.entries
+        .filter((e) => e.update)
+        .map((e) => {
+            const base = byName.get(e.fileName);
+            return base
+                ? { ...base, updateInfo: e }
+                : {
+                      name: e.fileName,
+                      isDir: false,
+                      size: e.update?.size ?? 0,
+                      mtime: 0,
+                      directory: '',
+                      updateInfo: e
+                  };
+        });
+});
+/** 统一展示行：其余分类走 filtered，「更新」分类同样吃搜索与排序 */
+const displayEntries = computed<Row[]>(() => {
+    if (!updatesTab.value) return filtered.value;
+    const kw = keyword.value;
+    const rows = updateRows.value.filter(
+        (e) => !kw || (e.name + ' ' + (e.updateInfo?.name || '')).toLowerCase().includes(kw)
+    );
+    return rows.sort((a, b) =>
+        sortBy.value === 'date'
+            ? b.mtime - a.mtime
+            : sortBy.value === 'size'
+              ? b.size - a.size
+              : a.name.localeCompare(b.name, 'zh-CN', { numeric: true })
+    );
+});
+const pageCount = computed(() => Math.max(1, Math.ceil(displayEntries.value.length / PAGE_SIZE)));
 const visibleEntries = computed(() =>
-    filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE)
+    displayEntries.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE)
 );
 const modIcons = ref<Record<string, string>>({});
 let iconGeneration = 0;
@@ -539,6 +637,22 @@ watch([keyword, pageCount], () => {
     page.value = Math.min(page.value, pageCount.value);
 });
 
+/** 资源页→社区资源：带上当前实例与资源类型（PCL 式实例语境闭环，落到社区页预筛选） */
+const REL_TO_KIND = {
+    mods: 'mod',
+    resourcepacks: 'resourcepack',
+    shaderpacks: 'shader'
+} as const;
+function goCommunityDownload() {
+    if (!currentVersion.value) return;
+    store.communityHandoff = {
+        kind: REL_TO_KIND[props.rel],
+        versionId: currentVersion.value.id,
+        nonce: Date.now()
+    };
+    store.currentView = 'community';
+}
+
 async function onOpenDir() {
     if (!currentVersion.value) return;
     opening.value = true;
@@ -564,6 +678,8 @@ function onRemove(entry: Row) {
 const isModEntry = (e: Row) =>
     props.rel === 'mods' && !e.isDir && /\.jar(\.disabled)?$/i.test(e.name);
 const isDisabledMod = (e: Row) => /\.jar\.disabled$/i.test(e.name);
+/** 资源文件（jar/zip）：无图时用页面同款类型图标兜底，与文件夹、普通文件区分 */
+const isArchiveEntry = (e: Row) => !e.isDir && /\.(?:jar(?:\.disabled)?|zip)$/i.test(e.name);
 const toggling = ref('');
 
 async function onToggleDisable(entry: Row, event?: Event) {
@@ -649,40 +765,44 @@ const fmtDate = (ts: number) => {
     return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('zh-CN');
 };
 
-// ---------------- MOD 更新检测（仅模组页；按 sha1 反查 Modrinth，内联面板不跳页） ----------------
-const updatePanel = reactive({
-    open: false,
-    checking: false,
-    error: '',
-    report: null as ModUpdateReport | null,
-    selected: new Set<string>(),
-    applying: false,
-    itemState: {} as Record<string, 'start' | 'ok' | 'error' | undefined>,
-    itemError: {} as Record<string, string>
-});
-
-watch(catalog, () => {
-    updatePanel.selected = new Set(
-        [...updatePanel.selected].filter((name) => !catalog.value[name]?.locked)
-    );
-});
-const updatableEntries = computed(() => updatePanel.report?.entries.filter((e) => e.update) ?? []);
-const unmatchedCount = computed(
-    () => updatePanel.report?.entries.filter((e) => !e.source).length ?? 0
+/** PCL 口径四分类 tab；「更新」类数量只有在已有检测报告时才显示（count = -1 表示不渲染角标） */
+const jarCount = computed(
+    () => entries.value.filter((e) => !e.isDir && /\.jar$/i.test(e.name)).length
 );
-const latestCount = computed(
-    () =>
-        updatePanel.report?.entries.filter((e) => e.alreadyLatest || (e.source && !e.update))
-            .length ?? 0
-);
+const disabledCount = computed(() => entries.value.filter(isDisabledMod).length);
+const modTabs = computed(() => [
+    { value: 'all', label: '全部', count: jarCount.value + disabledCount.value },
+    { value: 'enabled', label: '已启用', count: jarCount.value },
+    { value: 'disabled', label: '已禁用', count: disabledCount.value },
+    {
+        value: 'updates',
+        label: '更新',
+        count: updatePanel.report ? updatableEntries.value.length : -1
+    }
+]);
+function setTab(v: string) {
+    modFilter.value = v;
+}
+function maybeAutoCheck() {
+    if (!updatesTab.value || updatePanel.report || updatePanel.checking || updatePanel.applying)
+        return;
+    if (scope.value === 'folder' || !currentVersion.value) return;
+    void onCheckUpdates();
+}
+watch(updatesTab, (v) => {
+    if (v) maybeAutoCheck();
+});
+watch([effectiveRel, activeFolder, scope], () => {
+    if (updatesTab.value) maybeAutoCheck();
+});
 
 async function onCheckUpdates() {
     const v = currentVersion.value;
     if (!v || updatePanel.checking || updatePanel.applying) return;
+    if (scope.value === 'folder') return;
     updatePanel.checking = true;
     updatePanel.error = '';
     updatePanel.report = null;
-    updatePanel.open = true;
     updatePanel.itemState = {};
     updatePanel.itemError = {};
     const generation = loadGeneration;
@@ -699,12 +819,6 @@ async function onCheckUpdates() {
                         updateIcons.value = { ...updateIcons.value, ...icons };
                 })
                 .catch(() => {});
-        updatePanel.selected = new Set(
-            report.entries
-                .filter((e) => e.update && !catalog.value[e.fileName]?.locked)
-                .map((e) => e.fileName)
-        );
-        if (!report.entries.length) toast('该实例 mods 目录为空', 'info');
     } catch (e) {
         if (generation === loadGeneration) updatePanel.error = errText(e);
     } finally {
@@ -753,14 +867,15 @@ async function applyUpdates(fileNames: string[]) {
                 ...report,
                 entries: report.entries.filter((e) => updatePanel.itemState[e.fileName] !== 'ok')
             };
-            updatePanel.selected = new Set(
-                [...updatePanel.selected].filter((f) => updatePanel.itemState[f] !== 'ok')
-            );
+            // 更新成功的文件不再留在选择集里
+            const done = results.filter((r) => r.ok).map((r) => r.fileName);
+            const next = new Set(selection.value);
+            for (const f of done) next.delete(f);
+            selection.value = next;
             void load();
         }
         const failed = results.filter((r) => !r.ok);
         if (failed.length) toast(`${failed.length} 个更新失败：${failed[0].error ?? ''}`, 'error');
-        if (updatePanel.report.entries.length === 0) updatePanel.open = false;
     } catch (e) {
         if (operation === updateOperation)
             for (const target of targets) {
@@ -773,12 +888,6 @@ async function applyUpdates(fileNames: string[]) {
     }
 }
 
-function toggleUpdateSelect(fileName: string, checked: boolean) {
-    const next = new Set(updatePanel.selected);
-    if (checked) next.add(fileName);
-    else next.delete(fileName);
-    updatePanel.selected = next;
-}
 </script>
 
 <template>
@@ -790,20 +899,26 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
             <div data-ui="FileManager:9ace27a3aaa9" class="page-head fm-head-left">
                 <h1 data-ui="FileManager:72e6bc71f100" class="page-title">
                     {{ props.title }}
-                    <small v-if="currentVersion && !loading">{{ resourceCount }}</small>
+                    <small v-if="currentVersion && !loading">{{ resourceCount }} 个</small>
                 </h1>
+                <p v-if="props.subtitle" class="muted">{{ props.subtitle }}</p>
             </div>
             <div data-ui="FileManager:7a94152a1114" class="fm-actions">
                 <button
-                    v-if="props.rel === 'mods'"
                     class="btn btn-gold"
-                    :disabled="updatePanel.checking || !currentVersion || scope === 'folder'"
-                    :title="
-                        scope === 'folder' ? '更新检测只针对当前实例，请先切回「当前实例」' : ''
-                    "
-                    @click="onCheckUpdates"
+                    :disabled="importing || !currentVersion"
+                    :aria-label="'导入' + props.title"
+                    @click="onPickImport"
                 >
-                    {{ updatePanel.checking ? '检测中…' : '检测更新' }}
+                    {{ importing ? '导入中…' : `导入${props.title}…` }}
+                </button>
+                <button
+                    class="btn btn-ghost"
+                    :disabled="!currentVersion"
+                    :aria-label="'下载' + props.title"
+                    @click="goCommunityDownload"
+                >
+                    {{ `下载${props.title}…` }}
                 </button>
                 <button
                     class="btn btn-ghost"
@@ -811,6 +926,14 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                     @click="onOpenDir"
                 >
                     {{ props.openLabel }}
+                </button>
+                <button
+                    class="btn btn-ghost"
+                    :disabled="loading || !currentVersion"
+                    aria-label="刷新文件列表"
+                    @click="load"
+                >
+                    {{ loading ? '读取中…' : '↻ 刷新' }}
                 </button>
                 <details
                     data-ui="FileManager:4aeae736e670"
@@ -856,260 +979,98 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
             </div>
         </header>
         <div v-if="availableVersions.length" class="fm-context">
-            <label
-                >内容范围<SelectMenu v-model="scope" class="fm-ver-select" :options="scopeOptions"
-            /></label>
-            <label
-                >游戏实例<SelectMenu
-                    v-model="store.resourceVersionId"
-                    class="fm-ver-select"
-                    :options="
-                        availableVersions.map((v) => ({
-                            value: v.id,
-                            label: versionLabel(v),
-                            description: [
-                                v.mcVersion,
-                                v.loader,
-                                v.loaderVersion,
-                                v.isolated ? '已隔离' : '共享'
-                            ]
-                                .filter(Boolean)
-                                .join(' · ')
-                        }))
-                    "
-            /></label>
+            <ResourceScopeFields
+                v-model:scope="scope"
+                :scope-options="scopeOptions"
+                v-model:instance-id="store.resourceVersionId"
+                :instance-options="
+                    availableVersions.map((v) => ({
+                        value: v.id,
+                        label: versionLabel(v),
+                        description: [
+                            v.mcVersion,
+                            v.loader,
+                            v.loaderVersion,
+                            v.isolated ? '已隔离' : '共享'
+                        ]
+                            .filter(Boolean)
+                            .join(' · ')
+                    }))
+                "
+                :instance-locked="scope === 'folder'"
+                :disabled="loading"
+            />
             <span
                 v-if="scope === 'folder'"
                 data-ui="FileManager:fm-scope-summary"
                 class="fm-scope-summary muted"
                 >{{ scopeSummary }}（同名文件按实例分别列出）</span
             >
-            <button
-                v-if="props.rel !== 'mods'"
-                class="btn btn-ghost"
-                :disabled="loading || !currentVersion"
-                aria-label="刷新文件列表"
-                @click="load"
-            >
-                {{ loading ? '读取中…' : '↻ 刷新' }}
-            </button>
-            <button class="fm-path" :title="fullPath + '（点击复制完整路径）'" @click="copyPath">
-                {{ displayPath }}
-            </button>
+            <div class="fm-context-row">
+                <ResourcePathChip label="当前目录" :path="fullPath" />
+                <details class="fm-help">
+                    <summary>使用说明</summary>
+                    <p>
+                        「当前实例」只看所选实例的该子目录；「版本文件夹内的所有」会聚合共享目录与各实例的同名目录，每行标注所属实例。把文件拖进页面即可导入，也可以点右上角「导入{{
+                            props.title
+                        }}…」选择文件。{{
+                            props.rel === 'mods'
+                                ? '模组可用行内开关启用/禁用；「更多」菜单提供版本迁移与清理重复。'
+                                : ''
+                        }}
+                    </p>
+                </details>
+            </div>
         </div>
         <!-- 未安装任何版本时提示 -->
         <div data-ui="FileManager:de9f15303347" v-if="!currentVersion" class="card empty">
             <span>当前游戏文件夹没有可选版本，请先到「游戏版本」页安装或选择版本</span>
         </div>
 
-        <!-- MOD 更新检测面板（内联，不跳页） -->
-        <div
-            data-ui="FileManager:1c4db7ee7d0f"
-            v-if="props.rel === 'mods' && updatePanel.open"
-            class="card upd-panel"
-        >
-            <div data-ui="FileManager:9d0c31f6fdf0" class="upd-head">
-                <strong>MOD 更新检测</strong>
-                <span data-ui="FileManager:2c10d1e0ff26" v-if="updatePanel.report" class="muted">
-                    共 {{ updatePanel.report.entries.length }} 个 · 可更新
-                    {{ updatableEntries.length }} · 已最新 {{ latestCount
-                    }}<template v-if="unmatchedCount">
-                        · {{ unmatchedCount }} 个未匹配来源</template
-                    >
-                </span>
-                <span data-ui="FileManager:2887ce491013" class="upd-head-spacer"></span>
-                <button
-                    data-ui="FileManager:835ed3bb6d0b"
-                    class="btn btn-ghost btn-sm"
-                    :disabled="updatePanel.applying"
-                    @click="updatePanel.open = false"
-                >
-                    收起
-                </button>
-            </div>
-            <div
-                data-ui="FileManager:29ea6314dfcd"
-                v-if="updatePanel.checking"
-                class="empty upd-empty"
-            >
-                <span data-ui="FileManager:f3a3151fbbf3" class="spin"></span>
-                <span>正在计算文件哈希并查询 Modrinth…</span>
-            </div>
-            <div
-                data-ui="FileManager:e3e16f3446cd"
-                v-else-if="updatePanel.error"
-                class="empty upd-empty"
-            >
-                <span>检测失败：{{ updatePanel.error }}</span>
-                <button
-                    data-ui="FileManager:c52333bc5a18"
-                    class="btn btn-ghost btn-sm"
-                    @click="onCheckUpdates"
-                >
-                    重试
-                </button>
-            </div>
-            <template v-else-if="updatePanel.report">
-                <div
-                    data-ui="FileManager:e4442186c4ad"
-                    v-if="updatableEntries.length"
-                    class="upd-list"
-                >
-                    <div
-                        data-ui="FileManager:d8ea43df71b3"
-                        v-for="e in updatableEntries"
-                        :key="e.fileName"
-                        class="upd-entry"
-                    >
-                        <div
-                            data-ui="FileManager:ce4ce0b68078"
-                            class="upd-row"
-                            :class="{ 'is-ok': updatePanel.itemState[e.fileName] === 'ok' }"
-                        >
-                            <input
-                                data-ui="FileManager:23d633bae07f"
-                                type="checkbox"
-                                class="upd-check"
-                                :checked="
-                                    updatePanel.selected.has(e.fileName) &&
-                                    !catalog[e.fileName]?.locked
-                                "
-                                :disabled="updatePanel.applying || catalog[e.fileName]?.locked"
-                                @change="
-                                    toggleUpdateSelect(
-                                        e.fileName,
-                                        ($event.target as HTMLInputElement).checked
-                                    )
-                                "
-                            />
-
-                            <span data-ui="FileManager:8139bad75d7a" class="fm-file-icon"
-                                ><img
-                                    data-ui="FileManager:9efaa68e80b3"
-                                    v-if="updateIcons[e.fileName] || modIcons[e.fileName]"
-                                    :src="updateIcons[e.fileName] || modIcons[e.fileName]"
-                                    alt=""
-                                /><span data-ui="FileManager:3cab95fb3ec2" v-else>◇</span></span
-                            ><span
-                                data-ui="FileManager:3f70b14a0ffa"
-                                class="upd-name"
-                                :title="e.fileName"
-                                ><strong>{{ e.fileName }}</strong
-                                ><small data-ui="FileManager:a248bf5f85c5" class="muted">{{
-                                    e.name
-                                }}</small></span
-                            >
-                            <span data-ui="FileManager:a8fbbedbb2c1" class="muted upd-ver"
-                                >{{ e.currentVersion || '未知' }} →
-                                <b data-ui="FileManager:540c87044085">{{
-                                    e.update!.versionNumber
-                                }}</b></span
-                            >
-                            <span
-                                data-ui="FileManager:9cedea4e08aa"
-                                v-if="updatePanel.itemState[e.fileName] === 'start'"
-                                class="spin upd-spin"
-                            ></span>
-                            <span
-                                data-ui="FileManager:fe5bd266a021"
-                                v-else-if="updatePanel.itemState[e.fileName] === 'error'"
-                                class="upd-err"
-                                :title="updatePanel.itemError[e.fileName]"
-                                >失败</span
-                            >
-                            <button
-                                data-ui="FileManager:d3761b27321a"
-                                class="btn btn-ghost btn-sm"
-                                :disabled="updatePanel.applying"
-                                @click="
-                                    catalog[e.fileName]?.locked
-                                        ? (switchFile = e.fileName)
-                                        : applyUpdates([e.fileName])
-                                "
-                            >
-                                {{
-                                    catalog[e.fileName]?.locked
-                                        ? '已锁定 · 选版本'
-                                        : updatePanel.itemState[e.fileName] === 'error'
-                                          ? '重试'
-                                          : '更新'
-                                }}
-                            </button>
-                        </div>
-                        <p
-                            data-ui="FileManager:78f152086a1d"
-                            v-if="updatePanel.itemState[e.fileName] === 'error'"
-                            class="upd-error-detail"
-                            role="alert"
-                        >
-                            {{ updatePanel.itemError[e.fileName] || '更新失败，请重试' }}
-                        </p>
-                    </div>
-                </div>
-                <div data-ui="FileManager:27ab16a8261b" v-else class="empty upd-empty">
-                    <span>所有已匹配来源的 MOD 均为最新</span>
-                </div>
-                <div
-                    data-ui="FileManager:b6d97d6a46a3"
-                    v-if="updatableEntries.length"
-                    class="upd-foot"
-                >
-                    <button
-                        data-ui="FileManager:d1841e395c61"
-                        class="btn btn-gold btn-sm"
-                        :disabled="updatePanel.applying || !updatePanel.selected.size"
-                        @click="applyUpdates([...updatePanel.selected])"
-                    >
-                        {{
-                            updatePanel.applying
-                                ? '正在更新…'
-                                : `一键更新选中（${updatePanel.selected.size}）`
-                        }}
-                    </button>
-                    <span class="muted">更新会先校验新文件哈希，失败时保留旧文件</span>
-                </div>
-            </template>
-        </div>
-
-        <div
-            data-ui="FileManager:4c9771e53b3b"
-            v-if="currentVersion && props.rel === 'mods'"
-            class="fm-controls"
-        >
+        <div data-ui="FileManager:4c9771e53b3b" v-if="currentVersion" class="fm-controls">
             <input
                 data-ui="FileManager:ec68a12c2ae9"
                 v-model="localSearch"
                 class="input fm-search"
-                aria-label="搜索本地模组"
-                placeholder="搜索文件名或模组名称…"
+                :aria-label="'搜索' + props.title"
+                :placeholder="'搜索文件名或' + props.title + '名称…'"
             />
-            <SelectMenu
-                v-model="modFilter"
-                :options="[
-                    { value: 'all', label: '全部状态' },
-                    { value: 'enabled', label: '已启用' },
-                    { value: 'disabled', label: '已禁用' },
-                    { value: 'locked', label: '已锁定' }
-                ]"
-            />
-            <SelectMenu
-                v-model="sortBy"
-                :options="[
-                    { value: 'name', label: '名称排序' },
-                    { value: 'date', label: '最近修改' },
-                    { value: 'size', label: '文件大小' }
-                ]"
-            />
-
-            <button
-                class="btn btn-ghost fm-refresh"
-                :disabled="loading"
-                title="刷新文件列表"
-                aria-label="刷新文件列表"
-                @click="load"
+            <div
+                v-if="props.rel === 'mods'"
+                data-ui="FileManager:mod-tabs"
+                class="fm-tabs"
+                role="tablist"
+                aria-label="模组分类"
             >
-                <span v-if="loading" class="spin"></span><span v-else aria-hidden="true">↻</span>
-            </button>
+                <button
+                    v-for="tab in modTabs"
+                    :key="tab.value"
+                    class="fm-tab"
+                    :class="{ active: modFilter === tab.value }"
+                    role="tab"
+                    :aria-selected="modFilter === tab.value"
+                    :disabled="tab.value === 'updates' && scope === 'folder'"
+                    :title="
+                        tab.value === 'updates' && scope === 'folder'
+                            ? '更新检测只针对当前实例，请先切回「当前实例」'
+                            : ''
+                    "
+                    @click="setTab(tab.value)"
+                >
+                    {{ tab.label
+                    }}<span v-if="tab.count >= 0" class="fm-tab-count">{{ tab.count }}</span>
+                </button>
+            </div>
+            <div class="fm-sort">
+                <SelectMenu
+                    v-model="sortBy"
+                    :options="[
+                        { value: 'name', label: '名称排序' },
+                        { value: 'date', label: '最近修改' },
+                        { value: 'size', label: '文件大小' }
+                    ]"
+                />
+            </div>
         </div>
         <div
             data-ui="FileManager:50137bbe5c59"
@@ -1118,12 +1079,25 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
         >
             <strong>已选 {{ selection.size }} 项</strong
             ><button
+                v-if="updatesTab"
+                class="btn btn-gold btn-sm"
+                :disabled="updatePanel.applying || !selectedUpdatableCount"
+                @click="applyUpdates([...selection])"
+            >
+                {{
+                    updatePanel.applying ? '正在更新…' : `更新选中（${selectedUpdatableCount}）`
+                }}</button
+            ><button
                 data-ui="FileManager:8a3d5842bdcc"
                 class="btn btn-ghost btn-sm"
                 :disabled="batchBusy"
-                @click="selectAll(true)"
+                @click="toggleAllFiltered"
             >
-                全选筛选结果（{{ filtered.filter(isModEntry).length }}）</button
+                {{
+                    allFilteredSelected
+                        ? '取消全选'
+                        : `全选筛选结果（${displayEntries.filter(isModEntry).length}）`
+                }}</button
             ><button
                 data-ui="FileManager:3f98d111f11c"
                 class="btn btn-ghost btn-sm"
@@ -1144,21 +1118,14 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                 :disabled="batchBusy"
                 @click="batch('lock')"
             >
-                锁定版本</button
+                锁定</button
             ><button
                 data-ui="FileManager:d3ca28eade0c"
                 class="btn btn-ghost btn-sm"
                 :disabled="batchBusy"
                 @click="batch('unlock')"
             >
-                解除锁定</button
-            ><button
-                data-ui="FileManager:c17b974e4578"
-                class="btn btn-ghost btn-sm"
-                :disabled="batchBusy"
-                @click="selection = new Set()"
-            >
-                清空选择
+                解除锁定
             </button>
         </div>
         <p data-ui="FileManager:080a7432d0c7" v-if="catalogError" class="muted" role="alert">
@@ -1196,17 +1163,48 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                 </p>
             </div>
         </details>
-        <!-- 文件列表 -->
+        <!-- 「更新」分类的检测中/失败提示（有报告时列表照常展示，不闪断） -->
+        <div v-if="updatesTab && updatePanel.checking" class="card empty upd-state">
+            <span class="spin"></span>
+            <span>正在计算文件哈希并查询 Modrinth…</span>
+        </div>
+        <div v-else-if="updatesTab && updatePanel.error" class="card empty upd-state">
+            <span>检测失败：{{ updatePanel.error }}</span>
+            <button
+                class="btn btn-ghost btn-sm"
+                :disabled="updatePanel.checking"
+                @click="onCheckUpdates"
+            >
+                重试
+            </button>
+        </div>
+        <!-- 文件列表（「更新」分类与其余分类同一张列表，仅行来源不同） -->
         <div
             data-ui="FileManager:cdc99c60dc51"
-            v-if="currentVersion"
+            v-if="currentVersion && !(updatesTab && (!updatePanel.report || updatePanel.error))"
+            ref="listCard"
             class="card fm-card"
-            :class="{
-                'shader-empty':
-                    props.rel === 'shaderpacks' && !entries.length && !loading && !loadError
-            }"
+            :class="{ 'is-updates': updatesTab }"
             :aria-busy="loading"
         >
+            <div
+                v-if="updatesTab && updatePanel.report"
+                class="status-strip upd-summary"
+                role="status"
+            >
+                共 {{ updatePanel.report.entries.length }} 个 · 可更新
+                {{ updatableEntries.length }} · 已最新 {{ latestCount
+                }}<template v-if="unmatchedCount">
+                    · {{ unmatchedCount }} 个未匹配来源</template
+                >
+                <button
+                    class="btn btn-ghost btn-sm"
+                    :disabled="updatePanel.checking || updatePanel.applying"
+                    @click="onCheckUpdates"
+                >
+                    重新检测
+                </button>
+            </div>
             <div
                 data-ui="FileManager:aaf1f853f556"
                 v-if="entries.length && (loading || loadError)"
@@ -1257,8 +1255,14 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                 >
                 <small v-else class="muted">也可以直接把文件拖进本页面导入。</small>
             </div>
-            <div data-ui="FileManager:40d26ad64938" v-else-if="!filtered.length" class="empty">
-                <span>当前搜索或筛选条件没有匹配的文件</span>
+            <div data-ui="FileManager:40d26ad64938" v-else-if="!displayEntries.length" class="empty">
+                <span>{{
+                    updatesTab
+                        ? updatePanel.report?.entries.length
+                            ? '所有已匹配来源的 MOD 均为最新'
+                            : '该实例没有可检测的模组文件'
+                        : '当前搜索或筛选条件没有匹配的文件'
+                }}</span>
             </div>
             <div
                 data-ui="FileManager:893880828b4a"
@@ -1285,6 +1289,7 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                     :key="rowKey(e)"
                     class="fm-row"
                     :class="{ 'fm-row-disabled': isDisabledMod(e) }"
+                    :data-sweep-key="isModEntry(e) ? rowKey(e) : undefined"
                 >
                     <input
                         data-ui="FileManager:8d3101b3257d"
@@ -1304,8 +1309,8 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                     >
                         <img
                             data-ui="FileManager:e82feec99cd2"
-                            v-if="modIcons[rowKey(e)]"
-                            :src="modIcons[rowKey(e)]"
+                            v-if="modIcons[rowKey(e)] || (e.updateInfo && updateIcons[e.updateInfo.fileName])"
+                            :src="modIcons[rowKey(e)] || (e.updateInfo ? updateIcons[e.updateInfo.fileName] : '')"
                             draggable="false"
                             alt=""
                             @error="delete modIcons[rowKey(e)]"
@@ -1323,6 +1328,11 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                                 d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"
                             />
                         </svg>
+                        <span
+                            v-else-if="isArchiveEntry(e)"
+                            class="fm-file-icon-kind"
+                            v-html="props.icon"
+                        ></span>
                         <svg
                             v-else
                             viewBox="0 0 24 24"
@@ -1365,6 +1375,20 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                                     .join(' · ')
                             }}</small
                         ><small
+                            v-if="e.updateInfo"
+                            class="fm-internal fm-upd-ver"
+                            >{{ e.updateInfo.currentVersion || '未知' }} →
+                            <b>{{ e.updateInfo.update!.versionNumber }}</b>
+                            <template v-if="updatePanel.itemState[e.updateInfo.fileName] === 'error'">
+                                <span class="fm-upd-err">{{
+                                    updatePanel.itemError[e.updateInfo.fileName] || '更新失败，请重试'
+                                }}</span>
+                            </template>
+                            <template v-else-if="updatePanel.itemState[e.updateInfo.fileName] === 'ok'">
+                                <span>已更新，原文件已替换</span>
+                            </template>
+                        </small
+                        ><small
                             v-if="scope === 'folder' && e.instanceId"
                             data-ui="FileManager:fm-instance"
                             class="fm-instance"
@@ -1382,7 +1406,7 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
 
                     <label
                         data-ui="FileManager:7fe2dcd1bb05"
-                        v-if="isModEntry(e)"
+                        v-if="isModEntry(e) && !updatesTab"
                         class="switch fm-toggle"
                         :title="isDisabledMod(e) ? '启用模组' : '禁用模组'"
                         ><input
@@ -1397,7 +1421,34 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                             class="switch-ui"
                         ></span
                     ></label>
-                    <span v-if="props.rel === 'mods' && !isModEntry(e)" aria-hidden="true"></span>
+                    <button
+                        v-if="isModEntry(e) && updatesTab && e.updateInfo"
+                        class="btn btn-ghost btn-sm"
+                        :disabled="
+                            updatePanel.applying ||
+                            !!catalogOf(e)?.locked ||
+                            updatePanel.itemState[e.updateInfo.fileName] === 'ok'
+                        "
+                        @click="
+                            catalogOf(e)?.locked
+                                ? (switchFile = e.name)
+                                : applyUpdates([e.updateInfo.fileName])
+                        "
+                    >
+                        {{
+                            catalogOf(e)?.locked
+                                ? '已锁定 · 切换版本'
+                                : updatePanel.itemState[e.updateInfo.fileName] === 'ok'
+                                  ? '已更新'
+                                  : updatePanel.itemState[e.updateInfo.fileName] === 'error'
+                                    ? '重试'
+                                    : '更新'
+                        }}
+                    </button>
+                    <span
+                        v-if="props.rel === 'mods' && !(isModEntry(e) && (updatesTab ? e.updateInfo : true))"
+                        aria-hidden="true"
+                    ></span>
                     <details
                         class="file-more"
                         @keydown.esc="($event.currentTarget as HTMLDetailsElement).open = false"
@@ -1423,16 +1474,16 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                                 class="btn btn-ghost btn-sm"
                                 :disabled="batchBusy"
                                 :aria-label="
-                                    (catalogOf(e)?.locked ? '解除锁定 ' : '锁定版本 ') + e.name
+                                    (catalogOf(e)?.locked ? '解除锁定 ' : '锁定 ') + e.name
                                 "
                                 :title="
                                     catalogOf(e)?.locked
-                                        ? '已锁定：不参与自动更新'
+                                        ? '已锁定：不参与批量更新，点击解除'
                                         : '锁定此模组版本'
                                 "
                                 @click="toggleLock(e)"
                             >
-                                {{ catalogOf(e)?.locked ? '已锁定' : '锁定' }}</button
+                                {{ catalogOf(e)?.locked ? '解锁' : '锁定' }}</button
                             ><button
                                 data-ui="FileManager:fd277c185a8b"
                                 v-if="isModEntry(e)"
@@ -1441,7 +1492,7 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
                                 :aria-label="'切换版本 ' + e.name"
                                 @click="switchFile = e.name"
                             >
-                                版本
+                                切换版本
                             </button>
                             <button
                                 data-ui="FileManager:537aea904555"
@@ -1457,31 +1508,12 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
             </div>
         </div>
 
-        <nav
-            data-ui="FileManager:c2e38e035918"
-            v-if="currentVersion && pageCount > 1"
-            class="fm-pagination"
-            aria-label="资源列表分页"
-        >
-            <span class="muted">共 {{ filtered.length }} 项 · 每页 {{ PAGE_SIZE }} 项</span>
-            <button
-                data-ui="FileManager:50c8efdbe2b5"
-                class="btn btn-ghost btn-sm"
-                :disabled="page <= 1"
-                @click="page--"
-            >
-                上一页
-            </button>
-            <span>{{ page }} / {{ pageCount }}</span>
-            <button
-                data-ui="FileManager:eba7aed9ee2d"
-                class="btn btn-ghost btn-sm"
-                :disabled="page >= pageCount"
-                @click="page++"
-            >
-                下一页
-            </button>
-        </nav>
+        <ResourcePagination
+            v-if="currentVersion"
+            v-model:page="page"
+            :page-count="pageCount"
+            :total="displayEntries.length"
+        />
         <ModVersionModal
             v-if="switchFile && currentVersion"
             :source="currentVersion"
@@ -1590,10 +1622,84 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
     overflow-wrap: anywhere;
 }
 .fm-controls {
-    display: grid;
-    grid-template-columns: minmax(180px, 1fr) 160px 140px auto;
+    display: flex;
+    align-items: center;
     gap: 10px;
+    flex-wrap: wrap;
     margin-bottom: 16px;
+}
+.fm-controls .fm-search {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+.fm-sort {
+    width: 140px;
+    flex-shrink: 0;
+}
+.fm-sort :deep(.select-menu-btn) {
+    width: 100%;
+}
+/* PCL 口径四分类：分段 tab（全部/已启用/已禁用/更新） */
+.fm-tabs {
+    display: inline-flex;
+    gap: 4px;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--card);
+    flex-shrink: 0;
+}
+.fm-tab {
+    border: 0;
+    background: transparent;
+    padding: 5px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.fm-tab:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--card-2);
+}
+.fm-tab.active {
+    background: var(--accent);
+    color: var(--on-accent);
+}
+.fm-tab:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.fm-tab-count {
+    margin-left: 6px;
+    font-size: 11px;
+    opacity: 0.75;
+}
+/* 使用说明：与路径条并排，开关钉在右侧（同录像/截图/投影页） */
+.fm-help {
+    margin-left: auto;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: min(640px, 55%);
+    line-height: 1.7;
+    font-size: 12px;
+}
+.fm-help summary {
+    display: block;
+    text-align: right;
+    cursor: pointer;
+    white-space: nowrap;
+    color: var(--text-dim);
+}
+.fm-help summary::after {
+    content: " ▸";
+}
+.fm-help[open] summary::after {
+    content: " ▾";
+}
+.fm-help p {
+    margin: 8px 0 0;
 }
 .fm-batch {
     display: flex;
@@ -1630,9 +1736,6 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
     flex-shrink: 0;
 }
 @media (max-width: 1000px) {
-    .fm-controls {
-        grid-template-columns: 1fr 1fr;
-    }
     .fm-row {
         flex-wrap: wrap;
     }
@@ -1641,71 +1744,38 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
     }
 }
 
-.upd-name {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    gap: 3px;
-}
-.upd-name strong {
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.upd-name small {
-    font-size: 12px;
-}
 .fm-toggle {
     flex-shrink: 0;
 }
 
-.fm-pagination {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 12px;
-    flex-wrap: wrap;
-    padding: 8px 0;
-    font-size: 13px;
-}
-.fm-pagination .muted {
-    margin-right: auto;
-}
 .page {
     display: flex;
     flex-direction: column;
     gap: var(--sec-gap);
-    max-width: 940px;
+    max-width: 1440px;
     margin: 0 auto;
 }
 
-/* 三页（模组/资源包/光影包）头部结构保持一致：标题在左、操作在右 */
+/* 三页（模组/资源包/光影包）与录像族共用一套头部结构：标题+说明在左、操作在右 */
 .fm-head {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     justify-content: space-between;
     gap: var(--space-4);
     flex-wrap: wrap;
+}
+.fm-head-left p {
+    margin: 4px 0 0;
+    font-size: 12px;
 }
 .fm-head-left {
     flex: 1;
     min-width: 140px;
 }
-.fm-path {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: color 0.15s ease;
-}
-.fm-path:hover {
-    color: var(--accent-2);
-}
 .fm-actions {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    gap: 10px;
     flex-wrap: wrap;
     max-width: 100%;
 }
@@ -1814,91 +1884,34 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
     height: 100%;
 }
 
-/* MOD 更新检测面板 */
-.upd-panel {
-    padding: var(--card-pad);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-}
-.upd-head {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    font-size: var(--text-sm);
-}
-.upd-head-spacer {
-    flex: 1;
-}
-.upd-empty {
-    padding: var(--space-4) 0;
-}
-.upd-list {
-    display: flex;
-    flex-direction: column;
-    max-height: 300px;
-    overflow-y: auto;
-}
-.upd-error-detail {
-    margin: 0 12px 12px 40px;
-    color: var(--danger);
+/* 「更新」分类：行内版本迁移线/错误（与其余行同结构，仅多小字）与统计条 */
+.fm-upd-ver {
+    display: block;
     font-size: 12px;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    user-select: text;
+    color: var(--text-dim);
 }
-.upd-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    min-height: var(--row-h);
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-md);
-}
-.upd-row:hover {
-    background: var(--card-2);
-}
-.upd-row.is-ok {
-    opacity: 0.55;
-}
-.upd-check {
-    accent-color: var(--accent);
-    flex-shrink: 0;
-}
-.upd-name {
-    flex: 1;
-    min-width: 0;
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.upd-ver {
-    font-size: var(--text-xs);
-    flex-shrink: 0;
-    white-space: nowrap;
-}
-.upd-ver b {
+.fm-upd-ver b {
     color: var(--accent-2);
+    font-weight: 600;
 }
-.upd-spin {
-    width: 14px;
-    height: 14px;
-}
-.upd-err {
+.fm-upd-err {
     color: var(--danger);
-    font-size: var(--text-xs);
-    flex-shrink: 0;
 }
-.upd-foot {
+.upd-state {
     display: flex;
     align-items: center;
-    gap: var(--space-3);
+    justify-content: center;
+    gap: 12px;
+    min-height: 120px;
+}
+.upd-summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     flex-wrap: wrap;
 }
-.upd-foot .muted {
-    font-size: var(--text-xs);
+.upd-summary .btn {
+    margin-left: auto;
 }
 
 @media (max-width: 1180px) {
@@ -1956,20 +1969,12 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
     flex-basis: 100%;
     font-size: 12px;
 }
-.fm-context .fm-path {
+.fm-context-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
     flex-basis: 100%;
-    text-align: left;
-    border: 0;
-    padding: 0;
-    background: none;
-    color: var(--text-dim);
-    font: inherit;
-    font-size: 12px;
-    overflow-wrap: anywhere;
-    cursor: copy;
-}
-.fm-controls {
-    grid-template-columns: minmax(180px, 1fr) 160px 140px 38px;
 }
 .fm-card {
     padding: 0 16px !important;
@@ -1989,9 +1994,14 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
     border-bottom: 1px solid var(--border);
 }
 .fm-row {
-    min-height: 68px;
+    min-height: 72px;
     padding: 12px 0;
     flex-wrap: nowrap;
+}
+/* 同级相邻行分隔（UX：边界感；比边框弱一档） */
+.fm-list > .fm-row + .fm-row {
+    border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+    border-radius: 0;
 }
 .fm-row .fm-name {
     min-width: 0 !important;
@@ -2010,6 +2020,18 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
 }
 .fm-file-icon img {
     object-fit: contain;
+}
+/* 类型化兜底图标（无图资源用页面同款 SVG，不用文字字符） */
+.fm-file-icon-kind {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    color: var(--accent);
+    opacity: 0.85;
+}
+.fm-file-icon-kind :deep(svg) {
+    width: 100%;
+    height: 100%;
 }
 .fm-meta {
     width: auto;
@@ -2043,19 +2065,9 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
 .fm-row:has(> input:checked) {
     background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
-.shader-empty {
-    background: transparent !important;
-    border: 0;
-    box-shadow: none;
-    backdrop-filter: none !important;
-}
-.shader-empty .empty {
-    min-height: min(380px, 45vh);
-    justify-content: center;
-}
-.fm-context .fm-path:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 4px;
+/* 扫选进行中：禁文本选择，避免拖出一片选区 */
+.fm-card.sweeping {
+    user-select: none;
 }
 @media (max-width: 1150px) {
     .fm-table-head,
@@ -2074,12 +2086,6 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
     }
 }
 @media (max-width: 700px) {
-    .fm-controls {
-        grid-template-columns: 1fr 1fr;
-    }
-    .fm-search {
-        grid-column: 1/-1;
-    }
     .fm-head {
         align-items: flex-start;
         flex-wrap: wrap;
@@ -2135,14 +2141,7 @@ function toggleUpdateSelect(fileName: string, checked: boolean) {
 }
 .fm-row-disabled {
     opacity: 1;
-}
-
-@media (max-width: 1000px) {
-    .file-manager .fm-controls {
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 38px;
-    }
-    .fm-controls .fm-search {
-        grid-column: 1/-1;
-    }
+    /* 禁用状态成套表达：删除线 + 标签之外，再垫一层底色，与启用行拉开 */
+    background: color-mix(in srgb, var(--border) 18%, transparent);
 }
 </style>

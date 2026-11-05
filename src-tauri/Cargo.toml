@@ -11,8 +11,16 @@ rust-version = "1.82"
 [patch.crates-io]
 wry = { path = "vendor/wry" }
 
+# Tauri 移动端（Android）要求 lib 以 staticlib/cdylib 产出；rlib 供桌面 main.rs 使用
+[lib]
+name = "wuhuicl"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# 种子地图：编译 vendor/cubiomes C 库 + seed_map/cubiomes_bridge.c
+cc = "1"
+
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -39,7 +47,22 @@ regex = "1"
 url = "2"
 rand = "0.9"
 flate2 = "1"
+# 种子地图/投影工坊：level.dat / 投影文件 NBT 解析（与 Axolotl 同库）
+quartz_nbt = "0.2"
+[target.'cfg(not(target_os = "android"))'.dependencies]
+# 跨平台回收站删除（Windows IFileOperation / macOS Finder / Linux freedesktop Trash），
+# 替换原 PowerShell Microsoft.VisualBasic 方案。trash crate 不支持 Android，故门控；
+# Android 侧 recycle_bin_delete 降级为直接删除。
+trash = "5"
+
+[target.'cfg(unix)'.dependencies]
+# sysconf（内存）与 statvfs（磁盘空闲）、kill 信号等 unix 基础调用
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
 windows-registry = "0.5"
+# 最小化自整理：ICoreWebView2_3::TrySuspend 挂起渲染进程（与 tauri/wry 同版本，类型互通）
+webview2-com = "0.39"
 # 原生拖出（DoDragDrop + CF_HDROP）：与 vendor/wry 同版本，特性保持最小集
 windows = { version = "0.62", features = [
   "Win32_Foundation",
@@ -62,8 +85,16 @@ windows-sys = { version = "0.59", features = [
   "Win32_NetworkManagement_IpHelper",
   "Win32_NetworkManagement_Ndis",
   "Win32_Networking_WinSock",
+  # 服务器 SLP 探测：_minecraft._tcp SRV 记录解析（DnsQuery_W）
+  "Win32_NetworkManagement_Dns",
+  # 标题栏：SetWindowSubclass 持续剥掉原生 WS_SYSMENU（防幽灵窗口按钮）
+  "Win32_UI_Shell",
   "Win32_Storage_FileSystem",
 ] }
+
+[dev-dependencies]
+# seed_map 单元测试写临时 level.dat
+tempfile = "3"
 
 [profile.release]
 opt-level = "z"

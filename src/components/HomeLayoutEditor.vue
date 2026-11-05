@@ -43,6 +43,55 @@ function save(patch: Partial<Settings>) {
     void updateSettings(patch).catch((e) => toast('保存失败：' + errText(e), 'error'));
 }
 
+// ---------------- 首页启动卡背景类型（像素动画 / 静态图片） ----------------
+const thumbnailModes = [
+    { value: 'animation', label: '像素动画' },
+    { value: 'image', label: '静态图片' }
+] as const;
+const thumbnailMode = computed(() => store.settings?.launchThumbnail?.mode ?? 'animation');
+const thumbnailIsAnimation = computed(() => thumbnailMode.value !== 'image');
+function setThumbnailMode(mode: 'animation' | 'image') {
+    if (!store.settings || thumbnailMode.value === mode) return;
+    save({ launchThumbnail: { ...store.settings.launchThumbnail, mode } });
+}
+
+// ---------------- 像素动画播放参数（速度倍率 + 场景停留） ----------------
+const heroSpeedSteps = [
+    { value: 0.5, label: '0.5× 慢速' },
+    { value: 1, label: '1× 原速' },
+    { value: 1.5, label: '1.5×' },
+    { value: 2, label: '2× 快速' }
+] as const;
+const heroAnimation = computed(() => store.settings?.launchThumbnail?.animation);
+const heroSpeed = computed(() => {
+    const speed = heroAnimation.value?.speed;
+    return typeof speed === 'number' && speed > 0 ? speed : 1;
+});
+const heroDwell = computed(() => {
+    const dwell = heroAnimation.value?.dwellSeconds;
+    return typeof dwell === 'number' && dwell > 0 ? dwell : 9.5;
+});
+function setHeroSpeed(speed: number) {
+    if (!store.settings || heroSpeed.value === speed) return;
+    save({
+        launchThumbnail: {
+            ...store.settings.launchThumbnail,
+            animation: { ...store.settings.launchThumbnail.animation, speed }
+        }
+    });
+}
+function setHeroDwell(raw: string) {
+    if (!store.settings) return;
+    const parsed = Number.parseFloat(raw);
+    const dwellSeconds = Number.isFinite(parsed) ? Math.min(60, Math.max(1, parsed)) : 9.5;
+    save({
+        launchThumbnail: {
+            ...store.settings.launchThumbnail,
+            animation: { ...store.settings.launchThumbnail.animation, dwellSeconds }
+        }
+    });
+}
+
 // ---------------- 背景 ----------------
 const bgModes = [
     { value: 'none', label: '系统桌面' },
@@ -511,19 +560,81 @@ function setLaunchFit(fit: ImageFit) {
         </div>
     </details>
 
-    <!-- 首页启动卡全局缩略图 -->
+    <!-- 首页启动卡·像素动画：背景类型、播放速度与场景停留 -->
     <details class="card group layout-setting" data-section="thumbnail">
         <summary>
-            首页启动卡图片
+            首页启动卡·像素动画
+            <small>动画背景、播放速度与场景停留</small>
+        </summary>
+        <div class="layout-setting-body">
+            <div class="bg-row">
+                <span class="muted bg-label">背景类型</span>
+                <div class="fit-options">
+                    <button
+                        v-for="mode in thumbnailModes"
+                        :key="mode.value"
+                        class="capsule"
+                        :class="{ active: thumbnailMode === mode.value }"
+                        @click="setThumbnailMode(mode.value)"
+                    >
+                        {{ mode.label }}
+                    </button>
+                </div>
+            </div>
+            <template v-if="thumbnailIsAnimation">
+                <div class="bg-row">
+                    <span class="muted bg-label">动画速度</span>
+                    <div class="fit-options">
+                        <button
+                            v-for="step in heroSpeedSteps"
+                            :key="step.value"
+                            class="capsule"
+                            :class="{ active: heroSpeed === step.value }"
+                            @click="setHeroSpeed(step.value)"
+                        >
+                            {{ step.label }}
+                        </button>
+                    </div>
+                    <span class="muted">作用在场景时钟上，画面推进与场景停留同速变化</span>
+                </div>
+                <div class="bg-row carousel-default-time">
+                    <label class="bg-label" for="hero-scene-dwell">场景停留</label
+                    ><input
+                        id="hero-scene-dwell"
+                        type="number"
+                        min="1"
+                        max="60"
+                        step="0.5"
+                        class="input num-input"
+                        :value="heroDwell"
+                        @change="setHeroDwell(($event.target as HTMLInputElement).value)"
+                    /><span class="muted">秒 · 每个场景停留多久后轮到下一个</span>
+                </div>
+                <p class="muted group-hint thumbnail-mode-hint">
+                    六个场景自动轮播：主世界黎明、洞穴、红石、下界传送门、营地炉火（地标随当前实例）、起飞；也可在首页卡片右上角的指示条随时切换。启动游戏时卡片会随进度逐块加载世界，悬停「开始游戏」炉火会回应。
+                    <br />
+                    像素动画场景源自 EdwinZhanCN 的 LumilioCL（AGPL-3.0，致谢）。
+                </p>
+            </template>
+            <p v-else class="muted group-hint thumbnail-mode-hint">
+                已切换为静态图片：首页卡片显示下方「图片轮播」里勾选的图片。图片随时可以导入和整理，切回像素动画时配置原样保留。
+            </p>
+        </div>
+    </details>
+
+    <!-- 首页启动卡·图片轮播：图片管理随时可用 -->
+    <details class="card group layout-setting" data-section="thumbnail-images">
+        <summary>
+            首页启动卡·图片轮播
             <span class="carousel-count">{{ activeSlides.size }} / {{ slides.length }} 已启用</span
-            ><small>内置插画、自定义图片与轮播</small>
+            ><small>内置插画、自定义图片与轮播顺序</small>
         </summary>
         <div class="layout-setting-body">
             <div class="layout-head">
                 <div>
-                    <h3 class="group-title group-title-tight">首页启动卡</h3>
+                    <h3 class="group-title group-title-tight">图片轮播</h3>
                     <p class="muted group-hint group-hint-flush">
-                        实例专属图片优先；否则按下面的勾选与顺序混合轮播。取消勾选会保留图片，全部关闭时使用主题底色。
+                        背景类型为「静态图片」时按这里的勾选与顺序轮播（实例专属图片优先）；动画模式下配置原样保留。
                     </p>
                 </div>
             </div>
@@ -816,6 +927,9 @@ function setLaunchFit(fit: ImageFit) {
 </template>
 
 <style scoped>
+.thumbnail-mode-hint {
+    margin: 0 0 var(--space-3);
+}
 .layout-head {
     display: flex;
     align-items: center;

@@ -11,6 +11,7 @@ const icon =
         rel="resourcepacks"
         open-label="打开资源包文件夹"
         empty-text="暂无资源包，将 .zip 文件放入 resourcepacks 文件夹"
+        subtitle="管理所选实例的资源包；拖入或导入 .zip 即可使用。"
         :icon="icon"
     />
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue';
 import type {
     ProjectionCatalog,
     ProjectionEntry,
@@ -10,9 +10,20 @@ import { errText } from '../api';
 import { activeInstalled, store, toast } from '../store';
 import ContentSkeleton from '../components/ContentSkeleton.vue';
 import SelectMenu from '../components/SelectMenu.vue';
+import ResourceScopeFields from '../components/ResourceScopeFields.vue';
+import ResourcePathChip from '../components/ResourcePathChip.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import ResourcePagination from '../components/ResourcePagination.vue';
+import { useSweepSelect } from '../composables/sweepSelect';
+import type { SchematicPreviewSource } from '../lab/schematic-preview/backend';
 import ProjectionConvert from '../components/ProjectionConvert.vue';
+import ProjectionThumb from '../components/ProjectionThumb.vue';
+const SchematicWorkshopView = defineAsyncComponent(() => import('./SchematicWorkshopView.vue'));
 const converting = ref<ProjectionEntry>();
+/** 渲染子页开关与来源：rendering 为 null = 空工坊（自行导入/拖入/从实例选择） */
+const renderMode = ref(false);
+const rendering = ref<SchematicPreviewSource | null>(null);
+const renderKey = ref(0);
 const data = ref<ProjectionCatalog>({ entries: [], warnings: [], library: '', instances: [] });
 const loading = ref(false),
     busy = ref(false),
@@ -24,6 +35,9 @@ const loading = ref(false),
     selected = ref<string[]>([]),
     target = ref(''),
     confirm = ref<'trash' | 'dispatch' | ''>('');
+/** 排序跨会话记忆（与截图/录像页同口径） */
+const sort = ref(localStorage.getItem('kamucl.projectionSort') || 'new');
+watch(sort, (v) => localStorage.setItem('kamucl.projectionSort', v));
 const results = ref<ProjectionResult[]>([]);
 let generation = 0,
     disposed = false;
@@ -40,8 +54,12 @@ const currentTarget = computed(() => {
     return inst ? { id: inst, folder } : null;
 });
 const scopeOptions = [
-    { value: 'instance', label: '当前实例' },
-    { value: 'folder', label: '版本文件夹内的所有' }
+    { value: 'instance', label: '当前实例', description: '只看所选实例的投影目录' },
+    {
+        value: 'folder',
+        label: '版本文件夹内的所有',
+        description: '聚合文件夹内全部实例各自的 schematics 目录'
+    }
 ];
 watch(
     () => JSON.stringify([activeFolder.value, store.resourceVersionId, scope.value]),
@@ -75,16 +93,45 @@ const filtered = computed(() =>
                 .includes(query.value.trim().toLowerCase())
     )
 );
-const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / 40)));
-const rows = computed(() => filtered.value.slice((page.value - 1) * 40, page.value * 40));
+const sorted = computed(() => {
+    const list = [...filtered.value];
+    if (sort.value === 'name') list.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+    else if (sort.value === 'old') list.sort((a, b) => a.modified - b.modified);
+    else list.sort((a, b) => b.modified - a.modified);
+    return list;
+});
+const pages = computed(() => Math.max(1, Math.ceil(sorted.value.length / 40)));
+const rows = computed(() => sorted.value.slice((page.value - 1) * 40, page.value * 40));
 const targets = computed(() =>
     data.value.instances.map((i) => ({ value: JSON.stringify([i.folder, i.id]), label: i.name }))
 );
+/** 工坊解析器只认 litematic / schem（Sponge v2/v3）；.schematic 是旧版 MCEdit，.nbt 是原版结构 */
+const canRender = (entry: ProjectionEntry) =>
+    !entry.error && (entry.kind === 'litematic' || entry.kind === 'schem');
+const thumbSource = (entry: ProjectionEntry): SchematicPreviewSource | null =>
+    canRender(entry) ? { kind: 'external', path: entryPath(entry) } : null;
+const entryPath = (entry: ProjectionEntry) => {
+    // entry.name 已带扩展名（扫描按后缀过滤）；directory 是真实父目录
+    const sep = entry.directory.includes('\\') ? '\\' : '/';
+    const dir = entry.directory.replace(/[\\/]+$/, '');
+    return `${dir}${sep}${entry.name}`;
+};
+function renderEntry(entry: ProjectionEntry) {
+    if (!canRender(entry)) return;
+    renderKey.value += 1;
+    rendering.value = { kind: 'external', path: entryPath(entry) };
+    renderMode.value = true;
+}
+function openWorkshop() {
+    renderKey.value += 1;
+    rendering.value = null;
+    renderMode.value = true;
+}
 const size = (n: number) =>
     n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
 /** 当前实例为空、但该文件夹其它实例里有投影 → 空状态给出切换入口，避免误以为"没有投影" */
 const othersHaveProjections = ref(false);
-watch([query, kind, source, scope], () => {
+watch([query, kind, source, sort, scope], () => {
     page.value = 1;
     selected.value = [];
 });
@@ -124,6 +171,8 @@ async function refresh(silent = false) {
     }
 }
 function drag(event: DragEvent, entry: ProjectionEntry) {
+    // 纵向拖 = 扫选接管；横向仍走文件拖出
+    if (interceptFileDrag(event)) return;
     event.preventDefault();
     event.stopPropagation();
     if (busy.value || loading.value || store.editMode) return;
@@ -132,6 +181,20 @@ function drag(event: DragEvent, entry: ProjectionEntry) {
         selected.value.includes(entry.id) ? [...selected.value] : [entry.id]
     );
 }
+
+/** PCL 式扫选：按住行纵向拖 = 沿途选中/反选 */
+const workspaceEl = ref<HTMLElement | null>(null);
+const { interceptFileDrag } = useSweepSelect({
+    container: () => workspaceEl.value,
+    itemSelector: '.recording-row',
+    enabled: () => !busy.value && !loading.value && !store.editMode,
+    isSelected: (key) => selected.value.includes(key),
+    setMany: (keys, want) => {
+        const set = new Set(selected.value);
+        for (const k of keys) want ? set.add(k) : set.delete(k);
+        selected.value = [...set];
+    }
+});
 function autoRefresh() {
     if (
         !busy.value &&
@@ -147,6 +210,16 @@ function selectPage() {
     selected.value = ids.every((id) => selected.value.includes(id))
         ? selected.value.filter((id) => !ids.includes(id))
         : [...new Set([...selected.value, ...ids])];
+}
+/** 两个选择按钮同一套状态感知语义：标签永远说明下一次点击的结果（与截图/录像页同款） */
+const pageAllSelected = computed(
+    () => rows.value.length > 0 && rows.value.every((e) => selected.value.includes(e.id))
+);
+const filteredAllSelected = computed(
+    () => sorted.value.length > 0 && sorted.value.every((e) => selected.value.includes(e.id))
+);
+function toggleAllFiltered() {
+    selected.value = filteredAllSelected.value ? [] : sorted.value.map((e) => e.id);
 }
 async function open(entry?: ProjectionEntry) {
     try {
@@ -205,7 +278,7 @@ function escape(e: KeyboardEvent) {
 const dragActive = ref(false);
 async function dropProjections(event: DragEvent) {
     dragActive.value = false;
-    if (busy.value) return;
+    if (busy.value || renderMode.value) return;
     const files = Array.from(event.dataTransfer?.files ?? [])
         .map((f) => window.kamucl.getFilePath(f))
         .filter(Boolean);
@@ -246,7 +319,18 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <section class="recordings-page" data-ui="projections:page">
+    <section class="recordings-page" :class="{ 'render-mode': renderMode }" data-ui="projections:page">
+        <template v-if="renderMode">
+            <header class="page-head recording-heading" data-ui="projections:render-heading">
+                <div>
+                    <h1>投影渲染</h1>
+                    <p class="muted">3D 查看与编辑；拖入 .litematic / .schem 或从实例选择也可以。</p>
+                </div>
+                <button class="btn btn-ghost" @click="renderMode = false">← 返回投影列表</button>
+            </header>
+            <SchematicWorkshopView :key="renderKey" :auto-open="rendering" class="projection-workshop-embed" />
+        </template>
+        <template v-else>
         <ProjectionConvert
             v-if="converting"
             :entry="converting"
@@ -268,7 +352,9 @@ onUnmounted(() => {
                     class="btn btn-ghost"
                     @click="open()"
                 >
-                    打开当前实例 schematics</button
+                    打开投影文件夹</button
+                ><button data-ui="projections:workshop" class="btn btn-ghost" @click="openWorkshop">
+                    渲染工坊</button
                 ><button
                     data-ui="ProjectionsView:1594a41b4b07"
                     class="btn btn-gold"
@@ -286,9 +372,24 @@ onUnmounted(() => {
                 </button>
             </div>
         </header>
+        <div class="recording-context">
+            <ResourceScopeFields
+                v-model:scope="scope"
+                :scope-options="scopeOptions"
+                v-model:instance-id="store.resourceVersionId"
+                :instance-options="
+                    data.instances.map((i) => ({
+                        value: i.id,
+                        label: i.name,
+                        description: i.isolated ? '已隔离' : '共享'
+                    }))
+                "
+                :instance-locked="scope === 'folder'"
+                :disabled="busy"
+            />
+        </div>
         <div class="recording-library" data-ui="projections:library">
-            <span data-ui="ProjectionsView:2931d23fc4f5" class="muted">导入与复制保存位置：</span
-            ><span class="path" :title="data.library">{{ data.library || '正在读取…' }}</span>
+            <ResourcePathChip label="导入保存位置" :path="data.library" />
             <details class="recording-help">
                 <summary>使用说明</summary>
                 <p>
@@ -298,9 +399,14 @@ onUnmounted(() => {
                 </p>
             </details>
         </div>
-        <section class="recording-workspace card">
+        <section
+            ref="workspaceEl"
+            class="recording-workspace card"
+            :class="{ 'drop-hot': dragActive }"
+            @dragover.prevent="dragActive = true"
+            @dragleave.self="dragActive = false"
+        >
             <div class="recording-filters" data-ui="projections:filters">
-                <SelectMenu v-model="scope" :disabled="busy" :options="scopeOptions" />
                 <input
                     data-ui="ProjectionsView:a4bc662c17f4"
                     v-model="query"
@@ -327,6 +433,15 @@ onUnmounted(() => {
                         { value: 'all', label: '全部位置' },
                         { value: 'shared', label: '游戏文件夹根' },
                         { value: 'instances', label: '实例目录' }
+                    ]"
+                />
+                <SelectMenu
+                    v-model="sort"
+                    :disabled="busy"
+                    :options="[
+                        { value: 'new', label: '最新优先' },
+                        { value: 'old', label: '最旧优先' },
+                        { value: 'name', label: '按名称' }
                     ]"
                 />
             </div>
@@ -362,14 +477,18 @@ onUnmounted(() => {
                         :disabled="busy || !rows.length"
                         @click="selectPage"
                     >
-                        选择当前页</button
+                        {{ pageAllSelected ? '取消选择当前页' : '选择当前页' }}</button
                     ><button
                         data-ui="ProjectionsView:8436cfb2245d"
                         class="btn btn-ghost"
-                        :disabled="busy || !filtered.length"
-                        @click="selected = filtered.map((e) => e.id)"
+                        :disabled="busy || !sorted.length"
+                        @click="toggleAllFiltered"
                     >
-                        全选筛选结果（{{ filtered.length }}）</button
+                        {{
+                            filteredAllSelected
+                                ? '取消全选'
+                                : `全选筛选结果（${sorted.length}）`
+                        }}</button
                     ><span>已选 {{ selected.length }} 项</span
                     ><button
                         data-ui="ProjectionsView:ed589ee8e06c"
@@ -454,7 +573,7 @@ onUnmounted(() => {
                     @click="
                         othersHaveProjections
                             ? (scope = 'folder')
-                            : ((query = ''), (kind = 'all'), (source = 'all'), (folderFilter = ''));
+                            : ((query = ''), (kind = 'all'), (source = 'all'));
                     "
                 >
                     {{ othersHaveProjections ? '查看版本文件夹内的所有' : '清除筛选' }}
@@ -471,6 +590,8 @@ onUnmounted(() => {
                     v-for="entry in rows"
                     :key="entry.id"
                     class="recording-row"
+                    :class="{ selected: selected.includes(entry.id) }"
+                    :data-sweep-key="entry.id"
                 >
                     <input
                         data-ui="ProjectionsView:d29a579f673a"
@@ -480,6 +601,7 @@ onUnmounted(() => {
                         :aria-label="`选择 ${entry.name}`"
                         :disabled="busy"
                     />
+                    <ProjectionThumb :id="entry.id" :source="thumbSource(entry)" />
                     <div
                         data-ui="ProjectionsView:3867dfbdf0e7"
                         class="recording-info"
@@ -515,6 +637,14 @@ onUnmounted(() => {
                     >
                         定位文件</button
                     ><button
+                        data-ui="projections:render"
+                        class="btn btn-ghost btn-sm"
+                        :disabled="!canRender(entry)"
+                        :title="canRender(entry) ? '在渲染工坊中打开' : '渲染工坊仅支持 .litematic / .schem'"
+                        @click="renderEntry(entry)"
+                    >
+                        渲染</button
+                    ><button
                         class="btn btn-ghost btn-sm"
                         :disabled="!!entry.error || busy"
                         @click="converting = entry"
@@ -523,24 +653,7 @@ onUnmounted(() => {
                     </button>
                 </article>
             </div>
-            <div data-ui="ProjectionsView:419803271708" v-if="pages > 1" class="actions pagination">
-                <button
-                    data-ui="ProjectionsView:0fa04d3df515"
-                    class="btn btn-ghost"
-                    :disabled="page <= 1"
-                    @click="page--"
-                >
-                    上一页</button
-                ><span>{{ page }} / {{ pages }} · {{ filtered.length }} 个投影</span
-                ><button
-                    data-ui="ProjectionsView:6380222140de"
-                    class="btn btn-ghost"
-                    :disabled="page >= pages"
-                    @click="page++"
-                >
-                    下一页
-                </button>
-            </div>
+            <ResourcePagination v-model:page="page" :page-count="pages" :total="sorted.length" />
         </section>
         <details
             data-ui="ProjectionsView:d26a22685a69"
@@ -577,6 +690,7 @@ onUnmounted(() => {
             @cancel="confirm = ''"
             @confirm="execute(confirm as 'trash' | 'dispatch')"
         />
+        </template>
     </section>
 </template>
 
@@ -596,9 +710,10 @@ onUnmounted(() => {
 }
 .recording-library {
     display: flex;
-    justify-content: space-between;
+    align-items: flex-start;
     gap: 20px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    min-width: 0;
 }
 .recording-library h3 {
     margin: 0;
@@ -609,9 +724,15 @@ onUnmounted(() => {
     gap: 10px;
     flex-wrap: wrap;
 }
+.recording-context {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
 .recording-filters {
     display: grid;
-    grid-template-columns: minmax(200px, 1fr) minmax(180px, 1fr) 150px 150px;
+    grid-template-columns: minmax(200px, 1.6fr) 150px 150px;
     gap: 12px;
 }
 .recording-controls {
@@ -692,6 +813,28 @@ onUnmounted(() => {
 .recordings-page {
     gap: 12px;
 }
+/* 渲染子页：整页锁定为视口高度，工坊吃满剩余空间（内容在工坊内部滚动，不外溢） */
+.render-mode {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 100px);
+    overflow: hidden;
+}
+.render-mode .projection-workshop-embed {
+    flex: 1;
+    min-height: 0;
+    height: auto;
+}
+@media (max-width: 900px) {
+    .render-mode {
+        height: auto;
+        overflow: visible;
+    }
+    .render-mode .projection-workshop-embed {
+        height: auto;
+        min-height: calc(100vh - 12rem);
+    }
+}
 .recording-heading {
     display: flex;
     flex-direction: row;
@@ -722,14 +865,26 @@ onUnmounted(() => {
     min-width: 0;
     overflow-wrap: anywhere;
 }
+/* 使用说明与路径条并排：开关钉在右侧、整条可点；展开/收起时开关位置不变（控件不得因交互跳动） */
 .recording-help {
     margin-left: auto;
-    max-width: 100%;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: min(640px, 55%);
     line-height: 1.7;
 }
 .recording-help summary {
+    display: block;
+    text-align: right;
     cursor: pointer;
     white-space: nowrap;
+}
+/* display:block 会吃掉 <summary> 默认三角，这里显式补回展开方向箭头 */
+.recording-help summary::after {
+    content: " ▸";
+}
+.recording-help[open] summary::after {
+    content: " ▾";
 }
 .recording-workspace {
     padding: 16px;
@@ -737,16 +892,31 @@ onUnmounted(() => {
     gap: 12px;
     min-height: 240px;
     align-content: start;
+    position: relative;
+}
+.recording-workspace.sweeping {
+    user-select: none;
+}
+.recording-workspace.drop-hot {
+    outline: 2px dashed var(--accent);
+    outline-offset: -4px;
+}
+.recording-workspace.drop-hot::after {
+    content: '松开导入到当前实例';
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent);
+    color: var(--on-accent);
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    z-index: 5;
+    pointer-events: none;
 }
 .recording-filters {
-    grid-template-columns: minmax(190px, 1.5fr) minmax(160px, 1fr) 130px 130px;
-}
-.recording-filters > input {
-    grid-column: 1;
-    grid-row: 1;
-}
-.recording-filters > :first-child {
-    grid-column: 2;
+    grid-template-columns: minmax(190px, 1.5fr) 130px 130px 130px;
 }
 .recording-controls {
     padding: 8px 0;
@@ -759,6 +929,12 @@ onUnmounted(() => {
 .recording-row {
     padding: 12px 0;
     min-height: 72px;
+}
+.recording-row:hover {
+    background: var(--hover);
+}
+.recording-row.selected {
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
 }
 .recording-info strong {
     word-break: normal;
@@ -782,10 +958,6 @@ onUnmounted(() => {
     }
     .recording-filters > input {
         grid-column: 1/-1;
-    }
-    .recording-filters > :first-child {
-        grid-row: 2;
-        grid-column: 1;
     }
 }
 @media (max-width: 650px) {

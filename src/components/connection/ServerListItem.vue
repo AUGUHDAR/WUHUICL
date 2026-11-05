@@ -7,6 +7,8 @@ import ServerAddress from './ServerAddress.vue';
 defineProps<{
     server: ServerEntry;
     ping: ServerPingResult | null;
+    /** 服务器真实头像（SLP favicon 的 data URL；空 = 回退首字母） */
+    icon?: string;
     pending: boolean;
     active: boolean;
     selectMode: boolean;
@@ -49,7 +51,15 @@ defineEmits<{ select: []; toggle: []; connect: []; favorite: []; address: [] }>(
                 @click="selectMode ? $emit('toggle') : $emit('select')"
                 @dblclick="!selectMode && $emit('connect')"
             />
-            <span class="server-monogram" aria-hidden="true">{{
+            <img
+                v-if="icon"
+                class="server-icon"
+                :src="icon"
+                alt=""
+                draggable="false"
+                aria-hidden="true"
+            />
+            <span v-else class="server-monogram" aria-hidden="true">{{
                 privateServerText(server.name, server, addressRevealed).slice(0, 1).toUpperCase()
             }}</span>
             <span class="server-row-copy"
@@ -114,6 +124,16 @@ defineEmits<{ select: []; toggle: []; connect: []; favorite: []; address: [] }>(
 .server-row-button {
     position: relative;
 }
+.server-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-sm);
+    object-fit: cover;
+    background: var(--card-2);
+    flex: none;
+    image-rendering: pixelated;
+}
+.server-row-button > .server-icon,
 .server-row-button > .server-monogram,
 .server-row-state,
 .server-row-copy {

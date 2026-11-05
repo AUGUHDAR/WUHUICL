@@ -7,6 +7,8 @@ import { privateServerText } from '@shared/serverPrivacy';
 defineProps<{
     server: ServerEntry;
     ping: ServerPingResult | null;
+    /** 服务器真实头像（SLP favicon 的 data URL；空 = 回退首字母） */
+    icon?: string;
     pending: boolean;
     busy: boolean;
     running?: boolean;
@@ -41,7 +43,17 @@ defineEmits<{
                 :label="pending ? '检测中' : ping?.online ? '在线' : ping ? '未连通' : '未检测'"
         /></template>
         <div data-ui="ServerDetails:bcfe4bdd0062" class="server-detail-title">
+            <img
+                v-if="icon"
+                data-ui="ServerDetails:d5eb9cf8090b"
+                class="server-monogram large server-detail-icon"
+                :src="icon"
+                alt=""
+                draggable="false"
+                aria-hidden="true"
+            />
             <span
+                v-else
                 data-ui="ServerDetails:d5eb9cf8090b"
                 class="server-monogram large"
                 aria-hidden="true"
@@ -231,5 +243,9 @@ defineEmits<{
 }
 .server-detail-title {
     gap: 12px;
+}
+.server-detail-icon {
+    object-fit: cover;
+    image-rendering: pixelated;
 }
 </style>

@@ -90,15 +90,16 @@ fn import_managed_image(app: &tauri::AppHandle, src: &PathBuf, kind: &str) -> Re
     if bytes.len() > 32 * 1024 * 1024 {
         return Err("图片文件过大".into());
     }
-    let format = image::guess_format(&bytes).map_err(|_| "图片无法解码（支持 PNG/JPG/WebP）".to_string())?;
-    if !matches!(format, image::ImageFormat::Png | image::ImageFormat::Jpeg | image::ImageFormat::WebP) {
-        return Err("图片无法解码（支持 PNG/JPG/WebP）".into());
+    let format = image::guess_format(&bytes).map_err(|_| "图片无法解码（支持 PNG/JPG/WebP/GIF）".to_string())?;
+    if !matches!(format, image::ImageFormat::Png | image::ImageFormat::Jpeg | image::ImageFormat::WebP | image::ImageFormat::Gif) {
+        return Err("图片无法解码（支持 PNG/JPG/WebP/GIF）".to_string());
     }
     let root = managed_root(app).join(kind);
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     let ext = match format {
         image::ImageFormat::Png => "png",
         image::ImageFormat::Jpeg => "jpg",
+        image::ImageFormat::Gif => "gif",
         _ => "webp",
     };
     let name = format!("{}-{}.{}", chrono::Local::now().format("%Y%m%d%H%M%S"), &crate::accounts::uuid_v4()[..8], ext);
@@ -154,7 +155,7 @@ fn patch_launch_thumbnail(app: &tauri::AppHandle, patch: Value) -> Result<Value,
 
 fn pick_images(app: &tauri::AppHandle, multi: bool) -> Vec<String> {
     use tauri_plugin_dialog::DialogExt;
-    let dialog = app.dialog().file().add_filter("图片", &["png", "jpg", "jpeg", "webp"]);
+    let dialog = app.dialog().file().add_filter("图片", &["png", "jpg", "jpeg", "webp", "gif"]);
     if multi {
         dialog
             .blocking_pick_files()

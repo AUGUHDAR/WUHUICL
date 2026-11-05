@@ -165,7 +165,6 @@ watch(
         data-ui="BrandFaceCard:root"
         class="card group collapse setting-target"
         data-section="brand-face"
-        open
     >
         <summary data-ui="BrandFaceCard:head" class="collapse-head">
             <h3 data-ui="BrandFaceCard:title" class="group-title">启动形象</h3>

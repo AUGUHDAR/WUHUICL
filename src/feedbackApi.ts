@@ -82,6 +82,8 @@ export interface FBTicketLocal {
     lastTimeMs: number;
     replyCount: number;
     hasUnread: boolean;
+    /** 由 tickets:poll 合并进来；初始列表可能没有该字段（视为未删除） */
+    deleted?: boolean;
 }
 export interface FBTicketDetail {
     id: string;

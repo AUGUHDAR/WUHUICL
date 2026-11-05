@@ -14,6 +14,12 @@ export function createCatalogSession(
     let fetchedAt = 0;
     return {
         peek: () => snapshot,
+        /** 丢弃缓存的目录快照（最小化自整理用；下次 load 按需重新拉取） */
+        reset() {
+            snapshot = undefined;
+            pending = undefined;
+            fetchedAt = 0;
+        },
         load(refresh = false): Promise<CatalogSnapshot> {
             if (pending) return pending;
             if (!refresh && snapshot && now() >= fetchedAt && now() - fetchedAt < 300_000)

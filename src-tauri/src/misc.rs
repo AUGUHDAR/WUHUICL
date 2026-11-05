@@ -7,7 +7,8 @@ use std::path::PathBuf;
 
 // ---------------- 默认按键（keybindings.ts） ----------------
 
-const BIND_RE_OK: fn(&str) -> bool = |v| v.starts_with("key.keyboard.") || v.starts_with("key.mouse.");
+const BIND_RE_OK: fn(&str) -> bool =
+    |v| v.starts_with("key.keyboard.") || v.starts_with("key.mouse.");
 
 // 对应原版 shared/keybindings.ts 的 VANILLA_KEYBINDS（id 与 defaultBind 逐条照抄，顺序同原版）
 const VANILLA_KEYBINDS: &[(&str, &str)] = &[
@@ -46,7 +47,7 @@ const VANILLA_KEYBINDS: &[(&str, &str)] = &[
     ("key_key.playerlist", "key.keyboard.tab"),
     ("key_key.saveToolbarActivator", "key.keyboard.unknown"),
     ("key_key.loadToolbarActivator", "key.keyboard.unknown"),
-    ("key_key.spectatorOutlines", "key.keyboard.unknown")
+    ("key_key.spectatorOutlines", "key.keyboard.unknown"),
 ];
 
 fn default_keys_file(app: &tauri::AppHandle) -> PathBuf {
@@ -64,7 +65,10 @@ fn default_keys(app: &tauri::AppHandle) -> Value {
     let stored = read_stored_keys(app);
     let mut out = serde_json::Map::new();
     for (id, def) in VANILLA_KEYBINDS {
-        let v = stored[*id].as_str().filter(|s| BIND_RE_OK(s)).unwrap_or(def);
+        let v = stored[*id]
+            .as_str()
+            .filter(|s| BIND_RE_OK(s))
+            .unwrap_or(def);
         out.insert(id.to_string(), json!(v));
     }
     Value::Object(out)
@@ -149,7 +153,9 @@ fn mascot_state(app: &tauri::AppHandle) -> Value {
     std::fs::read(mascots_file(app))
         .ok()
         .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
-        .unwrap_or_else(|| json!({ "counts": {}, "order": [], "sound": { "muted": false, "volume": 0.5 } }))
+        .unwrap_or_else(
+            || json!({ "counts": {}, "order": [], "sound": { "muted": false, "volume": 0.5 } }),
+        )
 }
 
 fn save_mascots(app: &tauri::AppHandle, state: &Value) {
@@ -186,6 +192,55 @@ fn save_exit_history(app: &tauri::AppHandle, list: &[Value]) {
     }
 }
 
+// ---------------- 启动热力统计（首页「启动打卡」日历） ----------------
+
+fn launch_stats_file(app: &tauri::AppHandle) -> PathBuf {
+    crate::settings::user_data_dir(app).join("launch-stats.json")
+}
+
+fn load_launch_stats(app: &tauri::AppHandle) -> std::collections::BTreeMap<String, u32> {
+    std::fs::read(launch_stats_file(app))
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
+        .and_then(|v| v.get("days").cloned())
+        .and_then(|days| {
+            serde_json::from_value::<std::collections::BTreeMap<String, u32>>(days).ok()
+        })
+        .unwrap_or_default()
+}
+
+fn save_launch_stats(app: &tauri::AppHandle, days: &std::collections::BTreeMap<String, u32>) {
+    let file = launch_stats_file(app);
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    // 只保留最近 400 天，防止文件无限增长
+    let cutoff = (chrono::Local::now() - chrono::Duration::days(400))
+        .format("%Y-%m-%d")
+        .to_string();
+    let kept: std::collections::BTreeMap<String, u32> = days
+        .iter()
+        .filter(|(day, _)| day.as_str() >= cutoff.as_str())
+        .map(|(day, count)| (day.clone(), *count))
+        .collect();
+    if let Ok(bytes) = serde_json::to_vec_pretty(&json!({ "days": kept })) {
+        let _ = std::fs::write(file, bytes);
+    }
+}
+
+/// 游戏进程成功拉起后调用（每次启动 +1）
+pub fn record_launch_hit(app: &tauri::AppHandle) {
+    let mut days = load_launch_stats(app);
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    *days.entry(today).or_insert(0) += 1;
+    save_launch_stats(app, &days);
+}
+
+fn launch_heatmap(app: &tauri::AppHandle) -> Value {
+    let days = load_launch_stats(app);
+    serde_json::to_value(&days).unwrap_or_else(|_| json!({}))
+}
+
 // ---------------- 插件（plugins.ts：userData/plugins/<id>/） ----------------
 
 fn plugins_root(app: &tauri::AppHandle) -> PathBuf {
@@ -201,10 +256,15 @@ fn list_plugins(app: &tauri::AppHandle) -> Value {
                 continue;
             }
             let manifest_path = e.path().join("plugin.json");
-            let Ok(raw) = std::fs::read(&manifest_path) else { continue };
-            let Ok(mut info) = serde_json::from_slice::<Value>(&raw) else { continue };
+            let Ok(raw) = std::fs::read(&manifest_path) else {
+                continue;
+            };
+            let Ok(mut info) = serde_json::from_slice::<Value>(&raw) else {
+                continue;
+            };
             if let Some(obj) = info.as_object_mut() {
-                obj.entry("id".to_string()).or_insert_with(|| json!(e.file_name().to_string_lossy()));
+                obj.entry("id".to_string())
+                    .or_insert_with(|| json!(e.file_name().to_string_lossy()));
                 obj.insert("dir".to_string(), json!(e.path().to_string_lossy()));
             }
             out.push(info);
@@ -215,7 +275,11 @@ fn list_plugins(app: &tauri::AppHandle) -> Value {
 
 // ---------------- 通道分发 ----------------
 
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         // 默认按键
         "keys:getDefault" => Some(Ok(default_keys(app))),
@@ -244,19 +308,30 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
 
         // 默认游戏选项：形状与校验语义对齐原版 defaultGameOptions.ts
         "gameOptions:get" => Some(Ok(crate::gameoptions::get(app))),
-        "gameOptions:set" => Some(crate::gameoptions::set(app, &args.first().cloned().unwrap_or(json!({})))),
+        "gameOptions:set" => Some(crate::gameoptions::set(
+            app,
+            &args.first().cloned().unwrap_or(json!({})),
+        )),
 
         // 默认资源包
         "defaultPacks:get" => Some(Ok(Value::Array(load_packs(app)))),
         "defaultPacks:import" => Some((|| {
-            let files = args.first().and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let files = args
+                .first()
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
             let mut list = load_packs(app);
             let packs_root = crate::settings::user_data_dir(app).join("default-resource-packs");
             let _ = std::fs::create_dir_all(&packs_root);
             for f in files {
                 let Some(src) = f.as_str() else { continue };
                 let src_path = PathBuf::from(src);
-                let name = src_path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default().to_string();
+                let name = src_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy())
+                    .unwrap_or_default()
+                    .to_string();
                 let id = format!("pack-{}", &crate::accounts::uuid_v4()[..8]);
                 let dest = packs_root.join(&name);
                 std::fs::copy(&src_path, &dest).map_err(|e| e.to_string())?;
@@ -321,20 +396,42 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         "mascots:state" => Some(Ok(mascot_state(app))),
         "mascots:batch" => Some((|| {
             let mut state = mascot_state(app);
-            let hits = args.first().and_then(|v| v.get("hits")).and_then(|h| h.as_array()).cloned().unwrap_or_default();
+            let hits = args
+                .first()
+                .and_then(|v| v.get("hits"))
+                .and_then(|h| h.as_array())
+                .cloned()
+                .unwrap_or_default();
             let counts = state["counts"].as_object_mut().ok_or("玩偶状态损坏")?;
             for h in hits {
                 let id = h.as_str().unwrap_or("kamu").to_string();
-                *counts.entry(id).or_insert(json!(0)) = json!(counts.get(&h.as_str().unwrap_or("kamu").to_string()).and_then(|v| v.as_i64()).unwrap_or(0) + 1);
+                *counts.entry(id).or_insert(json!(0)) = json!(
+                    counts
+                        .get(&h.as_str().unwrap_or("kamu").to_string())
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0)
+                        + 1
+                );
             }
             save_mascots(app, &state);
             Ok(state)
         })()),
         "mascots:slap" => Some((|| {
-            let id = args.first().and_then(|v| v.as_str()).unwrap_or("kamu").to_string();
+            let id = args
+                .first()
+                .and_then(|v| v.as_str())
+                .unwrap_or("kamu")
+                .to_string();
             let mut state = mascot_state(app);
             let counts = state["counts"].as_object_mut().ok_or("玩偶状态损坏")?;
-            *counts.entry(id).or_insert(json!(0)) = json!(counts.values().filter_map(|v| v.as_i64()).sum::<i64>().max(0) + 1);
+            *counts.entry(id).or_insert(json!(0)) = json!(
+                counts
+                    .values()
+                    .filter_map(|v| v.as_i64())
+                    .sum::<i64>()
+                    .max(0)
+                    + 1
+            );
             save_mascots(app, &state);
             Ok(state)
         })()),
@@ -360,6 +457,7 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         })()),
 
         // 退出历史
+        "launchStats:heatmap" => Some(Ok(launch_heatmap(app))),
         "exitHistory:list" => Some(Ok(Value::Array(load_exit_history(app)))),
         "exitHistory:ack" => Some((|| {
             let mut list = load_exit_history(app);
@@ -378,8 +476,14 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         "plugins:list" => Some(Ok(list_plugins(app))),
         "plugins:install" => Some((|| {
             use tauri_plugin_dialog::DialogExt;
-            let picked = app.dialog().file().add_filter("插件脚本", &["js"]).blocking_pick_file();
-            let Some(path) = picked else { return Ok(list_plugins(app)) };
+            let picked = app
+                .dialog()
+                .file()
+                .add_filter("插件脚本", &["js"])
+                .blocking_pick_file();
+            let Some(path) = picked else {
+                return Ok(list_plugins(app));
+            };
             let code = std::fs::read_to_string(path.to_string()).map_err(|e| e.to_string())?;
             // plugin.json：脚本首行 // name: xxx 或文件名
             let name = code
@@ -405,9 +509,16 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             let id = args.first().and_then(|v| v.as_str()).unwrap_or("");
             let enabled = args.get(1).and_then(|v| v.as_bool()).unwrap_or(false);
             let manifest = plugins_root(app).join(id).join("plugin.json");
-            let mut info: Value = std::fs::read(&manifest).ok().and_then(|r| serde_json::from_slice(&r).ok()).unwrap_or(json!({}));
+            let mut info: Value = std::fs::read(&manifest)
+                .ok()
+                .and_then(|r| serde_json::from_slice(&r).ok())
+                .unwrap_or(json!({}));
             info["enabled"] = json!(enabled);
-            std::fs::write(&manifest, serde_json::to_vec_pretty(&info).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            std::fs::write(
+                &manifest,
+                serde_json::to_vec_pretty(&info).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
             Ok(list_plugins(app))
         })()),
         "plugins:remove" => Some((|| {
@@ -418,17 +529,21 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         "plugins:readCode" => Some((|| {
             let id = args.first().and_then(|v| v.as_str()).unwrap_or("");
             let manifest = plugins_root(app).join(id).join("plugin.json");
-            let info: Value = std::fs::read(&manifest).ok().and_then(|r| serde_json::from_slice(&r).ok()).unwrap_or(json!({}));
+            let info: Value = std::fs::read(&manifest)
+                .ok()
+                .and_then(|r| serde_json::from_slice(&r).ok())
+                .unwrap_or(json!({}));
             if info["enabled"] != true {
                 return Err("仅启用的插件可读取代码".into());
             }
-            let code = std::fs::read_to_string(plugins_root(app).join(id).join("main.js")).map_err(|e| e.to_string())?;
+            let code = std::fs::read_to_string(plugins_root(app).join(id).join("main.js"))
+                .map_err(|e| e.to_string())?;
             Ok(json!(code))
         })()),
         "plugins:openDir" => Some((|| {
             let dir = plugins_root(app);
             let _ = std::fs::create_dir_all(&dir);
-            std::process::Command::new("explorer.exe").arg(dir.as_os_str()).spawn().map_err(|e| e.to_string())?;
+            crate::platform::open_path(&dir.to_string_lossy())?;
             Ok(Value::Null)
         })()),
 
@@ -536,12 +651,18 @@ mod mem_organize {
             }
             // PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_QUOTA，不提权
             let handle = match unsafe {
-                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_QUOTA, false, pid)
+                OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SET_QUOTA,
+                    false,
+                    pid,
+                )
             } {
                 Ok(h) => h,
                 Err(_) => {
                     skipped += 1;
-                    *failures.entry("打开进程失败（权限不足）".to_string()).or_insert(0) += 1;
+                    *failures
+                        .entry("打开进程失败（权限不足）".to_string())
+                        .or_insert(0) += 1;
                     continue;
                 }
             };
@@ -604,6 +725,19 @@ fn organize_memory() -> Result<Value, String> {
     mem_organize::run()
 }
 
+/// EmptyWorkingSet 作用于启动器自身（最小化自整理用，伪句柄无需 OpenProcess）。非 Windows 恒 false。
+#[cfg(windows)]
+pub fn empty_self_working_set() -> bool {
+    use windows::Win32::System::ProcessStatus::EmptyWorkingSet;
+    use windows::Win32::System::Threading::GetCurrentProcess;
+    unsafe { EmptyWorkingSet(GetCurrentProcess()) }.is_ok()
+}
+
+#[cfg(not(windows))]
+pub fn empty_self_working_set() -> bool {
+    false
+}
+
 /// 供启动流程调用（「启动前整理内存」开关）：对应原版 launch.ts 里的 organizeMemory()
 pub fn run_memory_organize() -> Result<Value, String> {
     mem_organize::run()
@@ -616,7 +750,11 @@ fn import_packs_from(app: &tauri::AppHandle, files: Vec<Value>) -> Result<Value,
     for f in files {
         let Some(src) = f.as_str() else { continue };
         let src_path = PathBuf::from(src);
-        let name = src_path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default().to_string();
+        let name = src_path
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default()
+            .to_string();
         let id = format!("pack-{}", &crate::accounts::uuid_v4()[..8]);
         let dest = packs_root.join(&name);
         std::fs::copy(&src_path, &dest).map_err(|e| e.to_string())?;

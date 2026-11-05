@@ -11,6 +11,7 @@ const icon =
         rel="shaderpacks"
         open-label="打开光影包文件夹"
         empty-text="暂无光影包，将 .zip 文件放入 shaderpacks 文件夹"
+        subtitle="管理所选实例的光影包；拖入或导入 .zip 即可使用。"
         :icon="icon"
     />
 </template>

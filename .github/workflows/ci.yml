@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Windows：便携 exe 是主交付形态；check + 前端类型检查
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Frontend typecheck
+        run: npm run typecheck
+
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --locked
+
+  # Linux：webkit2gtk 4.1 是 Tauri 2 的官方依赖清单
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --locked
+
+      - name: Build AppImage
+        run: npx tauri build --config src-tauri/tauri.linux.conf.json
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wuhuicl-linux-appimage
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: warn
+
+  # macOS：ARM64 为主（Apple Silicon），zip 产物作 artifact 供真机验证
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --locked
+
+      - name: Build app bundle
+        run: npx tauri build --config src-tauri/tauri.macos.conf.json
+
+      # .app 是目录，upload-artifact 会丢掉权限位与符号链接，必须打包成 zip/dmg 再传。
+      # dmg 由 tauri 直接产出；zip 用 ditto 保留元数据（zip -r 会破坏 bundle 结构）。
+      - name: Package .app as zip
+        run: |
+          APP=$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          ditto -c -k --keepParent "$APP" "WUHUICL-macos-arm64.zip"
+          shasum -a 256 "WUHUICL-macos-arm64.zip" > "WUHUICL-macos-arm64.zip.sha256"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wuhuicl-macos-arm64
+          path: |
+            WUHUICL-macos-arm64.zip
+            WUHUICL-macos-arm64.zip.sha256
+            src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error

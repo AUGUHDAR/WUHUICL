@@ -43,6 +43,8 @@ export interface DiagnosticFinding {
     mods?: Array<{ fileName: string; name: string; icon?: string }>;
 }
 export interface InstanceOverview {
+    /** 实例备注（version json note 字段） */
+    note?: string;
     target: InstanceTarget;
     directory: string;
     shared: boolean;

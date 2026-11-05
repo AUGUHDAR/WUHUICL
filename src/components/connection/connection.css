@@ -72,11 +72,12 @@
 .connection-modal .modal-label { display: block; margin: var(--space-4) 0 var(--space-2); font-size: var(--text-xs); color: var(--text-dim); }
 .connection-modal .confirm-text, .connection-modal .join-hint { font-size: var(--text-sm); line-height: 1.8; }
 .connection-modal .join-hint { color: var(--text-dim); margin-top: var(--space-3); }
-/* 页内 Tab：同一页面的多个入口分 Tab 展示，避免同屏拥挤 */
-.connect-tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.connect-tab { display: inline-flex; align-items: center; min-height: var(--ctl-h); padding: var(--space-2) var(--space-4); border-radius: var(--radius-md); border: 1px solid var(--border-strong); background: var(--card-2); color: var(--text-dim); font-size: var(--text-xs); font-weight: 600; cursor: pointer; transition: color 160ms ease, border-color 160ms ease, background 160ms ease; }
-.connect-tab:hover { color: var(--text); }
-.connect-tab.active { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent) 55%, var(--border-strong)); background: var(--accent-soft); }
+/* 页内 Tab：VoxLink 同款胶囊导航，同一功能面的多个分区跨页共用同一套样式 */
+.connect-tabs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 5px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); box-shadow: var(--shadow); width: max-content; max-width: 100%; }
+.connect-tab { display: inline-flex; align-items: center; border: 0; background: none; color: var(--text-dim); font: inherit; font-size: 13px; padding: 7px 14px; border-radius: 999px; cursor: pointer; transition: background 160ms ease, color 160ms ease; white-space: nowrap; }
+.connect-tab:hover { color: var(--text); background: var(--accent-soft); }
+.connect-tab.active { color: var(--accent-2); background: var(--accent-soft); font-weight: 600; }
+.connect-tab .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: 6px; }
 .connect-tab:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 3px; }
 /* 日志区：窄视口、可折叠，始终置于页面底部 */
 .connection-log-viewport {

@@ -21,7 +21,7 @@ export interface ProjectionCatalog {
     warnings: string[];
     /** 导入/复制的落点：当前实例的 schematics 目录 */
     library: string;
-    instances: Array<InstanceTarget & { name: string }>;
+    instances: Array<InstanceTarget & { name: string; isolated: boolean }>;
 }
 export interface ProjectionDifference {
     key: string;

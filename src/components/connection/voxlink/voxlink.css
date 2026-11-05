@@ -7,7 +7,7 @@
 .vl-nav-item .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: 6px; vertical-align: 1px; }
 .vl-body { animation: vl-in .18s var(--ease-out) both; }
 @keyframes vl-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.vl-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); padding: var(--card-pad); box-shadow: var(--shadow); }
+.vl-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--card) 94%, var(--bg)); padding: var(--card-pad); box-shadow: var(--shadow); }
 .vl-card + .vl-card { margin-top: 14px; }
 .vl-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .vl-card-head > .vl-row { flex: none; gap: 8px; }

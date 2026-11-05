@@ -21,6 +21,8 @@ export interface CommunityDownloadRequest {
     file: CommunityFile;
     kind: CommunityKind;
     target?: InstalledVersion;
+    /** 外部目录（PCL 同款）：资源文件直落任意文件夹；与 target 互斥 */
+    externalDir?: string;
     /** The accepted default is captured even for packs, which create a new instance. */
     folder: string;
 }
@@ -45,7 +47,12 @@ export interface CommunityDownloadPort {
     discard(planId: string): Promise<unknown>;
     download(
         file: CommunityFile,
-        target: { versionId: string; kind: CommunityKind; folder: string },
+        target: {
+            versionId: string;
+            kind: CommunityKind;
+            folder: string;
+            externalDir?: string;
+        },
         operationId: string
     ): Promise<string>;
     cancel(taskId: string): Promise<unknown>;
@@ -85,13 +92,26 @@ export function createCommunityDownloadQueue(port: CommunityDownloadPort) {
     const items = reactive<CommunityDownloadItem[]>([]);
     let running = false;
     const packOutcomes = new Map<string, { ok: boolean; error?: string; cancelled?: boolean }>();
+    /** 终态条目保留上限：超出后最旧的自动移除（长期挂机会话不再无限累积） */
+    const TERMINAL_ITEMS_LIMIT = 40;
     const notify = (item: CommunityDownloadItem) => port.changed(item);
     const finish = (item: CommunityDownloadItem, state: CommunityDownloadState, error = '') => {
         item.state = state;
         item.error = error;
         item.plan = undefined;
         notify(item);
+        pruneTerminal();
     };
+    function pruneTerminal() {
+        let excess = items.filter((item) => terminal(item.state)).length - TERMINAL_ITEMS_LIMIT;
+        while (excess > 0) {
+            const index = items.findIndex((item) => terminal(item.state));
+            if (index < 0) break;
+            const [gone] = items.splice(index, 1);
+            packOutcomes.delete(gone.id);
+            excess--;
+        }
+    }
     async function pump() {
         if (running) return;
         // Bound prepared plans below the main process limit, leaving room for local MOD drops.
@@ -130,7 +150,12 @@ export function createCommunityDownloadQueue(port: CommunityDownloadPort) {
                 item.state = 'downloading';
                 item.result = await port.download(
                     item.file,
-                    { versionId: item.target?.id ?? '', kind: item.kind, folder: item.folder },
+                    {
+                        versionId: item.target?.id ?? '',
+                        kind: item.kind,
+                        folder: item.folder,
+                        externalDir: item.externalDir
+                    },
                     item.operationId
                 );
                 if (item.kind === 'modpack') {
@@ -163,7 +188,10 @@ export function createCommunityDownloadQueue(port: CommunityDownloadPort) {
             (item) => !terminal(item.state) && identity(item) === identity(request)
         );
         if (existing) return { item: existing, added: false };
-        if (!request.folder || (request.kind !== 'modpack' && !request.target))
+        // 外部目录直落：不需要目标实例；其余场景必须已登记
+        if (!request.folder && !request.externalDir)
+            throw new Error('请选择已登记的目标实例');
+        if (!request.externalDir && request.kind !== 'modpack' && !request.target)
             throw new Error('请选择已登记的目标实例');
         const frozen = snapshot(request);
         const item = reactive<CommunityDownloadItem>({

@@ -257,9 +257,9 @@ async function onCheckUpdate() {
             updateCheckState.value = 'latest';
             // Result remains visible beside the check button; no duplicate success toast.
         } else {
-            // 仅真实失败（断网/更新源不可达）才走这里，已记日志
+            // 仅真实失败（断网/更新源不可达）才走这里，已记日志；带 reason 时优先展示（如平台不支持）
             updateCheckState.value = 'failed';
-            toast('检查失败：断网或更新源不可达（已记日志）', 'error');
+            toast(r.reason || '检查失败：断网或更新源不可达（已记日志）', 'error');
         }
     } catch {
         updateCheckState.value = 'failed';
@@ -378,6 +378,7 @@ const featureToggles = [
     { key: 'packs', label: '资源包' },
     { key: 'shaders', label: '光影包' },
     { key: 'recordings', label: '录像' },
+    { key: 'screenshots', label: '截图' },
     { key: 'servers', label: '服务器' },
     { key: 'friends', label: '联机' },
     { key: 'keys', label: '游戏内配置' },
@@ -671,6 +672,10 @@ const pluginBusy = ref(false);
 /** 有插件变更（启停/安装/删除）后需重载生效 */
 const pluginDirty = ref(false);
 const pluginConfirmRemove = ref('');
+/** 模板里拿不到 window 级 location（Vue 模板全局白名单不含它），经此函数中转 */
+function reloadLauncher() {
+    location.reload();
+}
 
 onMounted(async () => {
     try {
@@ -1737,6 +1742,31 @@ async function onRemovePlugin(p: PluginInfo) {
                             <span data-ui="SettingsView:e5b45bd3ff81" class="switch-ui"></span>
                         </label>
                     </div>
+                    <div data-ui="SettingsView:6f2d84b9c1e7" class="card group group-inline">
+                        <div data-ui="SettingsView:91c5e7a3d2b4">
+                            <h3 data-ui="SettingsView:2b8f46d0ea59" class="group-title">
+                                最小化时自动整理内存
+                            </h3>
+                            <p data-ui="SettingsView:c4d1f9e7a362" class="muted group-hint">
+                                最小化时暂停界面渲染并换出内存，占用明显回落；恢复窗口时需重新加载，
+                                建议留意恢复时的短暂延迟。有下载/安装任务进行时不整理。
+                            </p>
+                        </div>
+                        <label data-ui="SettingsView:5a9e3c78d1b6" class="switch">
+                            <input
+                                data-ui="SettingsView:e7b2d5f48c93"
+                                :checked="store.settings.memTrimOnMinimize !== false"
+                                type="checkbox"
+                                @change="
+                                    save({
+                                        memTrimOnMinimize: ($event.target as HTMLInputElement)
+                                            .checked
+                                    })
+                                "
+                            />
+                            <span data-ui="SettingsView:8f4c6b21da05" class="switch-ui"></span>
+                        </label>
+                    </div>
                 </div>
 
                 <!-- 关于与更新 -->
@@ -2006,7 +2036,7 @@ async function onRemovePlugin(p: PluginInfo) {
                                 class="btn btn-gold btn-sm"
                                 @click="
                                     ($event.target as HTMLButtonElement).blur();
-                                    location.reload();
+                                    reloadLauncher();
                                 "
                             >
                                 重载启动器生效

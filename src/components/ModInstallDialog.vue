@@ -96,7 +96,7 @@ async function install() {
             includeDependencies.value,
             operationId
         );
-        toast(message, 'success');
+        toast(message + '，可在「模组」页管理', 'success');
         store.fsRefreshTick++;
         emit('installed');
     } catch (e) {

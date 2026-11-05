@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "targets": ["appimage", "deb", "tar.gz"],
+    "icon": ["icons/icon.png"],
+    "linux": {
+      "deb": {
+        "depends": []
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    },
+    "desktop": {
+      "entry": {
+        "Name": "WUHUICL",
+        "Comment": "简约美观的一键式 Minecraft 启动器",
+        "Categories": "Game;"
+      }
+    }
+  }
+}

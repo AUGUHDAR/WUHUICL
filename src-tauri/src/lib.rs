@@ -78,53 +78,59 @@ pub const DESKTOP_APP_GUARDS: &str = r#"
 pub mod accounts;
 pub mod appearance;
 pub mod assetproto;
-pub mod dragout;
-pub mod exportlogs;
-pub mod feedback;
-pub mod gamedir;
-pub mod gameoptions;
-pub mod download;
-pub mod misc;
-pub mod mods;
-pub mod mslogin;
-pub mod modpacks;
-pub mod nbt;
-pub mod net;
-pub mod recordings;
-pub mod typednbt;
 pub mod bridge;
-pub mod direct;
-pub mod frp;
-pub mod terracotta;
-pub mod voxlink;
-pub mod vl;
-pub mod projections;
 pub mod catalog;
 pub mod centercmd;
 pub mod community;
 pub mod crashanalyzer;
-pub mod gate;
+pub mod direct;
+pub mod download;
+pub mod dragout;
+pub mod exportlogs;
+pub mod feedback;
+pub mod frp;
+pub mod gamedir;
 pub mod gamefolders;
+pub mod gameoptions;
+pub mod gate;
+pub mod hero_scenes;
 pub mod installer;
 pub mod ipc;
 pub mod javaman;
 pub mod launch;
+pub mod misc;
+pub mod modpacks;
+pub mod mods;
+pub mod mslogin;
+pub mod nbt;
+pub mod net;
+pub mod platform;
+pub mod projections;
+pub mod recordings;
+pub mod schematic_preview;
+pub mod schem_worker;
+pub mod screenshots;
+pub mod seed_map;
 pub mod selfupdate;
 pub mod servers;
 pub mod settings;
 pub mod skins;
 pub mod sysinfo;
 pub mod tasks;
+pub mod terracotta;
+pub mod typednbt;
 pub mod versions;
+pub mod vl;
 pub mod vlcli;
+pub mod voxlink;
 pub mod windowctl;
+pub mod world_map;
 pub mod worlds;
 
 use base64::Engine;
 use gate::BootGate;
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
-
 
 /// 当前线程正在处理的 IPC 通道(ipc_invoke 入口写入),OOM 探针用它归因
 thread_local! {
@@ -224,6 +230,13 @@ impl AppState {
     }
 }
 
+/// 移动端 JNI 入口：Android 上 wry 经由该宏生成的符号拉起应用（桌面端走 main.rs）
+#[cfg(mobile)]
+#[tauri::mobile_entry_point]
+fn mobile_main() {
+    run()
+}
+
 pub fn run() {
     // panic = abort：panic 消息只写 stderr，双击启动时无人看见。
     // 把 panic 信息落盘 user_data/logs/panic.log，崩溃后能直接定位。
@@ -239,22 +252,25 @@ pub fn run() {
                 .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
                 .unwrap_or_default()
         );
-        let _ = std::fs::write(
-            crate::settings::user_data_dir_panic_log(),
-            &msg,
-        );
+        let _ = std::fs::write(crate::settings::user_data_dir_panic_log(), &msg);
         eprintln!("{}", msg);
     }));
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::new())
-        .invoke_handler(tauri::generate_handler![ipc::ipc_invoke, ipc::ipc_send])
+        .invoke_handler(tauri::generate_handler![
+            ipc::ipc_invoke,
+            ipc::ipc_send,
+            ipc::app_platform
+        ])
         .register_uri_scheme_protocol("kamucl-asset", assetproto::handle)
         .setup(|app| {
             // PCL 式目录：exe 旁 .minecraft\versions 与 WUHUICL\，并把旧 %APPDATA% 数据一次性搬来
             crate::settings::ensure_exe_side_dirs(app.handle());
             crate::vlcli::session::bind(app.handle());
+            // VoxLink CLI 后台静默更新循环（检查/下载/空闲替换全在后台，见 vlcli/asset.rs）
+            crate::vlcli::asset::start_background(app.handle().clone());
             // 社区整合包下载完成后的安装走 modpacks.rs（对应原版动态 import installModpack）
             crate::community::set_modpack_install_hook(std::sync::Arc::new(
                 crate::modpacks::install_modpack_job,
@@ -263,7 +279,10 @@ pub fn run() {
             crate::mods::set_migration_install_hook(std::sync::Arc::new(
                 crate::installer::migration_install_hook,
             ));
+            #[cfg(desktop)]
             crate::setup_windows(app.handle())?;
+            #[cfg(mobile)]
+            crate::setup_windows_mobile(app.handle())?;
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -296,10 +315,10 @@ pub fn run() {
 
 /// 创建主窗口（隐藏，等渲染层就绪）与全屏闪屏（点击穿透）。
 /// 对应原版 startupSplash.ts createElectronStartupSplash + index.ts createWindow。
+/// 多窗口 + 全屏点击穿透是桌面端专属；移动端见 setup_windows_mobile。
+#[cfg(desktop)]
 fn setup_windows(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::webview::PageLoadEvent;
-    use tauri::utils::config::WindowEffectsConfig;
-    use tauri::window::Effect;
 
     // 对应原版 createWindow：新窗口一律清空编辑器/桌宠的确认态
     windowctl::reset_palette_state();
@@ -307,26 +326,37 @@ fn setup_windows(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error
 
     let main_handle = app.clone();
     let main_opener = app.clone();
-    let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+    let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("WUHUICL 启动器")
         .inner_size(1360.0, 860.0)
         .min_inner_size(960.0, 620.0)
         .center()
-        .decorations(false)
         .resizable(true)
         .visible(false)
         // 对应原版 windowAppearance.ts：Windows 上窗口本身不能 transparent（layered window 会绕过
         // DWM 的 Acrylic 合成），透明只交给 WebContents 的 backgroundColor alpha。
         .transparent(false)
-        .background_color(tauri::window::Color(0, 0, 0, 0))
-        .effects(WindowEffectsConfig {
-            effects: vec![Effect::Acrylic],
-            state: None,
-            radius: None,
-            color: None,
-            interactive: false,
-        })
-        // 应用而非浏览器：拦掉 WebView2 自带的刷新/打印/缩放/查看源码/右键菜单。
+        .background_color(tauri::window::Color(0, 0, 0, 0));
+    // macOS 用原生装饰（红绿灯按钮，前端已预留间距）；Windows/Linux 自绘标题栏。
+    // title_bar_style(Overlay)：标题栏透明、内容延伸到标题栏下方，红绿灯浮在自绘顶栏上。
+    // 只用 decorations(true) 会额外叠一条系统标题栏 → 双标题栏。
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .decorations(true)
+        .title_bar_style(tauri::TitleBarStyle::Overlay);
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.decorations(false);
+    // Acrylic 窗口效果依赖 DWM 合成，仅 Windows；macOS/Linux 的毛玻璃后续按平台补
+    #[cfg(windows)]
+    let builder = builder.effects(tauri::utils::config::WindowEffectsConfig {
+        effects: vec![tauri::window::Effect::Acrylic],
+        state: None,
+        radius: None,
+        color: None,
+        interactive: false,
+    });
+    let main = builder
+        // 应用而非浏览器：拦掉 WebView 自带的刷新/打印/缩放/查看源码/右键菜单。
         // 页面脚本运行前注入，所以这些按键在任何视图里都不会漏出去。
         .initialization_script(DESKTOP_APP_GUARDS)
         .on_page_load(move |_window, event| {
@@ -344,6 +374,9 @@ fn setup_windows(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error
         .build()?;
     // 对应原版 index.ts:126 applyNativeAppearance(win, getSettings())
     windowctl::apply_native_appearance(&main, &settings::get(app));
+    // 捕获 WebView2 控制器：最小化自整理（TrySuspend）用
+    #[cfg(windows)]
+    windowctl::capture_main_controller(&main);
     main.hide()?;
 
     // 闪屏：全屏、点击穿透、置顶、无任务栏
@@ -386,7 +419,9 @@ fn setup_windows(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error
         .initialization_script(splash_face_script.as_str())
         .build()?;
     splash.set_ignore_cursor_events(true)?;
-    let auto_fit = crate::settings::get(app)["uiWindowAutoFit"].as_bool().unwrap_or(false);
+    let auto_fit = crate::settings::get(app)["uiWindowAutoFit"]
+        .as_bool()
+        .unwrap_or(false);
     windowctl::configure_auto_fit(app, auto_fit);
     gate::arm_watchdog(app);
 
@@ -395,28 +430,51 @@ fn setup_windows(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error
     std::thread::spawn(move || {
         let app = timer_app;
         loop {
-        std::thread::sleep(std::time::Duration::from_millis(32));
-        let Some(splash) = app.get_webview_window("splash") else {
-            break;
-        };
-        if !splash.is_visible().unwrap_or(false) {
-            continue;
-        }
-        if let Some(p) = sysinfo::cursor_pos() {
-            // GetCursorPos 与 outer_position 都是物理像素，渲染层要的是 DIP（对应原版 screen.*）
-            let scale = splash.scale_factor().unwrap_or(1.0);
-            let origin = splash.outer_position().map(|o| (o.x, o.y)).unwrap_or((0, 0));
-            let _ = splash.emit_to(
-                "splash",
-                "boot:pointer",
-                serde_json::json!({
-                    "x": (p.0 - origin.0) as f64 / scale,
-                    "y": (p.1 - origin.1) as f64 / scale,
-                }),
-            );
+            std::thread::sleep(std::time::Duration::from_millis(32));
+            let Some(splash) = app.get_webview_window("splash") else {
+                break;
+            };
+            if !splash.is_visible().unwrap_or(false) {
+                continue;
+            }
+            if let Some(p) = sysinfo::cursor_pos() {
+                // GetCursorPos 与 outer_position 都是物理像素，渲染层要的是 DIP（对应原版 screen.*）
+                let scale = splash.scale_factor().unwrap_or(1.0);
+                let origin = splash
+                    .outer_position()
+                    .map(|o| (o.x, o.y))
+                    .unwrap_or((0, 0));
+                let _ = splash.emit_to(
+                    "splash",
+                    "boot:pointer",
+                    serde_json::json!({
+                        "x": (p.0 - origin.0) as f64 / scale,
+                        "y": (p.1 - origin.1) as f64 / scale,
+                    }),
+                );
             }
         }
     });
 
+    Ok(())
+}
+
+/// 移动端（Android）窗口入口：单窗口、系统装饰，无闪屏/指针跟随/窗口特效。
+/// 多数桌面功能（启动游戏、Java 管理、自更新）在移动端由通道层返回不支持。
+#[cfg(mobile)]
+fn setup_windows_mobile(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+    let main_handle = app.clone();
+    let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .title("WUHUICL")
+        .initialization_script(DESKTOP_APP_GUARDS)
+        .on_page_load(move |_window, event| {
+            if matches!(event.event(), tauri::webview::PageLoadEvent::Finished) {
+                gate::set_painted(&main_handle);
+            }
+        })
+        .build()?;
+    let _ = main.show();
+    gate::arm_watchdog(app);
     Ok(())
 }

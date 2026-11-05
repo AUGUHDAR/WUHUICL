@@ -176,6 +176,7 @@ pub fn arm_watchdog(app: &AppHandle) {
 pub fn splash_ready(app: &AppHandle) {
     if let Some(splash) = app.get_webview_window("splash") {
         let _ = splash.show();
+        #[cfg(desktop)]
         let _ = splash.set_always_on_top(true);
         publish(app);
     }

@@ -32,6 +32,8 @@ import type { InstalledVersion, ServerEntry, ServerPingResult } from '@shared/ty
 const servers = ref<ServerEntry[]>([]);
 const targets = ref<InstalledVersion[]>([]);
 const pings = reactive<Record<string, ServerPingResult | 'loading'>>({});
+/** 服务器真实头像缓存（按规范化地址；离线后保留最后一次成功的图标） */
+const serverIcons = reactive<Record<string, string>>({});
 const loading = ref(true);
 const refreshing = ref(false),
     launchBusy = ref(false),
@@ -121,6 +123,7 @@ async function pingOne(s: ServerEntry) {
     pings[s.id] = 'loading';
     try {
         const result = await pingServer(s.address);
+        if (result.favicon) serverIcons[s.normalizedAddress || s.address] = result.favicon;
         if (
             pingEpoch.get(s.id) === epoch &&
             servers.value.some((item) => item.id === s.id && item.address === s.address)
@@ -465,7 +468,7 @@ watch(servers, (list) => {
 });
 /** 当前实例变化后重新同步该实例的 servers.dat 并刷新列表 */
 watch(
-    () => [store.resourceVersionId, currentInstanceFolder.value] as const,
+    () => [store.resourceVersionId, selectedInstance.value?.folder] as const,
     () => {
         if (!loading.value) void load();
     }
@@ -623,6 +626,7 @@ async function copyAddress(s: ServerEntry) {
                     :key="s.id"
                     :server="s"
                     :ping="pingOf(s)"
+                    :icon="serverIcons[s.normalizedAddress || s.address] || ''"
                     :pending="pings[s.id] === 'loading'"
                     :active="activeServer?.id === s.id"
                     :select-mode="selectMode"
@@ -642,6 +646,7 @@ async function copyAddress(s: ServerEntry) {
                 v-if="activeServer"
                 :server="activeServer"
                 :ping="pingOf(activeServer)"
+                :icon="serverIcons[activeServer.normalizedAddress || activeServer.address] || ''"
                 :pending="pings[activeServer.id] === 'loading'"
                 :busy="
                     launchBusy ||

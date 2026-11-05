@@ -1952,7 +1952,7 @@ mod tests {
             reply_count: js_num(2.0),
             last_time_ms: js_num(1_700_000_900_000.0),
             secret: "enc:AAA".to_string(),
-            server: "https://p2p.wuhui.icu".to_string(),
+            server: "https://p2p.voxdev.top".to_string(),
         }
     }
 
@@ -2048,7 +2048,7 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&stored("t-1")).unwrap(),
-            r#"{"id":"t-1","timeMs":1700000000000,"deleted":false,"hasUnread":true,"replyCount":2,"lastTimeMs":1700000900000,"secret":"enc:AAA","server":"https://p2p.wuhui.icu"}"#
+            r#"{"id":"t-1","timeMs":1700000000000,"deleted":false,"hasUnread":true,"replyCount":2,"lastTimeMs":1700000900000,"secret":"enc:AAA","server":"https://p2p.voxdev.top"}"#
         );
     }
 
@@ -2696,30 +2696,30 @@ mod tests {
 
     #[test]
     fn ticket_url_matches_urlsearchparams_encoding() {
-        let url = service(temp_path("url"), "https://p2p.wuhui.icu")
+        let url = service(temp_path("url"), "https://p2p.voxdev.top")
             .ticket_url(
                 "/ticket/detail",
                 &[("id", "abc-1_2"), ("secret", "enc:Ab+c/d==*~%.")],
             )
             .unwrap();
-        assert_eq!(url, "https://p2p.wuhui.icu/?route=%2Fticket%2Fdetail&id=abc-1_2&secret=enc%3AAb%2Bc%2Fd%3D%3D*%7E%25.");
+        assert_eq!(url, "https://p2p.voxdev.top/?route=%2Fticket%2Fdetail&id=abc-1_2&secret=enc%3AAb%2Bc%2Fd%3D%3D*%7E%25.");
         assert_eq!(
-            service(temp_path("url"), "https://p2p.wuhui.icu")
+            service(temp_path("url"), "https://p2p.voxdev.top")
                 .ticket_url("/ticket/poll", &[])
                 .unwrap(),
-            "https://p2p.wuhui.icu/?route=%2Fticket%2Fpoll"
+            "https://p2p.voxdev.top/?route=%2Fticket%2Fpoll"
         );
-        let kept = service(temp_path("url"), "https://p2p.wuhui.icu/?lang=fr&route=old")
+        let kept = service(temp_path("url"), "https://p2p.voxdev.top/?lang=fr&route=old")
             .ticket_url("/ticket/poll", &[])
             .unwrap();
         assert_eq!(
             kept,
-            "https://p2p.wuhui.icu/?lang=fr&route=%2Fticket%2Fpoll"
+            "https://p2p.voxdev.top/?lang=fr&route=%2Fticket%2Fpoll"
         );
         for base in [
-            "ftp://p2p.wuhui.icu",
+            "ftp://p2p.voxdev.top",
             "https://",
-            "//p2p.wuhui.icu",
+            "//p2p.voxdev.top",
             "not a url",
         ] {
             let error = service(temp_path("url"), base)

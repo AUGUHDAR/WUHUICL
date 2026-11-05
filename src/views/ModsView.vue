@@ -11,6 +11,7 @@ const icon =
         rel="mods"
         open-label="打开模组文件夹"
         empty-text="暂无模组，将 .jar 文件放入 mods 文件夹"
+        subtitle="管理所选实例的模组文件；行内开关启用/禁用，更多操作见「更多」菜单。"
         :icon="icon"
     />
 </template>

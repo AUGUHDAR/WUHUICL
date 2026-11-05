@@ -3,7 +3,6 @@
 //! 备份/克隆/恢复为文件级复制实现（zip 压缩备份 + manifest；restore 按 manifest 回放）。
 
 use crate::nbt;
-use base64::Engine;
 use serde_json::{json, Value};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -13,7 +12,9 @@ fn validate_instance_name(name: &str) -> Result<(), String> {
         || name.len() > 80
         || name == "."
         || name == ".."
-        || name.chars().any(|c| "\\/:*?\"<>|".contains(c) || (c as u32) < 0x20)
+        || name
+            .chars()
+            .any(|c| "\\/:*?\"<>|".contains(c) || (c as u32) < 0x20)
     {
         return Err("实例名称无效".into());
     }
@@ -21,7 +22,10 @@ fn validate_instance_name(name: &str) -> Result<(), String> {
 }
 
 /// centerTarget：登记校验 + 版本 json + 目录状态（隔离/共享）
-pub(crate) fn center_target(app: &tauri::AppHandle, target: &Value) -> Result<(PathBuf, PathBuf, Value, bool), String> {
+pub(crate) fn center_target(
+    app: &tauri::AppHandle,
+    target: &Value,
+) -> Result<(PathBuf, PathBuf, Value, bool), String> {
     let id = target["id"].as_str().unwrap_or("");
     validate_instance_name(id)?;
     let folder = target["folder"].as_str().unwrap_or("");
@@ -34,7 +38,9 @@ pub(crate) fn center_target(app: &tauri::AppHandle, target: &Value) -> Result<(P
         return Err("游戏文件夹尚未登记".into());
     }
     let base = PathBuf::from(folder);
-    let json = crate::installer::read_version_json_from(&base.join("versions").join(id).join(format!("{id}.json")))?;
+    let json = crate::installer::read_version_json_from(
+        &base.join("versions").join(id).join(format!("{id}.json")),
+    )?;
     let isolated = json["isolated"] == true
         || json["_gameDir"] == true
         || base.join("versions").join(id).join("saves").exists();
@@ -69,7 +75,9 @@ fn assert_instance_idle(app: &tauri::AppHandle, dir: &Path) -> Result<(), String
             continue;
         };
         let folder = v["folder"].as_str().unwrap_or("").to_string();
-        let Ok(json) = crate::installer::read_version_json(app, &folder, vid) else { continue };
+        let Ok(json) = crate::installer::read_version_json(app, &folder, vid) else {
+            continue;
+        };
         let isolated = json["isolated"] == true || json["_gameDir"] == true;
         let d = if isolated {
             PathBuf::from(&folder).join("versions").join(vid)
@@ -88,17 +96,36 @@ pub fn overview(app: &tauri::AppHandle, target: &Value) -> Result<Value, String>
     let (base, dir, json, isolated) = center_target(app, target)?;
     let id = target["id"].as_str().unwrap_or("");
     let mc_version = json["inheritsFrom"].as_str().unwrap_or(id).to_string();
-    let loader = ["forge", "fabric", "quilt", "neoforge"].iter().find(|l| {
-        id.to_lowercase().contains(*l) || json["libraries"].as_array().map(|libs| libs.iter().any(|lib| lib["name"].as_str().unwrap_or("").to_lowercase().contains(*l))).unwrap_or(false)
-    }).map(|l| l.to_string());
+    let loader = ["forge", "fabric", "quilt", "neoforge"]
+        .iter()
+        .find(|l| {
+            id.to_lowercase().contains(*l)
+                || json["libraries"]
+                    .as_array()
+                    .map(|libs| {
+                        libs.iter().any(|lib| {
+                            lib["name"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_lowercase()
+                                .contains(*l)
+                        })
+                    })
+                    .unwrap_or(false)
+        })
+        .map(|l| l.to_string());
     let running = assert_instance_idle(app, &dir).is_err();
     let mut roots = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
             let lower = name.to_lowercase();
-            if name.starts_with(".wuhuicl-") || name.starts_with(".kamucl-") || name.ends_with(".exe") || name.ends_with(".dll")
-                || name == format!("{id}.json") || name == format!("{id}.jar")
+            if name.starts_with(".wuhuicl-")
+                || name.starts_with(".kamucl-")
+                || name.ends_with(".exe")
+                || name.ends_with(".dll")
+                || name == format!("{id}.json")
+                || name == format!("{id}.jar")
             {
                 continue;
             }
@@ -109,30 +136,51 @@ pub fn overview(app: &tauri::AppHandle, target: &Value) -> Result<Value, String>
     Ok(json!({
         "target": target, "directory": dir.to_string_lossy(), "shared": !isolated,
         "name": id, "mcVersion": mc_version, "loader": loader,
+        "note": json.get("note").and_then(|v| v.as_str()).unwrap_or(""),
         "running": running, "roots": roots
     }))
 }
 
-fn small_image(path: &Path) -> Option<String> {
-    // 截图/图标原图可达数十 MB；24 张 base64 直传会把 IPC 响应顶到 2-4GB（实测 OOM 崩溃源）。
-    // 统一解码 → 等比缩到宽 320 → 重编码 PNG，单张输出通常 <200KB。
-    let bytes = std::fs::read(path).ok()?;
-    if bytes.len() > 64 * 1024 * 1024 || bytes.len() < 8 || bytes[0..4] != [0x89, 0x50, 0x4e, 0x47] {
-        return None;
+/// center:setNote → 实例备注写入 version json 的 note 字段（≤500 字；运行中禁止写）
+fn set_note(app: &tauri::AppHandle, target: &Value, note: &str) -> Result<(), String> {
+    let (base, _, json, isolated) = center_target(app, target)?;
+    let id = json["id"].as_str().unwrap_or("").to_string();
+    crate::mods::assert_instance_idle(app, &base)?;
+    let note = note.trim();
+    if note.chars().count() > 500 {
+        return Err("备注最长 500 字".into());
     }
-    let decoded = image::load_from_memory(&bytes).ok()?;
-    let thumb = decoded.thumbnail(320, 320);
-    let mut out = std::io::Cursor::new(Vec::new());
-    thumb.write_to(&mut out, image::ImageFormat::Png).ok()?;
-    Some(format!(
-        "data:image/png;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(out.into_inner())
-    ))
+    // 隔离实例的 version json 在 versions/<id>/ 内，共享实例在游戏文件夹根
+    let folder_str = if isolated {
+        base.join("versions")
+            .join(&id)
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        base.to_string_lossy().into_owned()
+    };
+    let path = crate::installer::version_json_path_in(&folder_str, &id);
+    let mut updated = json;
+    if note.is_empty() {
+        if let Some(obj) = updated.as_object_mut() {
+            obj.remove("note");
+        }
+    } else {
+        updated["note"] = json!(note);
+    }
+    crate::installer::write_version_json(&path, &updated)
+}
+
+/// 世界图标/截图缩略图：落盘到 launcher-managed/screenshot-cache（与截图页同池），
+/// 返回缓存路径由渲染层经 managedImageUrl 走 kamucl-asset 协议读取。
+/// 不再 base64 直传（24 张/页的 IPC 响应曾是 OOM 崩溃源）。
+fn thumb_path(app: &tauri::AppHandle, path: &Path, width: u32) -> Option<String> {
+    crate::screenshots::thumb_of(app, path, width).ok().map(|p| p.to_string_lossy().into_owned())
 }
 
 /// center:worlds → InstanceWorld[]（level.dat 元数据 + 最近游玩排序）
-pub fn worlds(_app: &tauri::AppHandle, target: &Value) -> Result<Value, String> {
-    let (_, dir, _, _) = center_target(_app, target)?;
+pub fn worlds(app: &tauri::AppHandle, target: &Value) -> Result<Value, String> {
+    let (_, dir, _, _) = center_target(app, target)?;
     let saves = dir.join("saves");
     let mut rows = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&saves) {
@@ -146,18 +194,32 @@ pub fn worlds(_app: &tauri::AppHandle, target: &Value) -> Result<Value, String> 
             match std::fs::read(&level) {
                 Ok(buf) if buf.len() <= 32 * 1024 * 1024 => match nbt::parse_nbt(&buf) {
                     Ok(root) => {
-                        let data = nbt::get(&root, "Data").and_then(nbt::as_compound).map(|c| c.clone()).unwrap_or(root.clone());
+                        let data = nbt::get(&root, "Data")
+                            .and_then(nbt::as_compound)
+                            .map(|c| c.clone())
+                            .unwrap_or(root.clone());
                         if let Some(name) = nbt::get(&data, "LevelName").and_then(nbt::as_str) {
                             row["name"] = json!(name);
                         }
-                        if let Some(v) = nbt::get(&data, "Version").and_then(nbt::as_compound).and_then(|v| nbt::get(v, "Name")).and_then(nbt::as_str) {
+                        if let Some(v) = nbt::get(&data, "Version")
+                            .and_then(nbt::as_compound)
+                            .and_then(|v| nbt::get(v, "Name"))
+                            .and_then(nbt::as_str)
+                        {
                             row["version"] = json!(v);
                         }
-                        let game_type = nbt::get(&data, "GameType").and_then(nbt::as_int).unwrap_or(0);
-                        row["mode"] = json!(["生存", "创造", "冒险", "旁观"].get(game_type as usize).copied().unwrap_or("生存"));
-                        let last_played = nbt::get(&data, "LastPlayed").and_then(nbt::as_int).unwrap_or(0);
+                        let game_type = nbt::get(&data, "GameType")
+                            .and_then(nbt::as_int)
+                            .unwrap_or(0);
+                        row["mode"] = json!(["生存", "创造", "冒险", "旁观"]
+                            .get(game_type as usize)
+                            .copied()
+                            .unwrap_or("生存"));
+                        let last_played = nbt::get(&data, "LastPlayed")
+                            .and_then(nbt::as_int)
+                            .unwrap_or(0);
                         row["lastPlayed"] = json!(last_played);
-                        if let Some(icon) = small_image(&e.path().join("icon.png")) {
+                        if let Some(icon) = thumb_path(app, &e.path().join("icon.png"), 320) {
                             row["icon"] = json!(icon);
                         }
                     }
@@ -173,14 +235,19 @@ pub fn worlds(_app: &tauri::AppHandle, target: &Value) -> Result<Value, String> 
     Ok(Value::Array(rows))
 }
 
-/// center:screenshots → {total, items[24]}（缩略图 dataURL）
-pub fn screenshots(_app: &tauri::AppHandle, target: &Value, page: i64) -> Result<Value, String> {
-    let (_, dir, _, _) = center_target(_app, target)?;
+/// center:screenshots → {total, items[24]}（缩略图为缓存路径，渲染层走 asset 协议）
+pub fn screenshots(app: &tauri::AppHandle, target: &Value, page: i64) -> Result<Value, String> {
+    let (_, dir, _, _) = center_target(app, target)?;
     let shot_dir = dir.join("screenshots");
     let mut names: Vec<String> = std::fs::read_dir(&shot_dir)
         .map(|rd| {
             rd.flatten()
-                .filter(|e| e.file_name().to_string_lossy().to_lowercase().ends_with(".png"))
+                .filter(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .to_lowercase()
+                        .ends_with(".png")
+                })
                 .map(|e| e.file_name().to_string_lossy().to_string())
                 .collect()
         })
@@ -191,7 +258,7 @@ pub fn screenshots(_app: &tauri::AppHandle, target: &Value, page: i64) -> Result
     let mut items = Vec::new();
     for id in names.iter().skip((page * 24) as usize).take(24) {
         let path = shot_dir.join(id);
-        if let Some(image) = small_image(&path) {
+        if let Some(image) = thumb_path(app, &path, 480) {
             let date = std::fs::metadata(&path)
                 .and_then(|m| m.modified())
                 .ok()
@@ -242,7 +309,11 @@ fn backup_instance(app: &tauri::AppHandle, target: &Value, op: &Value) -> Result
     let title = op["name"].as_str().unwrap_or("实例手动备份");
     let store = backups_dir(&dir);
     std::fs::create_dir_all(&store).map_err(|e| e.to_string())?;
-    let backup_id = format!("{}-{}", chrono::Local::now().format("%Y%m%d-%H%M%S"), &crate::accounts::uuid_v4()[..8]);
+    let backup_id = format!(
+        "{}-{}",
+        chrono::Local::now().format("%Y%m%d-%H%M%S"),
+        &crate::accounts::uuid_v4()[..8]
+    );
     let zip_path = store.join(format!("{backup_id}.zip"));
     let file = std::fs::File::create(&zip_path).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
@@ -255,7 +326,8 @@ fn backup_instance(app: &tauri::AppHandle, target: &Value, op: &Value) -> Result
         if src.is_dir() {
             continue;
         }
-        zip.start_file(rel_s.clone(), options).map_err(|e| e.to_string())?;
+        zip.start_file(rel_s.clone(), options)
+            .map_err(|e| e.to_string())?;
         let bytes = std::fs::read(&src).map_err(|e| e.to_string())?;
         std::io::Write::write_all(&mut zip, &bytes).map_err(|e| e.to_string())?;
         count += 1;
@@ -266,8 +338,15 @@ fn backup_instance(app: &tauri::AppHandle, target: &Value, op: &Value) -> Result
         "title": title, "automatic": false, "source": id,
         "files": manifest_entries, "metadata": { "type": "instance", "target": target }
     });
-    zip.start_file(".wuhuicl-backup-manifest.json", options).map_err(|e| e.to_string())?;
-    std::io::Write::write_all(&mut zip, serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?.as_slice()).map_err(|e| e.to_string())?;
+    zip.start_file(".wuhuicl-backup-manifest.json", options)
+        .map_err(|e| e.to_string())?;
+    std::io::Write::write_all(
+        &mut zip,
+        serde_json::to_vec_pretty(&manifest)
+            .map_err(|e| e.to_string())?
+            .as_slice(),
+    )
+    .map_err(|e| e.to_string())?;
     zip.finish().map_err(|e| e.to_string())?;
     Ok(json!({ "kind": "backup", "id": backup_id, "files": count }))
 }
@@ -279,7 +358,12 @@ fn walk_collect(root: &Path, dir: &Path) -> Result<Vec<Value>, String> {
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().to_string();
         let lower = name.to_lowercase();
-        if name.starts_with(".wuhuicl-") || name.starts_with(".kamucl-") || lower.ends_with(".exe") || lower.ends_with(".dll") || lower.ends_with(".log") {
+        if name.starts_with(".wuhuicl-")
+            || name.starts_with(".kamucl-")
+            || lower.ends_with(".exe")
+            || lower.ends_with(".dll")
+            || lower.ends_with(".log")
+        {
             continue;
         }
         let rel = e
@@ -304,7 +388,9 @@ fn clone_instance(app: &tauri::AppHandle, target: &Value, op: &Value) -> Result<
     assert_instance_idle(app, &dir)?;
     let name = op["name"].as_str().unwrap_or("");
     validate_instance_name(name)?;
-    let destination = op["destinationFolder"].as_str().unwrap_or(base.to_str().unwrap_or(""));
+    let destination = op["destinationFolder"]
+        .as_str()
+        .unwrap_or(base.to_str().unwrap_or(""));
     let dest = PathBuf::from(destination).join("versions").join(name);
     if dest.exists() {
         return Err("目标实例已存在，请更换名称".into());
@@ -332,8 +418,11 @@ fn clone_instance(app: &tauri::AppHandle, target: &Value, op: &Value) -> Result<
         obj.remove("inheritsFrom");
         obj.remove("gameDirectory");
     }
-    std::fs::write(dest.join(format!("{name}.json")), serde_json::to_string_pretty(&new_json).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    std::fs::write(
+        dest.join(format!("{name}.json")),
+        serde_json::to_string_pretty(&new_json).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     // jar
     let id = target["id"].as_str().unwrap_or("");
     let jar = dir.join(format!("{id}.jar"));
@@ -390,6 +479,7 @@ fn operation(app: &tauri::AppHandle, op: &Value) -> Result<Value, String> {
         "restore" => restore_instance(app, &target, op),
         "repair" => repair_instance(app, &target, op),
         "worldExport" => world_export(app, &target, op),
+        "setNote" => set_note(app, &target, op["note"].as_str().unwrap_or("")).map(|_| Value::Null),
         other => Err(format!("未知操作：{other}")),
     }
 }
@@ -435,7 +525,10 @@ fn world_export(app: &tauri::AppHandle, target: &Value, op: &Value) -> Result<Va
         while let Some(d) = stack.pop() {
             for e in std::fs::read_dir(&d).map_err(|e| e.to_string())?.flatten() {
                 let path = e.path();
-                let rel = path.strip_prefix(&source).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+                let rel = path
+                    .strip_prefix(&source)
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
                 if rel.is_empty() {
                     continue;
                 }
@@ -455,7 +548,14 @@ fn world_export(app: &tauri::AppHandle, target: &Value, op: &Value) -> Result<Va
         Ok(json!(dest.to_string_lossy().to_string()))
     })();
     let ok = result.is_ok();
-    crate::tasks::task_done(app, &rec.id, ok, result.as_ref().err().cloned(), false, None);
+    crate::tasks::task_done(
+        app,
+        &rec.id,
+        ok,
+        result.as_ref().err().cloned(),
+        false,
+        None,
+    );
     crate::tasks::finish_task(&rec.id);
     result
 }
@@ -473,27 +573,111 @@ struct DiagRule {
 }
 
 const DIAG_RULES: &[DiagRule] = &[
-    DiagRule { rule: "java-version", title: "Java 版本不兼容", pattern: r"(?i)UnsupportedClassVersionError|class file version .*only recognizes|requires Java (?:version )?\d+", advice: "选择该实例要求的 Java 版本后重新启动。", action: Some("java"), confidence: "certain" },
-    DiagRule { rule: "java-argument", title: "Java 启动参数无效", pattern: r"(?i)Unrecognized VM option|Unrecognized option:|Invalid maximum heap size|Improperly specified VM option", advice: "检查版本设置中的 JVM 参数，只修改报错指出的参数。", action: Some("java"), confidence: "certain" },
-    DiagRule { rule: "memory", title: "内存分配或使用失败", pattern: r"(?i)OutOfMemoryError|Could not reserve enough space|Native memory allocation .*failed|There is insufficient memory", advice: "检查可用内存与实例分配；无法预留时适当降低分配，堆内存耗尽时结合系统余量调整。", action: None, confidence: "certain" },
-    DiagRule { rule: "dependency", title: "加载器报告模组依赖不满足", pattern: r"(?i)requires .*which is missing|requires .*which is not installed|Missing mandatory dependencies|ModResolutionException|Incompatible mod set", advice: "打开模组管理核对加载器指出的前置与版本范围，再从社区安装适配版本。", action: Some("mods"), confidence: "certain" },
-    DiagRule { rule: "duplicate", title: "加载器报告重复模组", pattern: r"(?i)DuplicateModsFoundException|Duplicate mod(?:s| ID)?(?: found|:)|Found duplicate mods", advice: "打开模组管理中的清理重复，核对文件后确认处理。", action: Some("mods"), confidence: "certain" },
-    DiagRule { rule: "mod-version", title: "加载器报告模组版本不兼容", pattern: r"(?i)requires.*minecraft.*but|requires.*version.*but only|incompatible with.*version", advice: "按日志给出的游戏版本与加载器要求切换模组版本。", action: Some("mods"), confidence: "certain" },
-    DiagRule { rule: "archive", title: "运行文件可能损坏", pattern: r"(?i)ZipException:.*(?:zip END header|error in opening zip|invalid)|Invalid or corrupt jarfile", advice: "检查游戏本体和运行库；模组文件请通过模组管理重新下载。", action: Some("files"), confidence: "possible" },
-    DiagRule { rule: "permission", title: "文件无法访问或被占用", pattern: r"(?i)AccessDeniedException|Permission denied|used by another process|being used by another process", advice: "关闭占用该文件的程序并检查目录权限，再重试；不要删除存档锁文件。", action: None, confidence: "certain" },
-    DiagRule { rule: "disk", title: "磁盘空间不足", pattern: r"(?i)No space left on device|There is not enough space on the disk|ENOSPC", advice: "释放游戏目录和临时目录所在磁盘空间，再重新执行。", action: None, confidence: "certain" },
-    DiagRule { rule: "graphics", title: "图形环境初始化失败", pattern: r"(?i)GLFW error \d+|Failed to create OpenGL context|Pixel format not accelerated|does not support OpenGL", advice: "检查显卡驱动及游戏版本要求，使用显卡厂商官方驱动下载入口。", action: None, confidence: "certain" },
-    DiagRule { rule: "native-arch", title: "本地库或 Java 架构可能不匹配", pattern: r"(?i)wrong architecture|incompatible architecture|Can't load AMD 64-bit|mach-o.*(?:arm64|x86_64)|Bad CPU type in executable", advice: "确认 Java 与当前系统架构匹配，并重新校验运行库。", action: Some("java"), confidence: "possible" },
+    DiagRule {
+        rule: "java-version",
+        title: "Java 版本不兼容",
+        pattern: r"(?i)UnsupportedClassVersionError|class file version .*only recognizes|requires Java (?:version )?\d+",
+        advice: "选择该实例要求的 Java 版本后重新启动。",
+        action: Some("java"),
+        confidence: "certain",
+    },
+    DiagRule {
+        rule: "java-argument",
+        title: "Java 启动参数无效",
+        pattern: r"(?i)Unrecognized VM option|Unrecognized option:|Invalid maximum heap size|Improperly specified VM option",
+        advice: "检查版本设置中的 JVM 参数，只修改报错指出的参数。",
+        action: Some("java"),
+        confidence: "certain",
+    },
+    DiagRule {
+        rule: "memory",
+        title: "内存分配或使用失败",
+        pattern: r"(?i)OutOfMemoryError|Could not reserve enough space|Native memory allocation .*failed|There is insufficient memory",
+        advice: "检查可用内存与实例分配；无法预留时适当降低分配，堆内存耗尽时结合系统余量调整。",
+        action: None,
+        confidence: "certain",
+    },
+    DiagRule {
+        rule: "dependency",
+        title: "加载器报告模组依赖不满足",
+        pattern: r"(?i)requires .*which is missing|requires .*which is not installed|Missing mandatory dependencies|ModResolutionException|Incompatible mod set",
+        advice: "打开模组管理核对加载器指出的前置与版本范围，再从社区安装适配版本。",
+        action: Some("mods"),
+        confidence: "certain",
+    },
+    DiagRule {
+        rule: "duplicate",
+        title: "加载器报告重复模组",
+        pattern: r"(?i)DuplicateModsFoundException|Duplicate mod(?:s| ID)?(?: found|:)|Found duplicate mods",
+        advice: "打开模组管理中的清理重复，核对文件后确认处理。",
+        action: Some("mods"),
+        confidence: "certain",
+    },
+    DiagRule {
+        rule: "mod-version",
+        title: "加载器报告模组版本不兼容",
+        pattern: r"(?i)requires.*minecraft.*but|requires.*version.*but only|incompatible with.*version",
+        advice: "按日志给出的游戏版本与加载器要求切换模组版本。",
+        action: Some("mods"),
+        confidence: "certain",
+    },
+    DiagRule {
+        rule: "archive",
+        title: "运行文件可能损坏",
+        pattern: r"(?i)ZipException:.*(?:zip END header|error in opening zip|invalid)|Invalid or corrupt jarfile",
+        advice: "检查游戏本体和运行库；模组文件请通过模组管理重新下载。",
+        action: Some("files"),
+        confidence: "possible",
+    },
+    DiagRule {
+        rule: "permission",
+        title: "文件无法访问或被占用",
+        pattern: r"(?i)AccessDeniedException|Permission denied|used by another process|being used by another process",
+        advice: "关闭占用该文件的程序并检查目录权限，再重试；不要删除存档锁文件。",
+        action: None,
+        confidence: "certain",
+    },
+    DiagRule {
+        rule: "disk",
+        title: "磁盘空间不足",
+        pattern: r"(?i)No space left on device|There is not enough space on the disk|ENOSPC",
+        advice: "释放游戏目录和临时目录所在磁盘空间，再重新执行。",
+        action: None,
+        confidence: "certain",
+    },
+    DiagRule {
+        rule: "graphics",
+        title: "图形环境初始化失败",
+        pattern: r"(?i)GLFW error \d+|Failed to create OpenGL context|Pixel format not accelerated|does not support OpenGL",
+        advice: "检查显卡驱动及游戏版本要求，使用显卡厂商官方驱动下载入口。",
+        action: None,
+        confidence: "certain",
+    },
+    DiagRule {
+        rule: "native-arch",
+        title: "本地库或 Java 架构可能不匹配",
+        pattern: r"(?i)wrong architecture|incompatible architecture|Can't load AMD 64-bit|mach-o.*(?:arm64|x86_64)|Bad CPU type in executable",
+        advice: "确认 Java 与当前系统架构匹配，并重新校验运行库。",
+        action: Some("java"),
+        confidence: "possible",
+    },
 ];
 
 /// analyzeDiagnosticText()：脱敏后逐规则首命中行，evidence 取命中行前 1 行至后 4 行（≤2000 字符）
 fn analyze_diagnostic_text(text: &str) -> Vec<Value> {
     let redacted = crate::exportlogs::redact_text(text, &[]);
-    let lines: Vec<&str> = redacted.split(['\r', '\n']).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = redacted
+        .split(['\r', '\n'])
+        .filter(|l| !l.is_empty())
+        .collect();
     let mut out = Vec::new();
     for rule in DIAG_RULES {
-        let Ok(re) = regex::Regex::new(rule.pattern) else { continue };
-        let Some(index) = lines.iter().position(|l| re.is_match(l)) else { continue };
+        let Ok(re) = regex::Regex::new(rule.pattern) else {
+            continue;
+        };
+        let Some(index) = lines.iter().position(|l| re.is_match(l)) else {
+            continue;
+        };
         let start = index.saturating_sub(1);
         let end = (index + 4).min(lines.len());
         let evidence: String = lines[start..end].join("\n").chars().take(2000).collect();
@@ -520,7 +704,9 @@ struct DiagnosePlan {
 }
 
 fn diagnose_plans() -> &'static std::sync::Mutex<std::collections::HashMap<String, DiagnosePlan>> {
-    static P: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, DiagnosePlan>>> = std::sync::OnceLock::new();
+    static P: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, DiagnosePlan>>,
+    > = std::sync::OnceLock::new();
     P.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
@@ -552,17 +738,32 @@ fn diagnose(app: &tauri::AppHandle, target: &Value) -> Result<Value, String> {
     let rec = crate::tasks::register_task("检查实例运行环境", "world");
     let result = diagnose_inner(app, target, &rec);
     let ok = result.is_ok();
-    crate::tasks::task_done(app, &rec.id, ok, result.as_ref().err().cloned(), false, None);
+    crate::tasks::task_done(
+        app,
+        &rec.id,
+        ok,
+        result.as_ref().err().cloned(),
+        false,
+        None,
+    );
     crate::tasks::finish_task(&rec.id);
     result
 }
 
-fn diagnose_inner(app: &tauri::AppHandle, target: &Value, rec: &std::sync::Arc<crate::tasks::TaskRecord>) -> Result<Value, String> {
+fn diagnose_inner(
+    app: &tauri::AppHandle,
+    target: &Value,
+    rec: &std::sync::Arc<crate::tasks::TaskRecord>,
+) -> Result<Value, String> {
     let (base, dir, instance_json, _) = center_target(app, target)?;
     let id = target["id"].as_str().unwrap_or("");
     let folder = base.to_string_lossy().to_string();
     let merged = crate::installer::read_version_json(app, &folder, id)?;
-    let mc_version = merged.get("id").and_then(|v| v.as_str()).unwrap_or(id).to_string();
+    let mc_version = merged
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(id)
+        .to_string();
     let mut findings: Vec<Value> = Vec::new();
     let emit = |done: usize, total: usize, text: &str| {
         crate::tasks::emit_progress(
@@ -600,13 +801,16 @@ fn diagnose_inner(app: &tauri::AppHandle, target: &Value, rec: &std::sync::Arc<c
     let configured = if instance_json["_javaAuto"] == json!(true) {
         None
     } else {
-        instance_json["_javaPath"].as_str().map(str::to_string).or_else(|| {
-            if s["javaAuto"] == json!(false) {
-                s["javaPath"].as_str().map(str::to_string)
-            } else {
-                None
-            }
-        })
+        instance_json["_javaPath"]
+            .as_str()
+            .map(str::to_string)
+            .or_else(|| {
+                if s["javaAuto"] == json!(false) {
+                    s["javaPath"].as_str().map(str::to_string)
+                } else {
+                    None
+                }
+            })
     };
     match (&configured, need) {
         (Some(path), _) if !Path::new(path).exists() => {
@@ -649,13 +853,23 @@ fn diagnose_inner(app: &tauri::AppHandle, target: &Value, rec: &std::sync::Arc<c
 
     // 2) 运行文件完整性：client jar + libraries + asset index
     let mut files: Vec<(PathBuf, Option<String>, Option<String>, Option<u64>)> = Vec::new(); // dest/url/sha1/size
-    let client = merged.get("downloads").and_then(|d| d.get("client")).cloned().unwrap_or(Value::Null);
+    let client = merged
+        .get("downloads")
+        .and_then(|d| d.get("client"))
+        .cloned()
+        .unwrap_or(Value::Null);
     if !client.is_null() {
         let dest = crate::installer::client_jar_path(app, &folder, id);
         files.push((
             dest,
-            client.get("url").and_then(|v| v.as_str()).map(str::to_string),
-            client.get("sha1").and_then(|v| v.as_str()).map(str::to_string),
+            client
+                .get("url")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            client
+                .get("sha1")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
             client.get("size").and_then(|v| v.as_u64()),
         ));
     }
@@ -677,14 +891,23 @@ fn diagnose_inner(app: &tauri::AppHandle, target: &Value, rec: &std::sync::Arc<c
     {
         files.push((
             assets.join("indexes").join(format!("{index_id}.json")),
-            asset_index.get("url").and_then(|v| v.as_str()).map(str::to_string),
-            asset_index.get("sha1").and_then(|v| v.as_str()).map(str::to_string),
+            asset_index
+                .get("url")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            asset_index
+                .get("sha1")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
             asset_index.get("size").and_then(|v| v.as_u64()),
         ));
     }
     let total = files.len();
     let mut bad: Vec<Value> = Vec::new();
-    let mut files_count = findings.iter().filter(|f| f["rule"] == json!("files")).count();
+    let mut files_count = findings
+        .iter()
+        .filter(|f| f["rule"] == json!("files"))
+        .count();
     for (i, (dest, url, sha1, size)) in files.iter().enumerate() {
         if rec.cancelled.load(std::sync::atomic::Ordering::SeqCst) {
             return Err("已取消".into());
@@ -692,7 +915,10 @@ fn diagnose_inner(app: &tauri::AppHandle, target: &Value, rec: &std::sync::Arc<c
         if let Some(bad_entry) = verify_artifact(dest, url.as_deref(), sha1.as_deref(), *size)? {
             bad.push(bad_entry.clone());
             if files_count < 10 {
-                let name = dest.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+                let name = dest
+                    .file_name()
+                    .map(|n| n.to_string_lossy())
+                    .unwrap_or_default();
                 findings.push(json!({
                     "rule": "files", "title": "运行文件缺失或损坏", "confidence": "certain",
                     "evidence": format!("{}：{}", name, bad_entry["reason"].as_str().unwrap_or("")),
@@ -706,9 +932,12 @@ fn diagnose_inner(app: &tauri::AppHandle, target: &Value, rec: &std::sync::Arc<c
     }
     // asset objects（index 完好才查；每 64 个报一次进度）
     if !index_id.is_empty()
-        && !bad
-            .iter()
-            .any(|b| b["dest"].as_str().map(|d| d.ends_with(&format!("{index_id}.json"))).unwrap_or(false))
+        && !bad.iter().any(|b| {
+            b["dest"]
+                .as_str()
+                .map(|d| d.ends_with(&format!("{index_id}.json")))
+                .unwrap_or(false)
+        })
     {
         let index_path = assets.join("indexes").join(format!("{index_id}.json"));
         if let Ok(raw) = std::fs::read_to_string(&index_path) {
@@ -725,8 +954,17 @@ fn diagnose_inner(app: &tauri::AppHandle, target: &Value, rec: &std::sync::Arc<c
                             continue;
                         }
                         let dest = assets.join("objects").join(&hash[..2]).join(hash);
-                        let url = format!("https://resources.download.minecraft.net/{}/{}", &hash[..2], hash);
-                        if let Some(bad_entry) = verify_artifact(&dest, Some(&url), Some(hash), o.get("size").and_then(|v| v.as_u64()))? {
+                        let url = format!(
+                            "https://resources.download.minecraft.net/{}/{}",
+                            &hash[..2],
+                            hash
+                        );
+                        if let Some(bad_entry) = verify_artifact(
+                            &dest,
+                            Some(&url),
+                            Some(hash),
+                            o.get("size").and_then(|v| v.as_u64()),
+                        )? {
                             bad.push(bad_entry);
                             if files_count < 10 {
                                 findings.push(json!({
@@ -755,22 +993,30 @@ fn diagnose_inner(app: &tauri::AppHandle, target: &Value, rec: &std::sync::Arc<c
         .filter_map(|e| e.get("context"))
         .filter(|c| {
             c.get("versionId").and_then(|v| v.as_str()) == Some(id)
-                && c
-                    .get("effectiveGameDir")
+                && c.get("effectiveGameDir")
                     .and_then(|v| v.as_str())
                     .map(|d| crate::installer::path_identity(d) == dir_identity)
                     .unwrap_or(false)
-                && c
-                    .get("logDir")
+                && c.get("logDir")
                     .and_then(|v| v.as_str())
                     .map(|d| {
-                        let base = Path::new(d).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                        regex::Regex::new(r"^[a-f0-9-]{36}$").unwrap().is_match(&base)
+                        let base = Path::new(d)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        regex::Regex::new(r"^[a-f0-9-]{36}$")
+                            .unwrap()
+                            .is_match(&base)
                     })
                     .unwrap_or(false)
         })
         .cloned()
-        .max_by_key(|c| c.get("startedAt").and_then(|v| v.as_str()).and_then(|s| s.parse::<i64>().ok()).unwrap_or(0));
+        .max_by_key(|c| {
+            c.get("startedAt")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<i64>().ok())
+                .unwrap_or(0)
+        });
     let mut session: Option<String> = None;
     match session_ctx {
         Some(ctx) => {
@@ -793,7 +1039,10 @@ fn diagnose_inner(app: &tauri::AppHandle, target: &Value, rec: &std::sync::Arc<c
                 }
             }
             findings.extend(analyze_diagnostic_text(&text));
-            session = ctx.get("startedAt").and_then(|v| v.as_str()).map(str::to_string);
+            session = ctx
+                .get("startedAt")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
         }
         None => {
             findings.push(json!({
@@ -820,14 +1069,21 @@ fn diagnose_inner(app: &tauri::AppHandle, target: &Value, rec: &std::sync::Arc<c
             target: target.clone(),
             files: bad
                 .into_iter()
-                .filter(|f| f.get("url").and_then(|v| v.as_str()).map(|u| !u.is_empty()).unwrap_or(false))
+                .filter(|f| {
+                    f.get("url")
+                        .and_then(|v| v.as_str())
+                        .map(|u| !u.is_empty())
+                        .unwrap_or(false)
+                })
                 .collect(),
             metadata: serde_json::to_string(&merged).unwrap_or_default(),
             time: now,
         },
     );
     emit(1, 1, "检查完成");
-    Ok(json!({ "id": plan_id, "findings": findings, "java": java, "session": session, "requiredJava": need }))
+    Ok(
+        json!({ "id": plan_id, "findings": findings, "java": java, "session": session, "requiredJava": need }),
+    )
 }
 
 /// center:operation kind=repair：按诊断计划重下并校验坏文件（repairInstanceFiles）。
@@ -892,38 +1148,58 @@ fn repair_instance(app: &tauri::AppHandle, _target: &Value, op: &Value) -> Resul
         }
         Ok(json!(done))
     })();
-    let cancelled = result.as_ref().err().map(|e| e == "已取消").unwrap_or(false);
-    crate::tasks::task_done(app, &rec.id, result.is_ok(), result.as_ref().err().cloned(), cancelled, None);
+    let cancelled = result
+        .as_ref()
+        .err()
+        .map(|e| e == "已取消")
+        .unwrap_or(false);
+    crate::tasks::task_done(
+        app,
+        &rec.id,
+        result.is_ok(),
+        result.as_ref().err().cloned(),
+        cancelled,
+        None,
+    );
     crate::tasks::finish_task(&rec.id);
     result
 }
 
 /// center:file：读取 world/screenshot/preview 文件为 dataURL 或打开目录
-fn center_file(app: &tauri::AppHandle, target: &Value, kind: &str, id: &str) -> Result<Value, String> {
+fn center_file(
+    app: &tauri::AppHandle,
+    target: &Value,
+    kind: &str,
+    id: &str,
+) -> Result<Value, String> {
     let (_, dir, _, _) = center_target(app, target)?;
     let path = match kind {
         "world" => dir.join("saves").join(id),
         "screenshot" => dir.join("screenshots").join(id),
         "preview" => dir.join(id),
         "directory" => {
-            std::process::Command::new("explorer.exe").arg(dir.as_os_str()).spawn().map_err(|e| e.to_string())?;
+            crate::platform::open_path(&dir.to_string_lossy())?;
             return Ok(Value::Null);
         }
         other => return Err(format!("未知文件类型：{other}")),
     };
     if kind == "world" {
         // 存档目录打开
-        std::process::Command::new("explorer.exe").arg(path.as_os_str()).spawn().map_err(|e| e.to_string())?;
+        crate::platform::open_path(&path.to_string_lossy())?;
         return Ok(Value::Null);
     }
-    // screenshot/preview 与列表接口同口径：缩图后再传，原图直传会打爆 IPC 缓冲
-    small_image(&path)
+    // screenshot/preview 与列表接口同口径：落盘缩略图后传路径（1600px 供灯箱），原图直传会打爆 IPC 缓冲
+    thumb_path(app, &path, 1600)
         .map(|data| json!(data))
         .ok_or_else(|| "图片读取或缩放失败".to_string())
 }
 
 /// 统一入口
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     let target = || args.first().cloned().unwrap_or(Value::Null);
     match channel {
         "center:overview" => Some(overview(app, &target())),
@@ -934,7 +1210,10 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             args.get(1).and_then(|v| v.as_i64()).unwrap_or(0),
         )),
         "center:backups" => Some(backups(app, &target())),
-        "center:operation" => Some(operation(app, &args.first().cloned().unwrap_or(Value::Null))),
+        "center:operation" => Some(operation(
+            app,
+            &args.first().cloned().unwrap_or(Value::Null),
+        )),
         "center:file" => Some(center_file(
             app,
             &target(),
@@ -947,10 +1226,19 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             let file_name = args.get(1).and_then(|v| v.as_str()).ok_or("缺少文件名")?;
             let (base, _, _, _) = center_target(app, &target)?;
             let version_id = target["id"].as_str().unwrap_or("");
-            crate::mods::plan_missing_dependencies(app, version_id, &base.to_string_lossy(), file_name)
+            crate::mods::plan_missing_dependencies(
+                app,
+                version_id,
+                &base.to_string_lossy(),
+                file_name,
+            )
         })()),
         "center:dependencyApply" => Some((|| {
-            let id = args.first().and_then(|v| v.as_str()).ok_or("缺少参数")?.to_string();
+            let id = args
+                .first()
+                .and_then(|v| v.as_str())
+                .ok_or("缺少参数")?
+                .to_string();
             let confirmed = args.get(1).and_then(|v| v.as_bool()).unwrap_or(false);
             // 对应原版 task('补充必要前置')：注册任务 → apply → taskDone
             let rec = crate::tasks::register_task("补充必要前置", "world");
@@ -961,9 +1249,21 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
                     json!({ "taskId": task_id, "taskTitle": "补充必要前置", "stage": "world", "progress": fraction, "text": "下载并校验必要前置" }),
                 );
             };
-            let result = crate::mods::apply_missing_dependencies(app, &id, confirmed, &rec, Some(&sink));
-            let cancelled = result.as_ref().err().map(|e| e == "已取消").unwrap_or(false);
-            crate::tasks::task_done(app, &rec.id, result.is_ok(), result.as_ref().err().cloned(), cancelled, None);
+            let result =
+                crate::mods::apply_missing_dependencies(app, &id, confirmed, &rec, Some(&sink));
+            let cancelled = result
+                .as_ref()
+                .err()
+                .map(|e| e == "已取消")
+                .unwrap_or(false);
+            crate::tasks::task_done(
+                app,
+                &rec.id,
+                result.is_ok(),
+                result.as_ref().err().cloned(),
+                cancelled,
+                None,
+            );
             crate::tasks::finish_task(&rec.id);
             result
         })()),

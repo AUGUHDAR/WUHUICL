@@ -4,14 +4,16 @@
 //! 少数字段深合并（resolution/custom/homeLayout/background/launchThumbnail）。
 
 use serde_json::{json, Value};
-use tauri::Manager;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use tauri::Manager;
 
-static CACHE: Mutex<Option<Value>> = Mutex::new(None);
+static CACHE: Mutex<Option<Arc<Value>>> = Mutex::new(None);
 
-/// exe 所在目录（对应 PCL 的 Paths.Base）：便携化的根。
-/// 取不到时回落 %APPDATA%\WUHUICL，保持可用。
+/// exe 所在目录（对应 PCL 的 Paths.Base）：Windows 便携化的根。
+/// 取不到时回落 %APPDATA%\WUHUICL，保持可用。仅 Windows 使用——
+/// macOS/Linux 的应用在 /Applications 或 /usr 下，exe 旁不可写。
+#[cfg(windows)]
 fn exe_dir() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?.to_path_buf();
@@ -21,6 +23,7 @@ fn exe_dir() -> Option<PathBuf> {
 
 /// 规范化并去掉 `\\?\` 逐字前缀（dunce 的行为）：canonicalize 会把盘符路径
 /// 变成 `\\?\D:\...`，直接入库会带进设置与 UI；UNC 前缀还原成 `\\server\share`。
+#[cfg(windows)]
 fn dunce_canonical(path: &PathBuf) -> PathBuf {
     let canon = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
     let text = canon.to_string_lossy();
@@ -33,32 +36,49 @@ fn dunce_canonical(path: &PathBuf) -> PathBuf {
     canon
 }
 
-/// WUHUICL 启动器数据根（对应 PCL 在 exe 旁建的 `PCL\` 文件夹）：
-/// settings/账号/清单缓存/受管图片都落在这里，跟随 exe 移动。
+/// WUHUICL 启动器数据根。
+/// Windows：exe 旁 `WUHUICL\`（PCL 血统，settings/账号/清单缓存跟随 exe 移动）；
+/// macOS/Linux/Android：系统应用数据目录（macOS `~/Library/Application Support/com.wuhuicl.app`、
+/// Linux `~/.local/share/com.wuhuicl.app`、Android 应用沙箱——移动端打基础的关键一环）。
 pub fn user_data_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
-    exe_dir()
-        .map(|d| d.join(LAUNCHER_DATA_DIR_NAME))
-        .unwrap_or_else(|| {
-            app.path()
-                .app_data_dir()
-                .unwrap_or_else(|_| dirs::data_dir().unwrap_or_default().join("WUHUICL"))
-        })
+    #[cfg(windows)]
+    {
+        exe_dir()
+            .map(|d| d.join(LAUNCHER_DATA_DIR_NAME))
+            .unwrap_or_else(|| {
+                app.path()
+                    .app_data_dir()
+                    .unwrap_or_else(|_| dirs::data_dir().unwrap_or_default().join("WUHUICL"))
+            })
+    }
+    #[cfg(not(windows))]
+    {
+        app.path()
+            .app_data_dir()
+            .unwrap_or_else(|_| dirs::data_dir().unwrap_or_default().join("com.wuhuicl.app"))
+    }
 }
 
-/// 启动器数据文件夹名（exe 旁）
+/// 启动器数据文件夹名（Windows exe 旁）
 pub const LAUNCHER_DATA_DIR_NAME: &str = "WUHUICL";
 
-/// panic 日志落点：exe 旁 WUHUICL\logs\panic.log（panic hook 没有 AppHandle，
-/// 单独走 exe_dir；hook 阶段不允许再 panic，全部静默失败）
+/// panic 日志落点（panic hook 没有 AppHandle，单独推算；hook 阶段不允许再 panic，全部静默失败）。
+/// Windows：exe 旁 WUHUICL\logs\panic.log；其它平台：应用数据目录 logs\panic.log
 pub fn user_data_dir_panic_log() -> std::path::PathBuf {
+    #[cfg(windows)]
     let dir = exe_dir()
         .map(|d| d.join(LAUNCHER_DATA_DIR_NAME).join("logs"))
+        .unwrap_or_else(std::env::temp_dir);
+    #[cfg(not(windows))]
+    let dir = dirs::data_dir()
+        .map(|d| d.join("com.wuhuicl.app").join("logs"))
         .unwrap_or_else(std::env::temp_dir);
     let _ = std::fs::create_dir_all(&dir);
     dir.join("panic.log")
 }
 
-/// 旧版数据根（%APPDATA%\com.wuhuicl.app）：一次性迁移的来源。
+/// 旧版数据根（Windows %APPDATA%\com.wuhuicl.app）：一次性迁移的来源。
+/// 非 Windows 上与 user_data_dir 同路径，返回 None 即跳过迁移。
 fn legacy_user_data_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
     let dir = app.path().app_data_dir().ok()?;
     let new_dir = user_data_dir(app);
@@ -71,17 +91,59 @@ fn legacy_user_data_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<
 
 fn same_dir(a: &PathBuf, b: &PathBuf) -> bool {
     let norm = |p: &PathBuf| {
-        std::fs::canonicalize(p).unwrap_or_else(|_| p.clone()).to_string_lossy().to_lowercase()
+        std::fs::canonicalize(p)
+            .unwrap_or_else(|_| p.clone())
+            .to_string_lossy()
+            .to_lowercase()
     };
     norm(a) == norm(b)
 }
 
-/// 游戏根目录默认值：exe 旁 `.minecraft\`（对应 PCL 首启创建
-/// `Paths.Base & ".minecraft\versions\"` 的逻辑，不再用 %APPDATA%）
+/// 游戏根目录默认值。
+/// Windows：exe 旁 `.minecraft\`（对应 PCL 首启创建 `Paths.Base & ".minecraft\versions\"`）；
+/// macOS/Linux：应用数据目录下 `minecraft\`（用户可在设置里改指已有的 ~/.minecraft 等）；
+/// Android：应用沙箱 app_data_dir/minecraft（dirs crate 在 Android 沙箱里算出的
+/// XDG 路径不存在，必须走 Tauri app_data_dir；该值由 ensure_exe_side_dirs 提前注入）。
+#[cfg(target_os = "android")]
+static ANDROID_GAME_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Android 游戏根目录注入点（lib.rs setup 最先调用，先于任何 settings 读取）。
+pub fn init_android_game_dir<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    #[cfg(target_os = "android")]
+    {
+        if let Ok(d) = app.path().app_data_dir() {
+            let _ = ANDROID_GAME_DIR.set(d.join("minecraft"));
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+    }
+}
+
 pub fn default_game_dir() -> PathBuf {
-    exe_dir()
-        .unwrap_or_else(|| dirs::data_dir().unwrap_or_default())
-        .join(".minecraft")
+    #[cfg(windows)]
+    {
+        exe_dir()
+            .unwrap_or_else(|| dirs::data_dir().unwrap_or_default())
+            .join(".minecraft")
+    }
+    #[cfg(target_os = "android")]
+    {
+        ANDROID_GAME_DIR.get().cloned().unwrap_or_else(|| {
+            dirs::data_dir()
+                .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".local/share"))
+                .join("com.wuhuicl.app")
+                .join("minecraft")
+        })
+    }
+    #[cfg(all(not(windows), not(target_os = "android")))]
+    {
+        dirs::data_dir()
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".local/share"))
+            .join("com.wuhuicl.app")
+            .join("minecraft")
+    }
 }
 
 /// 旧默认游戏目录集合（%APPDATA%\.wuhuicl / %APPDATA%\.kamucl）：
@@ -101,6 +163,7 @@ fn legacy_game_dirs() -> Vec<PathBuf> {
 /// 2) 旧 %APPDATA%\com.wuhuicl.app 的小文件与子目录一次性搬进 `WUHUICL\`
 ///    （条件：新目录还没有 settings.json；搬完不删旧目录，失败静默回退）
 pub fn ensure_exe_side_dirs<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    init_android_game_dir(app);
     let new_dir = user_data_dir(app);
     let _ = std::fs::create_dir_all(&new_dir);
     let _ = std::fs::create_dir_all(default_game_dir().join("versions"));
@@ -146,9 +209,13 @@ fn copy_dir_recursive(from: &PathBuf, to: &PathBuf) -> std::io::Result<()> {
 }
 
 /// WUHUICL 自己的 Entra 应用注册：任何 Entra ID 租户 + 个人 Microsoft 账户，SPA 重定向 http://localhost
-const MS_CLIENT_ID: &str = "ced46a35-61d5-434d-8bf7-9dbca71ef616";
-/// 原版 shared/types.ts:978 的公共 client_id，社区版不再借用
-const LEGACY_MS_CLIENT_ID: &str = "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb";
+const MS_CLIENT_ID: &str = "e692df62-9c0e-497f-99ae-749e26537817";
+/// 已退役的 client_id：落盘设置里存着这些的统一迁移到 MS_CLIENT_ID。
+/// c36a9fb6… 是原版 shared/types.ts:978 的公共 client_id；ced46a35… 是 2026-10-24 之前社区版自建的注册。
+const RETIRED_MS_CLIENT_IDS: &[&str] = &[
+    "c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb",
+    "ced46a35-61d5-434d-8bf7-9dbca71ef616",
+];
 
 pub fn settings_file<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> PathBuf {
     user_data_dir(app).join("settings.json")
@@ -175,6 +242,7 @@ pub fn defaults() -> Value {
         "downloadSpeedKBps": 0,
         "defaultIsolation": true,
         "reduceMotion": false,
+        "memTrimOnMinimize": true,
         "msClientId": MS_CLIENT_ID,
         "theme": "transparent",
         "custom": {
@@ -205,7 +273,7 @@ pub fn defaults() -> Value {
         "logoFaceSource": "default",
         "logoFacePath": "",
         "background": { "mode": "none", "color": "#1b2437", "image": "", "opacity": 0.5, "blur": 0, "fit": "crop" },
-        "launchThumbnail": { "image": "", "fit": "crop" },
+        "launchThumbnail": { "image": "", "fit": "crop", "mode": "animation", "animation": { "speed": 1.0, "dwellSeconds": 9.5 } },
         "skinEditorPalette": { "custom": [], "recent": [], "color": "#000000", "alpha": 1.0 },
         "closeAfterLaunch": false,
         "configVersion": 1
@@ -214,8 +282,13 @@ pub fn defaults() -> Value {
 
 /// 读取设置（内存缓存 → 文件 → 默认值），合并规则照抄 getSettings()
 pub fn get<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Value {
-    if let Some(cached) = CACHE.lock().unwrap().as_ref() {
-        return cached.clone();
+    get_arc(app).as_ref().clone()
+}
+
+/// 零克隆读取：高频只读场景用这份 Arc（设置文档小时差异不大，主要是省掉每调一次的深拷贝）
+pub fn get_arc<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Arc<Value> {
+    if let Some(cached) = CACHE.lock().unwrap().clone() {
+        return cached;
     }
     let def = defaults();
     let merged = std::fs::read(settings_file(app))
@@ -228,10 +301,35 @@ pub fn get<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Value {
             let _ = std::fs::create_dir_all(default_game_dir());
             d
         });
-    // 对应 settings.ts:153 的默认值迁移：老落盘值里还写着公共 client_id 的，换成社区版自己的应用
+    // 对应 settings.ts:153 的默认值迁移：老落盘值里还写着公共/退役 client_id 的，换成社区版自己的应用
     let mut merged = merged;
-    if merged.get("msClientId").and_then(|v| v.as_str()) == Some(LEGACY_MS_CLIENT_ID) {
+    if merged
+        .get("msClientId")
+        .and_then(|v| v.as_str())
+        .is_some_and(|id| RETIRED_MS_CLIENT_IDS.contains(&id))
+    {
         merged["msClientId"] = Value::String(MS_CLIENT_ID.to_string());
+    }
+    // Android 目录迁移：首启时 dirs crate 在沙箱里算出的 XDG 坏路径（…/.local/share/
+    // com.wuhuicl.app/minecraft）已落盘的，统一改写到沙箱内正确默认，只改写坏路径自身。
+    #[cfg(target_os = "android")]
+    {
+        let bad_suffix = ".local/share/com.wuhuicl.app/minecraft";
+        let good = default_game_dir().to_string_lossy().into_owned();
+        let fix = |v: &mut Value| {
+            if let Some(s) = v.as_str() {
+                if s.ends_with(bad_suffix) {
+                    *v = Value::String(good.clone());
+                }
+            }
+        };
+        fix(&mut merged["gameDir"]);
+        fix(&mut merged["activeFolder"]);
+        if let Some(arr) = merged["folders"].as_array_mut() {
+            for f in arr.iter_mut() {
+                fix(&mut f["path"]);
+            }
+        }
     }
     // 目录迁移：落盘设置还指向 %APPDATA% 旧默认（.wuhuicl/.kamucl）时，改写到 exe 旁 .minecraft；
     // 旧 C 盘目录保留为非默认条目，已有实例不丢。只生效一次（改完落盘）。
@@ -242,6 +340,7 @@ pub fn get<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Value {
             let _ = std::fs::write(&file, bytes);
         }
     }
+    let merged = Arc::new(merged);
     *CACHE.lock().unwrap() = Some(merged.clone());
     merged
 }
@@ -251,11 +350,7 @@ pub fn get<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Value {
 fn migrate_legacy_game_dir_entries(merged: &mut Value) -> bool {
     let new_default = default_game_dir();
     let legacy = legacy_game_dirs();
-    let is_legacy = |p: &str| -> bool {
-        legacy
-            .iter()
-            .any(|l| same_dir(&PathBuf::from(p), l))
-    };
+    let is_legacy = |p: &str| -> bool { legacy.iter().any(|l| same_dir(&PathBuf::from(p), l)) };
     let mut changed = false;
     if let Some(folders) = merged.get_mut("folders").and_then(|f| f.as_array_mut()) {
         // 顺手归一化历史落盘的 \\?\ 逐字前缀路径
@@ -288,7 +383,10 @@ fn migrate_legacy_game_dir_entries(merged: &mut Value) -> bool {
             if old_default_is_legacy {
                 let already_listed = folders.iter().any(|f| {
                     f["isDefault"] != true
-                        && f["path"].as_str().map(|p| same_dir(&PathBuf::from(p), &PathBuf::from(old_path))).unwrap_or(false)
+                        && f["path"]
+                            .as_str()
+                            .map(|p| same_dir(&PathBuf::from(p), &PathBuf::from(old_path)))
+                            .unwrap_or(false)
                 });
                 if !already_listed {
                     folders.push(json!({
@@ -300,13 +398,21 @@ fn migrate_legacy_game_dir_entries(merged: &mut Value) -> bool {
             }
         }
     }
-    if let Some(gd) = merged.get_mut("gameDir").and_then(|v| v.as_str()).map(str::to_string) {
+    if let Some(gd) = merged
+        .get_mut("gameDir")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    {
         if is_legacy(&gd) {
             merged["gameDir"] = json!(new_default.to_string_lossy());
             changed = true;
         }
     }
-    if let Some(af) = merged.get_mut("activeFolder").and_then(|v| v.as_str()).map(str::to_string) {
+    if let Some(af) = merged
+        .get_mut("activeFolder")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    {
         if is_legacy(&af) {
             merged["activeFolder"] = json!(new_default.to_string_lossy());
             changed = true;
@@ -374,7 +480,7 @@ pub fn save(app: &tauri::AppHandle, patch: Value) -> Result<Value, String> {
     }
     let bytes = serde_json::to_vec_pretty(&current).map_err(|e| e.to_string())?;
     std::fs::write(&file, bytes).map_err(|e| e.to_string())?;
-    *CACHE.lock().unwrap() = Some(current.clone());
+    *CACHE.lock().unwrap() = Some(Arc::new(current.clone()));
     crate::download::configure_limiter_from_settings(app);
     Ok(current)
 }
@@ -405,7 +511,8 @@ mod tests {
 
     #[test]
     fn theme_only_patch_is_not_blocked_by_download_limits() {
-        let merged = merge_and_validate(&base(), json!({ "appearance": { "theme": "whiteBlue" } })).unwrap();
+        let merged =
+            merge_and_validate(&base(), json!({ "appearance": { "theme": "whiteBlue" } })).unwrap();
         assert_eq!(merged["appearance"]["theme"], "whiteBlue");
         assert_eq!(merged["downloadThreads"], 16);
     }

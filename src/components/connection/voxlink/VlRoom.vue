@@ -125,7 +125,7 @@ const missing = computed(() => Number(gate.value?.missing ?? (gate.value?.rows a
                             {{ gateBusy ? '检查中…' : '检查差异' }}
                         </button>
                         <button
-                            class="btn btn-sm"
+                            class="btn btn-gold btn-sm"
                             :disabled="downloading || gateBusy || !missing"
                             @click="downloadMods"
                         >

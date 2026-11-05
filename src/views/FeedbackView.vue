@@ -17,6 +17,7 @@ import {
     fbIssueRetract,
     fbIssuesList,
     fbLogin,
+    fbLoginCancel,
     fbLogout,
     fbMeta,
     fbTicketDelete,

@@ -7,6 +7,38 @@
 html[data-platform="darwin"] .sidebar { padding-top: 38px; }
 html[data-platform="darwin"] .shell { border-radius: 0; }
 
+/* -------- Android：触控基线（去点按高光/禁双击缩放延迟/阻尼滚动），文本输入保留选择 -------- */
+html[data-platform="android"] {
+  -webkit-tap-highlight-color: transparent;
+}
+/* 手机横屏可视高度只有 ~360px：全局令牌按仪表盘密度重定（ui-ux-pro-max density 8，
+   间距 8-32px scale），触控目标按 ≥44px 标准，所有引用令牌的组件一起收 */
+html[data-platform="android"] {
+  --ctl-h: 44px;
+  --row-h: 44px;
+  --card-pad: 10px;
+  --card-gap: 8px;
+  --sec-gap: 10px;
+  --banner-h: 200px;
+}
+html[data-platform="android"] body {
+  touch-action: manipulation;
+  overscroll-behavior: none;
+}
+html[data-platform="android"] input,
+html[data-platform="android"] textarea,
+html[data-platform="android"] [contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+  touch-action: auto;
+}
+/* 弹层在手机上贴边全幅（桌面弹窗按 100vw-32px 居中，手机横屏高度宝贵） */
+html[data-platform="android"] .modal {
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 20px);
+  border-radius: var(--radius-md);
+}
+
 :root {
   --bg: #10191b;
   --bg-2: rgba(13, 23, 26, 0.72);

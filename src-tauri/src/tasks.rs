@@ -82,6 +82,15 @@ pub fn pause_task(id: &str) -> bool {
     }
 }
 
+/// 是否有未结束的后台任务（最小化自整理用：有任务在跑时只做前端瘦身，
+/// 不动 Rust 侧工作集/扫描目录，避免进度事件在挂起的 WebView2 里排队）。
+pub fn has_active_tasks() -> bool {
+    TASKS.lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|m| !m.is_empty())
+}
+
 pub fn resume_task(id: &str) -> bool {
     let rec = with_tasks(|m| m.get(id).cloned());
     match rec {

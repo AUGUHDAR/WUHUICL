@@ -10,6 +10,7 @@ use crate::accounts::uuid_v4;
 use crate::download::with_file_job;
 use crate::installer::{self, read_version_json, same_path};
 use crate::mods::assert_instance_idle;
+use crate::recordings::center_target_dir_state;
 use crate::settings;
 use crate::tasks::{self, TaskRecord};
 use crate::typednbt::{self, NbtPayload, NbtTag};
@@ -40,14 +41,31 @@ const COLON: &str = "：";
 const KINDS: [&str; 4] = ["litematic", "schem", "schematic", "nbt"];
 const AIR_STATES: [&str; 3] = ["minecraft:air", "minecraft:cave_air", "minecraft:void_air"];
 
-static CATALOG: LazyLock<Mutex<HashMap<String, Stored>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static CATALOG: LazyLock<Mutex<HashMap<String, Stored>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 static SCAN_GENERATION: AtomicU64 = AtomicU64::new(0);
-static METADATA_CACHE: LazyLock<Mutex<HashMap<String, (u64, f64, Value)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-static ANALYSES: LazyLock<Mutex<HashMap<String, StoredAnalysis>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// 最小化自整理：清空扫描目录与元数据缓存。
+/// projections:list 每次调用都会整体重扫回填；METADATA_CACHE 条目带 mtime 自校验，按需重算。
+pub fn release_catalog() {
+    if let Ok(mut map) = CATALOG.lock() {
+        map.clear();
+    }
+    if let Ok(mut cache) = METADATA_CACHE.lock() {
+        cache.clear();
+    }
+}
+static METADATA_CACHE: LazyLock<Mutex<HashMap<String, (u64, f64, Value)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static ANALYSES: LazyLock<Mutex<HashMap<String, StoredAnalysis>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 static REGISTRIES: LazyLock<Value> = LazyLock::new(load_registries);
-static STATE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([a-z0-9_.-]+:[a-z0-9_./-]+)(?:\[([^\]]*)\])?$").unwrap());
-static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(1\.20(?:\.\d+)?|1\.21(?:\.\d+)?|26\.\d+(?:\.\d+)?)$").unwrap());
-static LEGACY_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^legacy:block_(\d+)\[data=(\d+)\]$").unwrap());
+static STATE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^([a-z0-9_.-]+:[a-z0-9_./-]+)(?:\[([^\]]*)\])?$").unwrap());
+static VERSION_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(1\.20(?:\.\d+)?|1\.21(?:\.\d+)?|26\.\d+(?:\.\d+)?)$").unwrap());
+static LEGACY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^legacy:block_(\d+)\[data=(\d+)\]$").unwrap());
 
 #[derive(Clone)]
 struct Source {
@@ -79,13 +97,19 @@ struct ScanErr {
 
 impl ScanErr {
     fn msg(message: impl Into<String>) -> Self {
-        Self { not_found: false, message: message.into() }
+        Self {
+            not_found: false,
+            message: message.into(),
+        }
     }
 }
 
 impl From<std::io::Error> for ScanErr {
     fn from(e: std::io::Error) -> Self {
-        Self { not_found: e.kind() == std::io::ErrorKind::NotFound, message: e.to_string() }
+        Self {
+            not_found: e.kind() == std::io::ErrorKind::NotFound,
+            message: e.to_string(),
+        }
     }
 }
 
@@ -129,7 +153,12 @@ fn legacy_name(key: &str) -> Option<String> {
 fn legacy_values() -> HashSet<String> {
     legacy_blocks()
         .as_object()
-        .map(|map| map.values().filter_map(|v| v.as_str()).map(str::to_string).collect())
+        .map(|map| {
+            map.values()
+                .filter_map(|v| v.as_str())
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -138,7 +167,9 @@ fn legacy_reverse_map() -> HashMap<String, String> {
     if let Some(map) = legacy_blocks().as_object() {
         for (key, value) in map {
             if let Some(text) = value.as_str() {
-                reverse.entry(text.to_string()).or_insert_with(|| key.clone());
+                reverse
+                    .entry(text.to_string())
+                    .or_insert_with(|| key.clone());
             }
         }
     }
@@ -159,12 +190,19 @@ fn projection_versions() -> Vec<RegistryVersion> {
         .unwrap_or_default()
         .iter()
         .filter(|entry| {
-            entry["version"].as_str().map(|v| VERSION_RE.is_match(v)).unwrap_or(false)
+            entry["version"]
+                .as_str()
+                .map(|v| VERSION_RE.is_match(v))
+                .unwrap_or(false)
         })
         .map(|entry| {
             let version = entry["version"].as_str().unwrap_or("").to_string();
             let data_version = entry["dataVersion"].as_i64().unwrap_or(0);
-            RegistryVersion { version, data_version, supported: has_blocks_array(&entry["version"].as_str().unwrap_or("")) }
+            RegistryVersion {
+                version,
+                data_version,
+                supported: has_blocks_array(&entry["version"].as_str().unwrap_or("")),
+            }
         })
         .collect()
 }
@@ -180,14 +218,21 @@ fn projection_versions_json() -> Value {
 
 fn version_name(data_version: Option<i64>) -> Option<String> {
     let wanted = data_version?;
-    projection_versions().into_iter().find(|v| v.data_version == wanted).map(|v| v.version)
+    projection_versions()
+        .into_iter()
+        .find(|v| v.data_version == wanted)
+        .map(|v| v.version)
 }
 
 // ---------------- 路径工具（与 backupStore.ts safePath 同语义，复用 recordings.rs 的写法） ----------------
 
 fn resolve_abs(input: &Path) -> PathBuf {
     let absolute = input.is_absolute();
-    let mut out = if absolute { PathBuf::new() } else { std::env::current_dir().unwrap_or_default() };
+    let mut out = if absolute {
+        PathBuf::new()
+    } else {
+        std::env::current_dir().unwrap_or_default()
+    };
     let mut stack: Vec<std::ffi::OsString> = Vec::new();
     for comp in input.components() {
         match comp {
@@ -224,9 +269,9 @@ fn safe_relative(value: &str) -> Result<(), String> {
         || value.contains('\\')
         || value.contains('\0')
         || value.starts_with('/')
-        || value
-            .split('/')
-            .any(|p| p.is_empty() || p == "." || p == ".." || p.chars().any(|c| ":*?\"<>|".contains(c)));
+        || value.split('/').any(|p| {
+            p.is_empty() || p == "." || p == ".." || p.chars().any(|c| ":*?\"<>|".contains(c))
+        });
     if bad {
         return Err(format!("无效的相对路径：{value}"));
     }
@@ -247,14 +292,19 @@ fn safe_path(root: &Path, rel: &str, missing: bool) -> Result<PathBuf, ScanErr> 
     for part in rel.split('/') {
         current = current.join(part);
         match std::fs::symlink_metadata(&current) {
-            Ok(meta) if meta.is_symlink() => return Err(ScanErr::msg(format!("不跟随符号链接：{rel}"))),
+            Ok(meta) if meta.is_symlink() => {
+                return Err(ScanErr::msg(format!("不跟随符号链接：{rel}")))
+            }
             Ok(_) => {}
             Err(e) => {
                 let not_found = e.kind() == std::io::ErrorKind::NotFound;
                 if missing && not_found {
                     continue;
                 }
-                return Err(ScanErr { not_found, message: e.to_string() });
+                return Err(ScanErr {
+                    not_found,
+                    message: e.to_string(),
+                });
             }
         }
     }
@@ -310,7 +360,9 @@ fn pget<'a>(c: &'a Pairs, k: &str) -> Option<&'a NbtTag> {
 }
 
 fn as_compound(t: Option<&NbtTag>) -> Result<&Pairs, String> {
-    let Some(tag) = t else { return Err("缺少 Compound 标签".into()) };
+    let Some(tag) = t else {
+        return Err("缺少 Compound 标签".into());
+    };
     match &tag.value {
         NbtPayload::Compound(v) => Ok(v),
         _ => Err("缺少 Compound 标签".into()),
@@ -416,9 +468,21 @@ fn js_value_text(t: &NbtTag) -> String {
         NbtPayload::Long(v) => v.to_string(),
         NbtPayload::Float(v) => js_number(*v as f64),
         NbtPayload::Double(v) => js_number(*v),
-        NbtPayload::ByteArray(v) => v.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(","),
-        NbtPayload::IntArray(v) => v.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(","),
-        NbtPayload::LongArray(v) => v.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(","),
+        NbtPayload::ByteArray(v) => v
+            .iter()
+            .map(|b| b.to_string())
+            .collect::<Vec<_>>()
+            .join(","),
+        NbtPayload::IntArray(v) => v
+            .iter()
+            .map(|b| b.to_string())
+            .collect::<Vec<_>>()
+            .join(","),
+        NbtPayload::LongArray(v) => v
+            .iter()
+            .map(|b| b.to_string())
+            .collect::<Vec<_>>()
+            .join(","),
         NbtPayload::List(v) => v.iter().map(js_value_text).collect::<Vec<_>>().join(","),
         NbtPayload::Compound(_) => "[object Object]".to_string(),
     }
@@ -434,7 +498,9 @@ fn vec3_of(c: &Pairs) -> Result<Vec3, String> {
 }
 
 fn xyz3(t: Option<&NbtTag>) -> Result<Vec3F, String> {
-    let Some(tag) = t else { return Ok([0.0, 0.0, 0.0]) };
+    let Some(tag) = t else {
+        return Ok([0.0, 0.0, 0.0]);
+    };
     match &tag.value {
         NbtPayload::IntArray(v) if v.len() == 3 => Ok([v[0] as f64, v[1] as f64, v[2] as f64]),
         NbtPayload::List(v) if v.len() == 3 => {
@@ -460,14 +526,22 @@ fn set_pair(c: &mut Pairs, k: &str, value: NbtTag) {
 }
 
 fn extras(c: &Pairs, known: &[&str]) -> Pairs {
-    c.iter().filter(|(name, _)| !known.contains(&name.as_str())).cloned().collect()
+    c.iter()
+        .filter(|(name, _)| !known.contains(&name.as_str()))
+        .cloned()
+        .collect()
 }
 
 fn volume_f(size: &Vec3F) -> Result<usize, String> {
     const BAD: &str = "投影区域尺寸无效或超过 1600 万方块";
     let mut product: f64 = 1.0;
     for value in size {
-        if !value.is_finite() || value.fract() != 0.0 || *value <= 0.0 || *value > 65535.0 || value.abs() > 9_007_199_254_740_991.0 {
+        if !value.is_finite()
+            || value.fract() != 0.0
+            || *value <= 0.0
+            || *value > 65535.0
+            || value.abs() > 9_007_199_254_740_991.0
+        {
             return Err(BAD.into());
         }
         product *= value;
@@ -507,7 +581,10 @@ fn state_tag(text: &str) -> Result<NbtTag, String> {
     let caps = STATE_RE
         .captures(text)
         .ok_or_else(|| format!("无效方块状态：{text}"))?;
-    let mut pairs: Pairs = vec![("Name".to_string(), typednbt::string(caps.get(1).map(|m| m.as_str()).unwrap_or("")))];
+    let mut pairs: Pairs = vec![(
+        "Name".to_string(),
+        typednbt::string(caps.get(1).map(|m| m.as_str()).unwrap_or("")),
+    )];
     let raw = caps.get(2).map(|m| m.as_str()).unwrap_or("");
     if !raw.is_empty() {
         let mut properties: Pairs = Vec::new();
@@ -515,7 +592,11 @@ fn state_tag(text: &str) -> Result<NbtTag, String> {
             let mut parts = entry.split('=');
             let key = parts.next().unwrap_or("");
             let value = parts.next().unwrap_or("");
-            if key.is_empty() || value.is_empty() || parts.next().is_some() || properties.iter().any(|(k, _)| k == key) {
+            if key.is_empty()
+                || value.is_empty()
+                || parts.next().is_some()
+                || properties.iter().any(|(k, _)| k == key)
+            {
                 return Err("无效方块属性".into());
             }
             properties.push((key.to_string(), typednbt::string(value)));
@@ -640,7 +721,14 @@ fn shift_block_entity(t: &NbtTag, delta: &Vec3) -> Result<NbtTag, String> {
 fn sponge_entity(t: &NbtTag, block: bool) -> Result<NbtTag, String> {
     let c = as_compound(Some(t))?;
     let id = t_str(need(c, "id", 8)?).to_string();
-    let data = extras(c, if block { &["id", "x", "y", "z"] } else { &["id", "Pos"] });
+    let data = extras(
+        c,
+        if block {
+            &["id", "x", "y", "z"]
+        } else {
+            &["id", "Pos"]
+        },
+    );
     let pos = if block {
         typednbt::int_array(vec3_of(c)?.map(|v| v as i32).to_vec())
     } else {
@@ -716,7 +804,11 @@ fn region_non_air(region: &Region) -> usize {
         .iter()
         .map(|t| AIR_STATES.contains(&state_text(t).unwrap_or_default().as_str()))
         .collect();
-    region.blocks.iter().filter(|index| !flags.get(**index as usize).copied().unwrap_or(false)).count()
+    region
+        .blocks
+        .iter()
+        .filter(|index| !flags.get(**index as usize).copied().unwrap_or(false))
+        .count()
 }
 
 fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, String> {
@@ -727,7 +819,11 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
         None => None,
     };
     let c: &Pairs = schematic.as_ref().unwrap_or(&raw);
-    let blocks_is_type = |want: u8| pget(c, "Blocks").map(|t| t.tag_type == want).unwrap_or(false);
+    let blocks_is_type = |want: u8| {
+        pget(c, "Blocks")
+            .map(|t| t.tag_type == want)
+            .unwrap_or(false)
+    };
     let detected: Option<&str> = if pget(&raw, "Regions").is_some() {
         Some("litematic")
     } else if pget(c, "Palette").is_some() || blocks_is_type(10) {
@@ -749,10 +845,14 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
             return Err("扩展名与投影内容不匹配".into());
         }
     }
-    let from_c = pget(c, "DataVersion").and_then(numeric).filter(|v| *v != 0.0);
+    let from_c = pget(c, "DataVersion")
+        .and_then(numeric)
+        .filter(|v| *v != 0.0);
     let data_version = match from_c {
         Some(v) => Some(to_i64(v)),
-        None => pget(&raw, "MinecraftDataVersion").and_then(numeric).map(to_i64),
+        None => pget(&raw, "MinecraftDataVersion")
+            .and_then(numeric)
+            .map(to_i64),
     };
     let metadata: Pairs = match pget(c, "Metadata") {
         Some(tag) => as_compound(Some(tag))?.clone(),
@@ -775,7 +875,11 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
             let size: Vec3 = signed.map(|v| v.abs());
             let anchor = vec3_of(pcompound(&r, "Position")?)?;
             let local_min: Vec3 = signed.map(|v| if v < 0 { v + 1 } else { 0 });
-            let offset: Vec3 = [anchor[0] + local_min[0], anchor[1] + local_min[1], anchor[2] + local_min[2]];
+            let offset: Vec3 = [
+                anchor[0] + local_min[0],
+                anchor[1] + local_min[1],
+                anchor[2] + local_min[2],
+            ];
             let palette = list_of(&r, "BlockStatePalette")?.to_vec();
             if palette.is_empty() {
                 return Err("投影调色板为空".into());
@@ -795,8 +899,19 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
                 entities.push(shift_entity(item, &negative)?);
             }
             let volume = volume_i(&size)?;
-            let blocks = unpack_longs(t_longs(need(&r, "BlockStates", 12)?), volume, palette.len())?;
-            let extra = extras(&r, &["Position", "Size", "BlockStatePalette", "BlockStates", "Entities", "TileEntities"]);
+            let blocks =
+                unpack_longs(t_longs(need(&r, "BlockStates", 12)?), volume, palette.len())?;
+            let extra = extras(
+                &r,
+                &[
+                    "Position",
+                    "Size",
+                    "BlockStatePalette",
+                    "BlockStates",
+                    "Entities",
+                    "TileEntities",
+                ],
+            );
             out.regions.push(Region {
                 name: name.clone(),
                 offset,
@@ -810,7 +925,16 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
                 extra,
             });
         }
-        out.extra = extras(&raw, &["Version", "SubVersion", "MinecraftDataVersion", "Metadata", "Regions"]);
+        out.extra = extras(
+            &raw,
+            &[
+                "Version",
+                "SubVersion",
+                "MinecraftDataVersion",
+                "Metadata",
+                "Regions",
+            ],
+        );
     } else if actual == "schem" {
         let version = t_int(need(c, "Version", 3)?);
         if ![1, 2, 3].contains(&version) {
@@ -821,7 +945,11 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
             size[i] = short_masked(c, k)?;
         }
         let n = volume_i(&size)?;
-        let blocks_holder: Option<Pairs> = if version == 3 { Some(pcompound(c, "Blocks")?.clone()) } else { None };
+        let blocks_holder: Option<Pairs> = if version == 3 {
+            Some(pcompound(c, "Blocks")?.clone())
+        } else {
+            None
+        };
         let b: &Pairs = blocks_holder.as_ref().unwrap_or(c);
         let palette_source = pcompound(b, "Palette")?.clone();
         let mut slots: Vec<Option<NbtTag>> = Vec::new();
@@ -846,7 +974,11 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
             Some(list) if !list.is_empty() && list.len() == palette_source.len() => list,
             _ => return Err("Sponge 调色板索引不连续".into()),
         };
-        let be_key = if version == 1 { "TileEntities" } else { "BlockEntities" };
+        let be_key = if version == 1 {
+            "TileEntities"
+        } else {
+            "BlockEntities"
+        };
         let mut block_entities: Vec<NbtTag> = Vec::new();
         for item in list_of(b, be_key)? {
             block_entities.push(block_entity_from_sponge(item)?);
@@ -861,7 +993,21 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
         let known: &[&str] = if version == 3 {
             &["Palette", "Data", "BlockEntities"]
         } else {
-            &["Version", "DataVersion", "Width", "Height", "Length", "Offset", "Palette", "PaletteMax", "BlockData", "TileEntities", "BlockEntities", "Entities", "Metadata"]
+            &[
+                "Version",
+                "DataVersion",
+                "Width",
+                "Height",
+                "Length",
+                "Offset",
+                "Palette",
+                "PaletteMax",
+                "BlockData",
+                "TileEntities",
+                "BlockEntities",
+                "Entities",
+                "Metadata",
+            ]
         };
         let extra = extras(b, known);
         out.regions.push(Region {
@@ -877,7 +1023,20 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
             extra,
         });
         out.extra = if version == 3 {
-            extras(c, &["Version", "DataVersion", "Width", "Height", "Length", "Offset", "Blocks", "Entities", "Metadata"])
+            extras(
+                c,
+                &[
+                    "Version",
+                    "DataVersion",
+                    "Width",
+                    "Height",
+                    "Length",
+                    "Offset",
+                    "Blocks",
+                    "Entities",
+                    "Metadata",
+                ],
+            )
         } else {
             Vec::new()
         };
@@ -926,9 +1085,18 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
             blocks[i] = index as u32;
         }
         let offset = [
-            pget(c, "WEOffsetX").and_then(numeric).map(to_i64).unwrap_or(0),
-            pget(c, "WEOffsetY").and_then(numeric).map(to_i64).unwrap_or(0),
-            pget(c, "WEOffsetZ").and_then(numeric).map(to_i64).unwrap_or(0),
+            pget(c, "WEOffsetX")
+                .and_then(numeric)
+                .map(to_i64)
+                .unwrap_or(0),
+            pget(c, "WEOffsetY")
+                .and_then(numeric)
+                .map(to_i64)
+                .unwrap_or(0),
+            pget(c, "WEOffsetZ")
+                .and_then(numeric)
+                .map(to_i64)
+                .unwrap_or(0),
         ];
         out.regions.push(Region {
             name: "region".to_string(),
@@ -943,10 +1111,28 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
             extra: Vec::new(),
         });
         out.data_version = Some(1343);
-        out.extra = extras(c, &["Width", "Height", "Length", "Blocks", "Data", "AddBlocks", "Entities", "TileEntities", "Materials", "WEOffsetX", "WEOffsetY", "WEOffsetZ"]);
+        out.extra = extras(
+            c,
+            &[
+                "Width",
+                "Height",
+                "Length",
+                "Blocks",
+                "Data",
+                "AddBlocks",
+                "Entities",
+                "TileEntities",
+                "Materials",
+                "WEOffsetX",
+                "WEOffsetY",
+                "WEOffsetZ",
+            ],
+        );
     } else {
         if pget(&raw, "palettes").is_some() {
-            return Err("原版结构包含多个候选调色板，暂不支持无损转换，请先在游戏内选定一个调色板".into());
+            return Err(
+                "原版结构包含多个候选调色板，暂不支持无损转换，请先在游戏内选定一个调色板".into(),
+            );
         }
         let size_f = xyz3(pget(&raw, "size"))?;
         let n = volume_f(&size_f)?;
@@ -955,7 +1141,9 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
         if palette.is_empty() {
             return Err("结构调色板为空".into());
         }
-        let mut air = palette.iter().position(|t| state_text(t).unwrap_or_default() == "minecraft:air");
+        let mut air = palette
+            .iter()
+            .position(|t| state_text(t).unwrap_or_default() == "minecraft:air");
         if air.is_none() {
             palette.push(state_tag("minecraft:air")?);
             air = Some(palette.len() - 1);
@@ -967,10 +1155,16 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
         for item in list_of(&raw, "blocks")? {
             let b = as_compound(Some(item))?.clone();
             let p_f = xyz3(pget(&b, "pos"))?;
-            if b.iter().any(|(k, _)| !["pos", "state", "nbt"].contains(&k.as_str())) {
+            if b.iter()
+                .any(|(k, _)| !["pos", "state", "nbt"].contains(&k.as_str()))
+            {
                 return Err("结构方块含未支持的附加包装标签，无法保证无损转换".into());
             }
-            if p_f.iter().enumerate().any(|(i, v)| v.fract() != 0.0 || *v < 0.0 || *v >= size[i] as f64) {
+            if p_f
+                .iter()
+                .enumerate()
+                .any(|(i, v)| v.fract() != 0.0 || *v < 0.0 || *v >= size[i] as f64)
+            {
                 return Err("结构方块坐标越界".into());
             }
             let p = round3(p_f);
@@ -994,7 +1188,9 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
             let c = as_compound(Some(item))?.clone();
             let mut nbt = as_compound(pget(&c, "nbt"))?.clone();
             let pos = xyz3(pget(&c, "pos"))?;
-            if c.iter().any(|(k, _)| !["pos", "blockPos", "nbt"].contains(&k.as_str())) {
+            if c.iter()
+                .any(|(k, _)| !["pos", "blockPos", "nbt"].contains(&k.as_str()))
+            {
                 return Err("结构实体包装包含未验证的数据，暂不支持无损转换".into());
             }
             if let Some(block_pos) = pget(&c, "blockPos") {
@@ -1029,9 +1225,21 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
             block_entities,
             extra: Vec::new(),
         });
-        out.extra = extras(&raw, &["DataVersion", "size", "palette", "blocks", "entities", "KAMUCLOffset"]);
+        out.extra = extras(
+            &raw,
+            &[
+                "DataVersion",
+                "size",
+                "palette",
+                "blocks",
+                "entities",
+                "KAMUCLOffset",
+            ],
+        );
     }
-    let display_name: Option<String> = pget(&out.metadata, "Name").filter(|t| t.tag_type == 8).map(|t| t_str(t).to_string());
+    let display_name: Option<String> = pget(&out.metadata, "Name")
+        .filter(|t| t.tag_type == 8)
+        .map(|t| t_str(t).to_string());
     if let Some(name) = display_name {
         out.name = name;
     }
@@ -1072,7 +1280,11 @@ fn flatten(p: &Projection) -> Result<Region, String> {
     let mut entities: Vec<NbtTag> = Vec::new();
     let mut block_entities: Vec<NbtTag> = Vec::new();
     for region in &p.regions {
-        let delta: Vec3 = [region.offset[0] - min[0], region.offset[1] - min[1], region.offset[2] - min[2]];
+        let delta: Vec3 = [
+            region.offset[0] - min[0],
+            region.offset[1] - min[1],
+            region.offset[2] - min[2],
+        ];
         let mut indexes: Vec<usize> = Vec::with_capacity(region.palette.len());
         for state in &region.palette {
             let text = state_text(state)?;
@@ -1108,7 +1320,11 @@ fn flatten(p: &Projection) -> Result<Region, String> {
         }
     }
     Ok(Region {
-        name: if p.name.is_empty() { "region".to_string() } else { p.name.clone() },
+        name: if p.name.is_empty() {
+            "region".to_string()
+        } else {
+            p.name.clone()
+        },
         offset: min,
         size,
         signed_size: None,
@@ -1166,8 +1382,16 @@ fn write_projection(p: &Projection, format: &str) -> Result<Vec<u8>, String> {
             let mut inner = r.extra.clone();
             set_pair(&mut inner, "Position", vec_tag(&anchor));
             set_pair(&mut inner, "Size", vec_tag(&signed));
-            set_pair(&mut inner, "BlockStatePalette", typednbt::list(r.palette.clone(), 10));
-            set_pair(&mut inner, "BlockStates", typednbt::long_array(pack_longs(&r.blocks, r.palette.len())));
+            set_pair(
+                &mut inner,
+                "BlockStatePalette",
+                typednbt::list(r.palette.clone(), 10),
+            );
+            set_pair(
+                &mut inner,
+                "BlockStates",
+                typednbt::long_array(pack_longs(&r.blocks, r.palette.len())),
+            );
             let mut entities: Vec<NbtTag> = Vec::new();
             for item in &r.entities {
                 entities.push(shift_entity(item, &delta)?);
@@ -1177,20 +1401,48 @@ fn write_projection(p: &Projection, format: &str) -> Result<Vec<u8>, String> {
             for item in &r.block_entities {
                 block_entities.push(shift_block_entity(item, &delta)?);
             }
-            set_pair(&mut inner, "TileEntities", typednbt::list(block_entities, 10));
+            set_pair(
+                &mut inner,
+                "TileEntities",
+                typednbt::list(block_entities, 10),
+            );
             regions.push((r.name.clone(), typednbt::compound(inner)));
         }
         let total_volume: i64 = p.regions.iter().map(|r| r.blocks.len() as i64).sum();
         let total_blocks: i64 = p.regions.iter().map(region_non_air).sum::<usize>() as i64;
         let mut metadata = p.metadata.clone();
-        set_pair(&mut metadata, "Name", typednbt::string(if p.name.is_empty() { "KAMUCL" } else { p.name.as_str() }));
-        set_pair(&mut metadata, "RegionCount", typednbt::int(p.regions.len() as i32));
-        set_pair(&mut metadata, "TotalVolume", typednbt::int(total_volume as i32));
-        set_pair(&mut metadata, "TotalBlocks", typednbt::int(total_blocks as i32));
+        set_pair(
+            &mut metadata,
+            "Name",
+            typednbt::string(if p.name.is_empty() {
+                "KAMUCL"
+            } else {
+                p.name.as_str()
+            }),
+        );
+        set_pair(
+            &mut metadata,
+            "RegionCount",
+            typednbt::int(p.regions.len() as i32),
+        );
+        set_pair(
+            &mut metadata,
+            "TotalVolume",
+            typednbt::int(total_volume as i32),
+        );
+        set_pair(
+            &mut metadata,
+            "TotalBlocks",
+            typednbt::int(total_blocks as i32),
+        );
         let mut built = p.extra.clone();
         set_pair(&mut built, "Version", typednbt::int(6));
         set_pair(&mut built, "SubVersion", typednbt::int(1));
-        set_pair(&mut built, "MinecraftDataVersion", typednbt::int(p.data_version.unwrap_or(0) as i32));
+        set_pair(
+            &mut built,
+            "MinecraftDataVersion",
+            typednbt::int(p.data_version.unwrap_or(0) as i32),
+        );
         set_pair(&mut built, "Metadata", typednbt::compound(metadata));
         set_pair(&mut built, "Regions", typednbt::compound(regions));
         root = built;
@@ -1203,26 +1455,54 @@ fn write_projection(p: &Projection, format: &str) -> Result<Vec<u8>, String> {
                 palette_pairs.push((state_text(state)?, typednbt::int(index as i32)));
             }
             let mut blocks_compound = r.extra.clone();
-            set_pair(&mut blocks_compound, "Palette", typednbt::compound(palette_pairs));
-            set_pair(&mut blocks_compound, "Data", typednbt::byte_array(encode_varints(&r.blocks)));
+            set_pair(
+                &mut blocks_compound,
+                "Palette",
+                typednbt::compound(palette_pairs),
+            );
+            set_pair(
+                &mut blocks_compound,
+                "Data",
+                typednbt::byte_array(encode_varints(&r.blocks)),
+            );
             let mut block_entities: Vec<NbtTag> = Vec::new();
             for item in &r.block_entities {
                 block_entities.push(sponge_entity(item, true)?);
             }
-            set_pair(&mut blocks_compound, "BlockEntities", typednbt::list(block_entities, 10));
+            set_pair(
+                &mut blocks_compound,
+                "BlockEntities",
+                typednbt::list(block_entities, 10),
+            );
             let mut entities: Vec<NbtTag> = Vec::new();
             for item in &r.entities {
                 entities.push(sponge_entity(item, false)?);
             }
             let mut schematic = p.extra.clone();
             set_pair(&mut schematic, "Version", typednbt::int(3));
-            set_pair(&mut schematic, "DataVersion", typednbt::int(p.data_version.unwrap_or(0) as i32));
-            set_pair(&mut schematic, "Metadata", typednbt::compound(p.metadata.clone()));
+            set_pair(
+                &mut schematic,
+                "DataVersion",
+                typednbt::int(p.data_version.unwrap_or(0) as i32),
+            );
+            set_pair(
+                &mut schematic,
+                "Metadata",
+                typednbt::compound(p.metadata.clone()),
+            );
             set_pair(&mut schematic, "Width", typednbt::short(as_short(w)));
             set_pair(&mut schematic, "Height", typednbt::short(as_short(h)));
             set_pair(&mut schematic, "Length", typednbt::short(as_short(l)));
-            set_pair(&mut schematic, "Offset", typednbt::int_array(r.offset.map(|v| v as i32).to_vec()));
-            set_pair(&mut schematic, "Blocks", typednbt::compound(blocks_compound));
+            set_pair(
+                &mut schematic,
+                "Offset",
+                typednbt::int_array(r.offset.map(|v| v as i32).to_vec()),
+            );
+            set_pair(
+                &mut schematic,
+                "Blocks",
+                typednbt::compound(blocks_compound),
+            );
             set_pair(&mut schematic, "Entities", typednbt::list(entities, 10));
             root = vec![("Schematic".to_string(), typednbt::compound(schematic))];
         } else if format == "nbt" {
@@ -1234,14 +1514,24 @@ fn write_projection(p: &Projection, format: &str) -> Result<Vec<u8>, String> {
             let (rw, rl) = (w as usize, l as usize);
             let mut blocks_list: Vec<NbtTag> = Vec::new();
             for i in 0..r.blocks.len() {
-                let pos: Vec3 = [(i % rw) as i64, (i / (rw * rl)) as i64, ((i / rw) % rl) as i64];
+                let pos: Vec3 = [
+                    (i % rw) as i64,
+                    (i / (rw * rl)) as i64,
+                    ((i / rw) % rl) as i64,
+                ];
                 let mut compound_pairs: Pairs = vec![
-                    ("pos".to_string(), typednbt::list(pos.iter().map(|v| typednbt::int(*v as i32)).collect(), 3)),
+                    (
+                        "pos".to_string(),
+                        typednbt::list(pos.iter().map(|v| typednbt::int(*v as i32)).collect(), 3),
+                    ),
                     ("state".to_string(), typednbt::int(r.blocks[i] as i32)),
                 ];
                 if let Some(entity) = be_map.get(&join3(&pos)) {
                     let inner = as_compound(Some(entity))?.clone();
-                    compound_pairs.push(("nbt".to_string(), typednbt::compound(extras(&inner, &["x", "y", "z"]))));
+                    compound_pairs.push((
+                        "nbt".to_string(),
+                        typednbt::compound(extras(&inner, &["x", "y", "z"])),
+                    ));
                 }
                 blocks_list.push(typednbt::compound(compound_pairs));
             }
@@ -1250,19 +1540,42 @@ fn write_projection(p: &Projection, format: &str) -> Result<Vec<u8>, String> {
                 let inner = as_compound(Some(item))?;
                 let pos = xyz3(pget(inner, "Pos"))?;
                 let pairs: Pairs = vec![
-                    ("pos".to_string(), typednbt::list(pos.iter().map(|v| typednbt::double(*v)).collect(), 6)),
-                    ("blockPos".to_string(), typednbt::list(pos.iter().map(|v| typednbt::int(v.floor() as i32)).collect(), 3)),
+                    (
+                        "pos".to_string(),
+                        typednbt::list(pos.iter().map(|v| typednbt::double(*v)).collect(), 6),
+                    ),
+                    (
+                        "blockPos".to_string(),
+                        typednbt::list(
+                            pos.iter()
+                                .map(|v| typednbt::int(v.floor() as i32))
+                                .collect(),
+                            3,
+                        ),
+                    ),
                     ("nbt".to_string(), item.clone()),
                 ];
                 entities.push(typednbt::compound(pairs));
             }
             let mut built = p.extra.clone();
-            set_pair(&mut built, "DataVersion", typednbt::int(p.data_version.unwrap_or(0) as i32));
-            set_pair(&mut built, "size", typednbt::list(r.size.iter().map(|v| typednbt::int(*v as i32)).collect(), 3));
+            set_pair(
+                &mut built,
+                "DataVersion",
+                typednbt::int(p.data_version.unwrap_or(0) as i32),
+            );
+            set_pair(
+                &mut built,
+                "size",
+                typednbt::list(r.size.iter().map(|v| typednbt::int(*v as i32)).collect(), 3),
+            );
             set_pair(&mut built, "palette", typednbt::list(r.palette.clone(), 10));
             set_pair(&mut built, "blocks", typednbt::list(blocks_list, 10));
             set_pair(&mut built, "entities", typednbt::list(entities, 10));
-            set_pair(&mut built, "KAMUCLOffset", typednbt::int_array(r.offset.map(|v| v as i32).to_vec()));
+            set_pair(
+                &mut built,
+                "KAMUCLOffset",
+                typednbt::int_array(r.offset.map(|v| v as i32).to_vec()),
+            );
             root = built;
         } else {
             let reverse = legacy_reverse_map();
@@ -1271,7 +1584,9 @@ fn write_projection(p: &Projection, format: &str) -> Result<Vec<u8>, String> {
                 let text = state_text(state)?;
                 let key = match reverse.get(&text) {
                     Some(found) => Some(found.clone()),
-                    None => LEGACY_RE.captures(&text).map(|caps| format!("{}:{}", &caps[1], &caps[2])),
+                    None => LEGACY_RE
+                        .captures(&text)
+                        .map(|caps| format!("{}:{}", &caps[1], &caps[2])),
                 };
                 let key = key.ok_or_else(|| format!("方块无法表示为旧 schematic：{text}"))?;
                 let mut parts = key.split(':');
@@ -1297,15 +1612,27 @@ fn write_projection(p: &Projection, format: &str) -> Result<Vec<u8>, String> {
             set_pair(&mut built, "Blocks", typednbt::byte_array(ids));
             set_pair(&mut built, "Data", typednbt::byte_array(data));
             set_pair(&mut built, "AddBlocks", typednbt::byte_array(add));
-            set_pair(&mut built, "Entities", typednbt::list(r.entities.clone(), 10));
-            set_pair(&mut built, "TileEntities", typednbt::list(r.block_entities.clone(), 10));
+            set_pair(
+                &mut built,
+                "Entities",
+                typednbt::list(r.entities.clone(), 10),
+            );
+            set_pair(
+                &mut built,
+                "TileEntities",
+                typednbt::list(r.block_entities.clone(), 10),
+            );
             set_pair(&mut built, "WEOffsetX", typednbt::int(r.offset[0] as i32));
             set_pair(&mut built, "WEOffsetY", typednbt::int(r.offset[1] as i32));
             set_pair(&mut built, "WEOffsetZ", typednbt::int(r.offset[2] as i32));
             root = built;
         }
     }
-    let name = if format == "schematic" { "Schematic" } else { "" };
+    let name = if format == "schematic" {
+        "Schematic"
+    } else {
+        ""
+    };
     typednbt::write_typed_nbt(&typednbt::compound(root), name, true)
 }
 
@@ -1327,10 +1654,18 @@ fn tags(items: &[NbtTag]) -> Result<String, String> {
 }
 
 fn blocks_hash(r: &Region) -> Result<String, String> {
-    let names: Vec<String> = r.palette.iter().map(state_text).collect::<Result<_, String>>()?;
+    let names: Vec<String> = r
+        .palette
+        .iter()
+        .map(state_text)
+        .collect::<Result<_, String>>()?;
     let mut hash = Sha256::new();
     let header = json!({ "size": r.size.to_vec(), "offset": r.offset.to_vec() });
-    hash.update(serde_json::to_string(&header).unwrap_or_default().as_bytes());
+    hash.update(
+        serde_json::to_string(&header)
+            .unwrap_or_default()
+            .as_bytes(),
+    );
     let mut seen = vec![0u8; names.len()];
     for index in &r.blocks {
         if let Some(slot) = seen.get_mut(*index as usize) {
@@ -1345,8 +1680,15 @@ fn blocks_hash(r: &Region) -> Result<String, String> {
     }
     used.sort();
     hash.update(serde_json::to_string(&used).unwrap_or_default().as_bytes());
-    let ids: HashMap<&str, u32> = used.iter().enumerate().map(|(i, name)| (name.as_str(), i as u32)).collect();
-    let mapped: Vec<u32> = names.iter().map(|name| ids.get(name.as_str()).copied().unwrap_or(0)).collect();
+    let ids: HashMap<&str, u32> = used
+        .iter()
+        .enumerate()
+        .map(|(i, name)| (name.as_str(), i as u32))
+        .collect();
+    let mapped: Vec<u32> = names
+        .iter()
+        .map(|name| ids.get(name.as_str()).copied().unwrap_or(0))
+        .collect();
     let mut chunk = vec![0u8; 16384];
     let mut count = 0usize;
     for index in &r.blocks {
@@ -1365,7 +1707,11 @@ fn blocks_hash(r: &Region) -> Result<String, String> {
     Ok(hex::encode(hash.finalize()))
 }
 
-fn assert_projection_equivalent(expected: &Projection, actual: &Projection, format: &str) -> Result<(), String> {
+fn assert_projection_equivalent(
+    expected: &Projection,
+    actual: &Projection,
+    format: &str,
+) -> Result<(), String> {
     let collect = |p: &Projection| -> Result<Vec<Region>, String> {
         if format == "litematic" || p.regions.len() == 1 {
             Ok(p.regions.clone())
@@ -1375,7 +1721,10 @@ fn assert_projection_equivalent(expected: &Projection, actual: &Projection, form
     };
     let a = collect(expected)?;
     let b = collect(actual)?;
-    if a.len() != b.len() || (format != "schematic" && (expected.data_version.unwrap_or(0)) != (actual.data_version.unwrap_or(0))) {
+    if a.len() != b.len()
+        || (format != "schematic"
+            && (expected.data_version.unwrap_or(0)) != (actual.data_version.unwrap_or(0)))
+    {
         return Err("生成文件区域或游戏版本校验失败".into());
     }
     for i in 0..a.len() {
@@ -1403,12 +1752,15 @@ fn assert_projection_equivalent(expected: &Projection, actual: &Projection, form
             .iter()
             .map(|t| shift_block_entity(t, &right.offset))
             .collect::<Result<Vec<NbtTag>, String>>()?;
-        if tags(&left_entities)? != tags(&right_entities)? || tags(&left_block_entities)? != tags(&right_block_entities)? {
+        if tags(&left_entities)? != tags(&right_entities)?
+            || tags(&left_block_entities)? != tags(&right_block_entities)?
+        {
             return Err("生成文件实体或方块实体校验失败".into());
         }
         if format == "litematic"
             && (left.name != right.name
-                || json!(Vec::from(left.signed_size.unwrap_or(left.size))) != json!(Vec::from(right.signed_size.unwrap_or(right.size))))
+                || json!(Vec::from(left.signed_size.unwrap_or(left.size)))
+                    != json!(Vec::from(right.signed_size.unwrap_or(right.size))))
         {
             return Err("生成文件区域方向校验失败".into());
         }
@@ -1418,7 +1770,9 @@ fn assert_projection_equivalent(expected: &Projection, actual: &Projection, form
             return Err("生成文件区域附加标签校验失败".into());
         }
     }
-    if tags(&[typednbt::compound(expected.extra.clone())])? != tags(&[typednbt::compound(actual.extra.clone())])? {
+    if tags(&[typednbt::compound(expected.extra.clone())])?
+        != tags(&[typednbt::compound(actual.extra.clone())])?
+    {
         return Err("生成文件附加标签校验失败".into());
     }
     let generated = ["Name", "RegionCount", "TotalVolume", "TotalBlocks"];
@@ -1485,7 +1839,10 @@ impl Analysis {
         if let Some(value) = &self.target_version {
             map.insert("targetVersion".into(), json!(value));
         }
-        map.insert("differences".into(), Value::Array(self.differences.iter().map(difference_json).collect()));
+        map.insert(
+            "differences".into(),
+            Value::Array(self.differences.iter().map(difference_json).collect()),
+        );
         map.insert("blocks".into(), json!(self.blocks));
         if let Some(value) = &self.unsupported {
             map.insert("unsupported".into(), json!(value));
@@ -1498,7 +1855,9 @@ fn validate_state(text: &str, version: &str) -> Result<Option<String>, String> {
     let tag = state_tag(text)?;
     let c = as_compound(Some(&tag))?;
     let name = t_str(need(c, "Name", 8)?).to_string();
-    let Some(schema) = block_schema(version) else { return Ok(Some("目标版本缺少可信方块注册表".into())) };
+    let Some(schema) = block_schema(version) else {
+        return Ok(Some("目标版本缺少可信方块注册表".into()));
+    };
     if !name.starts_with("minecraft:") {
         return Ok(Some("目标原版注册表不包含此模组方块".into()));
     }
@@ -1512,7 +1871,10 @@ fn validate_state(text: &str, version: &str) -> Result<Option<String>, String> {
         properties = as_compound(Some(entry))?.clone();
     }
     for (key, value) in &properties {
-        let Some(state) = schema_states.iter().find(|s| s["name"].as_str() == Some(key.as_str())) else {
+        let Some(state) = schema_states
+            .iter()
+            .find(|s| s["name"].as_str() == Some(key.as_str()))
+        else {
             return Ok(Some(format!("目标版本没有属性 {key}")));
         };
         let values: Vec<String> = match state.get("values").and_then(|v| v.as_array()) {
@@ -1553,7 +1915,11 @@ fn raw_int(pairs: &Pairs, k: &str) -> Option<i64> {
     pget(pairs, k).and_then(numeric).map(to_i64)
 }
 
-fn analyze_projection(p: &Projection, format: &str, target_version: Option<&str>) -> Result<Analysis, String> {
+fn analyze_projection(
+    p: &Projection,
+    format: &str,
+    target_version: Option<&str>,
+) -> Result<Analysis, String> {
     if !KINDS.contains(&format) {
         return Err("目标格式无效".into());
     }
@@ -1569,7 +1935,9 @@ fn analyze_projection(p: &Projection, format: &str, target_version: Option<&str>
         unsupported: None,
     };
     if let Some(version) = target_version {
-        let supported = projection_versions().into_iter().any(|v| v.version == version && v.supported);
+        let supported = projection_versions()
+            .into_iter()
+            .any(|v| v.version == version && v.supported);
         if !supported {
             result.unsupported = Some("该版本暂缺可信注册表，未提供版本转换".into());
             return Ok(result);
@@ -1580,12 +1948,15 @@ fn analyze_projection(p: &Projection, format: &str, target_version: Option<&str>
         None => false,
     };
     let litematic_encoding = raw_int(&p.raw, "Version").map(|v| v != 6).unwrap_or(true)
-        || raw_int(&p.raw, "SubVersion").map(|v| v != 1).unwrap_or(true);
+        || raw_int(&p.raw, "SubVersion")
+            .map(|v| v != 1)
+            .unwrap_or(true);
     if p.format == "litematic" && format == "litematic" && litematic_encoding && !p.raw.is_empty() {
         result.differences.push(Difference {
             key: "litematicEncoding".into(),
             kind: "data",
-            description: "将写入已验证的 Litematic v6 / SubVersion 1 编码；原编码版本标签不再保留".into(),
+            description: "将写入已验证的 Litematic v6 / SubVersion 1 编码；原编码版本标签不再保留"
+                .into(),
             count: 1,
             replacement: None,
             discard_only: true,
@@ -1595,19 +1966,25 @@ fn analyze_projection(p: &Projection, format: &str, target_version: Option<&str>
         Some(tag) => raw_int(as_compound(Some(tag))?, "Version"),
         None => raw_int(&p.raw, "Version"),
     };
-    let sponge_upgrade = p.format == "schem" && format == "schem" && sponge_version.map(|v| v != 3).unwrap_or(true);
+    let sponge_upgrade =
+        p.format == "schem" && format == "schem" && sponge_version.map(|v| v != 3).unwrap_or(true);
     if sponge_upgrade {
         result.differences.push(Difference {
             key: "spongeVersion".into(),
             kind: "data",
-            description: "Sponge 文件版本将升级为 v3；方块、实体与偏移保持，未验证的扩展数据需要逐项舍弃".into(),
+            description:
+                "Sponge 文件版本将升级为 v3；方块、实体与偏移保持，未验证的扩展数据需要逐项舍弃"
+                    .into(),
             count: 1,
             replacement: None,
             discard_only: true,
         });
     }
     if cross && source_version.is_none() {
-        result.unsupported = Some("无法确认原文件的现代游戏版本；旧 schematic 仅支持格式导入，不提供完整跨版本转换".into());
+        result.unsupported = Some(
+            "无法确认原文件的现代游戏版本；旧 schematic 仅支持格式导入，不提供完整跨版本转换"
+                .into(),
+        );
         return Ok(result);
     }
     if format == "schematic" && cross {
@@ -1618,7 +1995,8 @@ fn analyze_projection(p: &Projection, format: &str, target_version: Option<&str>
         match flatten(p) {
             Ok(flat) => {
                 if format == "nbt" && flat.blocks.len() > 180_000 {
-                    result.unsupported = Some("原版结构标签过多；请拆分为不超过 18 万方块的区域".into());
+                    result.unsupported =
+                        Some("原版结构标签过多；请拆分为不超过 18 万方块的区域".into());
                 }
             }
             Err(e) => result.unsupported = Some(e),
@@ -1629,12 +2007,19 @@ fn analyze_projection(p: &Projection, format: &str, target_version: Option<&str>
         result.differences.push(Difference {
             key: "regions".into(),
             kind: "data",
-            description: "目标格式只有一个区域，将合并区域，区域名称和有符号选择方向不再保留".into(),
+            description: "目标格式只有一个区域，将合并区域，区域名称和有符号选择方向不再保留"
+                .into(),
             count,
             replacement: None,
             discard_only: true,
         });
-    } else if format != "litematic" && p.regions.iter().any(|r| r.signed_size.map(|s| s.iter().any(|v| *v < 0)).unwrap_or(false)) {
+    } else if format != "litematic"
+        && p.regions.iter().any(|r| {
+            r.signed_size
+                .map(|s| s.iter().any(|v| *v < 0))
+                .unwrap_or(false)
+        })
+    {
         result.differences.push(Difference {
             key: "direction".into(),
             kind: "data",
@@ -1648,7 +2033,9 @@ fn analyze_projection(p: &Projection, format: &str, target_version: Option<&str>
         result.differences.push(Difference {
             key: "nativeOffset".into(),
             kind: "data",
-            description: "原版结构不支持放置偏移；会保留 KAMUCLOffset 标签供启动器读取，原版游戏将忽略该标签".into(),
+            description:
+                "原版结构不支持放置偏移；会保留 KAMUCLOffset 标签供启动器读取，原版游戏将忽略该标签"
+                    .into(),
             count: 1,
             replacement: None,
             discard_only: true,
@@ -1677,7 +2064,10 @@ fn analyze_projection(p: &Projection, format: &str, target_version: Option<&str>
             let text = state_text(state)?;
             let reason: Option<String> = if cross {
                 validate_state(&text, target_version.unwrap_or(""))?
-            } else if format == "schematic" && !legacy.contains(&text) && !text.starts_with("legacy:block_") {
+            } else if format == "schematic"
+                && !legacy.contains(&text)
+                && !text.starts_with("legacy:block_")
+            {
                 Some("旧 schematic 无法表示此方块状态".into())
             } else if format != "schematic" && text.starts_with("legacy:block_") {
                 Some("无法可靠映射旧数值 ID，请选择替代方块或舍弃".into())
@@ -1721,7 +2111,11 @@ fn analyze_projection(p: &Projection, format: &str, target_version: Option<&str>
                         .unwrap_or_else(|| "未知类型".to_string());
                     result.differences.push(Difference {
                         key: format!("{kind}:{ri}:{i}"),
-                        kind: if kind == "entity" { "entity" } else { "blockEntity" },
+                        kind: if kind == "entity" {
+                            "entity"
+                        } else {
+                            "blockEntity"
+                        },
                         description: format!("{id}{COLON}该版本组合的实体 NBT 迁移规则尚未验证"),
                         count: 1,
                         replacement: None,
@@ -1731,7 +2125,11 @@ fn analyze_projection(p: &Projection, format: &str, target_version: Option<&str>
                     let pos = vec3_of(c)?;
                     let at = (pos[0] as i128)
                         .wrapping_add((pos[2] as i128).wrapping_mul(r.size[0] as i128))
-                        .wrapping_add((pos[1] as i128).wrapping_mul(r.size[0] as i128).wrapping_mul(r.size[2] as i128));
+                        .wrapping_add(
+                            (pos[1] as i128)
+                                .wrapping_mul(r.size[0] as i128)
+                                .wrapping_mul(r.size[2] as i128),
+                        );
                     let key = if at < 0 {
                         String::new()
                     } else {
@@ -1759,7 +2157,10 @@ fn analyze_projection(p: &Projection, format: &str, target_version: Option<&str>
             result.differences.push(Difference {
                 key: format!("regionExtra:{ri}"),
                 kind: "data",
-                description: format!("区域附加标签：{}；目标格式或版本不保证语义", names.join("、")),
+                description: format!(
+                    "区域附加标签：{}；目标格式或版本不保证语义",
+                    names.join("、")
+                ),
                 count,
                 replacement: None,
                 discard_only: true,
@@ -1794,13 +2195,21 @@ fn analyze_projection(p: &Projection, format: &str, target_version: Option<&str>
 
 // ---------------- 转换（对应原版 core/projectionConversion.ts convertProjection()） ----------------
 
-fn convert_projection(mut p: Projection, format: &str, version: Option<&str>, choices: &Value) -> Result<Vec<u8>, String> {
+fn convert_projection(
+    mut p: Projection,
+    format: &str,
+    version: Option<&str>,
+    choices: &Value,
+) -> Result<Vec<u8>, String> {
     let analysis = analyze_projection(&p, format, version)?;
     if let Some(reason) = analysis.unsupported {
         return Err(reason);
     }
     for difference in &analysis.differences {
-        let choice = choices.get(&difference.key).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
+        let choice = choices
+            .get(&difference.key)
+            .and_then(|v| v.as_str())
+            .filter(|v| !v.is_empty());
         let Some(choice) = choice else {
             return Err(format!("请确认全部差异：{}", difference.description));
         };
@@ -1809,7 +2218,11 @@ fn convert_projection(mut p: Projection, format: &str, version: Option<&str>, ch
         }
         let parts: Vec<&str> = difference.key.split(':').collect();
         if parts.first().copied() == Some("block") && parts.len() == 3 {
-            let replacement = if choice == "discard" { "minecraft:air".to_string() } else { choice.to_string() };
+            let replacement = if choice == "discard" {
+                "minecraft:air".to_string()
+            } else {
+                choice.to_string()
+            };
             if let Some(target) = version {
                 if let Some(reason) = validate_state(&replacement, target)? {
                     return Err(format!("替代方块不可用：{reason}"));
@@ -1862,7 +2275,10 @@ fn convert_projection(mut p: Projection, format: &str, version: Option<&str>, ch
         p.metadata.clear();
     }
     if let Some(target) = version {
-        p.data_version = projection_versions().into_iter().find(|v| v.version == target).map(|v| v.data_version);
+        p.data_version = projection_versions()
+            .into_iter()
+            .find(|v| v.version == target)
+            .map(|v| v.data_version);
     }
     let bytes = write_projection(&p, format)?;
     let reread = read_projection(&bytes, Some(format))?;
@@ -1915,7 +2331,10 @@ enum WorkerOutput {
     Bytes(Vec<u8>),
 }
 
-fn read_projection_file(job: &WorkerJob, progress: &WorkerProgress) -> Result<(Projection, String), String> {
+fn read_projection_file(
+    job: &WorkerJob,
+    progress: &WorkerProgress,
+) -> Result<(Projection, String), String> {
     let meta = std::fs::metadata(&job.file).map_err(|e| e.to_string())?;
     if meta.len() > WORKER_MAX_BYTES {
         return Err("投影文件超过 64 MB 压缩文件上限".into());
@@ -1943,7 +2362,10 @@ fn run_projection_worker(job: WorkerJob, progress: WorkerProgress) -> Result<Wor
         match job.action {
             "metadata" => {
                 let mut map = Map::new();
-                map.insert("blocks".into(), json!(p.regions.iter().map(region_non_air).sum::<usize>()));
+                map.insert(
+                    "blocks".into(),
+                    json!(p.regions.iter().map(region_non_air).sum::<usize>()),
+                );
                 if let Some(value) = p.data_version {
                     map.insert("dataVersion".into(), json!(value));
                 }
@@ -1953,7 +2375,11 @@ fn run_projection_worker(job: WorkerJob, progress: WorkerProgress) -> Result<Wor
                 Ok(WorkerOutput::Json(Value::Object(map)))
             }
             "analyze" => {
-                let analysis = analyze_projection(&p, job.format.as_deref().unwrap_or(""), job.version.as_deref())?;
+                let analysis = analyze_projection(
+                    &p,
+                    job.format.as_deref().unwrap_or(""),
+                    job.version.as_deref(),
+                )?;
                 let mut view = analysis.to_json();
                 if let Value::Object(map) = &mut view {
                     map.insert("sourceHash".into(), json!(hash));
@@ -1969,7 +2395,7 @@ fn run_projection_worker(job: WorkerJob, progress: WorkerProgress) -> Result<Wor
                     job.choices.as_ref().unwrap_or(&empty),
                 )?;
                 progress.send(0.85, "重新读取生成文件验证");
-                let reread = read_projection(&bytes, Some(job.format.as_deref().unwrap_or(""))) ?;
+                let reread = read_projection(&bytes, Some(job.format.as_deref().unwrap_or("")))?;
                 let before: usize = p.regions.iter().map(|r| r.blocks.len()).sum();
                 let after: usize = reread.regions.iter().map(|r| r.blocks.len()).sum();
                 if after < before {
@@ -2005,7 +2431,14 @@ fn active_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .to_string();
     let bound = s["folders"]
         .as_array()
-        .map(|list| list.iter().any(|f| f["path"].as_str().map(|p| key_of_str(p) == key_of_str(&root)).unwrap_or(false)))
+        .map(|list| {
+            list.iter().any(|f| {
+                f["path"]
+                    .as_str()
+                    .map(|p| key_of_str(p) == key_of_str(&root))
+                    .unwrap_or(false)
+            })
+        })
         .unwrap_or(false);
     if root.is_empty() || !bound {
         return Err("请先选择已登记的游戏文件夹".into());
@@ -2033,7 +2466,9 @@ fn validate_instance_name(name: &str) -> Result<(), String> {
         || name.len() > 80
         || name == "."
         || name == ".."
-        || name.chars().any(|c| "\\/:*?\"<>|".contains(c) || (c as u32) < 0x20)
+        || name
+            .chars()
+            .any(|c| "\\/:*?\"<>|".contains(c) || (c as u32) < 0x20)
     {
         return Err("实例名称无效".into());
     }
@@ -2048,7 +2483,14 @@ fn center_target_dir(app: &tauri::AppHandle, target: &Value) -> Result<PathBuf, 
     let s = settings::get(app);
     let registered = s["folders"]
         .as_array()
-        .map(|list| list.iter().any(|f| f["path"].as_str().map(|p| same_path(p, folder)).unwrap_or(false)))
+        .map(|list| {
+            list.iter().any(|f| {
+                f["path"]
+                    .as_str()
+                    .map(|p| same_path(p, folder))
+                    .unwrap_or(false)
+            })
+        })
         .unwrap_or(false);
     if !registered {
         return Err("游戏文件夹尚未登记".into());
@@ -2119,7 +2561,14 @@ fn selected_items(app: &tauri::AppHandle, ids: &Value) -> Result<Vec<Stored>, St
         if !seen.insert(id.clone()) {
             continue;
         }
-        let matched = catalog.get(&id).filter(|stored| stored.source.folder.as_ref().map(|f| bound.contains(&key_of(f))).unwrap_or(false));
+        let matched = catalog.get(&id).filter(|stored| {
+            stored
+                .source
+                .folder
+                .as_ref()
+                .map(|f| bound.contains(&key_of(f)))
+                .unwrap_or(false)
+        });
         match matched {
             Some(stored) => out.push(stored.clone()),
             None => return Err("投影所属文件夹已解除绑定，请刷新列表".into()),
@@ -2137,7 +2586,10 @@ fn entry_modified(item: &Stored) -> f64 {
 }
 
 fn entry_kind(item: &Stored) -> String {
-    item.entry["kind"].as_str().unwrap_or("litematic").to_string()
+    item.entry["kind"]
+        .as_str()
+        .unwrap_or("litematic")
+        .to_string()
 }
 
 fn entry_name(item: &Stored) -> String {
@@ -2147,7 +2599,11 @@ fn entry_name(item: &Stored) -> String {
 fn current_file(item: &Stored) -> Result<PathBuf, String> {
     let file = safe_path(&item.source.root, &item.rel, false).map_err(|e| e.message)?;
     let meta = stat_of(&file)?;
-    if !meta.is_file() || meta.is_symlink() || meta.len() != entry_size(item) || mtime_ms(&meta) != entry_modified(item) {
+    if !meta.is_file()
+        || meta.is_symlink()
+        || meta.len() != entry_size(item)
+        || mtime_ms(&meta) != entry_modified(item)
+    {
         return Err("投影已变化，请刷新列表后重试".into());
     }
     Ok(file)
@@ -2177,23 +2633,19 @@ fn drag_path(root: &Path, rel: &str) -> Result<PathBuf, String> {
 // ---------------- 回收站（对应原版 core/recycleFile.ts） ----------------
 
 fn recycle_bin_delete(target: &Path) -> Result<(), String> {
-    let escaped = target.to_string_lossy().replace('\'', "''");
-    let method = if target.is_dir() { "DeleteDirectory" } else { "DeleteFile" };
-    let script = format!(
-        "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::{method}('{escaped}', 'OnlyErrorDialogs', 'SendToRecycleBin')"
-    );
-    let output = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if output.status.success() && !target.exists() {
-        return Ok(());
+    // shell.trashItem 等价：trash crate 跨平台（Windows IFileOperation / macOS Finder / Linux freedesktop）。
+    // trash crate 不支持 Android：Android 沙箱内无系统回收站，降级为直接删除。
+    #[cfg(not(target_os = "android"))]
+    {
+        trash::delete(target).map_err(|e| e.to_string())
     }
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if stderr.is_empty() {
-        Err("系统未移除该文件".into())
-    } else {
-        Err(stderr)
+    #[cfg(target_os = "android")]
+    {
+        if target.is_dir() {
+            std::fs::remove_dir_all(target).map_err(|e| e.to_string())
+        } else {
+            std::fs::remove_file(target).map_err(|e| e.to_string())
+        }
     }
 }
 
@@ -2201,7 +2653,9 @@ pub(crate) fn recycle_file(directory: &Path, name: &str) -> Result<(), String> {
     let bad_name = name.is_empty()
         || name == "."
         || name == ".."
-        || name.chars().any(|c| "\\/:*?\"<>|\0".contains(c) || (c as u32) < 0x20)
+        || name
+            .chars()
+            .any(|c| "\\/:*?\"<>|\0".contains(c) || (c as u32) < 0x20)
         || name.ends_with('.')
         || name.ends_with(' ');
     if bad_name {
@@ -2228,8 +2682,10 @@ pub(crate) fn recycle_file(directory: &Path, name: &str) -> Result<(), String> {
     let current = stat_of(&target)?;
     #[cfg(unix)]
     let moved = current.is_symlink()
-        || std::os::unix::fs::MetadataExt::ino(&current) != std::os::unix::fs::MetadataExt::ino(&stat)
-        || std::os::unix::fs::MetadataExt::dev(&current) != std::os::unix::fs::MetadataExt::dev(&stat);
+        || std::os::unix::fs::MetadataExt::ino(&current)
+            != std::os::unix::fs::MetadataExt::ino(&stat)
+        || std::os::unix::fs::MetadataExt::dev(&current)
+            != std::os::unix::fs::MetadataExt::dev(&stat);
     #[cfg(not(unix))]
     let moved = current.is_symlink() || file_id(&current) != file_id(&stat);
     if moved {
@@ -2283,7 +2739,12 @@ impl Drop for StageGuard {
     }
 }
 
-fn copy_projection(source: &Path, destination: &Path, rec: Option<&TaskRecord>, on_bytes: &mut dyn FnMut(u64)) -> Result<PathBuf, String> {
+fn copy_projection(
+    source: &Path,
+    destination: &Path,
+    rec: Option<&TaskRecord>,
+    on_bytes: &mut dyn FnMut(u64),
+) -> Result<PathBuf, String> {
     const CHANGED: &str = "录像在复制期间发生变化，请停止录制后重试";
     let before = stat_of(source)?;
     if !before.is_file() || before.is_symlink() {
@@ -2312,7 +2773,9 @@ fn copy_projection(source: &Path, destination: &Path, rec: Option<&TaskRecord>, 
             break;
         }
         digest.update(&buffer[..read]);
-        writer.write_all(&buffer[..read]).map_err(|e| e.to_string())?;
+        writer
+            .write_all(&buffer[..read])
+            .map_err(|e| e.to_string())?;
         transferred += read as u64;
         on_bytes(transferred);
     }
@@ -2320,7 +2783,11 @@ fn copy_projection(source: &Path, destination: &Path, rec: Option<&TaskRecord>, 
     drop(writer);
     let after = stat_of(source)?;
     let sha = hex::encode(digest.finalize());
-    if after.is_symlink() || file_id(&after) != file_id(&before) || after.len() != before.len() || mtime_ms(&after) != mtime_ms(&before) {
+    if after.is_symlink()
+        || file_id(&after) != file_id(&before)
+        || after.len() != before.len()
+        || mtime_ms(&after) != mtime_ms(&before)
+    {
         return Err(CHANGED.into());
     }
     if sha != sha256_file(source, rec)? || sha != sha256_file(&stage, rec)? {
@@ -2331,8 +2798,14 @@ fn copy_projection(source: &Path, destination: &Path, rec: Option<&TaskRecord>, 
             return Err("已取消".into());
         }
     }
-    let stem = source.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let ext = source.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let stem = source
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = source
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
     let source_abs = resolve_abs(source);
     for index in 0..10000usize {
         let name = if index == 0 {
@@ -2375,7 +2848,9 @@ fn visit_source(
     }
     *visited += 1;
     if *visited > SCAN_DIR_LIMIT {
-        return Err(ScanErr::msg("扫描已达到 20000 个目录/文件上限，请分目录整理"));
+        return Err(ScanErr::msg(
+            "扫描已达到 20000 个目录/文件上限，请分目录整理",
+        ));
     }
     let dir = safe_path(&source.root, rel, true)?;
     let reader = match std::fs::read_dir(&dir) {
@@ -2387,7 +2862,12 @@ fn visit_source(
     for entry in reader {
         let entry = entry.map_err(ScanErr::from)?;
         let file_type = entry.file_type().map_err(ScanErr::from)?;
-        listing.push((entry.file_name().to_string_lossy().into_owned(), file_type.is_dir(), file_type.is_file(), file_type.is_symlink()));
+        listing.push((
+            entry.file_name().to_string_lossy().into_owned(),
+            file_type.is_dir(),
+            file_type.is_file(),
+            file_type.is_symlink(),
+        ));
     }
     let suffix = format!(".{kind}");
     for (name, is_dir, is_file, is_link) in listing {
@@ -2398,7 +2878,10 @@ fn visit_source(
         if is_dir {
             if depth < 4 {
                 let lower = name.to_lowercase();
-                if !(lower.ends_with(".cache") || lower.ends_with(".tmp") || lower.ends_with(".del")) {
+                if !(lower.ends_with(".cache")
+                    || lower.ends_with(".tmp")
+                    || lower.ends_with(".del"))
+                {
                     visit_source(rec, source, kind, &next, depth + 1, visited, found, order)?;
                 }
             }
@@ -2426,17 +2909,38 @@ fn visit_source(
         entry.insert("size".into(), json!(meta.len()));
         entry.insert("modified".into(), json!(mtime_ms(&meta)));
         entry.insert("source".into(), json!(source.label));
-        entry.insert("directory".into(), json!(full.parent().map(text_of).unwrap_or_default()));
+        entry.insert(
+            "directory".into(),
+            json!(full.parent().map(text_of).unwrap_or_default()),
+        );
         if !found.contains_key(&id) {
             order.push(id.clone());
         }
-        found.insert(id, Stored { entry: Value::Object(entry), source: source.clone(), rel: next });
+        found.insert(
+            id,
+            Stored {
+                entry: Value::Object(entry),
+                source: source.clone(),
+                rel: next,
+            },
+        );
     }
     Ok(())
 }
 
-fn worker_json(app: &tauri::AppHandle, job: WorkerJob, task_id: &str, task_title: &str, enabled: bool) -> Result<Value, String> {
-    let progress = WorkerProgress { app: app.clone(), task_id: task_id.to_string(), task_title: task_title.to_string(), enabled };
+fn worker_json(
+    app: &tauri::AppHandle,
+    job: WorkerJob,
+    task_id: &str,
+    task_title: &str,
+    enabled: bool,
+) -> Result<Value, String> {
+    let progress = WorkerProgress {
+        app: app.clone(),
+        task_id: task_id.to_string(),
+        task_title: task_title.to_string(),
+        enabled,
+    };
     match run_projection_worker(job, progress)? {
         WorkerOutput::Json(value) => Ok(value),
         WorkerOutput::Bytes(_) => Ok(Value::Null),
@@ -2444,10 +2948,24 @@ fn worker_json(app: &tauri::AppHandle, job: WorkerJob, task_id: &str, task_title
 }
 
 fn metadata_job(file: &Path, kind: &str) -> WorkerJob {
-    WorkerJob { file: file.to_path_buf(), source_format: kind.to_string(), action: "metadata", format: None, version: None, hash: None, choices: None }
+    WorkerJob {
+        file: file.to_path_buf(),
+        source_format: kind.to_string(),
+        action: "metadata",
+        format: None,
+        version: None,
+        hash: None,
+        choices: None,
+    }
 }
 
-fn scan_metadata(app: &tauri::AppHandle, item: &Stored, kind: &str, task_id: &str, task_title: &str) -> Result<Value, String> {
+fn scan_metadata(
+    app: &tauri::AppHandle,
+    item: &Stored,
+    kind: &str,
+    task_id: &str,
+    task_title: &str,
+) -> Result<Value, String> {
     let file = current_file(item)?;
     worker_json(app, metadata_job(&file, kind), task_id, task_title, false)
 }
@@ -2485,7 +3003,11 @@ fn scan_inner(
     for folder in &registered {
         let root_path = resolve_abs(Path::new(folder["path"].as_str().unwrap_or("")));
         let root_text = text_of(&root_path);
-        let label = folder["name"].as_str().filter(|v| !v.is_empty()).map(str::to_string).unwrap_or_else(|| root_text.clone());
+        let label = folder["name"]
+            .as_str()
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| root_text.clone());
         // 实例/文件夹视图只看选定实例所在的文件夹
         if scope == "instance" || scope == "folder" {
             let active = target_folder.as_deref().unwrap_or("");
@@ -2494,7 +3016,12 @@ fn scan_inner(
             }
         }
         // 共享目录模式下的实例其 schematics 就在游戏文件夹根
-        sources.push(Source { folder: Some(root_path.clone()), root: root_path.clone(), label: format!("{label} · 共享目录"), instance_id: None });
+        sources.push(Source {
+            folder: Some(root_path.clone()),
+            root: root_path.clone(),
+            label: format!("{label} · 共享目录"),
+            instance_id: None,
+        });
         let (ids, errors) = installed_version_ids(&root_path);
         for error in errors {
             warnings.push(format!("{root_text}{COLON}{error}"));
@@ -2503,10 +3030,15 @@ fn scan_inner(
             if scope == "instance" && Some(id.as_str()) != target_id.as_deref() {
                 continue;
             }
-            match center_target_dir(app, &json!({ "folder": root_text, "id": id })) {
-                Ok(dir) => {
-                    sources.push(Source { folder: Some(root_path.clone()), root: dir, label: id.clone(), instance_id: Some(id.clone()) });
-                    instances.push(json!({ "folder": root_text, "id": id, "name": format!("{id} · {root_text}") }));
+            match center_target_dir_state(app, &json!({ "folder": root_text, "id": id })) {
+                Ok((dir, isolated)) => {
+                    sources.push(Source {
+                        folder: Some(root_path.clone()),
+                        root: dir,
+                        label: id.clone(),
+                        instance_id: Some(id.clone()),
+                    });
+                    instances.push(json!({ "folder": root_text, "id": id, "name": format!("{id} · {root_text}"), "isolated": isolated }));
                 }
                 Err(_) => warnings.push(format!("无法读取实例：{root_text}{COLON}{id}")),
             }
@@ -2521,7 +3053,16 @@ fn scan_inner(
             continue;
         }
         for kind in KINDS {
-            if let Err(e) = visit_source(rec, source, kind, projection_dir(), 0, &mut visited, &mut found, &mut order) {
+            if let Err(e) = visit_source(
+                rec,
+                source,
+                kind,
+                projection_dir(),
+                0,
+                &mut visited,
+                &mut found,
+                &mut order,
+            ) {
                 if !e.not_found {
                     warnings.push(format!("{}{COLON}{}", source.label, e.message));
                 }
@@ -2564,7 +3105,10 @@ fn scan_inner(
                         json!({ "error": e })
                     }
                 };
-                METADATA_CACHE.lock().unwrap().insert(id.clone(), (size, modified, value.clone()));
+                METADATA_CACHE
+                    .lock()
+                    .unwrap()
+                    .insert(id.clone(), (size, modified, value.clone()));
                 value
             }
         };
@@ -2602,8 +3146,17 @@ fn scan_inner(
             }
         }
     }
-    let mut entries: Vec<Value> = order.iter().filter_map(|id| found.get(id)).map(|stored| stored.entry.clone()).collect();
-    entries.sort_by(|a, b| b["modified"].as_f64().unwrap_or(0.0).total_cmp(&a["modified"].as_f64().unwrap_or(0.0)));
+    let mut entries: Vec<Value> = order
+        .iter()
+        .filter_map(|id| found.get(id))
+        .map(|stored| stored.entry.clone())
+        .collect();
+    entries.sort_by(|a, b| {
+        b["modified"]
+            .as_f64()
+            .unwrap_or(0.0)
+            .total_cmp(&a["modified"].as_f64().unwrap_or(0.0))
+    });
     Ok(json!({
         "entries": entries,
         "warnings": warnings,
@@ -2634,8 +3187,22 @@ fn action_title(action: &str) -> &'static str {
     }
 }
 
-fn emit_run_progress(app: &tauri::AppHandle, task_id: &str, task_title: &str, total: u64, base: u64, bytes: u64, processed: usize, count: usize, name: &str) {
-    let progress = if total > 0 { ((base + bytes) as f64 / total as f64).min(1.0) } else { 0.0 };
+fn emit_run_progress(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    task_title: &str,
+    total: u64,
+    base: u64,
+    bytes: u64,
+    processed: usize,
+    count: usize,
+    name: &str,
+) {
+    let progress = if total > 0 {
+        ((base + bytes) as f64 / total as f64).min(1.0)
+    } else {
+        0.0
+    };
     tasks::emit_progress(
         app,
         json!({
@@ -2667,7 +3234,9 @@ fn run_one(
     }
     let name = entry_name(item);
     let kind = entry_kind(item);
-    emit_run_progress(app, task_id, task_title, total, base, 0, processed, count, &name);
+    emit_run_progress(
+        app, task_id, task_title, total, base, 0, processed, count, &name,
+    );
     let file = current_file(item)?;
     if action == "trash" {
         let inner = item.clone();
@@ -2678,16 +3247,25 @@ fn run_one(
             current_file(&inner)?;
             let full = safe_path(&inner.source.root, &inner.rel, false).map_err(|e| e.message)?;
             let parent = full.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-            let leaf = full.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let leaf = full
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             recycle_file(&parent, &leaf)
         })?;
         return Ok(None);
     }
     worker_json(app, metadata_job(&file, &kind), task_id, task_title, false)?;
-    let root = destination.ok_or("未指定投影目标目录".to_string())?.to_path_buf();
+    let root = destination
+        .ok_or("未指定投影目标目录".to_string())?
+        .to_path_buf();
     let mut on_bytes = {
         let (name, app_ref, tid, title) = (name.clone(), app, task_id, task_title);
-        move |bytes: u64| emit_run_progress(app_ref, tid, title, total, base, bytes, processed, count, &name)
+        move |bytes: u64| {
+            emit_run_progress(
+                app_ref, tid, title, total, base, bytes, processed, count, &name,
+            )
+        }
     };
     let mut output: Option<PathBuf> = None;
     {
@@ -2714,7 +3292,12 @@ fn run_one(
     Ok(output)
 }
 
-fn run(app: &tauri::AppHandle, items: Vec<Stored>, action: &str, destination: Option<&Path>) -> Result<Value, String> {
+fn run(
+    app: &tauri::AppHandle,
+    items: Vec<Stored>,
+    action: &str,
+    destination: Option<&Path>,
+) -> Result<Value, String> {
     let rec = tasks::register_task(&format!("投影文件 · {}", action_title(action)), "world");
     let task_id = rec.id.clone();
     let task_title = rec.title.clone();
@@ -2727,7 +3310,19 @@ fn run(app: &tauri::AppHandle, items: Vec<Stored>, action: &str, destination: Op
         let name = entry_name(item);
         let size = entry_size(item);
         let processed = results.len();
-        let outcome = run_one(app, &rec, item, action, destination, &task_id, &task_title, total, done, processed, count);
+        let outcome = run_one(
+            app,
+            &rec,
+            item,
+            action,
+            destination,
+            &task_id,
+            &task_title,
+            total,
+            done,
+            processed,
+            count,
+        );
         match outcome {
             Ok(path) => {
                 let mut row = json!({ "id": id, "name": name, "ok": true });
@@ -2737,15 +3332,26 @@ fn run(app: &tauri::AppHandle, items: Vec<Stored>, action: &str, destination: Op
                 results.push(row);
             }
             Err(e) => {
-                let message = if rec.cancelled.load(Ordering::SeqCst) { "任务已取消，原投影保留".to_string() } else { e };
+                let message = if rec.cancelled.load(Ordering::SeqCst) {
+                    "任务已取消，原投影保留".to_string()
+                } else {
+                    e
+                };
                 results.push(json!({ "id": id, "name": name, "ok": false, "error": message }));
             }
         }
         done += size;
     }
-    let failed = results.iter().filter(|row| row["ok"].as_bool() != Some(true)).count();
+    let failed = results
+        .iter()
+        .filter(|row| row["ok"].as_bool() != Some(true))
+        .count();
     let cancelled = rec.cancelled.load(Ordering::SeqCst);
-    let error = if failed > 0 { Some(format!("{failed} 个投影处理失败，请查看投影页结果")) } else { None };
+    let error = if failed > 0 {
+        Some(format!("{failed} 个投影处理失败，请查看投影页结果"))
+    } else {
+        None
+    };
     tasks::task_done(app, &task_id, failed == 0, error, cancelled, None);
     Ok(Value::Array(results))
 }
@@ -2756,7 +3362,12 @@ fn operate(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
     let ids = request["ids"].clone();
     let valid_action = matches!(action.as_str(), "collect" | "export" | "dispatch" | "trash");
     let id_len = ids.as_array().map(|a| a.len()).unwrap_or(0);
-    if !request.is_object() || !valid_action || !ids.is_array() || id_len < 1 || id_len > SCAN_ENTRY_LIMIT {
+    if !request.is_object()
+        || !valid_action
+        || !ids.is_array()
+        || id_len < 1
+        || id_len > SCAN_ENTRY_LIMIT
+    {
         return Err("投影操作参数无效".into());
     }
     let root = active_root(app)?;
@@ -2773,14 +3384,31 @@ fn operate(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
             destination = Some(instance_projections_dir(app, &target)?);
         }
         "dispatch" => {
-            let target = request.get("target").filter(|v| v.is_object()).ok_or("请选择目标实例".to_string())?;
+            let target = request
+                .get("target")
+                .filter(|v| v.is_object())
+                .ok_or("请选择目标实例".to_string())?;
             destination = Some(instance_projections_dir(app, target)?);
         }
         "export" => {
-            use tauri_plugin_dialog::DialogExt;
-            let picked = app.dialog().file().set_title("选择投影提取文件夹").blocking_pick_folder();
-            let Some(picked) = picked else { return Ok(Value::Null) };
-            destination = Some(picked.into_path().map_err(|e| e.to_string())?);
+            // 移动端 SAF 无系统文件夹选择器，按用户取消处理
+            #[cfg(mobile)]
+            {
+                return Ok(Value::Null);
+            }
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_dialog::DialogExt;
+                let picked = app
+                    .dialog()
+                    .file()
+                    .set_title("选择投影提取文件夹")
+                    .blocking_pick_folder();
+                let Some(picked) = picked else {
+                    return Ok(Value::Null);
+                };
+                destination = Some(picked.into_path().map_err(|e| e.to_string())?);
+            }
         }
         _ => {}
     }
@@ -2794,7 +3422,10 @@ fn import_at(app: &tauri::AppHandle, paths: &[String], target: Value) -> Result<
     for raw in paths {
         let file = PathBuf::from(raw);
         let meta = stat_of(&file)?;
-        let rel = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let rel = file
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let parent = file.parent().map(|p| p.to_path_buf()).unwrap_or_default();
         let kind = file
             .extension()
@@ -2809,7 +3440,16 @@ fn import_at(app: &tauri::AppHandle, paths: &[String], target: Value) -> Result<
         entry.insert("source".into(), json!("导入"));
         entry.insert("directory".into(), json!(text_of(&parent)));
         entry.insert("library".into(), json!(false));
-        items.push(Stored { entry: Value::Object(entry), source: Source { folder: None, root: parent, label: "导入".into(), instance_id: None }, rel });
+        items.push(Stored {
+            entry: Value::Object(entry),
+            source: Source {
+                folder: None,
+                root: parent,
+                label: "导入".into(),
+                instance_id: None,
+            },
+            rel,
+        });
     }
     run(app, items, "collect", Some(&destination))
 }
@@ -2821,12 +3461,21 @@ fn import_dialog(app: &tauri::AppHandle, target: Value) -> Result<Value, String>
         .dialog()
         .file()
         .set_title("导入投影到当前实例 schematics")
-        .add_filter("Minecraft 投影", &["litematic", "schem", "schematic", "nbt"])
+        .add_filter(
+            "Minecraft 投影",
+            &["litematic", "schem", "schematic", "nbt"],
+        )
         .blocking_pick_files();
-    let Some(picked) = picked else { return Ok(Value::Null) };
+    let Some(picked) = picked else {
+        return Ok(Value::Null);
+    };
     let paths: Vec<String> = picked
         .into_iter()
-        .filter_map(|raw| raw.into_path().ok().map(|p| p.to_string_lossy().into_owned()))
+        .filter_map(|raw| {
+            raw.into_path()
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        })
         .collect();
     if paths.is_empty() {
         return Ok(Value::Null);
@@ -2835,28 +3484,25 @@ fn import_dialog(app: &tauri::AppHandle, target: Value) -> Result<Value, String>
 }
 
 fn open_directory(dir: &Path) -> Result<(), String> {
-    let mut command = if cfg!(windows) { std::process::Command::new("explorer.exe") } else { std::process::Command::new("xdg-open") };
-    command.arg(dir.as_os_str());
-    command.spawn().map_err(|e| e.to_string())?;
-    Ok(())
+    crate::platform::open_path(&dir.to_string_lossy())
 }
 
 fn reveal_item(path: &Path) -> Result<(), String> {
-    if cfg!(windows) {
-        std::process::Command::new("explorer.exe")
-            .arg(format!("/select,{}", path.to_string_lossy()))
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-    open_directory(path.parent().unwrap_or(path))
+    crate::platform::show_in_folder(&path.to_string_lossy())
 }
 
 fn open(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
-    let id = args.first().and_then(|v| v.as_str()).filter(|v| !v.is_empty()).map(str::to_string);
+    let id = args
+        .first()
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
     match id {
         Some(id) => {
-            let item = selected_items(app, &json!([id]))?.into_iter().next().ok_or("请选择投影文件".to_string())?;
+            let item = selected_items(app, &json!([id]))?
+                .into_iter()
+                .next()
+                .ok_or("请选择投影文件".to_string())?;
             reveal_item(&current_file(&item)?)?;
         }
         None => {
@@ -2872,13 +3518,26 @@ fn open(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
 // ---------------- 转换通道（对应原版 core/projectionJobs.ts registerProjectionConversion()） ----------------
 
 fn resolve_source(app: &tauri::AppHandle, id: &str) -> Result<(PathBuf, String), String> {
-    let item = selected_items(app, &json!([id]))?.into_iter().next().ok_or("请选择投影文件".to_string())?;
+    let item = selected_items(app, &json!([id]))?
+        .into_iter()
+        .next()
+        .ok_or("请选择投影文件".to_string())?;
     let file = current_file(&item)?;
     Ok((file, entry_kind(&item)))
 }
 
-fn worker_progress(app: &tauri::AppHandle, task_id: &str, task_title: &str, enabled: bool) -> WorkerProgress {
-    WorkerProgress { app: app.clone(), task_id: task_id.to_string(), task_title: task_title.to_string(), enabled }
+fn worker_progress(
+    app: &tauri::AppHandle,
+    task_id: &str,
+    task_title: &str,
+    enabled: bool,
+) -> WorkerProgress {
+    WorkerProgress {
+        app: app.clone(),
+        task_id: task_id.to_string(),
+        task_title: task_title.to_string(),
+        enabled,
+    }
 }
 
 fn task_wrapper<F>(app: &tauri::AppHandle, title: &str, run: F) -> Result<Value, String>
@@ -2894,9 +3553,21 @@ where
 }
 
 fn analyze(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
-    let id = args.first().and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let format = args.get(1).and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let version = args.get(2).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).map(str::to_string);
+    let id = args
+        .first()
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let format = args
+        .get(1)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let version = args
+        .get(2)
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
     let now = now_ms();
     {
         let mut analyses = ANALYSES.lock().unwrap();
@@ -2906,43 +3577,69 @@ fn analyze(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
         }
     }
     let (file, kind) = resolve_source(app, &id)?;
-    task_wrapper(app, "投影转换 · 分析差异", move |app, _rec, task_id, task_title| {
-        let job = WorkerJob {
-            file: file.clone(),
-            source_format: kind.clone(),
-            action: "analyze",
-            format: Some(format.clone()),
-            version: version.clone(),
-            hash: None,
-            choices: None,
-        };
-        let mut view = match run_projection_worker(job, worker_progress(app, task_id, task_title, true))? {
-            WorkerOutput::Json(value) => value,
-            WorkerOutput::Bytes(_) => Value::Null,
-        };
-        let new_id = uuid_v4();
-        if let Value::Object(map) = &mut view {
-            map.insert("id".into(), json!(new_id.clone()));
-        }
-        ANALYSES.lock().unwrap().insert(
-            new_id,
-            StoredAnalysis { view: view.clone(), source_id: id.clone(), file: file.clone(), time: now_ms() },
-        );
-        Ok(view)
-    })
+    task_wrapper(
+        app,
+        "投影转换 · 分析差异",
+        move |app, _rec, task_id, task_title| {
+            let job = WorkerJob {
+                file: file.clone(),
+                source_format: kind.clone(),
+                action: "analyze",
+                format: Some(format.clone()),
+                version: version.clone(),
+                hash: None,
+                choices: None,
+            };
+            let mut view = match run_projection_worker(
+                job,
+                worker_progress(app, task_id, task_title, true),
+            )? {
+                WorkerOutput::Json(value) => value,
+                WorkerOutput::Bytes(_) => Value::Null,
+            };
+            let new_id = uuid_v4();
+            if let Value::Object(map) = &mut view {
+                map.insert("id".into(), json!(new_id.clone()));
+            }
+            ANALYSES.lock().unwrap().insert(
+                new_id,
+                StoredAnalysis {
+                    view: view.clone(),
+                    source_id: id.clone(),
+                    file: file.clone(),
+                    time: now_ms(),
+                },
+            );
+            Ok(view)
+        },
+    )
 }
 
 fn convert(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
-    let id = args.first().and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let id = args
+        .first()
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let choices = args.get(1).cloned().unwrap_or(Value::Null);
-    let stored = ANALYSES.lock().unwrap().get(&id).map(|v| (v.view.clone(), v.source_id.clone(), v.file.clone(), v.time));
+    let stored = ANALYSES
+        .lock()
+        .unwrap()
+        .get(&id)
+        .map(|v| (v.view.clone(), v.source_id.clone(), v.file.clone(), v.time));
     let Some((view, source_id, analysis_file, time)) = stored else {
         return Err("转换分析已过期，请重新分析".into());
     };
     if now_ms() - time > ANALYSIS_TTL_MS {
         return Err("转换分析已过期，请重新分析".into());
     }
-    if choices.is_null() || !(choices.is_object() || choices.is_array()) || serde_json::to_string(&choices).map(|s| s.len()).unwrap_or(usize::MAX) > CHOICES_LIMIT {
+    if choices.is_null()
+        || !(choices.is_object() || choices.is_array())
+        || serde_json::to_string(&choices)
+            .map(|s| s.len())
+            .unwrap_or(usize::MAX)
+            > CHOICES_LIMIT
+    {
         return Err("转换选择无效".into());
     }
     let (current, current_format) = resolve_source(app, &source_id)?;
@@ -2953,87 +3650,101 @@ fn convert(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
     let target_format = view["targetFormat"].as_str().unwrap_or("").to_string();
     let target_version = view["targetVersion"].as_str().map(str::to_string);
     let source_hash = view["sourceHash"].as_str().unwrap_or("").to_string();
-    task_wrapper(app, "投影转换 · 生成与验证", move |app, rec, task_id, task_title| {
-        if rec.cancelled.load(Ordering::SeqCst) {
-            return Err("投影任务已取消，原文件保留".into());
-        }
-        let job = WorkerJob {
-            file: analysis_file.clone(),
-            source_format: source_format.clone(),
-            action: "convert",
-            format: Some(target_format.clone()),
-            version: target_version.clone(),
-            hash: Some(source_hash.clone()),
-            choices: Some(choices.clone()),
-        };
-        let bytes = match run_projection_worker(job, worker_progress(app, task_id, task_title, true))? {
-            WorkerOutput::Bytes(value) => value,
-            WorkerOutput::Json(_) => Vec::new(),
-        };
-        let dir = analysis_file.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        let stem = analysis_file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-        let mut output = PathBuf::new();
-        {
-            let rec_ref: Option<&TaskRecord> = Some(rec);
-            let target = target_format.clone();
-            with_file_job(&dir, rec_ref, || -> Result<(), String> {
-                if rec.cancelled.load(Ordering::SeqCst) {
-                    return Err("投影任务已取消，原文件保留".into());
-                }
-                let temp = dir.join(format!(".kamucl-convert-{}.part", uuid_v4()));
-                let wrote = (|| -> Result<(), String> {
-                    let mut handle = std::fs::File::create_new(&temp).map_err(|e| e.to_string())?;
-                    handle.write_all(&bytes).map_err(|e| e.to_string())?;
-                    handle.flush().map_err(|e| e.to_string())?;
-                    drop(handle);
+    task_wrapper(
+        app,
+        "投影转换 · 生成与验证",
+        move |app, rec, task_id, task_title| {
+            if rec.cancelled.load(Ordering::SeqCst) {
+                return Err("投影任务已取消，原文件保留".into());
+            }
+            let job = WorkerJob {
+                file: analysis_file.clone(),
+                source_format: source_format.clone(),
+                action: "convert",
+                format: Some(target_format.clone()),
+                version: target_version.clone(),
+                hash: Some(source_hash.clone()),
+                choices: Some(choices.clone()),
+            };
+            let bytes = match run_projection_worker(
+                job,
+                worker_progress(app, task_id, task_title, true),
+            )? {
+                WorkerOutput::Bytes(value) => value,
+                WorkerOutput::Json(_) => Vec::new(),
+            };
+            let dir = analysis_file
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_default();
+            let stem = analysis_file
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let mut output = PathBuf::new();
+            {
+                let rec_ref: Option<&TaskRecord> = Some(rec);
+                let target = target_format.clone();
+                with_file_job(&dir, rec_ref, || -> Result<(), String> {
                     if rec.cancelled.load(Ordering::SeqCst) {
                         return Err("投影任务已取消，原文件保留".into());
                     }
-                    for index in 1..10000usize {
-                        let name = if index == 1 {
-                            format!("{stem}.{target}")
-                        } else {
-                            format!("{stem}-{index}.{target}")
-                        };
-                        let candidate = dir.join(name);
-                        match std::fs::hard_link(&temp, &candidate) {
-                            Ok(_) => {
-                                output = candidate;
-                                break;
-                            }
-                            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                            Err(e) => return Err(e.to_string()),
+                    let temp = dir.join(format!(".kamucl-convert-{}.part", uuid_v4()));
+                    let wrote = (|| -> Result<(), String> {
+                        let mut handle =
+                            std::fs::File::create_new(&temp).map_err(|e| e.to_string())?;
+                        handle.write_all(&bytes).map_err(|e| e.to_string())?;
+                        handle.flush().map_err(|e| e.to_string())?;
+                        drop(handle);
+                        if rec.cancelled.load(Ordering::SeqCst) {
+                            return Err("投影任务已取消，原文件保留".into());
                         }
-                    }
-                    if output.as_os_str().is_empty() {
-                        return Err("转换副本重名过多".into());
-                    }
-                    if rec.cancelled.load(Ordering::SeqCst) {
-                        let _ = std::fs::remove_file(&output);
-                        return Err("投影任务已取消，原文件保留".into());
-                    }
-                    Ok(())
-                })();
-                let _ = std::fs::remove_file(&temp);
-                wrote
-            })?;
-        }
-        ANALYSES.lock().unwrap().remove(id.as_str());
-        tasks::emit_progress(
-            app,
-            json!({
-                "taskId": task_id,
-                "taskTitle": task_title,
-                "stage": "world",
-                "progress": 1,
-                "text": "生成文件已验证，原文件哈希保持不变"
-            }),
-        );
-        Ok(json!({
-            "path": text_of(&output),
-            "name": output.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
-        }))
-    })
+                        for index in 1..10000usize {
+                            let name = if index == 1 {
+                                format!("{stem}.{target}")
+                            } else {
+                                format!("{stem}-{index}.{target}")
+                            };
+                            let candidate = dir.join(name);
+                            match std::fs::hard_link(&temp, &candidate) {
+                                Ok(_) => {
+                                    output = candidate;
+                                    break;
+                                }
+                                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                                Err(e) => return Err(e.to_string()),
+                            }
+                        }
+                        if output.as_os_str().is_empty() {
+                            return Err("转换副本重名过多".into());
+                        }
+                        if rec.cancelled.load(Ordering::SeqCst) {
+                            let _ = std::fs::remove_file(&output);
+                            return Err("投影任务已取消，原文件保留".into());
+                        }
+                        Ok(())
+                    })();
+                    let _ = std::fs::remove_file(&temp);
+                    wrote
+                })?;
+            }
+            ANALYSES.lock().unwrap().remove(id.as_str());
+            tasks::emit_progress(
+                app,
+                json!({
+                    "taskId": task_id,
+                    "taskTitle": task_title,
+                    "stage": "world",
+                    "progress": 1,
+                    "text": "生成文件已验证，原文件哈希保持不变"
+                }),
+            );
+            Ok(json!({
+                "path": text_of(&output),
+                "name": output.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+            }))
+        },
+    )
 }
 
 fn discard_analysis(args: &[Value]) -> Result<Value, String> {
@@ -3054,7 +3765,10 @@ fn handle_drag(app: &tauri::AppHandle, args: &[Value]) {
         for item in &items {
             let file = drag_path(&item.source.root, &item.rel)?;
             let meta = stat_of(&file)?;
-            if !meta.is_file() || meta.len() != entry_size(item) || mtime_ms(&meta) != entry_modified(item) {
+            if !meta.is_file()
+                || meta.len() != entry_size(item)
+                || mtime_ms(&meta) != entry_modified(item)
+            {
                 return Err("投影已变化，请刷新后重试".into());
             }
             paths.push(file.to_string_lossy().to_string());
@@ -3067,9 +3781,13 @@ fn handle_drag(app: &tauri::AppHandle, args: &[Value]) {
     }
 }
 
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
-                "projections:list" => {
+        "projections:list" => {
             let target = args.get(1).cloned().unwrap_or(json!({}));
             Some(list(
                 app,
@@ -3078,11 +3796,15 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             ))
         }
         "projections:operate" => Some(operate(app, args)),
-        "projections:import" => Some(import_dialog(app, args.first().cloned().unwrap_or(Value::Null))),
+        "projections:import" => Some(import_dialog(
+            app,
+            args.first().cloned().unwrap_or(Value::Null),
+        )),
         // 拖拽导入（projections:importAt）：带路径 + 目标实例，跳过对话框
         "projections:importAt" => Some(import_at(
             app,
-            &args.first()
+            &args
+                .first()
                 .and_then(|v| v.as_array())
                 .map(|a| {
                     a.iter()

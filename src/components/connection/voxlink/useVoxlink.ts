@@ -45,11 +45,11 @@ const PHASE_LABELS: Record<string, string> = {
 };
 
 export const vl = reactive({
-    /** 组件是否可用；false 时界面只出"请稍等" */
+    /** 组件二进制是否就绪；false 时界面只出获取进度（下载在后台继续，可离开页面） */
     ready: false,
     preparing: false,
-    prepareText: '',
     prepareError: '',
+    /** 当前安装的 release 版本号（以 GitHub/Gitee release tag 为准，非 CLI 自报构建标签） */
     version: '',
     protocol: 0,
     capabilities: [] as string[],
@@ -62,8 +62,31 @@ export const vl = reactive({
     logs: [] as { ts: number; level: string; text: string }[],
     lastError: '',
     /** 房号是否可能在服务端滞留（强杀后靠心跳过期） */
-    roomMayLinger: false
+    roomMayLinger: false,
+    /** 后台更新流水线状态（检查/下载/待替换全部静默发生，这里只做展示） */
+    update: {
+        phase: 'idle',
+        latest: '',
+        bytes: 0,
+        total: null as number | null,
+        progress: null as number | null,
+        message: '',
+        pending: '' as string | null
+    } as VlUpdateState
 });
+
+export interface VlUpdateState {
+    phase: 'idle' | 'checking' | 'downloading' | 'pending' | 'latest' | 'failed';
+    latest?: string;
+    bytes?: number;
+    total?: number | null;
+    progress?: number | null;
+    message?: string;
+    version?: string;
+    lastCheckAt?: number;
+    lastError?: string | null;
+    pending?: string | null;
+}
 
 export const section = ref<VlSection>('lobby');
 
@@ -95,18 +118,18 @@ export function onDropPaths(handler: (paths: string[]) => void): () => void {
 
 /** 大厅点加入时暂存房号，加入页读一次就清空 */
 export const pendingJoinCode = ref('');
+/** 大厅直加失败时带去加入页的原因（如实际有密码、门控拦截） */
+export const pendingJoinError = ref('');
 
 let bound = false;
 
-/** 下载进度：后端在 asset.rs 里推 vlcli:progress。 */
-function onProgress(payload: unknown): void {
-    const p = (payload || {}) as { stage?: string; bytes?: number; total?: number; text?: string };
-    const text = p.text || vl.prepareText;
-    if (p.stage === 'download' && p.total) {
-        vl.prepareText = `${text} ${Math.min(99, Math.floor(((p.bytes || 0) / p.total) * 100))}%`;
-    } else if (text) {
-        vl.prepareText = text;
+/** 把后台更新流水线的事件折进展示状态（检查/下载/待替换全程静默，界面只读这里）。 */
+function onUpdateState(data: Record<string, unknown>): void {
+    const u = vl.update as unknown as Record<string, unknown>;
+    for (const key of ['phase', 'latest', 'bytes', 'total', 'progress', 'message', 'version', 'lastCheckAt', 'lastError', 'pending']) {
+        if (data[key] !== undefined) u[key] = data[key];
     }
+    if (typeof data.version === 'string' && data.version) vl.version = data.version;
 }
 
 function onEvent(payload: unknown): void {
@@ -139,6 +162,9 @@ function onEvent(payload: unknown): void {
         case 'error':
             vl.lastError = String(data.message || '联机操作未完成');
             break;
+        case 'update':
+            onUpdateState(data);
+            break;
         case 'closed':
             vl.alive = false;
             vl.state = 'idle';
@@ -170,35 +196,49 @@ export const host = vlHost;
 export const join = vlJoin;
 export const stop = vlStop;
 
-/** 准备联机组件：静默下载、校验、探版本。 */
+/** 准备联机组件：后端本地判定毫秒级返回；检查与下载全在后台流水线，界面永不等网络。 */
 export async function vlEnsure(force = false): Promise<boolean> {
     if (vl.ready && !force) return true;
     if (vl.preparing) return false;
     vl.preparing = true;
     vl.prepareError = '';
-    vl.prepareText = '正在准备联机组件…';
-    const r = await vlCall<{ version?: string; path?: string; offline?: boolean }>('vlcli:ensure', { force });
-    if (!r.ok && r.message) {
-        // ensure 走的是结构化返回，失败时把原因留着给界面显示
-        vl.prepareError = String(r.message);
-    } else if (r.data?.version) {
-        vl.version = String(r.data.version);
+    const r = await vlCall<{ ready?: boolean; version?: string }>('vlcli:ensure', { force });
+    if (!r.ok) {
+        const err = (r.data as { error?: string } | undefined)?.error;
+        vl.prepareError = r.message || err || '联机组件不可用';
+    } else {
+        const d = (r.data || {}) as { ready?: boolean; version?: string };
+        vl.version = String(d.version || vl.version || '');
+        vl.ready = Boolean(d.ready);
     }
-    if (!vl.prepareError) {
-        const cap = await vlCall<Record<string, unknown>>('vlcli:capabilities');
-        const data = (cap.data || {}) as Record<string, unknown>;
-        if (cap.ok) {
-            vl.version = String(data.version || vl.version);
-            vl.protocol = Number(data.protocolVersion || 0);
-            vl.capabilities = Array.isArray(data.capabilities) ? (data.capabilities as string[]) : [];
-            vl.ready = true;
-        } else {
-            vl.prepareError = String(data.error || cap.message || '联机组件不可用');
-        }
+    if (!vl.ready) {
+        // 还没有二进制：读一次后台流水线状态，界面显示下载进度（可离开页面，回来接着看）
+        const s = await vlCall<VlUpdateState>('vlcli:updateState');
+        if (s.ok && s.data) onUpdateState(s.data as unknown as Record<string, unknown>);
+    } else {
+        void fillCapabilities();
+        // 已就绪也同步一次更新状态：后台可能在用户离开时完成了升级，版本显示要追上
+        const s = await vlCall<VlUpdateState>('vlcli:updateState');
+        if (s.ok && s.data) onUpdateState(s.data as unknown as Record<string, unknown>);
     }
     vl.preparing = false;
-    vl.prepareText = '';
     return vl.ready;
+}
+
+/** 协议号与能力清单：纯本地探测，异步补齐；不阻塞进入，也不覆盖 release 版本号。 */
+async function fillCapabilities(): Promise<void> {
+    const cap = await vlCall<Record<string, unknown>>('vlcli:capabilities');
+    if (!cap.ok) return;
+    const data = (cap.data || {}) as Record<string, unknown>;
+    vl.protocol = Number(data.protocolVersion || 0);
+    vl.capabilities = Array.isArray(data.capabilities) ? (data.capabilities as string[]) : [];
+}
+
+/** 手动触发一次后台检查（设置页「检查更新」）；结果经 update 事件回流，不在这里等。 */
+export async function vlCheckUpdate(): Promise<void> {
+    await vlCall('vlcli:ensure', { force: true });
+    const s = await vlCall<VlUpdateState>('vlcli:updateState');
+    if (s.ok && s.data) onUpdateState(s.data as unknown as Record<string, unknown>);
 }
 
 export async function vlRefreshStatus(): Promise<void> {
@@ -245,7 +285,6 @@ export function useVoxlink() {
     if (!bound) {
         bound = true;
         window.kamucl.on('vlcli:event', onEvent);
-        window.kamucl.on('vlcli:progress', onProgress);
     }
     return { vl, section, ensure: vlEnsure, call: vlCall, host: vlHost, join: vlJoin, stop: vlStop, refresh: vlRefreshStatus };
 }

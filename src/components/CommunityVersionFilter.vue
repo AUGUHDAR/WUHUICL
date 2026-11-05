@@ -1,6 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
-const props = defineProps<{ modelValue: string; versions: string[]; loading?: boolean }>();
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+/** 全量清单项：type 供彩色角标（PCL 式——正式版/快照/旧版一眼可辨） */
+type VersionType = 'release' | 'snapshot' | 'old_beta' | 'old_alpha';
+const props = defineProps<{
+    modelValue: string;
+    versions: Array<{ id: string; type: VersionType }>;
+    loading?: boolean;
+}>();
 const emit = defineEmits<{ 'update:modelValue': [value: string]; change: [] }>();
 const input = ref<HTMLInputElement>(),
     menu = ref<HTMLElement>(),
@@ -9,11 +15,17 @@ const input = ref<HTMLInputElement>(),
     keyboardSelection = ref(false);
 const text = ref(props.modelValue);
 const options = computed(() => [
-    '',
+    { id: '', type: 'release' as VersionType },
     ...props.versions
-        .filter((v) => v.toLowerCase().includes(text.value.trim().toLowerCase()))
-        .slice(0, 60)
+        .filter((v) => v.id.toLowerCase().includes(text.value.trim().toLowerCase()))
+        .slice(0, 200)
 ]);
+const typeText: Record<VersionType, string> = {
+    release: '正式版',
+    snapshot: '快照',
+    old_beta: 'Beta',
+    old_alpha: 'Alpha'
+};
 const position = ref<Record<string, string>>({});
 function close() {
     open.value = false;
@@ -33,7 +45,7 @@ function show() {
         maxHeight: Math.min(280, Math.max(48, up ? above : below)) + 'px',
         ...(up ? { bottom: innerHeight - rect.top + 4 + 'px' } : { top: rect.bottom + 4 + 'px' })
     };
-    active.value = Math.max(0, options.value.indexOf(props.modelValue));
+    active.value = Math.max(0, options.value.findIndex((o) => o.id === props.modelValue));
     open.value = true;
     addEventListener('pointerdown', outside, true);
     addEventListener('scroll', onScroll, true);
@@ -92,7 +104,7 @@ function keyboard(event: KeyboardEvent) {
         event.preventDefault();
         choose(
             open.value && keyboardSelection.value
-                ? (options.value[active.value] ?? text.value.trim())
+                ? (options.value[active.value]?.id ?? text.value.trim())
                 : text.value.trim()
         );
     } else if (event.key === 'Tab') {
@@ -104,7 +116,6 @@ function keyboard(event: KeyboardEvent) {
     }
 }
 // An instance filter or reset can change the value while the text field is mounted.
-import { watch } from 'vue';
 watch(
     () => props.modelValue,
     (value) => {
@@ -155,16 +166,22 @@ onBeforeUnmount(close);
                 <button
                     v-for="(version, i) in options"
                     :id="'community-version-option-' + i"
-                    :key="version"
+                    :key="version.id"
                     type="button"
                     role="option"
-                    :aria-selected="modelValue === version"
+                    :aria-selected="modelValue === version.id"
                     :data-focused="active === i"
-                    :class="{ selected: modelValue === version }"
+                    :class="{ selected: modelValue === version.id }"
                     @pointerdown.prevent
-                    @click="choose(version)"
+                    @click="choose(version.id)"
                 >
-                    {{ version || '全部版本' }}
+                    <span class="cvf-name">{{ version.id || '全部版本' }}</span
+                    ><span
+                        v-if="version.id"
+                        class="cvf-type"
+                        :class="'is-' + version.type"
+                        >{{ typeText[version.type] }}</span
+                    >
                 </button>
                 <p v-if="options.length === 1 && text.trim()" class="muted">
                     没有匹配项；按 Enter 使用输入版本
@@ -193,7 +210,9 @@ onBeforeUnmount(close);
     box-shadow: var(--shadow);
 }
 .community-version-popup button {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 10px;
     width: 100%;
     min-height: var(--row-h);
     padding: 8px 12px;
@@ -214,6 +233,39 @@ onBeforeUnmount(close);
     background: var(--accent-soft);
     color: var(--text);
     font-weight: 600;
+}
+/* 类型彩色角标（PCL 式）：正式版=绿 / 快照=橙 / 旧版=灰 */
+.cvf-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.cvf-type {
+    flex: none;
+    font-size: 11px;
+    line-height: 1.5;
+    padding: 0 7px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+}
+.cvf-type.is-release {
+    color: #2e7d32;
+    background: color-mix(in srgb, #4caf50 16%, transparent);
+    border-color: color-mix(in srgb, #4caf50 35%, transparent);
+}
+.cvf-type.is-snapshot {
+    color: #b26a00;
+    background: color-mix(in srgb, #ff9800 16%, transparent);
+    border-color: color-mix(in srgb, #ff9800 35%, transparent);
+}
+.cvf-type.is-old_beta,
+.cvf-type.is-old_alpha {
+    color: var(--text-dim);
+    background: color-mix(in srgb, var(--text) 7%, transparent);
+    border-color: color-mix(in srgb, var(--text) 16%, transparent);
 }
 .community-version-popup p {
     padding: 8px;

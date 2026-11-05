@@ -3070,6 +3070,76 @@ fn community_download_ipc(app: &tauri::AppHandle, args: &[Value]) -> Result<Valu
     let kind = target.get("kind").and_then(|v| v.as_str()).unwrap_or("mod").to_string();
     let version_id = target.get("versionId").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
+    // 外部目录（PCL 同款能力）：资源文件直落任意文件夹，不要求登记实例
+    let external = target
+        .get("externalDir")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    if let Some(dir) = external {
+        if kind == "modpack" {
+            tasks::task_done(
+                app,
+                &rec.id,
+                false,
+                Some("整合包需要安装到游戏实例，请选择实例".into()),
+                false,
+                None,
+            );
+            return Err("整合包需要安装到游戏实例，请选择实例".into());
+        }
+        let path = Path::new(&dir);
+        if !path.is_absolute() {
+            tasks::task_done(app, &rec.id, false, Some("目标目录路径无效".into()), false, None);
+            return Err("目标目录路径无效".into());
+        }
+        let folder = installer::canonical_path(&dir).to_string_lossy().into_owned();
+        let emit = Arc::new(DownloadEmit {
+            app: app.clone(),
+            guard: Mutex::new(ProgressGuard::new()),
+            task_id: rec.id.clone(),
+            task_title: rec.title.clone(),
+            operation_id,
+            last_stage: Arc::new(Mutex::new(String::new())),
+        });
+        emit.emit(&json!({ "stage": "download", "progress": 0, "indeterminate": true, "text": "准备下载资源…" }));
+        let app2 = app.clone();
+        let rec2 = rec.clone();
+        let emit2 = emit.clone();
+        let file2 = file.clone();
+        let target2 = target.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
+        std::thread::spawn(move || {
+            let result = community_download_in_folder(&app2, &rec2, &emit2, &file2, &target2, &folder);
+            let _ = tx.send(result);
+        });
+        let result = rx.recv().map_err(|_| "下载任务异常退出".to_string());
+        return match result {
+            Ok(Ok(path)) => {
+                tasks::task_done(app, &rec.id, true, None, false, None);
+                Ok(json!(path))
+            }
+            Ok(Err(e)) => {
+                let cancelled = download::is_cancel_error(&e) || rec.cancelled.load(Ordering::SeqCst);
+                let last_stage = emit.last_stage.lock().unwrap().clone();
+                tasks::task_done(
+                    app,
+                    &rec.id,
+                    false,
+                    Some(e.clone()),
+                    cancelled,
+                    if last_stage.is_empty() { None } else { Some(last_stage) },
+                );
+                Err(e)
+            }
+            Err(e) => {
+                tasks::task_done(app, &rec.id, false, Some(e.clone()), false, None);
+                Err(e)
+            }
+        };
+    }
+
     // Freeze both the instance and shared directory before the first network await.
     let folder_provided = target.get("folder").is_some();
     let requested = if !folder_provided {

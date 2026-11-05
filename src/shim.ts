@@ -142,6 +142,8 @@ function bridge(): void {
             void invoke('ipc_send', { channel, args }).catch(() => undefined);
         },
         getFilePath: (file: File) => dropPaths.shift() ?? file.name,
+        // 占位值：initBridgePlatform() 在应用挂载前用后端 app_platform 覆盖。
+        // 期间任何早于 init 的读取（应为空）拿到 win32，与旧版行为一致。
         platform: 'win32'
     };
 
@@ -171,6 +173,22 @@ function bridge(): void {
     window.addEventListener('DOMContentLoaded', () => {
         listenTauriDrag();
     });
+}
+
+/**
+ * 从后端取真实平台（win32 / darwin / linux / android）写进 bridge。
+ * 在应用挂载前 await——渲染层所有 platform 分支（macOS 红绿灯、Linux 更新文案、
+ * 内存整理入口等）都以它为准；失败时保持占位值，UI 按旧版行为降级。
+ */
+export async function initBridgePlatform(): Promise<void> {
+    try {
+        const p = await invoke<string>('app_platform');
+        if (p === 'win32' || p === 'darwin' || p === 'linux' || p === 'android') {
+            window.kamucl.platform = p;
+        }
+    } catch {
+        // 后端不可用（极早期）：保留占位值
+    }
 }
 
 bridge();

@@ -7,6 +7,17 @@ export interface LaunchTracking {
     launchingVersionId: string;
     launchingFolder: string;
 }
+/** 已退出/出错的启动记录保留上限（整次会话累计启动不再无限增长） */
+const EXITED_LAUNCH_STATES_LIMIT = 32;
+function pruneExitedLaunchStates(states: Record<string, LaunchState>): void {
+    const exited = Object.keys(states).filter(
+        (k) => states[k].status === 'exited' || states[k].status === 'error'
+    );
+    for (const k of exited.slice(0, Math.max(0, exited.length - EXITED_LAUNCH_STATES_LIMIT))) {
+        delete states[k];
+    }
+}
+
 export function trackLaunchState(state: LaunchTracking, incoming: LaunchState): boolean {
     const focused =
         !incoming.versionId ||
@@ -19,6 +30,7 @@ export function trackLaunchState(state: LaunchTracking, incoming: LaunchState): 
         const key = instanceKey({ id: incoming.versionId, folder: incoming.folder ?? '' });
         if (incoming.launchId) delete state.launchStates[key]; // replace optimistic renderer preparation
         state.launchStates[incoming.launchId ? `${key}#${incoming.launchId}` : key] = incoming;
+        pruneExitedLaunchStates(state.launchStates);
     }
     if (incoming.status === 'launching' || focused || !state.launchState) {
         let next = incoming;

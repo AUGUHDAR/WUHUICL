@@ -173,8 +173,8 @@ function openExternal(url: string) {
 
 /** LittleSkin 内置预设辅助（保留给文档注释：无需手动添加，列表自带） */
 
-function providerIconUrl(provider: YggdrasilProvider): string | null {
-    return skinSiteIconUrl(provider.apiRoot, provider.name);
+function providerIconUrl(provider: YggdrasilProvider): string | undefined {
+    return skinSiteIconUrl(provider.apiRoot, provider.name) ?? undefined;
 }
 
 // ---------------- 拖拽卡片直登弹窗（拖入 → 填账号密码 → 登录入库一步完成） ----------------
@@ -906,15 +906,19 @@ async function onRemove(acc: Account) {
         :open="!!removeTarget"
         :title="removeTarget?.kind === 'account' ? '删除账号' : '删除外置登录提供商'"
         :message="
-            removeTarget?.kind === 'account'
-                ? `确定要删除账号「${removeTarget.acc.username}」吗？删除后可用同一方式重新添加。`
-                : `确定要删除提供商「${removeTarget.provider.name}」吗？使用该提供商登录的账号将无法再验证会话。`
+            removeTarget == null
+                ? ''
+                : removeTarget.kind === 'account'
+                  ? `确定要删除账号「${removeTarget.acc.username}」吗？删除后可用同一方式重新添加。`
+                  : `确定要删除提供商「${removeTarget.provider.name}」吗？使用该提供商登录的账号将无法再验证会话。`
         "
         confirm-text="删除"
         :busy="
-            removeTarget?.kind === 'account'
-                ? removingId === removeTarget.acc.id
-                : removingProviderId === removeTarget.provider.id
+            removeTarget
+                ? removeTarget.kind === 'account'
+                    ? removingId === removeTarget.acc.id
+                    : removingProviderId === removeTarget.provider.id
+                : false
         "
         @confirm="confirmRemove"
         @cancel="removeTarget = null"

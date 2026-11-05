@@ -502,7 +502,7 @@ onMounted(() => {
     void loadFolderState();
 });
 
-// ---------------- 搜索与筛选（搜索框联动顶栏 store.searchKeyword） ----------------
+// ---------------- 搜索与筛选（页内即时搜索，不联动顶栏全局关键词） ----------------
 type TypeFilter = 'all' | 'release' | 'snapshot' | 'old';
 const typeFilter = ref<TypeFilter>('release');
 
@@ -524,7 +524,15 @@ const typeText: Record<RemoteVersion['type'], string> = {
 const typeTagClass = (t: RemoteVersion['type']) =>
     t === 'release' ? 'tag-gold' : t === 'snapshot' ? 'tag-cyan' : '';
 
-const keyword = computed(() => store.searchKeyword.trim().toLowerCase());
+/** 版本图标走 UiGlyph 真实素材（PCL 同款）：快照=命令方块，远古版=圆石，正式版=草方块 */
+const versionGlyph = (t: RemoteVersion['type']) =>
+    t === 'snapshot' ? 'snapshot' : t === 'old_beta' || t === 'old_alpha' ? 'stone' : 'vanilla';
+const versionGroupGlyph = (key: string) =>
+    key.startsWith('snap') ? 'snapshot' : key.startsWith('old') ? 'stone' : 'vanilla';
+
+/** 页内搜索词：只影响版本列表，与顶栏全局搜索互不干扰 */
+const localKeyword = ref('');
+const keyword = computed(() => localKeyword.value.trim().toLowerCase());
 
 /** ETA 由主进程基于字节速度指数平滑；未知总量/暂停时不伪造。 */
 function progressEta(id: string) {
@@ -1401,7 +1409,7 @@ async function confirmIsolation() {
                         <circle cx="11" cy="11" r="7" />
                         <path d="m21 21-4.3-4.3" />
                     </svg>
-                    <input v-model="store.searchKeyword" placeholder="搜索版本号…" />
+                    <input v-model="localKeyword" placeholder="搜索版本号…" />
                 </div>
 
                 <div class="filter-capsules">
@@ -1472,6 +1480,7 @@ async function confirmIsolation() {
             data-ui="game.latest-release"
         >
             <div>
+                <UiGlyph class="version-icon latest-icon" name="vanilla" :size="32" />
                 <span class="tag tag-gold">最新正式版</span><strong>{{ latestRelease.id }}</strong>
                 <time :datetime="latestRelease.releaseTime"
                     >发布于 {{ formatDate(latestRelease.releaseTime) }}</time
@@ -1493,7 +1502,12 @@ async function confirmIsolation() {
         </div>
         <!-- 版本列表 -->
         <div v-if="tab === 'download'" class="card list-card">
-            <ContentSkeleton v-if="loading && !manifest.length" label="正在获取版本列表…" />
+            <ContentSkeleton
+                v-if="loading && !manifest.length"
+                variant="groups"
+                :rows="12"
+                label="正在获取版本列表…"
+            />
             <div v-else-if="loadError && !manifest.length" class="empty">
                 <span>加载失败：{{ loadError }}</span>
                 <button class="btn btn-ghost btn-sm" @click="load(true)">重试</button>
@@ -1516,6 +1530,11 @@ async function confirmIsolation() {
                 >
                     <summary class="collapse-head version-group-head">
                         <span class="version-group-title">
+                            <UiGlyph
+                                class="version-group-icon"
+                                :name="versionGroupGlyph(group.key)"
+                                :size="22"
+                            />
                             <strong>{{ group.label }}</strong>
                             <small class="muted">{{ group.versions.length }} 个版本</small>
                             <span v-if="group.installed" class="tag tag-success"
@@ -1527,6 +1546,12 @@ async function confirmIsolation() {
                     <div class="collapse-body version-group-body">
                         <div v-for="v in group.versions" :key="v.id" class="version-row">
                             <div class="version-info">
+                                <UiGlyph
+                                    class="version-icon"
+                                    :name="versionGlyph(v.type)"
+                                    :size="26"
+                                    :title="typeText[v.type]"
+                                />
                                 <span class="version-id">{{ v.id }}</span>
                                 <span class="tag" :class="typeTagClass(v.type)">{{
                                     typeText[v.type]
@@ -3099,6 +3124,26 @@ async function confirmIsolation() {
     align-items: center;
     gap: var(--space-3);
     min-width: 0;
+}
+/* 版本类型真实图标（HMCL 同款素材，经 UiGlyph）：草方块=正式版/远古版，命令方块=快照 */
+.version-icon {
+    width: 30px;
+    height: 30px;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--card-2);
+}
+.version-icon.latest-icon {
+    width: 36px;
+    height: 36px;
+}
+.version-group-icon {
+    flex: none;
+    display: flex;
 }
 .version-id {
     font-weight: 600;

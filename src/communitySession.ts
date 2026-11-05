@@ -21,8 +21,14 @@ export interface CommunitySession {
     interrupted: boolean;
 }
 let last: CommunitySession | undefined;
+/** 快照保留的结果条数上限：无限滚动可以一直翻页，但跨页面驻留的快照不能跟着无限涨 */
+const COMMUNITY_SESSION_RESULTS_LIMIT = 400;
 export function saveCommunitySession(value: CommunitySession): void {
-    last = JSON.parse(JSON.stringify(value)) as CommunitySession;
+    const clone = JSON.parse(JSON.stringify(value)) as CommunitySession;
+    if (clone.results.length > COMMUNITY_SESSION_RESULTS_LIMIT) {
+        clone.results.length = COMMUNITY_SESSION_RESULTS_LIMIT;
+    }
+    last = clone;
 }
 export function readCommunitySession(): CommunitySession | undefined {
     return last ? structuredClone(last) : undefined;

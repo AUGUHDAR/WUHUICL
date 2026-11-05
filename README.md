@@ -20,6 +20,8 @@
 
 装版本、管实例、下模组和资源包、管皮肤，开游戏前把内存和按键调好，这是它每天干的活。
 
+**平台支持**：Windows 是第一等公民（便携 exe，全功能）。macOS 和 Linux 是实验性支持——安装版本、启动游戏、管 Java、下模组资源、管皮肤、离线/外置登录都可用；Windows 专属功能（内存整理、原生拖出、应用内自动更新、游戏窗口尺寸记忆、VoxLink 联机引擎）在其它平台会自动隐藏或提示不可用。Android 目前只做了架构准备（[docs/ANDROID.md](docs/ANDROID.md)），没有可装的包。
+
 ## 注意
 
 正版登录暂时用不了。Client ID 是自建的应用注册，Mojang 白名单没批，最后一步过不去。离线登录和外置登录正常。
@@ -110,6 +112,8 @@ GPL-3.0-or-later，见 [LICENSE](LICENSE)。从 KAMUCL 和 VoxLink 改写来的�
 Community edition of [KAMUCL](https://github.com/kamubaba-i/KAMUCL), rewritten in Rust and Tauri 2. The original takes up too much while running, and pushing that down is the whole point. Screens still match the original for now, features are still being moved over, new work comes later. The two will pull apart.
 
 Install versions, keep instances, download mods and packs, manage skins, set memory and keybindings before launching.
+
+**Platforms**: Windows is the primary target (portable exe, full features). macOS and Linux are experimental — version installs, game launch, Java management, mod/asset downloads, skins, and offline/external login work; Windows-only features (memory organizer, native drag-out, in-app updates, game window size memory, VoxLink engine) degrade gracefully elsewhere. Android currently has architecture groundwork only ([docs/ANDROID.md](docs/ANDROID.md)), no installable build yet.
 
 ## Notes
 

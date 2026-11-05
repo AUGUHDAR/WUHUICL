@@ -382,6 +382,8 @@ export interface Settings {
     uiWindowAutoFit?: boolean;
     /** Explicit reduction is additive to the operating system preference; absent means follow system. */
     reduceMotion?: boolean;
+    /** 最小化时自动整理内存（换出自身工作集 + 暂停 WebView2 渲染 + 释放可重建缓存）；缺省视为开启。 */
+    memTrimOnMinimize?: boolean;
     visualDesign?: import('./visualDesign').VisualDesign;
     gameDir: string;
     /** 游戏文件夹登记列表（每个文件夹独立 versions/；libraries/assets/runtimes 共享于默认文件夹） */
@@ -585,9 +587,21 @@ export interface BackgroundSettings {
 
 export type ImageFit = 'fill' | 'fit' | 'crop';
 
+/** 像素动画播放参数（launchThumbnail.animation）。 */
+export interface HeroAnimationSettings {
+    /** 场景时钟倍率：1=原速，0.5 慢速，上限 3。 */
+    speed?: number;
+    /** 每场景停留秒数（1..60，默认 9.5）。 */
+    dwellSeconds?: number;
+}
+
 export interface LaunchThumbnailSettings {
     /** KAMUCL userData 受管资源路径；空字符串使用内置轮播。 */
     image: string;
+    /** 背景类型：animation=像素动画场景（默认）；image=图片轮播（下方其余字段）。 */
+    mode?: 'animation' | 'image';
+    /** 像素动画播放参数。 */
+    animation?: HeroAnimationSettings;
     /** Ordered managed carousel images; absent means migrate legacy `image`. */
     images?: string[];
     /** Mixed ordering: stable builtin:<id> keys and managed custom image paths. */
@@ -620,8 +634,36 @@ export const DEFAULT_BACKGROUND: BackgroundSettings = {
 
 export const DEFAULT_LAUNCH_THUMBNAIL: LaunchThumbnailSettings = {
     image: '',
+    mode: 'animation',
     fit: 'crop'
 };
+
+// ---------------- 首页启动卡像素动画（hero:frame） ----------------
+
+/** hero:frame 请求：时钟由前端持有，后端是无状态渲染器。 */
+export interface HeroFrameRequest {
+    /** 场景 id（HERO_SCENES 注册表）；炉火带地标后缀，如 "hearth:mine"。 */
+    scene: string;
+    /** 场景时钟（秒）。 */
+    age: number;
+    columns: number;
+    rows: number;
+    /** 离场场景与转场进度（0..1，区块加载式过渡）。 */
+    leaving?: { scene: string; age: number; progress: number };
+    /** 世界已加载份额（<1 时其余为 void），启动进度联动用。 */
+    reveal?: number;
+    /** 前景常驻内容时整体压暗。 */
+    dim?: boolean;
+    /** 指针悬停开始游戏（0..1）。 */
+    flare?: number;
+}
+
+/** hero:frame 响应：原始像素（网格分辨率 u32 流）与 HUD 读数。 */
+export interface HeroFrameResponse {
+    /** base64(u32 LE)：逐 texel 的 0xRRGGBB，行主序，共 columns×rows 个。 */
+    bin: string;
+    hud: string | null;
+}
 
 // ---------------- 皮肤/披风 ----------------
 export type SkinVariant = 'classic' | 'slim';
@@ -729,7 +771,7 @@ export interface LaunchState {
     launchId?: string;
     versionId?: string;
     folder?: string;
-    status: 'launching' | 'running' | 'exited' | 'error';
+    status: 'launching' | 'waiting-window' | 'running' | 'exited' | 'error';
     text: string;
     code?: number;
     intentionalRestart?: boolean;
@@ -746,6 +788,9 @@ export const IPC = {
     centerOperation: 'center:operation',
     centerDiagnose: 'center:diagnose',
     centerFile: 'center:file',
+    centerSetNote: 'center:setNote', // (target, note) 写实例备注（version json note 字段）
+    worldMapInfo: 'worldmap:info', // (instanceId, world) 世界元信息 + 各维度 region 清单
+    worldMapRenderTile: 'worldmap:renderTile', // (instanceId, world, dimension, level, tx, tz) => { path } | { empty }
     exitHistoryList: 'exitHistory:list',
     exitHistoryAck: 'exitHistory:ack',
     exitHistoryClear: 'exitHistory:clear',
@@ -763,6 +808,7 @@ export const IPC = {
     pluginsReadCode: 'plugins:readCode', // (id: string) => string  仅启用插件可读
     pluginsOpenDir: 'plugins:openDir', // () => void  打开插件目录
     appSelectImage: 'app:selectImage', // () => string | null  选择图片文件（png/jpg/webp）
+    appSelectFiles: 'app:selectFiles', // (filter: string[], 形如 ['模组|*.jar']) => string[]  多选文件，取消返回 []
     appearanceImportBackground: 'appearance:importBackground', // () => Settings | null  导入受管背景并保存
     appearanceImportBackgroundMulti: 'appearance:importBackgroundMulti', // () => Settings | null  多选导入背景图（自动切换用）
     appearanceResetBackground: 'appearance:resetBackground', // () => Settings  恢复默认并清理旧受管背景
@@ -770,6 +816,7 @@ export const IPC = {
     appearanceResetFaceImage: 'appearance:resetFaceImage', // (slot) => null  删除自定义头图文件
     appearanceImportLaunchThumbnail: 'appearance:importLaunchThumbnail', // () => Settings | null
     appearanceResetLaunchThumbnail: 'appearance:resetLaunchThumbnail', // () => Settings
+    heroFrame: 'hero:frame', // (HeroFrameRequest) => HeroFrameResponse  首页启动卡像素动画单帧渲染
 
     // 账号
     accountsList: 'accounts:list', // () => Account[]
@@ -876,6 +923,9 @@ export const IPC = {
     serversEdit: 'servers:edit', // (id: string, name: string, address: string) => ServerEntry[]
     serversFavorite: 'servers:favorite',
     serversRemove: 'servers:remove', // (id: string) => ServerEntry[]
+    launchShareMclogs: 'launch:shareMclogs', // (versionId, folder?) => { url, bytes }
+    launchExportScript: 'game:exportScript', // (versionId, folder?) => 保存路径
+    launchStatsHeatmap: 'launchStats:heatmap', // () => Record<'YYYY-MM-DD', number>
     serversPing: 'servers:ping', // (address: string) => ServerPingResult  6 秒超时
     serversBind: 'servers:bind', // (id: string, versionId: string, folder?: string) => ServerEntry[]  绑定/解绑具体实例
     serversSyncFromDat: 'servers:syncFromDat', // (versionId?: string, folder?: string) => ServerSyncResult
@@ -1009,7 +1059,7 @@ export const IPC_EVENT = {
  * 默认微软登录 client_id：Prism Launcher 注册的公开 Azure 应用，
  * 已在 consumers 租户实测支持 device code 流程；可在设置中替换为自注册应用
  */
-export const DEFAULT_MS_CLIENT_ID = 'c36a9fb6-4f2a-41ff-90bd-ae7cc92031eb';
+export const DEFAULT_MS_CLIENT_ID = 'e692df62-9c0e-497f-99ae-749e26537817';
 
 // ---------------- 社区资源 ----------------
 export type CommunityKind = 'mod' | 'modpack' | 'resourcepack' | 'shader' | 'datapack';
@@ -1045,7 +1095,7 @@ export interface CommunityResult {
 
 /** An identity can open download/metadata without inventing absent search metrics. */
 export type CommunityProjectReference = Pick<CommunityResult, 'source' | 'projectId' | 'title'> &
-    Partial<Pick<CommunityResult, 'slug' | 'originalTitle'>>;
+    Partial<Pick<CommunityResult, 'slug' | 'originalTitle' | 'iconUrl'>>;
 export interface CommunityModProject extends CommunityProjectReference {
     kind: 'mod';
     iconUrl?: string;
@@ -1413,6 +1463,8 @@ export interface ServerPingResult {
     /** MOTD 纯文本（去格式化码） */
     motd: string;
     version: string;
+    /** 服务器真实头像（SLP favicon 的 data URL；离线/无图标为空） */
+    favicon?: string;
     latencyMs: number;
 }
 

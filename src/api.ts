@@ -43,6 +43,8 @@ import type {
     ServerSyncResult,
     Settings,
     VersionCategoryAction,
+    HeroFrameRequest,
+    HeroFrameResponse,
     SkinHistoryEntry,
     SkinVariant,
     SystemInfo,
@@ -86,6 +88,8 @@ export const getExitHistory = () =>
         }>
     >(IPC.exitHistoryList);
 export const acknowledgeExitHistory = () => invoke<void>(IPC.exitHistoryAck);
+export const getLaunchHeatmap = () =>
+    invoke<Record<string, number>>(IPC.launchStatsHeatmap);
 export const clearExitHistory = () => invoke<void>(IPC.exitHistoryClear);
 /** 真实系统信息（物理内存总量等），用于内存滑块上限等 */
 export const getSystemInfo = () => invoke<SystemInfo>(IPC.appSystemInfo);
@@ -104,6 +108,8 @@ export const resetBackground = () => invoke<Settings>(IPC.appearanceResetBackgro
 export const importLaunchThumbnail = () =>
     invoke<Settings | null>(IPC.appearanceImportLaunchThumbnail);
 export const resetLaunchThumbnail = () => invoke<Settings>(IPC.appearanceResetLaunchThumbnail);
+/** 首页启动卡像素动画：单帧渲染（场景注册表与时钟在 src/heroScenes.ts） */
+export const heroFrame = (request: HeroFrameRequest) => invoke<HeroFrameResponse>(IPC.heroFrame, request);
 /** 游戏目录迁移（异步）；结束经 onGameDirDone 回调 */
 export const migrateGameDir = (newDir: string, migrate: boolean) =>
     invoke<void>(IPC.gameDirMigrate, newDir, migrate);
@@ -111,6 +117,8 @@ export const onGameDirDone = (cb: (r: { ok: boolean; error?: string; gameDir?: s
     subscribe<{ ok: boolean; error?: string; gameDir?: string }>(IPC_EVENT.gameDirDone, cb);
 /** 选择整合包文件（.mrpack/.zip），取消返回 null */
 export const selectFile = () => invoke<string | null>(IPC.appSelectFile);
+/** 多选文件，filter 形如 ['模组|*.jar']；取消/未选返回 [] */
+export const selectFiles = (filter: string[]) => invoke<string[]>(IPC.appSelectFiles, filter);
 
 // ---------------- 账号 ----------------
 export const listAccounts = () => invoke<Account[]>(IPC.accountsList);
@@ -260,10 +268,11 @@ export const communityFiles = (
     projectId: string,
     filter?: { mcVersion?: string; loader?: LoaderName | ''; kind?: CommunityKind }
 ) => invoke<CommunityFile[]>(IPC.communityFiles, source, projectId, filter);
-/** 下载资源文件，返回保存路径；kind=modpack 时自动进入整合包安装流程 */
+/** 下载资源文件，返回保存路径；kind=modpack 时自动进入整合包安装流程；
+ * externalDir 提供时资源直落该外部目录（与 versionId 互斥） */
 export const communityDownload = (
     file: CommunityFile,
-    target: { versionId: string; kind: CommunityKind; folder?: string },
+    target: { versionId: string; kind: CommunityKind; folder?: string; externalDir?: string },
     operationId?: string
 ) => invoke<string>(IPC.communityDownload, file, target, operationId);
 
@@ -588,6 +597,14 @@ export const resumeTask = (taskId: string) => invoke<boolean>(IPC.tasksResume, t
 /** 导出启动失败日志包（弹系统保存对话框），返回保存路径（取消 = null） */
 export const exportLaunchLogs = (versionId: string, folder?: string) =>
     invoke<string | null>(IPC.launchExportLogs, versionId, folder);
+
+/** 脱敏后把 latest.log 分享到 mclo.gs，返回分享链接 */
+export const shareLogsToMclogs = (versionId: string, folder?: string) =>
+    invoke<{ url: string; bytes: number }>(IPC.launchShareMclogs, versionId, folder);
+
+/** 导出最近一次启动的完整命令为 .bat 脚本（弹系统保存对话框），取消 = null */
+export const exportLaunchScript = (versionId: string, folder?: string) =>
+    invoke<string | null>(IPC.launchExportScript, versionId, folder);
 
 // ---------------- 工具 ----------------
 /** 把 invoke 抛出的错误转成适合 toast 展示的短文本 */

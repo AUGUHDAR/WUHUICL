@@ -13,7 +13,11 @@ use tauri::{AppHandle, Emitter, Manager};
 const GB: u64 = 1024 * 1024 * 1024;
 
 /// 返回 None 表示本模块不认识该通道（由路由继续分发）；Some(result) 即最终结果。
-pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
+pub fn invoke(
+    app: &tauri::AppHandle,
+    channel: &str,
+    args: &[Value],
+) -> Option<Result<Value, String>> {
     match channel {
         "gameDir:migrate" => Some(game_dir_migrate(app, args)),
         _ => None,
@@ -86,31 +90,8 @@ fn dir_stats(dir: &Path) -> DirStats {
 
 // ---------------- 校验（gamedir.ts checkTarget） ----------------
 
-// GetDiskFreeSpaceExW（kernel32；windows-sys 的 Storage::FileSystem feature 未启用，手动声明）
-#[link(name = "kernel32")]
-extern "system" {
-    fn GetDiskFreeSpaceExW(
-        lpdirectoryname: *const u16,
-        lpfreebytesavailabletocaller: *mut u64,
-        lptotalnumberofbytes: *mut u64,
-        lptotalnumberoffreebytes: *mut u64,
-    ) -> i32;
-}
-
 fn free_disk_bytes(dir: &Path) -> Option<u64> {
-    let wide: Vec<u16> = dir
-        .to_string_lossy()
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-    let mut free: u64 = 0;
-    unsafe {
-        if GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, std::ptr::null_mut(), std::ptr::null_mut()) != 0 {
-            Some(free)
-        } else {
-            None
-        }
-    }
+    crate::platform::free_disk_bytes(dir)
 }
 
 /// 解析路径（node path.resolve 等价：相对 → cwd 合并）
@@ -142,7 +123,10 @@ pub fn check_target(app: &AppHandle, new_dir: &Path, need_bytes: u64) -> Result<
     }
     std::fs::create_dir_all(new_dir).map_err(|e| format!("目标目录不可写（权限问题）：{}", e))?;
     // 权限测试：创建并删除一个临时文件
-    let probe = new_dir.join(format!(".kamucl-probe-{}", chrono::Utc::now().timestamp_millis()));
+    let probe = new_dir.join(format!(
+        ".kamucl-probe-{}",
+        chrono::Utc::now().timestamp_millis()
+    ));
     let write_result = std::fs::write(&probe, "ok");
     let _ = std::fs::remove_file(&probe);
     write_result.map_err(|e| format!("目标目录不可写（权限问题）：{}", e))?;
@@ -172,16 +156,26 @@ pub fn migrate_game_dir(
 ) -> Result<String, String> {
     let src = installer::game_dir(app);
     let resolved = resolve_path(new_dir);
-    let stats = if migrate { dir_stats(Path::new(&src)) } else { DirStats { files: 0, bytes: 0 } };
+    let stats = if migrate {
+        dir_stats(Path::new(&src))
+    } else {
+        DirStats { files: 0, bytes: 0 }
+    };
 
     progress(&json!({ "stage": "migrate", "progress": 0, "text": "校验目标目录…" }));
     check_target(app, &resolved, stats.bytes)?;
 
     if migrate && stats.files > 0 {
         let done = Arc::new(Mutex::new(0u64));
-        copy_walk(Path::new(&src), &resolved, stats.files, &done, &|text, fraction| {
-            progress(&json!({ "stage": "migrate", "progress": fraction, "text": text }));
-        })?;
+        copy_walk(
+            Path::new(&src),
+            &resolved,
+            stats.files,
+            &done,
+            &|text, fraction| {
+                progress(&json!({ "stage": "migrate", "progress": fraction, "text": text }));
+            },
+        )?;
     }
 
     // 全部完成才切换配置（之前的任何失败都不会破坏现状）

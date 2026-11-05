@@ -32,7 +32,10 @@ export type ViewName =
     | 'packs'
     | 'shaders'
     | 'recordings'
+    | 'screenshots'
     | 'projections'
+    | 'seedmap'
+    | 'worldmap'
     | 'keys'
     | 'skins'
     | 'community'
@@ -131,6 +134,12 @@ export const store = reactive({
     /** 整合包导入处理器（App.vue 注册，供任意页面触发导入确认弹窗） */
     resourceDropHandler: null as ((event: DragEvent) => void) | null,
     importHandler: null as ((filePath: string) => void) | null,
+    /** 资源页→社区资源的语境交接：社区页挂载时消费（预填资源类型与目标实例） */
+    communityHandoff: null as null | {
+        kind: 'mod' | 'resourcepack' | 'shader';
+        versionId: string;
+        nonce: number;
+    },
     /** 启动器更新弹窗触发器（设置页手动检查/启动自动检查写入，App.vue 监听打开弹窗） */
     updatePrompt: null as {
         release: import('@shared/types').ReleaseInfo;
@@ -139,6 +148,8 @@ export const store = reactive({
     /** 外置登录提供商拖拽入口；切换到账号页期间先暂存在 pending 中。 */
     yggdrasilImportHandler: null as ((input: YggdrasilProviderInput) => void) | null,
     pendingYggdrasilImport: null as YggdrasilProviderInput | null,
+    /** 实例中心「地图」按钮的跳转请求（WorldMapView 挂载时消费并置空） */
+    worldMapRequest: null as { instanceId: string; world: string } | null,
     /** 后台任务列表（版本安装/整合包导入/资源下载），驱动顶栏下载中心 */
     tasks: [] as TaskItem[],
     toasts: [] as ToastItem[]
@@ -285,6 +296,9 @@ export function finalizeTask(r: {
     t.error = r.error;
     t.progress = r.ok ? 1 : t.progress;
     t.finishedAt = Date.now();
+    // 终态后明细不再渲染（模板只在 running/paused 消费），置空释放引用
+    t.parallelStages = undefined;
+    t.manualFiles = undefined;
     if (r.ok || r.cancelled) {
         // 成功 8 秒、取消 3 秒后自动从下载中心移除
         setTimeout(
@@ -296,6 +310,12 @@ export function finalizeTask(r: {
             },
             r.ok ? 8000 : 3000
         );
+    } else {
+        // 失败任务 30 秒后自动移除（此前可手动关闭）；失败原因走通知中心留痕
+        setTimeout(() => {
+            const i = store.tasks.findIndex((x) => x.id === t.id && x.status === 'error');
+            if (i >= 0) store.tasks.splice(i, 1);
+        }, 30000);
     }
 }
 
@@ -365,6 +385,8 @@ export async function loadExitNotices() {
                         : undefined
             })
         );
+        // 与 toast() 同一上限：整段历史一次性并入时也要裁到 30 条
+        if (store.notices.length > 30) store.notices.length = 30;
         store.notices.sort((a, b) => b.time - a.time);
         store.noticesUnread ||= records.some((record) => !record.seen);
     } catch {
@@ -527,8 +549,10 @@ export function versionIconUrl(v: InstalledVersion): string {
         const def =
             store.settings?.folders.find((f) => f.isDefault)?.path ?? store.settings?.gameDir ?? '';
         if (!def) return '';
-        // 自定义图标在默认文件夹的受管 icons 目录，走 kamucl-asset 协议（file:// 在 Tauri 页面里不可读）
-        const p = `${def}\\.wuhuicl\\icons\\${icon.slice(5)}`;
+        // 自定义图标在默认文件夹的受管 icons 目录，走 kamucl-asset 协议（file:// 在 Tauri 页面里不可读）；
+        // 按平台选分隔符拼接（managedAssets 的 key 匹配两端都做了分隔符归一）
+        const sep = window.kamucl.platform === 'win32' ? '\\' : '/';
+        const p = [def, '.wuhuicl', 'icons', icon.slice(5)].join(sep);
         return managedImageUrl(p);
     }
     return '';
