@@ -11,13 +11,6 @@
       "appimage": {
         "bundleMediaFramework": false
       }
-    },
-    "desktop": {
-      "entry": {
-        "Name": "WUHUICL",
-        "Comment": "简约美观的一键式 Minecraft 启动器",
-        "Categories": "Game;"
-      }
     }
   }
 }
