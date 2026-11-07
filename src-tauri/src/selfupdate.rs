@@ -215,7 +215,7 @@ fn pick_main_asset(assets: &[Value]) -> Option<Value> {
         return None;
     }
     #[cfg(any(target_os = "macos", target_os = "linux"))]
-    let prefer = |suffix: &str| {
+    let prefer = |suffix: &str| -> Option<Value> {
         list.iter()
             .find(|a| {
                 a["name"]
@@ -223,12 +223,14 @@ fn pick_main_asset(assets: &[Value]) -> Option<Value> {
                     .map(|n| n.to_lowercase().ends_with(suffix))
                     .unwrap_or(false)
             })
-            .copied()
+            .map(|a| (*a).clone())
     };
     #[cfg(target_os = "macos")]
-    return prefer(".dmg").or_else(|| prefer(".zip")).or(Some(list[0].clone()));
+    return prefer(".dmg")
+        .or_else(|| prefer(".zip"))
+        .or_else(|| Some(list[0].clone()));
     #[cfg(target_os = "linux")]
-    return prefer(".appimage").or(Some(list[0].clone()));
+    return prefer(".appimage").or_else(|| Some(list[0].clone()));
     #[cfg(windows)]
     return Some(list[0].clone());
 }
