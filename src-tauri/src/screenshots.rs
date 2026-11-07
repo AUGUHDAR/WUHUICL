@@ -42,11 +42,28 @@ const IMAGE_LIMIT: u64 = 64 * 1024 * 1024;
 static CATALOG: LazyLock<Mutex<HashMap<String, Stored>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static SCAN_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// 列目录是读取操作：串行化 + 短 TTL 结果缓存，吸收进页面瞬间的并发调用。
+static SCAN_LOCK: Mutex<()> = Mutex::new(());
+static SCAN_CACHE: Mutex<Option<(String, i64, Value)>> = Mutex::new(None);
+const SCAN_CACHE_TTL_MS: i64 = 2_500;
 
-/// 最小化自整理：清空扫描目录。screenshots:list 每次调用都会整体重扫回填，无功能损失。
+fn now_ms_i64() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn cached_scan(key: &str) -> Option<Value> {
+    SCAN_CACHE.lock().unwrap().as_ref().and_then(|(k, at, value)| {
+        (k == key && now_ms_i64() - at < SCAN_CACHE_TTL_MS).then(|| value.clone())
+    })
+}
+
+/// 最小化自整理：清空扫描目录与短 TTL 缓存（screenshots:list 会按需重扫回填）。
 pub fn release_catalog() {
     if let Ok(mut map) = CATALOG.lock() {
         map.clear();
+    }
+    if let Ok(mut cache) = SCAN_CACHE.lock() {
+        *cache = None;
     }
 }
 
@@ -162,8 +179,6 @@ fn visit_source(
 fn scan_inner(
     app: &tauri::AppHandle,
     rec: &TaskRecord,
-    task_id: &str,
-    task_title: &str,
     scope: &str,
     target: &Value,
 ) -> Result<Value, String> {
@@ -256,22 +271,11 @@ fn scan_inner(
             }
         }
     }
-    let total = order.len();
-    for read in 1..=total {
-        tasks::wait_while_paused(rec);
-        if rec.cancelled.load(Ordering::SeqCst) {
-            return Err("已取消".into());
-        }
-        tasks::emit_progress(
-            app,
-            json!({
-                "taskId": task_id,
-                "taskTitle": task_title,
-                "stage": "world",
-                "progress": (read as f64 / total as f64).min(1.0),
-                "text": format!("读取截图 {read}/{total}")
-            }),
-        );
+    // 列目录本身没有逐文件工作：只做一次收尾（旧写法按条目数空转推 N 条进度事件，
+    // 除了把下载中心刷成"扫描中"以外没有任何作用）。
+    tasks::wait_while_paused(rec);
+    if rec.cancelled.load(Ordering::SeqCst) {
+        return Err("已取消".into());
     }
     if SCAN_GENERATION.load(Ordering::SeqCst) == generation {
         let mut catalog = CATALOG.lock().unwrap();
@@ -301,14 +305,30 @@ fn scan_inner(
     }))
 }
 
-fn list(app: &tauri::AppHandle, scope: &str, target: &Value) -> Result<Value, String> {
-    let rec = tasks::register_task("截图 · 扫描截图目录", "world");
-    let task_id = rec.id.clone();
-    let task_title = rec.title.clone();
-    let outcome = scan_inner(app, &rec, &task_id, &task_title, scope, target);
-    let cancelled = rec.cancelled.load(Ordering::SeqCst);
-    let error = outcome.as_ref().err().cloned();
-    tasks::task_done(app, &task_id, outcome.is_ok(), error, cancelled, None);
+/// screenshots:list —— 列目录是「读取」，不注册后台任务（否则每次进页面都在下载中心
+/// 凭空多出一条「扫描截图目录」）；短 TTL 缓存吸收进页面瞬间的重复调用。
+fn list(app: &tauri::AppHandle, scope: &str, target: &Value, force: bool) -> Result<Value, String> {
+    let cache_key = format!(
+        "{scope}\u{0}{}\u{0}{}",
+        target["folder"].as_str().unwrap_or(""),
+        target["id"].as_str().unwrap_or("")
+    );
+    if !force {
+        if let Some(value) = cached_scan(&cache_key) {
+            return Ok(value);
+        }
+    }
+    let _guard = SCAN_LOCK.lock().unwrap();
+    if !force {
+        if let Some(value) = cached_scan(&cache_key) {
+            return Ok(value);
+        }
+    }
+    let rec = tasks::register_quiet_task("截图 · 读取目录", "world");
+    let outcome = scan_inner(app, &rec, scope, target);
+    if let Ok(value) = &outcome {
+        *SCAN_CACHE.lock().unwrap() = Some((cache_key, now_ms_i64(), value.clone()));
+    }
     outcome
 }
 
@@ -929,10 +949,12 @@ pub fn invoke(
     match channel {
         "screenshots:list" => {
             let target = args.get(1).cloned().unwrap_or(json!({}));
+            let force = args.get(2).and_then(|v| v.as_bool()).unwrap_or(false);
             Some(list(
                 app,
                 args.first().and_then(|v| v.as_str()).unwrap_or("instance"),
                 &target,
+                force,
             ))
         }
         "screenshots:thumbs" => Some(thumbs(

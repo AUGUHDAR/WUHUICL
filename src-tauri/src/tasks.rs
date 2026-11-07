@@ -47,6 +47,22 @@ pub fn register_task(title: &str, kind: &'static str) -> Arc<TaskRecord> {
     rec
 }
 
+/// 读取类操作的临时令牌：不进入 TASKS 表 = 不占下载中心、不计入顶栏徽标、不可被外部取消。
+///
+/// 资源页的「列目录」（projections/recordings/screenshots:list）是对磁盘的读取，
+/// 不是后台作业；用 register_task 会让每次进页面都凭空多出一条「扫描全部目录」任务，
+/// 用户看到的就是"点一下就弹一个扫盘提示，进几次弹几个"。
+pub fn register_quiet_task(title: &str, kind: &'static str) -> Arc<TaskRecord> {
+    Arc::new(TaskRecord {
+        id: format!("quiet-{}", SEQ.fetch_add(1, Ordering::SeqCst) + 1),
+        title: title.to_string(),
+        kind,
+        cancelled: Arc::new(AtomicBool::new(false)),
+        paused: Arc::new(AtomicBool::new(false)),
+        status: Mutex::new(TaskStatus::Running),
+    })
+}
+
 /// tasks:cancel → boolean（等待由调用方的轮询取消令牌实现）
 pub fn cancel_task(id: &str) -> bool {
     let rec = with_tasks(|m| m.get(id).cloned());

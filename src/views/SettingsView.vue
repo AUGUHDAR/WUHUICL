@@ -233,6 +233,71 @@ async function chooseNewDownloadFolder() {
     }
 }
 
+// ---------------- 缓存管理 ----------------
+// 与 PCL 的 `Cache\` 目录同口径：只清理可重建的缓存，不碰存档/模组/配置。
+interface CacheEntry {
+    name: string;
+    files: number;
+    bytes: number;
+    maxFiles: number;
+    maxBytes: number;
+    path: string;
+}
+const cacheEntries = ref<CacheEntry[]>([]);
+const cacheTotal = ref(0);
+const cacheBusy = ref(false);
+const CACHE_LABELS: Record<string, string> = {
+    'mod-icons-v1': 'MOD 图标',
+    'mod-fingerprints-v1': 'MOD 文件指纹',
+    'projection-meta-v1.json': '投影列表元数据',
+    'screenshot-cache': '截图缩略图',
+    'map-tile-cache': '世界地图瓦片',
+    'feedback-cache': '反馈附件'
+};
+function cacheLabel(name: string): string {
+    return CACHE_LABELS[name] ?? name;
+}
+function formatBytes(n: number): string {
+    if (!Number.isFinite(n) || n <= 0) return '0 B';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+    return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+async function loadCacheStats() {
+    try {
+        const stats = (await window.kamucl.invoke('cache:stats')) as {
+            entries: CacheEntry[];
+            totalBytes: number;
+        };
+        cacheEntries.value = stats.entries ?? [];
+        cacheTotal.value = stats.totalBytes ?? 0;
+    } catch {
+        /* 读不到缓存清单不影响设置页其余部分 */
+    }
+}
+async function clearCache(name = '') {
+    if (cacheBusy.value) return;
+    cacheBusy.value = true;
+    try {
+        const result = (await window.kamucl.invoke('cache:clear', name)) as {
+            freedBytes: number;
+        };
+        toast(
+            name
+                ? `已清理「${cacheLabel(name)}」，释放 ${formatBytes(result.freedBytes)}`
+                : `已清理全部缓存，释放 ${formatBytes(result.freedBytes)}`,
+            'success'
+        );
+        await loadCacheStats();
+    } catch (e) {
+        toast('清理缓存失败：' + errText(e), 'error');
+    } finally {
+        cacheBusy.value = false;
+    }
+}
+onMounted(() => void loadCacheStats());
+
 // ---------------- 关于与更新 ----------------
 const appVersion = __APP_VERSION__;
 const showLicenses = ref(false);
@@ -1922,6 +1987,58 @@ async function onRemovePlugin(p: PluginInfo) {
                     </div>
                 </details>
 
+                <!-- 缓存管理：与 PCL 的 Cache 目录同口径，只清可重建内容 -->
+                <details
+                    data-ui="SettingsView:cache-manage"
+                    v-show="category === 'about'"
+                    class="card group collapse"
+                    data-section="cache"
+                >
+                    <summary data-ui="SettingsView:cache-manage-head" class="collapse-head">
+                        <h3 class="group-title">缓存管理</h3>
+                        <span class="muted cache-total">{{ formatBytes(cacheTotal) }}</span>
+                        <span class="collapse-arrow" aria-hidden="true"></span>
+                    </summary>
+                    <div class="collapse-body">
+                        <p class="muted group-hint">
+                            MOD 图标、缩略图、地图瓦片等都放在这里，随时可重新生成。清理不会影响存档、MOD
+                            与配置；超过上限时会自动淘汰最旧的部分。
+                        </p>
+                        <div class="cache-rows">
+                            <div
+                                v-for="entry in cacheEntries"
+                                :key="entry.name"
+                                class="cache-row"
+                                :data-ui="'cache:' + entry.name"
+                            >
+                                <span class="cache-name">{{ cacheLabel(entry.name) }}</span>
+                                <span class="cache-size muted">
+                                    {{ formatBytes(entry.bytes) }} · {{ entry.files }} 个文件
+                                </span>
+                                <button
+                                    class="btn btn-ghost btn-sm"
+                                    :disabled="cacheBusy || entry.files === 0"
+                                    @click="clearCache(entry.name)"
+                                >
+                                    清理
+                                </button>
+                            </div>
+                        </div>
+                        <div class="cache-actions">
+                            <button class="btn btn-ghost" :disabled="cacheBusy" @click="loadCacheStats">
+                                重新统计
+                            </button>
+                            <button
+                                class="btn btn-gold"
+                                :disabled="cacheBusy || cacheTotal === 0"
+                                @click="clearCache('')"
+                            >
+                                清理全部缓存
+                            </button>
+                        </div>
+                    </div>
+                </details>
+
                 <!-- 插件系统 -->
                 <details
                     data-ui="SettingsView:034daafb11ff"
@@ -2297,6 +2414,49 @@ async function onRemovePlugin(p: PluginInfo) {
     .settings-page [data-section] {
         scroll-margin-top: 16px;
     }
+}
+
+/* 缓存管理 */
+.cache-total {
+    margin-left: auto;
+    font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+}
+.cache-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: var(--space-3) 0;
+}
+.cache-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: 38px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+}
+.cache-row:last-child {
+    border-bottom: 0;
+}
+.cache-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: var(--text-sm);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cache-size {
+    flex: none;
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+}
+.cache-actions {
+    display: flex;
+    gap: var(--space-3);
+    justify-content: flex-end;
+    flex-wrap: wrap;
 }
 
 /* 关于与更新 */

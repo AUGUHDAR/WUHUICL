@@ -70,14 +70,14 @@ function frame(now: number) {
     )
         convergence = elapsed;
     if (convergence === null && !reduced)
-        advanceBootGlass(geometry.shards, elapsed, delta, pointer);
+        advanceBootGlass(geometry.shards, elapsed, delta, pointer, geometry.width, geometry.height);
     ctx.clearRect(0, 0, innerWidth, innerHeight);
     const complete =
         reduced || (convergence !== null && elapsed - convergence >= CONVERGE_DURATION);
     if (complete) ctx.drawImage(face, geometry.left, geometry.top, geometry.board, geometry.board);
     else
         for (const shard of geometry.shards) {
-            const p = glassPosition(shard, elapsed, convergence),
+            const p = glassPosition(shard, elapsed, convergence, geometry.width, geometry.height),
                 glass = 1 - p.progress;
             ctx.save();
             ctx.translate(p.x, p.y);

@@ -31,6 +31,7 @@
 //! 9. mods:favoriteVersions 的订阅按 ticket 全局登记（Electron 按 sender 隔离；Tauri 单主窗口
 //!    等价）；单飞共享队列（4 并发、无完成缓存）语义保留。
 
+use crate::cachefs;
 use crate::community::{
     self, community_exact_file, community_favorite_candidates, community_file_matches_instance,
     community_files, community_search_items, dependency_range, matches_version_range,
@@ -1142,6 +1143,22 @@ pub fn expand_jar_paths(paths: &[String]) -> (Vec<String>, Vec<String>) {
 /// scanModDirectory()：analysis/icons 含图标，catalog 不含；hash=true 时附 sha1；
 /// 传入 names 时同时计算 CurseForge 指纹并接受 .jar.disabled/.zip
 pub fn scan_mod_directory(dir: &str, hash: bool, names: Option<&[String]>, purpose: &str) -> Result<Vec<Value>, String> {
+    scan_mod_directory_cached(None, dir, hash, names, purpose)
+}
+
+/// 带指纹缓存的扫描。`app` 为 None 时不使用持久缓存（内部/离线调用）。
+///
+/// 为什么要这层：模组页每次打开都会扫描目录，而 SHA1 与 CurseForge 指纹
+/// 各需要对整个 jar 做一遍完整读取（实测 592 个 jar 合计 1.1 GB）。
+/// 按 PCL 的 ModHash.ini 口径，用「路径 + size + mtime」做键缓存算过的结果，
+/// 文件没动就直接复用。
+pub fn scan_mod_directory_cached(
+    app: Option<&tauri::AppHandle>,
+    dir: &str,
+    hash: bool,
+    names: Option<&[String]>,
+    purpose: &str,
+) -> Result<Vec<Value>, String> {
     let include_icons = purpose != "catalog";
     let requested: Option<HashSet<String>> = names.map(|n| n.iter().cloned().collect());
     let entries = match std::fs::read_dir(dir) {
@@ -1150,29 +1167,81 @@ pub fn scan_mod_directory(dir: &str, hash: bool, names: Option<&[String]>, purpo
         Err(e) => return Err(e.to_string()),
     };
     let mut result: Vec<Value> = Vec::new();
+    // 只遍历目录一次：边列边收集 (name → 缓存键)，然后批量查一次 JSON 缓存。
+    // 早先的写法对同一目录 read_dir 两遍、再用线性 find 配路径，是热路径上不必要的开销。
+    struct Pending {
+        path: PathBuf,
+        name: String,
+        key: String,
+    }
+    let mut pending: Vec<Pending> = Vec::new();
     for entry in entries.flatten() {
         let is_file = entry.file_type().map(|t| t.is_file()).unwrap_or(false);
         if !is_file {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        static JAR_ZIP: OnceLock<regex::Regex> = OnceLock::new();
-        static JAR: OnceLock<regex::Regex> = OnceLock::new();
-        let accept = match &requested {
-            Some(set) => {
-                if !set.contains(&name) {
-                    false
-                } else {
-                    JAR_ZIP.get_or_init(|| regex::Regex::new(r"(?i)\.(?:jar(?:\.disabled)?|zip)$").unwrap()).is_match(&name)
-                }
-            }
-            None => JAR.get_or_init(|| regex::Regex::new(r"(?i)\.jar$").unwrap()).is_match(&name),
-        };
-        if !accept {
+        if !is_mod_file_name(&name, &requested) {
             continue;
         }
-        let file = entry.path();
+        let path = entry.path();
+        let key = if hash || names.is_some() {
+            match entry.metadata() {
+                Ok(meta) => {
+                    let mtime = meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+                    cachefs::fingerprint_key(&path, meta.len(), mtime)
+                }
+                Err(_) => String::new(),
+            }
+        } else {
+            String::new()
+        };
+        pending.push(Pending { path, name, key });
+    }
+    let keys: Vec<String> = pending
+        .iter()
+        .map(|p| p.key.clone())
+        .filter(|k| !k.is_empty())
+        .collect();
+    let mut fingerprints = match app {
+        Some(app) if !keys.is_empty() => cachefs::fingerprint_get(app, &keys),
+        _ => HashMap::new(),
+    };
+    let mut dirty: Vec<(String, cachefs::Fingerprint)> = Vec::new();
+
+    for Pending { path: file, name, key } in pending {
         let file_str = file.to_string_lossy().into_owned();
+        let cached = if key.is_empty() {
+            None
+        } else {
+            fingerprints.remove(&key)
+        };
+        // 整份解析结果命中：连 jar 都不用打开（图标字段随 purpose 变化，故只有
+        // 非图标用途可复用；catalog 正好就是最热的那个）
+        if let Some(hit) = cached.as_ref() {
+            if let (false, Some(info)) = (include_icons, hit.info.as_ref()) {
+                let mut info = info.clone();
+                info["filePath"] = json!(file_str);
+                info["fileName"] = json!(name);
+                if !hash {
+                    info.as_object_mut().map(|m| m.remove("sha1"));
+                } else {
+                    info["sha1"] = json!(hit.sha1);
+                }
+                if names.is_some() {
+                    info["fingerprint"] = json!(hit.fingerprint as u64);
+                } else if let Some(m) = info.as_object_mut() {
+                    m.remove("fingerprint");
+                }
+                result.push(info);
+                continue;
+            }
+        }
         match std::fs::read(&file) {
             Ok(data) => {
                 let mut info = parse_mod_archive(std::io::Cursor::new(&data[..]), &file_str, &name, 0, include_icons);
@@ -1182,13 +1251,33 @@ pub fn scan_mod_directory(dir: &str, hash: bool, names: Option<&[String]>, purpo
                         info["iconDataUrl"] = json!(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)));
                     }
                 }
+                // 命中缓存就跳过这两次全文件遍历；未命中才算
+                let (sha1, fp) = match cached {
+                    Some(hit) => (hit.sha1, hit.fingerprint),
+                    None => {
+                        let mut h = Sha1::new();
+                        h.update(&data);
+                        let sha1 = hex::encode(h.finish());
+                        let fp = curse_fingerprint(&data);
+                        if !key.is_empty() {
+                            dirty.push((
+                                key.clone(),
+                                cachefs::Fingerprint {
+                                    sha1: sha1.clone(),
+                                    fingerprint: fp,
+                                    // 只为「无图标」用途存整份结果（含图标会膨胀数倍）
+                                    info: (!include_icons).then(|| info.clone()),
+                                },
+                            ));
+                        }
+                        (sha1, fp)
+                    }
+                };
                 if hash {
-                    let mut h = Sha1::new();
-                    h.update(&data);
-                    info["sha1"] = json!(hex::encode(h.finish()));
+                    info["sha1"] = json!(sha1);
                 }
                 if names.is_some() {
-                    info["fingerprint"] = json!(curse_fingerprint(&data) as u64);
+                    info["fingerprint"] = json!(fp as u64);
                 }
                 result.push(info);
             }
@@ -1201,7 +1290,29 @@ pub fn scan_mod_directory(dir: &str, hash: bool, names: Option<&[String]>, purpo
             }
         }
     }
+    if let (Some(app), false) = (app, dirty.is_empty()) {
+        cachefs::fingerprint_put(app, &dirty);
+    }
     Ok(result)
+}
+
+/// 模组文件名过滤（与原先内联的两条正则同语义：请求清单用 jar/zip，全量用 jar）。
+fn is_mod_file_name(name: &str, requested: &Option<HashSet<String>>) -> bool {
+    static JAR_ZIP: OnceLock<regex::Regex> = OnceLock::new();
+    static JAR: OnceLock<regex::Regex> = OnceLock::new();
+    match requested {
+        Some(set) => {
+            if !set.contains(name) {
+                return false;
+            }
+            JAR_ZIP
+                .get_or_init(|| regex::Regex::new(r"(?i)\.(?:jar(?:\.disabled)?|zip)$").unwrap())
+                .is_match(name)
+        }
+        None => JAR
+            .get_or_init(|| regex::Regex::new(r"(?i)\.jar$").unwrap())
+            .is_match(name),
+    }
 }
 
 fn read_zip_entry(data: &[u8], name: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
@@ -1228,6 +1339,25 @@ pub fn scan_managed_mod_directory(dir: &str, purpose: &str) -> Result<Vec<Value>
         Err(e) => return Err(e.to_string()),
     };
     scan_mod_directory(dir, true, Some(&names), purpose)
+}
+
+/// 带指纹缓存的 `scan_managed_mod_directory`（模组页热路径）。
+pub fn scan_managed_mod_directory_cached(
+    app: &tauri::AppHandle,
+    dir: &str,
+    purpose: &str,
+) -> Result<Vec<Value>, String> {
+    let names: Vec<String> = match std::fs::read_dir(dir) {
+        Ok(rd) => rd
+            .flatten()
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| regex::Regex::new(r"(?i)\.jar(?:\.disabled)?$").unwrap().is_match(n))
+            .collect(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.to_string()),
+    };
+    scan_mod_directory_cached(Some(app), dir, true, Some(&names), purpose)
 }
 
 // ---------------- 运行实例钩子 + 空闲校验 ----------------
@@ -1710,7 +1840,10 @@ pub fn apply_mod_updates(app: &tauri::AppHandle, dir: &Path, items: &[Value]) ->
 
 /// modCatalog()：读某个模组目录的清单（按目录作用域，供聚合视图按行定位）
 pub fn mod_catalog_in_dir(app: &tauri::AppHandle, dir: &Path) -> Result<Vec<Value>, String> {
-    let entries = scan_managed_mod_directory(&dir.to_string_lossy(), "catalog")?;
+    let entries = scan_managed_mod_directory_cached(app, &dir.to_string_lossy(), "catalog")?;
+    // 目录状态（别名/锁定）只读一次：以前每个 mod 各调一次 read_state，
+    // 124 个 mod 就是 248 次重复读盘，占了列表耗时的大头。
+    let state = read_state(app, dir).unwrap_or_default();
     let mut list: Vec<Value> = Vec::new();
     for i in entries {
         let sha1 = i.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -1724,8 +1857,13 @@ pub fn mod_catalog_in_dir(app: &tauri::AppHandle, dir: &Path) -> Result<Vec<Valu
             item["fingerprint"] = fp.clone();
         }
         if !sha1.is_empty() {
-            item["identity"] = json!(mod_identity(app, dir, &sha1));
-            item["locked"] = json!(is_mod_locked(app, dir, &sha1));
+            let fallback = format!("sha1:{sha1}");
+            let identity = state.aliases.get(&sha1).cloned().unwrap_or_else(|| fallback.clone());
+            item["identity"] = json!(identity);
+            item["locked"] = json!(
+                state.locks.get(&identity).copied().unwrap_or(false)
+                    || state.locks.get(&fallback).copied().unwrap_or(false)
+            );
         }
         if let Some(err) = i.get("error") {
             item["error"] = err.clone();
@@ -3602,6 +3740,12 @@ pub fn get_mod_icons_in_dir(app: &tauri::AppHandle, dir: &Path, requested: &[Str
             // 缓存键已含 size+mtime+ctime，文件一变即失效，本地图标可与远程同寿
             let payload = json!({ "icon": icon, "expires": now_ms() + 7 * 86_400_000 });
             let _ = std::fs::write(cache_path, payload.to_string());
+        }
+    }
+    // 图标缓存原先只增不减（实测 566 条已 11 MB），写入后按配额淘汰最旧的一半
+    if let Some(quota) = cachefs::QUOTAS.iter().find(|q| q.name == "mod-icons-v1") {
+        if cachefs::needs_enforce(app, quota) {
+            cachefs::enforce(app, quota);
         }
     }
     Value::Object(result)

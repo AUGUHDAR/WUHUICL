@@ -107,6 +107,12 @@ export const settingsCatalog = [
         category: 'about',
         name: '关于与更新',
         keywords: '版本 自动更新 检查更新 下载源 镜像 回退 还原 本地更新 许可 开源'
+    },
+    {
+        id: 'cache',
+        category: 'about',
+        name: '缓存管理',
+        keywords: '缓存 清理 图标 缩略图 瓦片 指纹 体积 占空间 磁盘 cache'
     }
 ] as const;
 export function searchSettings(query: string) {

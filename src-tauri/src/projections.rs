@@ -44,19 +44,214 @@ const AIR_STATES: [&str; 3] = ["minecraft:air", "minecraft:cave_air", "minecraft
 static CATALOG: LazyLock<Mutex<HashMap<String, Stored>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static SCAN_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// 列目录是读取操作：同一时刻只让一个扫描进磁盘，其余调用走结果缓存/排队，
+/// 避免进页面时 onMounted + scope watch + fsRefreshTick + focus 并发各扫一遍。
+static SCAN_LOCK: Mutex<()> = Mutex::new(());
+/// 最近一次扫描结果（短 TTL）：吸收进页面瞬间的重复调用；手动刷新传 force 跳过。
+static SCAN_CACHE: Mutex<Option<(String, i64, Value)>> = Mutex::new(None);
+const SCAN_CACHE_TTL_MS: i64 = 2_500;
 
-/// 最小化自整理：清空扫描目录与元数据缓存。
-/// projections:list 每次调用都会整体重扫回填；METADATA_CACHE 条目带 mtime 自校验，按需重算。
-pub fn release_catalog() {
+/// 最小化自整理：先把元数据缓存落盘，再释放内存与扫描目录。
+/// 元数据缓存带「大小 + mtime」自校验并持久化——重开启动器后命中即秒开，
+/// 只有真正改动过的投影文件才重新解压统计。
+pub fn release_catalog(app: &tauri::AppHandle) {
+    metadata_flush(app, true);
     if let Ok(mut map) = CATALOG.lock() {
         map.clear();
     }
-    if let Ok(mut cache) = METADATA_CACHE.lock() {
-        cache.clear();
+    if let Ok(mut store) = METADATA.lock() {
+        store.clear();
+    }
+    if let Ok(mut cache) = SCAN_CACHE.lock() {
+        *cache = None;
     }
 }
-static METADATA_CACHE: LazyLock<Mutex<HashMap<String, (u64, f64, Value)>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// 单个投影文件解析出的元数据（blocks / dataVersion / gameVersion 或 error）。
+struct MetaEntry {
+    size: u64,
+    modified: f64,
+    /// 最近一次在扫描中看到的毫秒时间戳（用于淘汰长期不再出现的条目）
+    seen: i64,
+    meta: Value,
+}
+
+#[derive(Default)]
+struct MetadataStore {
+    /// 是否已从磁盘装载（装载前不允许写回，否则会把旧缓存清空）
+    loaded: bool,
+    dirty: bool,
+    saved_at: i64,
+    map: HashMap<String, MetaEntry>,
+}
+
+impl MetadataStore {
+    fn clear(&mut self) {
+        self.map.clear();
+        self.loaded = false;
+        self.dirty = false;
+    }
+}
+
+static METADATA: LazyLock<Mutex<MetadataStore>> =
+    LazyLock::new(|| Mutex::new(MetadataStore::default()));
+
+const METADATA_KEEP_DAYS: i64 = 60;
+const METADATA_MAX_ENTRIES: usize = 20_000;
+/// 两次落盘的最小间隔：连续刷新时不必反复写 JSON
+const METADATA_SAVE_INTERVAL_MS: i64 = 20_000;
+/// seen 的落盘门槛：低于此间隔的重复命中只在内存里推进，不触发写盘
+const METADATA_TOUCH_PERSIST_MS: i64 = 6 * 60 * 60 * 1000;
+
+/// 元数据缓存文件：{用户数据}/cache/projection-meta-v1.json
+fn metadata_path(app: &tauri::AppHandle) -> PathBuf {
+    settings::user_data_dir(app)
+        .join("cache")
+        .join("projection-meta-v1.json")
+}
+
+/// 首次访问时装载持久缓存。文件不存在/损坏都按「空缓存」处理，不阻塞扫描。
+fn metadata_ensure_loaded(app: &tauri::AppHandle) {
+    let mut store = METADATA.lock().unwrap();
+    if store.loaded {
+        return;
+    }
+    store.loaded = true;
+    let path = metadata_path(app);
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        return;
+    };
+    let Some(entries) = value["entries"].as_object() else {
+        return;
+    };
+    let cutoff = now_ms() - METADATA_KEEP_DAYS * 24 * 60 * 60 * 1000;
+    for (id, item) in entries {
+        let Some(size) = item["size"].as_u64() else {
+            continue;
+        };
+        let Some(modified) = item["modified"].as_f64() else {
+            continue;
+        };
+        let Some(meta) = item.get("meta") else {
+            continue;
+        };
+        let seen = item["seen"].as_i64().unwrap_or(0);
+        if seen < cutoff {
+            continue;
+        }
+        store.map.insert(
+            id.clone(),
+            MetaEntry {
+                size,
+                modified,
+                seen,
+                meta: meta.clone(),
+            },
+        );
+    }
+}
+
+/// 命中判定：大小与 mtime 都一致才算未变（与旧内存缓存同口径）。
+fn metadata_lookup(id: &str, size: u64, modified: f64) -> Option<Value> {
+    METADATA
+        .lock()
+        .unwrap()
+        .map
+        .get(id)
+        .filter(|entry| entry.size == size && entry.modified == modified)
+        .map(|entry| entry.meta.clone())
+}
+
+fn metadata_store(id: &str, size: u64, modified: f64, meta: Value) {
+    let mut store = METADATA.lock().unwrap();
+    let now = now_ms();
+    let touch = match store.map.get_mut(id) {
+        Some(existing) if existing.size == size && existing.modified == modified => {
+            // 内容没变：只推进 seen。只有 seen 已经陈旧才需要落盘，
+            // 避免「页面开着、每 15 秒自动刷新」把整份 JSON 反复写盘。
+            let stale = now - existing.seen > METADATA_TOUCH_PERSIST_MS;
+            if stale {
+                existing.seen = now;
+            }
+            existing.meta = meta;
+            stale
+        }
+        _ => {
+            store.map.insert(
+                id.to_string(),
+                MetaEntry {
+                    size,
+                    modified,
+                    seen: now,
+                    meta,
+                },
+            );
+            true
+        }
+    };
+    if touch {
+        store.dirty = true;
+    }
+}
+
+/// 写回磁盘（原子替换）。失败静默——缓存丢了只是慢一次，不影响正确性。
+/// `force` 用于释放/退出前的收尾：跳过最小间隔限制，把最后一次改动写全。
+fn metadata_flush(app: &tauri::AppHandle, force: bool) {
+    let snapshot = {
+        let mut store = METADATA.lock().unwrap();
+        if !store.loaded || !store.dirty {
+            return;
+        }
+        if !force
+            && store.saved_at != 0
+            && now_ms() - store.saved_at < METADATA_SAVE_INTERVAL_MS
+        {
+            return;
+        }
+        // 超限时按「最久没在扫描中出现」淘汰，保证文件不会无限膨胀
+        if store.map.len() > METADATA_MAX_ENTRIES {
+            let mut rows: Vec<(i64, String)> = store
+                .map
+                .iter()
+                .map(|(id, entry)| (entry.seen, id.clone()))
+                .collect();
+            rows.sort_by_key(|(seen, _)| *seen);
+            let drop_count = rows.len() - METADATA_MAX_ENTRIES;
+            for (_, id) in rows.into_iter().take(drop_count) {
+                store.map.remove(&id);
+            }
+        }
+        store.dirty = false;
+        store.saved_at = now_ms();
+        let entries: Map<String, Value> = store
+            .map
+            .iter()
+            .map(|(id, entry)| {
+                (
+                    id.clone(),
+                    json!({
+                        "size": entry.size,
+                        "modified": entry.modified,
+                        "seen": entry.seen,
+                        "meta": entry.meta,
+                    }),
+                )
+            })
+            .collect();
+        json!({ "version": 1, "entries": entries })
+    };
+    let path = metadata_path(app);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, snapshot.to_string()).is_ok() && std::fs::rename(&tmp, &path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
 static ANALYSES: LazyLock<Mutex<HashMap<String, StoredAnalysis>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static REGISTRIES: LazyLock<Value> = LazyLock::new(load_registries);
@@ -798,21 +993,87 @@ struct Projection {
     raw: Pairs,
 }
 
+/// 只保留转换判定需要的根级标量，不做整棵树深拷贝。
+/// 判定实际只用 `Version` / `SubVersion` / `MinecraftDataVersion` 与 `Schematic.Version`。
+fn raw_header(raw: &Pairs) -> Pairs {
+    let is_number = |tag: &NbtTag| {
+        matches!(
+            tag.value,
+            NbtPayload::Byte(_)
+                | NbtPayload::Short(_)
+                | NbtPayload::Int(_)
+                | NbtPayload::Long(_)
+                | NbtPayload::Float(_)
+                | NbtPayload::Double(_)
+        )
+    };
+    let mut out: Pairs = Vec::new();
+    for (key, tag) in raw {
+        match key.as_str() {
+            "Version" | "SubVersion" | "MinecraftDataVersion" if is_number(tag) => {
+                out.push((key.clone(), tag.clone()));
+            }
+            "Schematic" => {
+                // spawne v3 的整个 Blocks 子树都挂在这里，只留 Version 标量
+                if let NbtPayload::Compound(inner) = &tag.value {
+                    let version: Pairs = inner
+                        .iter()
+                        .filter(|(k, v)| k == "Version" && is_number(v))
+                        .cloned()
+                        .collect();
+                    if !version.is_empty() {
+                        out.push((key.clone(), typednbt::compound(version)));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// 非空气方块数。
+/// 元数据列表只需要一个数，但旧写法为每个方块索引做一次 `Vec<bool>` 查表 —— 对
+/// 800 万方块的投影是纯粹的浪费。这里按「调色板槽位是否为空气」求直方图，
+/// 一次计数数组就把结果算出来（方块的索引本身必须遍历，因为空洞也是数组元素）。
 fn region_non_air(region: &Region) -> usize {
-    let flags: Vec<bool> = region
+    let air: Vec<bool> = region
         .palette
         .iter()
         .map(|t| AIR_STATES.contains(&state_text(t).unwrap_or_default().as_str()))
         .collect();
-    region
-        .blocks
-        .iter()
-        .filter(|index| !flags.get(**index as usize).copied().unwrap_or(false))
-        .count()
+    let air_count = air.iter().filter(|v| **v).count();
+    if air_count == 0 {
+        // 没有空气：整块区域都是实心，直接返回方块数，连遍历都省了
+        return region.blocks.len();
+    }
+    if air_count == air.len() {
+        return 0;
+    }
+    region.blocks.len() - region.blocks.iter().filter(|i| air.get(**i as usize).copied().unwrap_or(false)).count()
 }
 
 fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, String> {
-    let (root_name, root_tag) = typednbt::read_typed_nbt(input)?;
+    read_projection_with(input, format, &[])
+}
+
+/// 列表元数据只关心「方块数 + 版本」：TileEntities（箱子物品 NBT）与 Entities
+/// 可以有几 MB，解析它们对结果毫无影响，直接跨过字节。
+const METADATA_SKIP: [&str; 2] = ["TileEntities", "BlockEntities"];
+
+fn read_projection_metadata_only(
+    input: &[u8],
+    format: Option<&str>,
+) -> Result<Projection, String> {
+    read_projection_with(input, format, &METADATA_SKIP)
+}
+
+fn read_projection_with(
+    input: &[u8],
+    format: Option<&str>,
+    skip: &[&str],
+) -> Result<Projection, String> {
+    let (root_name, root_tag) = typednbt::read_typed_nbt_skipping(input, skip)?;
     let raw = as_compound(Some(&root_tag))?.clone();
     let schematic: Option<Pairs> = match pget(&raw, "Schematic") {
         Some(tag) => Some(as_compound(Some(tag))?.clone()),
@@ -865,12 +1126,17 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
         regions: Vec::new(),
         metadata,
         extra: Vec::new(),
-        raw: raw.clone(),
+        // 原始 NBT 根只在转换判定里读 Version/SubVersion/Schematic.Version 三个整数。
+        // 整棵树（含几 MB 的 BlockStates long 数组）深拷贝是这里最大的单项开销，
+        // 因此只留这几个标量。
+        raw: raw_header(&raw),
     };
     if actual == "litematic" {
-        let regions = pcompound(&raw, "Regions")?.clone();
-        for (name, tag) in &regions {
-            let r = as_compound(Some(tag))?.clone();
+        // 借用即可：region 子树里最大的字段是 BlockStates（几 MB long 数组），
+        // 深拷贝整棵子树是「一个文件解 300ms」的主因。
+        let regions = pcompound(&raw, "Regions")?;
+        for (name, tag) in regions {
+            let r = as_compound(Some(tag))?;
             let signed = vec3_of(pcompound(&r, "Size")?)?;
             let size: Vec3 = signed.map(|v| v.abs());
             let anchor = vec3_of(pcompound(&r, "Position")?)?;
@@ -945,15 +1211,11 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
             size[i] = short_masked(c, k)?;
         }
         let n = volume_i(&size)?;
-        let blocks_holder: Option<Pairs> = if version == 3 {
-            Some(pcompound(c, "Blocks")?.clone())
-        } else {
-            None
-        };
-        let b: &Pairs = blocks_holder.as_ref().unwrap_or(c);
-        let palette_source = pcompound(b, "Palette")?.clone();
+        // 借用（v3 的 Blocks 子树装着整个 Data 字节数组，深拷贝没有意义）
+        let b: &Pairs = if version == 3 { pcompound(c, "Blocks")? } else { c };
+        let palette_source = pcompound(b, "Palette")?;
         let mut slots: Vec<Option<NbtTag>> = Vec::new();
-        for (name, value) in &palette_source {
+        for (name, value) in palette_source {
             if value.tag_type != 3 {
                 return Err("Sponge 调色板无效".into());
             }
@@ -1153,7 +1415,7 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
         let mut occupied = vec![0u8; n];
         let mut block_entities: Vec<NbtTag> = Vec::new();
         for item in list_of(&raw, "blocks")? {
-            let b = as_compound(Some(item))?.clone();
+            let b = as_compound(Some(item))?;
             let p_f = xyz3(pget(&b, "pos"))?;
             if b.iter()
                 .any(|(k, _)| !["pos", "state", "nbt"].contains(&k.as_str()))
@@ -1185,7 +1447,7 @@ fn read_projection(input: &[u8], format: Option<&str>) -> Result<Projection, Str
         }
         let mut entities: Vec<NbtTag> = Vec::new();
         for item in list_of(&raw, "entities")? {
-            let c = as_compound(Some(item))?.clone();
+            let c = as_compound(Some(item))?;
             let mut nbt = as_compound(pget(&c, "nbt"))?.clone();
             let pos = xyz3(pget(&c, "pos"))?;
             if c.iter()
@@ -2351,7 +2613,12 @@ fn read_projection_file(
         }
     }
     progress.send(0.15, "读取投影与校验原文件");
-    let p = read_projection(&input, Some(job.source_format.as_str()))?;
+    // metadata 只需要方块数与版本：跳过方块实体/实体 NBT（可以占解压后体积的九成）
+    let p = if job.action == "metadata" {
+        read_projection_metadata_only(&input, Some(job.source_format.as_str()))?
+    } else {
+        read_projection(&input, Some(job.source_format.as_str()))?
+    };
     progress.send(0.45, "检查区域、方块状态与实体数据");
     Ok((p, hash))
 }
@@ -2836,7 +3103,6 @@ fn copy_projection(
 fn visit_source(
     rec: &TaskRecord,
     source: &Source,
-    kind: &'static str,
     rel: &str,
     depth: usize,
     visited: &mut usize,
@@ -2862,15 +3128,17 @@ fn visit_source(
     for entry in reader {
         let entry = entry.map_err(ScanErr::from)?;
         let file_type = entry.file_type().map_err(ScanErr::from)?;
+        // 一次 stat 拿全：下面按扩展名过滤命中时直接复用，不再回盘
+        let meta = entry.metadata().ok();
         listing.push((
             entry.file_name().to_string_lossy().into_owned(),
             file_type.is_dir(),
             file_type.is_file(),
             file_type.is_symlink(),
+            meta,
         ));
     }
-    let suffix = format!(".{kind}");
-    for (name, is_dir, is_file, is_link) in listing {
+    for (name, is_dir, is_file, is_link, meta) in listing {
         if is_link || name.starts_with('.') {
             continue;
         }
@@ -2882,19 +3150,29 @@ fn visit_source(
                     || lower.ends_with(".tmp")
                     || lower.ends_with(".del"))
                 {
-                    visit_source(rec, source, kind, &next, depth + 1, visited, found, order)?;
+                    visit_source(rec, source, &next, depth + 1, visited, found, order)?;
                 }
             }
             continue;
         }
-        if !is_file || !name.to_lowercase().ends_with(&suffix) {
+        if !is_file {
             continue;
         }
+        // 一次遍历同时收 4 种格式：以前按扩展名各递归一遍，同一个目录要被 read_dir 4 次
+        let lower = name.to_lowercase();
+        let Some(kind) = KINDS.iter().find(|k| lower.ends_with(&format!(".{k}"))) else {
+            continue;
+        };
         if found.len() >= SCAN_ENTRY_LIMIT {
             return Err(ScanErr::msg("仅显示前 10000 个投影文件"));
         }
-        let full = safe_path(&source.root, &next, false)?;
-        let meta = std::fs::symlink_metadata(&full).map_err(ScanErr::from)?;
+        // 父目录已在本次 read_dir 时通过 safe_path 校验过（无符号链接、真实目录），
+        // 这里只需拼一个文件名——不必再从根逐段 stat 一遍。
+        let full = dir.join(&name);
+        let meta = match meta {
+            Some(meta) => meta,
+            None => std::fs::symlink_metadata(&full).map_err(ScanErr::from)?,
+        };
         let id = hex::encode(Sha256::digest(key_of(&full).as_bytes()));
         let mut entry = Map::new();
         if let Some(folder) = &source.folder {
@@ -2905,7 +3183,7 @@ fn visit_source(
         }
         entry.insert("id".into(), json!(id.clone()));
         entry.insert("name".into(), json!(name));
-        entry.insert("kind".into(), json!(kind));
+        entry.insert("kind".into(), json!(*kind));
         entry.insert("size".into(), json!(meta.len()));
         entry.insert("modified".into(), json!(mtime_ms(&meta)));
         entry.insert("source".into(), json!(source.label));
@@ -2970,6 +3248,50 @@ fn scan_metadata(
     worker_json(app, metadata_job(&file, kind), task_id, task_title, false)
 }
 
+/// 解析单个投影的元数据（blocks / 版本）。失败不抛出整批，只记在条目上。
+fn parse_one(app: &tauri::AppHandle, rec: &TaskRecord, item: &Stored) -> Result<Value, String> {
+    let kind = entry_kind(item);
+    match scan_metadata(app, item, &kind, &rec.id, &rec.title) {
+        Ok(value) => Ok(value),
+        Err(e) => {
+            if rec.cancelled.load(Ordering::SeqCst) {
+                Err("已取消".into())
+            } else {
+                Ok(json!({ "error": e }))
+            }
+        }
+    }
+}
+
+/// 把元数据字段并入目录条目的 entry（失败时只有 error 字段，同样并入用于提示）。
+fn merge_metadata(found: &mut HashMap<String, Stored>, id: &str, metadata: &Value) {
+    let Some(stored) = found.get_mut(id) else {
+        return;
+    };
+    let Value::Object(target) = &mut stored.entry else {
+        return;
+    };
+    let Value::Object(extra) = metadata else {
+        return;
+    };
+    for (key, value) in extra {
+        target.insert(key.clone(), value.clone());
+    }
+}
+
+/// 并行解析的线程数：投影文件解析是纯 CPU（解压 + NBT 遍历），按核数但不过度并发
+/// （每个任务还要读整个文件，磁盘带宽也是瓶颈；上限 4 足够，且避免大文件挤爆内存）。
+fn parse_workers(pending: usize) -> usize {
+    if pending <= 1 {
+        return 1;
+    }
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2)
+        .clamp(1, 4)
+        .min(pending)
+}
+
 fn scan_inner(
     app: &tauri::AppHandle,
     rec: &TaskRecord,
@@ -2977,6 +3299,7 @@ fn scan_inner(
     task_title: &str,
     scope: &str,
     target: &Value,
+    progress: bool,
 ) -> Result<Value, String> {
     let target_folder: Option<String> = target["folder"].as_str().map(str::to_string);
     let target_id: Option<String> = target["id"].as_str().map(str::to_string);
@@ -3052,30 +3375,30 @@ fn scan_inner(
         if !seen.insert(key_of(&source.root)) {
             continue;
         }
-        for kind in KINDS {
-            if let Err(e) = visit_source(
-                rec,
-                source,
-                kind,
-                projection_dir(),
-                0,
-                &mut visited,
-                &mut found,
-                &mut order,
-            ) {
-                if !e.not_found {
-                    warnings.push(format!("{}{COLON}{}", source.label, e.message));
-                }
+        // 一次递归收全部 4 种格式（旧写法按格式各走一遍，目录要被列 4 次）
+        if let Err(e) = visit_source(
+            rec,
+            source,
+            projection_dir(),
+            0,
+            &mut visited,
+            &mut found,
+            &mut order,
+        ) {
+            if !e.not_found {
+                warnings.push(format!("{}{COLON}{}", source.label, e.message));
             }
-            if rec.cancelled.load(Ordering::SeqCst) {
-                return Err("已取消".into());
-            }
+        }
+        if rec.cancelled.load(Ordering::SeqCst) {
+            return Err("已取消".into());
         }
     }
     let total = order.len();
     let mut read = 0usize;
+    // 第一遍：命中持久缓存的直接铺好（重开启动器也命中）；未命中的收集起来待解析。
+    metadata_ensure_loaded(app);
+    let mut pending: Vec<(String, Stored)> = Vec::new();
     for id in &order {
-        tasks::wait_while_paused(rec);
         if rec.cancelled.load(Ordering::SeqCst) {
             return Err("已取消".into());
         }
@@ -3083,60 +3406,81 @@ fn scan_inner(
             Some(value) => value.clone(),
             None => continue,
         };
-        let size = entry_size(&item);
-        let modified = entry_modified(&item);
-        let kind = entry_kind(&item);
-        let cached = METADATA_CACHE
-            .lock()
-            .unwrap()
-            .get(id)
-            .filter(|entry| entry.0 == size && entry.1 == modified)
-            .map(|entry| entry.2.clone());
-        let metadata = match cached {
-            Some(cached) => cached,
-            None => {
-                let outcome = scan_metadata(app, &item, &kind, task_id, task_title);
-                let value = match outcome {
-                    Ok(value) => value,
-                    Err(e) => {
-                        if rec.cancelled.load(Ordering::SeqCst) {
-                            return Err("已取消".into());
-                        }
-                        json!({ "error": e })
-                    }
-                };
-                METADATA_CACHE
-                    .lock()
-                    .unwrap()
-                    .insert(id.clone(), (size, modified, value.clone()));
-                value
+        let (size, modified) = (entry_size(&item), entry_modified(&item));
+        match metadata_lookup(id, size, modified) {
+            Some(cached) => {
+                // 命中也要刷新 seen，避免长期在用的投影被淘汰
+                metadata_store(id, size, modified, cached.clone());
+                merge_metadata(&mut found, id, &cached);
+                read += 1;
             }
-        };
-        if let Some(stored) = found.get_mut(id) {
-            if let Value::Object(target) = &mut stored.entry {
-                if let Value::Object(source_map) = &metadata {
-                    for (key, value) in source_map {
-                        target.insert(key.clone(), value.clone());
-                    }
-                }
-            }
+            None => pending.push((id.clone(), item)),
         }
+    }
+    // 第二遍：未命中的文件并行解析。每个文件都要完整解压 + 遍历方块统计，
+    // 串行解析正是「首次进页面要等好几秒」的主因；文件之间完全独立，可以并行。
+    let workers = parse_workers(pending.len());
+    let mut parsed: Vec<(String, Value)> = Vec::new();
+    if workers <= 1 || pending.len() <= 1 {
+        for (id, item) in &pending {
+            tasks::wait_while_paused(rec);
+            if rec.cancelled.load(Ordering::SeqCst) {
+                return Err("已取消".into());
+            }
+            let value = parse_one(app, rec, item)?;
+            parsed.push((id.clone(), value));
+            read += 1;
+        }
+    } else {
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let slot = Mutex::new(Vec::with_capacity(pending.len()));
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| loop {
+                    if rec.cancelled.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    let index = next.fetch_add(1, Ordering::SeqCst);
+                    let Some((id, item)) = pending.get(index) else {
+                        return;
+                    };
+                    // 单个文件失败不打断整批：错误照常记录在条目上
+                    let value = parse_one(app, rec, item)
+                        .unwrap_or_else(|e| json!({ "error": e }));
+                    slot.lock().unwrap().push((id.clone(), value));
+                });
+            }
+        });
+        if rec.cancelled.load(Ordering::SeqCst) {
+            return Err("已取消".into());
+        }
+        parsed = slot.into_inner().unwrap();
+    }
+    for (id, value) in parsed {
+        let item = match found.get(&id) {
+            Some(item) => item,
+            None => continue,
+        };
+        // 解析期间文件被替换的，这一条留空等下次刷新重算，不写进缓存
+        metadata_store(&id, entry_size(item), entry_modified(item), value.clone());
+        merge_metadata(&mut found, &id, &value);
         read += 1;
+    }
+    // 进度推送给的是下载中心：静默读取（进页面/定时刷新）不该在这里冒泡
+    if progress && total > 0 {
         tasks::emit_progress(
             app,
             json!({
                 "taskId": task_id,
                 "taskTitle": task_title,
                 "stage": "world",
-                "progress": (read as f64 / total.max(1) as f64).min(1.0),
+                "progress": 1.0,
                 "text": format!("读取投影 {read}/{total}")
             }),
         );
     }
-    {
-        let mut cache = METADATA_CACHE.lock().unwrap();
-        cache.retain(|id, _| found.contains_key(id));
-    }
+    // 本实例/文件夹之外的条目保留（换范围再回来仍是热的），只清长期不出现的老条目
+    metadata_flush(app, false);
     if SCAN_GENERATION.load(Ordering::SeqCst) == generation {
         let mut catalog = CATALOG.lock().unwrap();
         catalog.clear();
@@ -3157,22 +3501,101 @@ fn scan_inner(
             .unwrap_or(0.0)
             .total_cmp(&a["modified"].as_f64().unwrap_or(0.0))
     });
+    // 实例视图没结果时，顺手告诉前端「这个文件夹里别的实例有没有投影」。
+    // 以前由前端再发一次 scope=folder 的完整扫描（会把整个文件夹的投影全解压一遍），
+    // 只为回答一个是/否——这里只数文件名，不读内容。
+    let others_have = if scope == "instance" && order.is_empty() {
+        folder_has_projections(app, target_folder.as_deref().unwrap_or(""), target_id.as_deref())
+    } else {
+        false
+    };
     Ok(json!({
         "entries": entries,
         "warnings": warnings,
         "library": collection,
-        "instances": instances
+        "instances": instances,
+        "othersHaveProjections": others_have
     }))
 }
 
-fn list(app: &tauri::AppHandle, scope: &str, target: &Value) -> Result<Value, String> {
-    let rec = tasks::register_task("投影 · 扫描全部目录", "world");
-    let task_id = rec.id.clone();
-    let task_title = rec.title.clone();
-    let outcome = scan_inner(app, &rec, &task_id, &task_title, scope, target);
-    let cancelled = rec.cancelled.load(Ordering::SeqCst);
-    let error = outcome.as_ref().err().cloned();
-    tasks::task_done(app, &task_id, outcome.is_ok(), error, cancelled, None);
+/// 其它实例是否还有投影：只列目录看有无匹配后缀的文件，不解压、不解析。
+fn folder_has_projections(app: &tauri::AppHandle, folder: &str, target_id: Option<&str>) -> bool {
+    if folder.is_empty() {
+        return false;
+    }
+    let root_path = resolve_abs(Path::new(folder));
+    let (ids, _) = installed_version_ids(&root_path);
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    // 共享目录（未隔离实例）的 schematics 在文件夹根
+    dirs.push(root_path.join(projection_dir()));
+    for id in ids {
+        if Some(id.as_str()) == target_id {
+            continue;
+        }
+        if let Ok((dir, _)) =
+            center_target_dir_state(app, &json!({ "folder": folder, "id": id }))
+        {
+            dirs.push(dir.join(projection_dir()));
+        }
+    }
+    dirs.iter().any(|dir| {
+        std::fs::read_dir(dir)
+            .map(|reader| {
+                reader.flatten().any(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .to_lowercase()
+                        .rsplit_once('.')
+                        .map(|(_, ext)| KINDS.contains(&ext))
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// projections:list —— 列目录是「读取」，不是后台作业：
+/// - 不注册进 TASKS（否则每次进页面都在下载中心凭空多出一条任务）；
+/// - 短 TTL 结果缓存 + 全局串行锁：吸收进页面瞬间的 onMounted/scope/focus/定时器并发；
+/// - force=true（用户点「刷新」）跳过缓存重扫。
+fn list(app: &tauri::AppHandle, scope: &str, target: &Value, force: bool) -> Result<Value, String> {
+    let cache_key = format!(
+        "{scope}\u{0}{}\u{0}{}",
+        target["folder"].as_str().unwrap_or(""),
+        target["id"].as_str().unwrap_or("")
+    );
+    if !force {
+        let hit = SCAN_CACHE.lock().unwrap().as_ref().and_then(|(key, at, value)| {
+            (key == &cache_key && now_ms() - at < SCAN_CACHE_TTL_MS).then(|| value.clone())
+        });
+        if let Some(value) = hit {
+            return Ok(value);
+        }
+    }
+    // 串行化：同一时刻只允许一个扫描读盘，后到的调用直接复用刚算出的结果
+    let _guard = SCAN_LOCK.lock().unwrap();
+    if !force {
+        let hit = SCAN_CACHE.lock().unwrap().as_ref().and_then(|(key, at, value)| {
+            (key == &cache_key && now_ms() - at < SCAN_CACHE_TTL_MS).then(|| value.clone())
+        });
+        if let Some(value) = hit {
+            return Ok(value);
+        }
+    }
+    let rec = tasks::register_quiet_task("投影 · 读取目录", "world");
+    let outcome = scan_inner(
+        app,
+        &rec,
+        &rec.id.clone(),
+        &rec.title.clone(),
+        scope,
+        target,
+        false,
+    );
+    if let Ok(value) = &outcome {
+        *SCAN_CACHE.lock().unwrap() = Some((cache_key, now_ms(), value.clone()));
+    }
     outcome
 }
 
@@ -3789,10 +4212,13 @@ pub fn invoke(
     match channel {
         "projections:list" => {
             let target = args.get(1).cloned().unwrap_or(json!({}));
+            // 第三参数 force：用户显式点刷新/换范围时跳过短 TTL 缓存
+            let force = args.get(2).and_then(|v| v.as_bool()).unwrap_or(false);
             Some(list(
                 app,
                 args.first().and_then(|v| v.as_str()).unwrap_or("instance"),
                 &target,
+                force,
             ))
         }
         "projections:operate" => Some(operate(app, args)),

@@ -27,6 +27,8 @@ const props = defineProps<{
     qqGroup: string;
     /** 回退模式（文案微调） */
     rollback?: boolean;
+    /** 应用内更新可用（仅 Windows 便携版）；false 时主按钮改为去发布页 */
+    canAutoUpdate?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -36,6 +38,7 @@ const emit = defineEmits<{
     (e: 'cancelDownload'): void;
     (e: 'installNow'): void;
     (e: 'close'): void;
+    (e: 'openReleases'): void;
 }>();
 
 const copied = ref(false);
@@ -174,8 +177,15 @@ const sizeText = computed(() => {
                     </button>
                     <div class="upd-actions-right">
                         <button class="btn btn-ghost" @click="emit('later')">稍后提醒</button
-                        ><button class="btn btn-gold" @click="emit('updateNow')">
+                        ><button
+                            v-if="canAutoUpdate ?? true"
+                            class="btn btn-gold"
+                            @click="emit('updateNow')"
+                        >
                             {{ rollback ? '确认回退' : '立即更新' }}
+                        </button>
+                        <button v-else class="btn btn-gold" @click="emit('openReleases')">
+                            去发布页下载
                         </button>
                     </div></template
                 >

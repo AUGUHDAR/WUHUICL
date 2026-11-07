@@ -35,6 +35,8 @@ export interface GlassPose extends GlassPoint {
 }
 export interface GlassShard {
     vertices: GlassPoint[];
+    /** Max centroid-to-vertex distance; invariant under rotation, bounds any pose. */
+    radius: number;
     sourceX: number;
     sourceY: number;
     targetX: number;
@@ -54,9 +56,14 @@ export interface GlassGeometry {
     board: number;
     left: number;
     top: number;
+    width: number;
+    height: number;
     shards: GlassShard[];
 }
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
+/** Falls back to the midpoint when a tiny window cannot fit the margin on both sides. */
+const clampTo = (v: number, lo: number, hi: number) =>
+    lo < hi ? Math.max(lo, Math.min(hi, v)) : (lo + hi) / 2;
 const smooth = (n: number) => {
     const t = clamp(n);
     return t * t * t * (t * (t * 6 - 15) + 10);
@@ -93,8 +100,10 @@ export function makeBootGlass(width: number, height: number): GlassGeometry {
     const add = (vertices: GlassPoint[]) => {
         const sourceX = vertices.reduce((n, p) => n + p.x, 0) / 3,
             sourceY = vertices.reduce((n, p) => n + p.y, 0) / 3;
+        const relative = vertices.map((p) => ({ x: p.x - sourceX, y: p.y - sourceY }));
         shards.push({
-            vertices: vertices.map((p) => ({ x: p.x - sourceX, y: p.y - sourceY })),
+            vertices: relative,
+            radius: Math.max(...relative.map((p) => Math.hypot(p.x, p.y))),
             sourceX,
             sourceY,
             targetX: left + sourceX,
@@ -124,13 +133,22 @@ export function makeBootGlass(width: number, height: number): GlassGeometry {
                 add([a, d, c]);
             }
         }
-    return { board, left, top, shards };
+    return { board, left, top, width, height, shards };
 }
 
+const glassBase = (shard: GlassShard, elapsed: number): GlassPoint => ({
+    x: shard.x + Math.sin(elapsed / 1500 + shard.phase) * 14,
+    y: shard.y + Math.cos(elapsed / 1800 + shard.phase) * 11
+});
+
+/** Half-extent of any rotated pose (scale ≤1.2) plus wobble headroom and a calm strip off the border. */
+const glassEdgeMargin = (shard: GlassShard): number => shard.radius * 1.2 + 22;
+
 function floating(shard: GlassShard, elapsed: number): GlassPose {
+    const base = glassBase(shard, elapsed);
     return {
-        x: shard.x + Math.sin(elapsed / 1500 + shard.phase) * 14 + shard.offsetX,
-        y: shard.y + Math.cos(elapsed / 1800 + shard.phase) * 11 + shard.offsetY,
+        x: base.x + shard.offsetX,
+        y: base.y + shard.offsetY,
         rotation: shard.spin + Math.sin(elapsed / 2100 + shard.phase) * 0.22,
         scale: 1.06 + Math.sin(elapsed / 1900 + shard.phase) * 0.12,
         progress: 0
@@ -142,13 +160,22 @@ export function advanceBootGlass(
     shards: GlassShard[],
     elapsed: number,
     deltaMs: number,
-    pointer: GlassPoint | null
+    pointer: GlassPoint | null,
+    width: number,
+    height: number
 ): void {
     const dt = Math.min(32, Math.max(0, deltaMs)) / 1000;
     for (const shard of shards) {
-        const p = floating(shard, elapsed);
+        const p = floating(shard, elapsed),
+            m = glassEdgeMargin(shard);
         let fx = 0,
             fy = 0;
+        // Glass clipped by the window edge reads as a glitch: drift back before reaching it.
+        const zone = m + 64;
+        if (p.x < zone) fx += (zone - p.x) * 42;
+        if (p.x > width - zone) fx -= (p.x - (width - zone)) * 42;
+        if (p.y < zone) fy += (zone - p.y) * 42;
+        if (p.y > height - zone) fy -= (p.y - (height - zone)) * 42;
         if (pointer) {
             let dx = p.x - pointer.x,
                 dy = p.y - pointer.y;
@@ -169,6 +196,22 @@ export function advanceBootGlass(
         shard.velocityY = (shard.velocityY + (fy - shard.offsetY * 8) * dt) * drag;
         shard.offsetX = Math.max(-180, Math.min(180, shard.offsetX + shard.velocityX * dt));
         shard.offsetY = Math.max(-180, Math.min(180, shard.offsetY + shard.velocityY * dt));
+        // Hard containment on top of the ±180 spring bound: a shard never crosses the window edge.
+        const base = glassBase(shard, elapsed);
+        if (base.x + shard.offsetX < m) {
+            shard.offsetX = m - base.x;
+            shard.velocityX = Math.max(0, shard.velocityX);
+        } else if (base.x + shard.offsetX > width - m) {
+            shard.offsetX = width - m - base.x;
+            shard.velocityX = Math.min(0, shard.velocityX);
+        }
+        if (base.y + shard.offsetY < m) {
+            shard.offsetY = m - base.y;
+            shard.velocityY = Math.max(0, shard.velocityY);
+        } else if (base.y + shard.offsetY > height - m) {
+            shard.offsetY = height - m - base.y;
+            shard.velocityY = Math.min(0, shard.velocityY);
+        }
     }
 }
 
@@ -176,9 +219,18 @@ export function advanceBootGlass(
 export function glassPosition(
     shard: GlassShard,
     elapsed: number,
-    convergeAt: number | null
+    convergeAt: number | null,
+    width: number,
+    height: number
 ): GlassPose {
-    if (convergeAt === null) return floating(shard, elapsed);
+    if (convergeAt === null) {
+        const pose = floating(shard, elapsed),
+            m = glassEdgeMargin(shard);
+        // Per-frame safety net under the physics containment: shards stay fully on-window.
+        pose.x = clampTo(pose.x, m, width - m);
+        pose.y = clampTo(pose.y, m, height - m);
+        return pose;
+    }
     shard.from ??= floating(shard, convergeAt);
     const progress = smooth((elapsed - convergeAt - shard.delay) / (CONVERGE_DURATION - 180)),
         from = shard.from;

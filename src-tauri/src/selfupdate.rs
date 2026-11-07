@@ -1,7 +1,9 @@
 //! 自更新（对应原版 core/selfUpdate + applyUpdate 的通道合同面）。
-//! WUHUICL 独立版本线：update:check 同时查 GitHub Releases 与 Gitee 发行版（同优先级竞速，
-//! 先返回可用结果者胜）。下载走 GitHub 直连 + Gitee 镜像 **同开竞争**（先完成者胜，另一方
-//! 切断），SHA-256 按 Release asset digest 校验；apply 写替换脚本，进程退出后完成替换并重启。
+//! WUHUICL 独立版本线：update:check 同时查 GitHub Releases 与 Gitee 发行版——两源
+//! 并发等满后取 tag 更大者（不能先到先赢：Gitee 镜像常滞后，会钉死版本）。下载走
+//! GitHub 直连 + Gitee 镜像同开竞争（先完成者胜，另一方切断），SHA-256 按 Release
+//! asset digest 校验；apply 写替换脚本，进程退出后完成替换并重启。
+//! 检查/列表/跳过三端通用；应用内替换仅 Windows（macOS/Linux 弹窗引导去发布页）。
 //!
 //! tag 规范：**纯数字版本号**（如 `1.0.0`），禁止 v 前缀/beta 等后缀——一个版本号对应
 //! 一个版本，预发布信息只允许写在正文里。
@@ -87,10 +89,10 @@ fn current_version() -> String {
 }
 
 /// update:check → UpdateCheckResult {ok, hasUpdate, release?, reason?, fromCache?}
-/// GitHub 与 Gitee 同优先级竞速：先返回有效结果的一方胜出，另一方丢弃。
-fn check(app: &tauri::AppHandle, force: bool) -> Value {
-    let _ = (app, force);
-    // 两个源并发请求，先成功者用其结果
+/// GitHub 与 Gitee 两源并发、等满各自 20s 上限后合并：都成功取 tag 更大者，单成功用单者。
+/// 不能先到先赢——Gitee 镜像常滞后一两个版本（voxlink 侧同款教训），先回的滞后源
+/// 会把版本钉死，用户永远收不到更新提示。
+fn check(_app: &tauri::AppHandle, _force: bool) -> Value {
     let gh = {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -105,15 +107,23 @@ fn check(app: &tauri::AppHandle, force: bool) -> Value {
         });
         rx
     };
-    // 都等，但先拿到 ok 的优先（Gitee 国内通常先回；GitHub 失败会先送 Err）
-    let gh_result = gh.recv_timeout(std::time::Duration::from_secs(20)).ok();
-    let gitee_result = gitee.recv_timeout(std::time::Duration::from_secs(20)).ok();
-    for r in [gh_result, gitee_result].into_iter().flatten() {
-        if let Ok(data) = r {
-            return build_check_result(&data);
+    let mut latest: Option<(Vec<u64>, Value)> = None;
+    for rx in [gh, gitee] {
+        let Ok(Ok(data)) = rx.recv_timeout(std::time::Duration::from_secs(20)) else {
+            continue;
+        };
+        let Some(tag) = parse_tag(data["tag_name"].as_str().unwrap_or("")) else {
+            continue;
+        };
+        let key = tag_key(&tag);
+        if latest.as_ref().map_or(true, |(k, _)| key > *k) {
+            latest = Some((key, data));
         }
     }
-    json!({ "ok": false, "hasUpdate": false, "reason": "网络不可达（GitHub 与 Gitee 均失败）" })
+    match latest {
+        Some((_, data)) => build_check_result(&data),
+        None => json!({ "ok": false, "hasUpdate": false, "reason": "网络不可达（GitHub 与 Gitee 均失败）" }),
+    }
 }
 
 fn fetch_github_latest() -> Result<Value, String> {
@@ -129,7 +139,7 @@ fn fetch_github_latest() -> Result<Value, String> {
     resp.json::<Value>().map_err(|e| e.to_string())
 }
 
-/// Gitee releases 列表第一条（Gitee API 没有 /latest，按创建序取最新）
+/// Gitee releases 列表（Gitee API 没有 /latest；列表排序无合同保证，按 created_at 取最新）
 fn fetch_gitee_latest() -> Result<Value, String> {
     let resp = crate::net::client()
         .get(GITEE_API)
@@ -141,7 +151,15 @@ fn fetch_gitee_latest() -> Result<Value, String> {
     }
     let data = resp.json::<Value>().map_err(|e| e.to_string())?;
     data.as_array()
-        .and_then(|a| a.first().cloned())
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .max_by(|a, b| {
+            a["created_at"]
+                .as_str()
+                .unwrap_or("")
+                .cmp(b["created_at"].as_str().unwrap_or(""))
+        })
         .ok_or_else(|| "Gitee 无发行版".to_string())
 }
 
@@ -155,36 +173,105 @@ fn parse_tag(tag: &str) -> Option<String> {
     }
 }
 
-/// 把 GitHub/Gitee 的 release JSON 归一为 check 结果（两平台字段名一致：tag_name/assets/body）
-fn build_check_result(data: &Value) -> Value {
-    let tag = parse_tag(data["tag_name"].as_str().unwrap_or("")).unwrap_or_default();
-    let has_update = is_newer(&tag, &current_version());
-    let assets: Vec<Value> = data["assets"]
+/// tag → 数值段向量（逐段比较用；入参已经过 parse_tag，只会是纯数字）
+fn tag_key(tag: &str) -> Vec<u64> {
+    tag.split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect()
+}
+
+/// 当前平台的更新资产过滤（check/list 结果只带本平台拿得动的包）
+fn asset_matches_platform(name: &str) -> bool {
+    let n = name.to_lowercase();
+    #[cfg(windows)]
+    {
+        n.ends_with(".exe")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        n.ends_with(".dmg") || (n.ends_with(".zip") && n.contains("macos"))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        n.ends_with(".appimage") || n.ends_with(".deb")
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    {
+        let _ = n;
+        false
+    }
+}
+
+/// 平台过滤后挑主资产（macOS 优先 dmg，Linux 优先 AppImage；assets 已按平台筛过则取首个）
+fn pick_main_asset(assets: &[Value]) -> Option<Value> {
+    let list: Vec<&Value> = assets
+        .iter()
+        .filter(|a| {
+            a["name"]
+                .as_str()
+                .map(asset_matches_platform)
+                .unwrap_or(false)
+        })
+        .collect();
+    if list.is_empty() {
+        return None;
+    }
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let prefer = |suffix: &str| {
+        list.iter()
+            .find(|a| {
+                a["name"]
+                    .as_str()
+                    .map(|n| n.to_lowercase().ends_with(suffix))
+                    .unwrap_or(false)
+            })
+            .copied()
+    };
+    #[cfg(target_os = "macos")]
+    return prefer(".dmg").or_else(|| prefer(".zip")).or(Some(list[0].clone()));
+    #[cfg(target_os = "linux")]
+    return prefer(".appimage").or(Some(list[0].clone()));
+    #[cfg(windows)]
+    return Some(list[0].clone());
+}
+
+/// 资产 JSON → 精简条目（name/url/size/digest；Gitee 无 digest，由 size 校验兜底）
+fn slim_assets(data: &Value) -> Vec<Value> {
+    data["assets"]
         .as_array()
         .cloned()
         .unwrap_or_default()
         .into_iter()
         .filter_map(|a| {
             let name = a["name"].as_str()?.to_string();
-            if !name.to_lowercase().ends_with(".exe") {
-                return None;
-            }
             Some(json!({
                 "name": name,
                 "url": a["browser_download_url"].as_str().map(str::to_string)
                     .unwrap_or_default(),
-                "size": a["size"].as_u64().unwrap_or(0)
+                "size": a["size"].as_u64().unwrap_or(0),
+                "digest": a["digest"].as_str().unwrap_or("")
             }))
         })
-        .collect();
+        .collect()
+}
+
+/// 把 GitHub/Gitee 的 release JSON 归一为 UpdateCheckResult；release 段按前端 ReleaseInfo
+/// 合同出（publishedAt/assetUrl/assetSize/assetName），另带平台过滤后的 assets 供
+/// update:start 取 digest 与双源下载 URL。
+fn build_check_result(data: &Value) -> Value {
+    let tag = parse_tag(data["tag_name"].as_str().unwrap_or("")).unwrap_or_default();
+    let has_update = is_newer(&tag, &current_version());
+    let assets = slim_assets(data);
+    let main = pick_main_asset(&assets);
     json!({
         "ok": true,
         "hasUpdate": has_update,
         "release": if has_update { json!({
             "version": tag,
-            "name": data["name"].as_str().unwrap_or(""),
+            "publishedAt": data["published_at"].as_str()
+                .or_else(|| data["created_at"].as_str()).unwrap_or(""),
             "body": data["body"].as_str().unwrap_or(""),
-            "date": data["published_at"].as_str().or_else(|| data["created_at"].as_str()).unwrap_or(""),
+            "assetUrl": main.as_ref().and_then(|a| a["url"].as_str()).unwrap_or(""),
+            "assetSize": main.as_ref().and_then(|a| a["size"].as_u64()).unwrap_or(0),
+            "assetName": main.as_ref().and_then(|a| a["name"].as_str()).unwrap_or(""),
             "assets": assets,
             "rollback": false
         }) } else { Value::Null }
@@ -193,18 +280,7 @@ fn build_check_result(data: &Value) -> Value {
 
 /// 语义化版本比较：tag > current
 fn is_newer(tag: &str, current: &str) -> bool {
-    let parse = |s: &str| -> Vec<u64> {
-        s.split('.')
-            .map(|p| {
-                p.chars()
-                    .filter(|c| c.is_ascii_digit())
-                    .collect::<String>()
-                    .parse()
-                    .unwrap_or(0)
-            })
-            .collect()
-    };
-    let (a, b) = (parse(tag), parse(current));
+    let (a, b) = (tag_key(tag), tag_key(current));
     for i in 0..a.len().max(b.len()) {
         let x = a.get(i).copied().unwrap_or(0);
         let y = b.get(i).copied().unwrap_or(0);
@@ -226,7 +302,8 @@ fn config_status(app: &tauri::AppHandle) -> Value {
     })
 }
 
-/// update:listReleases → ReleaseInfo[]
+/// update:listReleases → ReleaseInfo[]（历史版本回退候选；同样按前端合同出，
+/// 带平台过滤后的 assets——Windows 回退流程会把整条 release 原样传给 update:start）
 fn list_releases() -> Value {
     let Ok(resp) = crate::net::client()
         .get(REPO_API)
@@ -247,39 +324,47 @@ fn list_releases() -> Value {
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .map(|r| {
-                json!({
-                    "version": r["tag_name"].as_str().unwrap_or("").trim_start_matches(['v', 'V']),
-                    "name": r["name"].as_str().unwrap_or(""),
+            .filter_map(|r| {
+                let tag = parse_tag(r["tag_name"].as_str().unwrap_or(""))?;
+                let assets = slim_assets(&r);
+                let main = pick_main_asset(&assets);
+                Some(json!({
+                    "version": tag,
+                    "publishedAt": r["published_at"].as_str().unwrap_or(""),
                     "body": r["body"].as_str().unwrap_or(""),
-                    "date": r["published_at"].as_str().unwrap_or(""),
+                    "assetUrl": main.as_ref().and_then(|a| a["url"].as_str()).unwrap_or(""),
+                    "assetSize": main.as_ref().and_then(|a| a["size"].as_u64()).unwrap_or(0),
+                    "assetName": main.as_ref().and_then(|a| a["name"].as_str()).unwrap_or(""),
+                    "assets": assets,
                     "rollback": false
-                })
+                }))
             })
             .collect(),
     )
 }
 
-/// 更新提示事件（启动检查发现新版本时推 updatePrompt——对应 index.ts 启动链）
+/// 更新提示事件（启动检查发现新版本时推 updatePrompt——对应 index.ts 启动链）。
+/// 三端都检查；macOS/Linux 弹窗引导去发布页（应用内替换仅 Windows）。
+/// 用户点过"跳过此版本"的版本不再启动时打扰（设置页手动检查不受限）。
 pub fn startup_check(app: &tauri::AppHandle) {
-    // 非 Windows 无应用内更新流程，不做启动检查
-    #[cfg(not(windows))]
-    {
-        let _ = app;
-        return;
-    }
-    #[cfg(windows)]
-    {
-        let handle = app.clone();
-        std::thread::spawn(move || {
-            let result = check(&handle, false);
-            if result["ok"] == true && result["hasUpdate"] == true {
-                if let Some(win) = handle.get_webview_window("main") {
-                    let _ = win.emit_to("main", "event:updatePrompt", result["release"].clone());
-                }
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let result = check(&handle, false);
+        if result["ok"] == true && result["hasUpdate"] == true {
+            let version = result["release"]["version"].as_str().unwrap_or("");
+            let skipped = crate::settings::get(&handle)
+                .get("skipUpdateVersion")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if !skipped.is_empty() && version == skipped {
+                return;
             }
-        });
-    }
+            if let Some(win) = handle.get_webview_window("main") {
+                let _ = win.emit_to("main", "event:updatePrompt", result["release"].clone());
+            }
+        }
+    });
 }
 
 // ---------------- 下载与应用（update:start / update:apply） ----------------
@@ -758,47 +843,25 @@ pub fn invoke(
     channel: &str,
     args: &[Value],
 ) -> Option<Result<Value, String>> {
-    // 应用内自更新 = Windows 便携 exe 的就地替换流程（cmd/bat + tasklist）。
-    // macOS/Linux 安装形态不同（dmg/AppImage/deb），后续按平台做；先诚实降级。
-    #[cfg(not(windows))]
-    {
-        let _ = (app, args);
-        match channel {
-            "update:check" => Some(Ok(json!({
-                "ok": false,
-                "hasUpdate": false,
-                "reason": "当前平台暂不支持应用内更新，请到 GitHub/Gitee 发布页下载新版本"
-            }))),
-            "update:getState" | "update:getPending" => Some(Ok(Value::Null)),
-            "update:getConfigStatus" => Some(Ok(config_status(app))),
-            "update:listReleases" => Some(Ok(list_releases())),
-            "update:skip" => Some(Ok(Value::Null)),
-            "update:start"
-            | "update:apply"
-            | "update:applyPending"
-            | "update:pickLocalFile"
-            | "update:applyLocal"
-            | "update:restoreBackup" => Some(Err(
-                "当前平台暂不支持应用内更新，请到发布页下载新版本".into(),
-            )),
-            _ => None,
-        }
-    }
-    #[cfg(windows)]
+    // 平台无关：检查/列表/跳过/配置状态在任何平台都可用（macOS/Linux 提示更新后引导发布页）
     match channel {
-        "update:check" => Some(Ok(check(
-            app,
-            args.first().and_then(|v| v.as_bool()).unwrap_or(false),
-        ))),
-        "update:getState" | "update:getPending" => Some(Ok(Value::Null)),
-        "update:getConfigStatus" => Some(Ok(config_status(app))),
-        "update:listReleases" => Some(Ok(list_releases())),
-        "update:skip" => Some((|| {
+        "update:check" => {
+            return Some(Ok(check(
+                app,
+                args.first().and_then(|v| v.as_bool()).unwrap_or(false),
+            )));
+        }
+        "update:getState" | "update:getPending" => return Some(Ok(Value::Null)),
+        "update:getConfigStatus" => return Some(Ok(config_status(app))),
+        "update:listReleases" => return Some(Ok(list_releases())),
+        "update:skip" => {
             let version = args.first().and_then(|v| v.as_str()).unwrap_or("");
-            crate::settings::save(app, json!({ "skipUpdateVersion": version }))?;
-            Ok(Value::Null)
-        })()),
-        "update:resetSettings" => Some((|| {
+            return Some(
+                crate::settings::save(app, json!({ "skipUpdateVersion": version }))
+                    .map(|_| Value::Null),
+            );
+        }
+        "update:resetSettings" => {
             let file = crate::settings::settings_file(app);
             if file.exists() {
                 let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
@@ -811,13 +874,19 @@ pub fn invoke(
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
-            std::fs::write(
-                &path,
-                serde_json::to_vec_pretty(&def).map_err(|e| e.to_string())?,
-            )
-            .map_err(|e| e.to_string())?;
-            Ok(Value::Null)
-        })()),
+            let payload = serde_json::to_vec_pretty(&def).map_err(|e| e.to_string());
+            return Some(
+                payload
+                    .and_then(|bytes| std::fs::write(&path, bytes).map_err(|e| e.to_string()))
+                    .map(|_| Value::Null),
+            );
+        }
+        _ => {}
+    }
+    // 应用内自更新 = Windows 便携 exe 的就地替换流程（cmd/bat + tasklist）。
+    // macOS/Linux 安装形态不同（dmg/zip、AppImage/deb），暂不支持，前端弹窗引导去发布页。
+    #[cfg(windows)]
+    match channel {
         "update:start" => {
             let release = args.first().cloned().unwrap_or(Value::Null);
             let mode = args
@@ -839,5 +908,16 @@ pub fn invoke(
         }
         "update:restoreBackup" => Some(Err("备份恢复未启用：更新脚本自带 .old 回滚".into())),
         _ => None,
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        match channel {
+            "update:start" | "update:apply" | "update:applyPending" | "update:pickLocalFile"
+            | "update:applyLocal" | "update:restoreBackup" => Some(Err(
+                "macOS/Linux 暂不支持应用内更新：请到 GitHub/Gitee 发布页下载新版本".into(),
+            )),
+            _ => None,
+        }
     }
 }

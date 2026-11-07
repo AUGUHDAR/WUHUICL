@@ -1,0 +1,194 @@
+name: Release
+
+# 推纯数字 tag（如 1.0.2）触发三平台构建并自动创建 GitHub Release；
+# Gitee 侧由 gitee-release job 用 GITEE_TOKEN 同步创建并上传同名资产。
+# tag 规范 = 更新器合同：纯数字版本号，禁止 v 前缀/beta 后缀。
+on:
+  push:
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（纯数字，如 1.0.2；手动触发不要求仓库里有 tag）'
+        required: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  # 版本一致性闸门：tag 与三处版本声明必须一致，否则 shipped 更新器会拿
+  # CARGO_PKG_VERSION 旧值立刻提示"更新到自己"。
+  preflight:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: |
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Verify version consistency
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          fail=0
+          grep -q "\"version\": \"$VERSION\"" src-tauri/tauri.conf.json || { echo "tauri.conf.json 版本 != $VERSION"; fail=1; }
+          grep -q "^version = \"$VERSION\"" src-tauri/Cargo.toml || { echo "Cargo.toml 版本 != $VERSION"; fail=1; }
+          grep -q "\"version\": \"$VERSION\"" package.json || { echo "package.json 版本 != $VERSION"; fail=1; }
+          case "$VERSION" in
+            *[!0-9.]*) echo "tag 必须是纯数字版本号"; fail=1 ;;
+          esac
+          exit $fail
+
+  windows:
+    runs-on: windows-latest
+    needs: preflight
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install frontend deps
+        run: npm ci
+      # 便携 exe 是主交付形态（更新器就地替换），跳过 NSIS 打包
+      - name: Build portable exe
+        run: npx tauri build --no-bundle
+      - name: Rename with version
+        shell: pwsh
+        run: |
+          $v = "${{ needs.preflight.outputs.version }}"
+          Copy-Item src-tauri/target/release/wuhuicl.exe "WUHUICL-$v-x64.exe"
+          (Get-FileHash "WUHUICL-$v-x64.exe" -Algorithm SHA256).Hash.ToLower() + "  WUHUICL-$v-x64.exe" | Out-File "WUHUICL-$v-x64.exe.sha256" -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wuhuicl-windows-x64
+          path: |
+            WUHUICL-*-x64.exe
+            WUHUICL-*-x64.exe.sha256
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-24.04
+    needs: preflight
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install frontend deps
+        run: npm ci
+      - name: Build AppImage and deb
+        run: npx tauri build --config src-tauri/tauri.linux.conf.json
+      - name: Rename with version
+        run: |
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name '*.AppImage' | head -1)
+          DEB=$(find src-tauri/target/release/bundle/deb -name '*.deb' | head -1)
+          cp "$APPIMAGE" "WUHUICL-linux-x64.AppImage"
+          cp "$DEB" "WUHUICL-linux-x64.deb"
+          sha256sum "WUHUICL-linux-x64.AppImage" > "WUHUICL-linux-x64.AppImage.sha256"
+          sha256sum "WUHUICL-linux-x64.deb" > "WUHUICL-linux-x64.deb.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wuhuicl-linux-x64
+          path: |
+            WUHUICL-linux-x64.AppImage
+            WUHUICL-linux-x64.AppImage.sha256
+            WUHUICL-linux-x64.deb
+            WUHUICL-linux-x64.deb.sha256
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    needs: preflight
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install frontend deps
+        run: npm ci
+      - name: Build app bundle and dmg
+        run: npx tauri build --config src-tauri/tauri.macos.conf.json
+      # .app 是目录，upload-artifact 会丢权限位与符号链接，必须 ditto 打 zip
+      - name: Package and hash
+        run: |
+          APP=$(find src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          DMG=$(find src-tauri/target/release/bundle/dmg -name '*.dmg' | head -1)
+          ditto -c -k --keepParent "$APP" "WUHUICL-macos-arm64.zip"
+          cp "$DMG" "WUHUICL-macos-arm64.dmg"
+          shasum -a 256 "WUHUICL-macos-arm64.zip" > "WUHUICL-macos-arm64.zip.sha256"
+          shasum -a 256 "WUHUICL-macos-arm64.dmg" > "WUHUICL-macos-arm64.dmg.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wuhuicl-macos-arm64
+          path: |
+            WUHUICL-macos-arm64.zip
+            WUHUICL-macos-arm64.zip.sha256
+            WUHUICL-macos-arm64.dmg
+            WUHUICL-macos-arm64.dmg.sha256
+          if-no-files-found: error
+
+  github-release:
+    runs-on: ubuntu-24.04
+    needs: [preflight, windows, linux, macos]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Collect assets
+        run: |
+          mkdir -p release
+          mv dist/WUHUICL-* release/
+          ls -la release/
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.preflight.outputs.version }}
+          name: WUHUICL ${{ needs.preflight.outputs.version }}
+          generate_release_notes: true
+          make_latest: true
+          files: release/*
+          fail_on_unmatched_files: true
+
+  # Gitee 同步：创建同名 release 并上传同一批资产（更新器对 Gitee 无 digest，靠
+  # size 校验兜底，因此双端资产必须字节一致——这里直接用本 run 构建产物，天然一致）。
+  gitee-release:
+    runs-on: ubuntu-24.04
+    needs: [preflight, windows, linux, macos]
+    if: ${{ vars.GITEE_SYNC_ENABLED != 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/publish-gitee.mjs

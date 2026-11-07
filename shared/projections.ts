@@ -22,6 +22,11 @@ export interface ProjectionCatalog {
     /** 导入/复制的落点：当前实例的 schematics 目录 */
     library: string;
     instances: Array<InstanceTarget & { name: string; isolated: boolean }>;
+    /**
+     * 仅 scope=instance 且当前结果为空时有意义：同文件夹的其它实例里还有投影。
+     * 由后端只列目录名得出，前端据此把空状态换成「切到版本文件夹内的所有」。
+     */
+    othersHaveProjections?: boolean;
 }
 export interface ProjectionDifference {
     key: string;

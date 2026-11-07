@@ -369,6 +369,19 @@ fn string_from_units(units: &[u16]) -> String {
 }
 
 pub fn read_typed_nbt(input: &[u8]) -> Result<(String, NbtTag), String> {
+    read_typed_nbt_skipping(input, &[])
+}
+
+/// 读取 NBT，但在任意层级遇到 `skip` 里的键名时**直接跳过字节**、不构造标签树。
+///
+/// 投影列表只需要方块数与版本；而一个 .litematic 里 `TileEntities`（几万个箱子的
+/// 物品 NBT）可以占解压后体积的 95%（实测 8.4 MB 里 7.97 MB 是它）。为了一行
+/// 方块数把这些数据解析成标签树，是「扫盘慢」最大的一处浪费。
+/// 跳过只是不建树，仍会按类型走完长度校验，文件损坏照样报错。
+pub fn read_typed_nbt_skipping(
+    input: &[u8],
+    skip: &[&str],
+) -> Result<(String, NbtTag), String> {
     let buffer = decompress_input(input)?;
     if buffer.len() > MAX_BYTES {
         return Err("NBT 解压后超过 128 MB".into());
@@ -377,6 +390,7 @@ pub fn read_typed_nbt(input: &[u8]) -> Result<(String, NbtTag), String> {
         b: &buffer,
         p: 0,
         nodes: 0,
+        skip: skip.to_vec(),
     };
     let type_ = r.u8()?;
     if type_ != TAG_COMPOUND {
@@ -394,6 +408,8 @@ struct Reader<'a> {
     b: &'a [u8],
     p: usize,
     nodes: usize,
+    /// 遇到这些键名时只跨过字节，不构造标签（见 read_typed_nbt_skipping）
+    skip: Vec<&'a str>,
 }
 
 impl<'a> Reader<'a> {
@@ -500,6 +516,11 @@ impl<'a> Reader<'a> {
                     if !seen.insert(name.clone()) {
                         return Err(ERR_DUP_KEY.into());
                     }
+                    // 大块无关数据（如投影的 TileEntities）只跨字节，不建标签树
+                    if self.skip.iter().any(|k| *k == name) {
+                        self.skip_value(child, depth + 1)?;
+                        continue;
+                    }
                     let child_tag = self.read(child, depth + 1)?;
                     entries.push((name, child_tag));
                 }
@@ -524,6 +545,91 @@ impl<'a> Reader<'a> {
             other => return Err(format!("NBT 标签类型无效：{}", other)),
         };
         Ok(tag(type_, value, element_type))
+    }
+
+    /// 按类型跨过一个标签的字节，不构造标签树。
+    /// 仍然走完整的长度/类型校验，跳过不会掩盖损坏的文件。
+    fn skip_value(&mut self, type_: u8, depth: u32) -> Result<(), String> {
+        if depth > MAX_DEPTH {
+            return Err(ERR_TOO_DEEP.into());
+        }
+        self.nodes += 1;
+        if self.nodes > MAX_NODES {
+            return Err(ERR_TOO_DEEP.into());
+        }
+        match type_ {
+            TAG_BYTE => {
+                self.take(1)?;
+            }
+            TAG_SHORT => {
+                self.take(2)?;
+            }
+            TAG_INT | TAG_FLOAT => {
+                self.take(4)?;
+            }
+            TAG_LONG | TAG_DOUBLE => {
+                self.take(8)?;
+            }
+            TAG_BYTE_ARRAY => {
+                let n = self.count()?;
+                self.take(n)?;
+            }
+            TAG_STRING => {
+                self.string()?;
+            }
+            TAG_LIST => {
+                let element = self.u8()?;
+                let n = self.count()?;
+                if element > 12 || (element == 0 && n != 0) {
+                    return Err(ERR_LIST_TYPE.into());
+                }
+                if element == 0 {
+                    return Ok(());
+                }
+                if element == TAG_END {
+                    return Err(ERR_LIST_TYPE.into());
+                }
+                // 定长元素可整块跨过；复合/列表元素只能逐个走
+                let fixed = match element {
+                    TAG_BYTE => Some(1),
+                    TAG_SHORT => Some(2),
+                    TAG_INT | TAG_FLOAT => Some(4),
+                    TAG_LONG | TAG_DOUBLE => Some(8),
+                    _ => None,
+                };
+                match fixed {
+                    Some(width) => {
+                        let bytes = n.checked_mul(width).ok_or(ERR_TRUNCATED)?;
+                        self.take(bytes)?;
+                    }
+                    None => {
+                        for _ in 0..n {
+                            self.skip_value(element, depth + 1)?;
+                        }
+                    }
+                }
+            }
+            TAG_COMPOUND => loop {
+                let child = self.u8()?;
+                if child == TAG_END {
+                    return Ok(());
+                }
+                self.string()?;
+                self.skip_value(child, depth + 1)?;
+            },
+            TAG_INT_ARRAY => {
+                let n = self.count()?;
+                let bytes = n.checked_mul(4).ok_or(ERR_TRUNCATED)?;
+                self.take(bytes)?;
+            }
+            TAG_LONG_ARRAY => {
+                let n = self.count()?;
+                let bytes = n.checked_mul(8).ok_or(ERR_TRUNCATED)?;
+                self.take(bytes)?;
+            }
+            other => return Err(format!("NBT 标签类型无效：{}", other)),
+        }
+        Ok(())
     }
 }
 

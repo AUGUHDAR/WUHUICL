@@ -79,6 +79,7 @@ pub mod accounts;
 pub mod appearance;
 pub mod assetproto;
 pub mod bridge;
+pub mod cachefs;
 pub mod catalog;
 pub mod centercmd;
 pub mod community;
@@ -418,6 +419,13 @@ fn setup_windows(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error
         .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
         .initialization_script(splash_face_script.as_str())
         .build()?;
+    // 多显示器混合 DPI 下 WebView2 子窗口会沿用窗口落位前的旧 bounds（wry 竞态，
+    // 偏移量≈OS 级联放置的初始位置且每次启动不同），左侧露出一条透出壁纸的缝。
+    // 落位后强制两次真实尺寸变化，逼 wry 重设 controller bounds，让子窗口贴回客户区。
+    let splash_w = size.width as f64 / scale;
+    let splash_h = size.height as f64 / scale;
+    let _ = splash.set_size(tauri::Size::Logical(tauri::LogicalSize::new(splash_w + 1.0, splash_h)));
+    let _ = splash.set_size(tauri::Size::Logical(tauri::LogicalSize::new(splash_w, splash_h)));
     splash.set_ignore_cursor_events(true)?;
     let auto_fit = crate::settings::get(app)["uiWindowAutoFit"]
         .as_bool()

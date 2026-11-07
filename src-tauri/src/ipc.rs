@@ -7,7 +7,7 @@
 //! 为真实现；未移植通道显式返回「未实现的通道」错误，便于移植期发现缺口。
 
 use crate::{
-    accounts, appearance, bridge, catalog, centercmd, community, direct, exportlogs, feedback, frp,
+    accounts, appearance, bridge, cachefs, catalog, centercmd, community, direct, exportlogs, feedback, frp,
     gamedir, gamefolders, gate, hero_scenes, installer, javaman, launch, misc, modpacks, mods,
     mslogin, projections, recordings, schematic_preview, screenshots, seed_map, selfupdate,
     servers, settings, skins, sysinfo, tasks, terracotta, versions, vlcli, voxlink, windowctl,
@@ -147,6 +147,9 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         return r;
     }
     if let Some(r) = exportlogs::invoke(app, channel, args) {
+        return r;
+    }
+    if let Some(r) = cachefs::invoke(app, channel, args) {
         return r;
     }
     match channel {

@@ -268,7 +268,8 @@ fn self_mem_trim_on_resize(window: &Window) {
     }
     crate::screenshots::release_catalog();
     crate::recordings::release_catalog();
-    crate::projections::release_catalog();
+    // 投影元数据改为持久缓存：压缩前先落盘，再释放内存与扫描目录
+    crate::projections::release_catalog(app);
     set_webview_suspended(app, true);
     crate::misc::empty_self_working_set();
     spawn_restore_watcher(window);

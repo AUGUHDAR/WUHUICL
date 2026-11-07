@@ -444,6 +444,17 @@ function openUpdateModal(release: ReleaseInfo, rollback = false) {
     updateModal.rollback = rollback;
     updateModal.open = true;
 }
+/** 应用内替换仅 Windows 便携版；macOS/Linux 弹窗按钮指向发布页 */
+const canAutoUpdate = window.kamucl.platform === 'win32';
+function onUpdateOpenReleases() {
+    // 跟随 updateSource 设置：直连用户给 GitHub，其余（auto/gitee/mirror）给 Gitee
+    const url =
+        store.settings?.updateSource === 'direct'
+            ? 'https://github.com/AUGUHDAR/WUHUICL/releases/latest'
+            : 'https://gitee.com/AUGUHDAR/WUHUICL/releases';
+    window.open(url, '_blank');
+    updateModal.open = false;
+}
 // 设置页手动检查/任意页面写入 store.updatePrompt → 统一在此打开弹窗
 watch(
     () => store.updatePrompt,
@@ -2349,11 +2360,13 @@ onUnmounted(() => {
                 :slow-hint="updateModal.slowHint"
                 :qq-group="qqGroup"
                 :rollback="updateModal.rollback"
+                :can-auto-update="canAutoUpdate"
                 @update-now="onUpdateNow"
                 @later="onUpdateLater"
                 @skip="onUpdateSkip"
                 @cancel-download="onUpdateCancelDownload"
                 @install-now="onUpdateInstallNow"
+                @open-releases="onUpdateOpenReleases"
                 @close="updateModal.open = false"
             />
 

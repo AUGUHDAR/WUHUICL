@@ -24,7 +24,13 @@ const converting = ref<ProjectionEntry>();
 const renderMode = ref(false);
 const rendering = ref<SchematicPreviewSource | null>(null);
 const renderKey = ref(0);
-const data = ref<ProjectionCatalog>({ entries: [], warnings: [], library: '', instances: [] });
+const data = ref<ProjectionCatalog>({
+    entries: [],
+    warnings: [],
+    library: '',
+    instances: [],
+    othersHaveProjections: false
+});
 const loading = ref(false),
     busy = ref(false),
     error = ref(''),
@@ -41,7 +47,6 @@ watch(sort, (v) => localStorage.setItem('kamucl.projectionSort', v));
 const results = ref<ProjectionResult[]>([]);
 let generation = 0,
     disposed = false;
-let refreshTimer: ReturnType<typeof setInterval> | undefined;
 const activeFolder = computed(() => store.settings?.activeFolder || store.settings?.gameDir || '');
 /** 内容范围：instance=只看当前实例；folder=版本文件夹内的所有（含收藏与共享目录） */
 const scope = ref<'instance' | 'folder'>(
@@ -135,7 +140,7 @@ watch([query, kind, source, sort, scope], () => {
     page.value = 1;
     selected.value = [];
 });
-async function refresh(silent = false) {
+async function refresh(silent = false, force = false) {
     const id = ++generation;
     if (!silent) loading.value = true;
     error.value = '';
@@ -143,7 +148,9 @@ async function refresh(silent = false) {
         const next = await invoke<ProjectionCatalog>(
             'projections:list',
             scope.value,
-            currentTarget.value ?? {}
+            currentTarget.value ?? {},
+            // force：用户点「刷新」= 要一份最新真相；静默刷新/首屏走短 TTL 缓存
+            force
         );
         if (disposed || id !== generation) return;
         data.value = next;
@@ -151,19 +158,9 @@ async function refresh(silent = false) {
         selected.value = selected.value.filter((id) => next.entries.some((e) => e.id === id));
         page.value = Math.min(page.value, pages.value);
         if (!silent) target.value = '';
-        // 当前实例没投影时，探一次「版本文件夹内的所有」是否有其它实例的投影，
-        // 决定空状态是给"导入入口"还是给"切换范围"入口（玩家不该误以为整个文件夹都是空的）
-        if (scope.value === 'instance' && next.entries.length === 0) {
-            const all = await invoke<ProjectionCatalog>(
-                'projections:list',
-                'folder',
-                currentTarget.value ?? {}
-            );
-            if (!disposed && id === generation)
-                othersHaveProjections.value = all.entries.some((e) => !!e.instanceId);
-        } else {
-            othersHaveProjections.value = false;
-        }
+        // 「当前实例为空但同文件夹别的实例有投影」由后端随结果一并给出（只数列目录），
+        // 不再让前端补发一次 scope=folder 的完整扫描
+        othersHaveProjections.value = !!next.othersHaveProjections;
     } catch (e) {
         if (!disposed && id === generation) error.value = errText(e);
     } finally {
@@ -195,15 +192,25 @@ const { interceptFileDrag } = useSweepSelect({
         selected.value = [...set];
     }
 });
+/**
+ * 自动刷新只在「真的可能变了」时发生：窗口重新获得焦点（从外面拷了文件回来）。
+ * 定时轮询已取消——投影只会在用户自己导入/游戏内保存时变化，
+ * 每 15 秒重新列一遍目录纯属白烧磁盘。
+ */
+let lastAutoRefresh = 0;
 function autoRefresh() {
+    const now = Date.now();
+    if (now - lastAutoRefresh < 4000) return;
     if (
         !busy.value &&
         !loading.value &&
         !selected.value.length &&
         !target.value &&
         document.visibilityState === 'visible'
-    )
+    ) {
+        lastAutoRefresh = now;
         void refresh(true);
+    }
 }
 function selectPage() {
     const ids = rows.value.map((e) => e.id);
@@ -263,7 +270,7 @@ async function execute(action: ProjectionRequest['action'] | 'import') {
                 `已完成 ${result.length - failed.length} 项${failed.length ? `，${failed.length} 项未完成` : ''}`,
                 failed.length ? 'error' : 'success'
             );
-            await refresh();
+            await refresh(false, true);
         }
     } catch (e) {
         toast(errText(e), 'error');
@@ -294,7 +301,7 @@ async function dropProjections(event: DragEvent) {
             results.value = result;
         }
         toast(`已导入 ${files.length} 个投影文件`, 'success');
-        await refresh(true);
+        await refresh(true, true);
     } catch (e) {
         toast('导入失败：' + errText(e), 'error');
     } finally {
@@ -305,13 +312,11 @@ onMounted(() => {
     void refresh();
     window.addEventListener('keydown', escape);
     window.addEventListener('focus', autoRefresh);
-    refreshTimer = setInterval(autoRefresh, 15000);
     store.resourceDropHandler = dropProjections;
 });
 onUnmounted(() => {
     disposed = true;
     generation++;
-    clearInterval(refreshTimer);
     window.removeEventListener('keydown', escape);
     window.removeEventListener('focus', autoRefresh);
     if (store.resourceDropHandler === dropProjections) store.resourceDropHandler = null;
@@ -335,7 +340,7 @@ onUnmounted(() => {
             v-if="converting"
             :entry="converting"
             @close="converting = undefined"
-            @done="refresh()"
+            @done="refresh(false, true)"
         />
         <header class="page-head recording-heading" data-ui="projections:heading">
             <div data-ui="ProjectionsView:3e7b827962e6">
@@ -366,7 +371,7 @@ onUnmounted(() => {
                     data-ui="ProjectionsView:54ee9bdbb21c"
                     class="btn btn-ghost"
                     :disabled="busy || loading"
-                    @click="refresh()"
+                    @click="refresh(false, true)"
                 >
                     {{ loading ? '读取中…' : '↻ 刷新' }}
                 </button>
@@ -450,7 +455,7 @@ onUnmounted(() => {
                 <button
                     data-ui="ProjectionsView:d86b658466b7"
                     class="btn btn-ghost"
-                    @click="refresh()"
+                    @click="refresh(false, true)"
                 >
                     重试
                 </button>

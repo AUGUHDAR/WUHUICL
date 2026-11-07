@@ -32,7 +32,6 @@ watch(sort, (v) => localStorage.setItem('kamucl.recordingSort', v));
 const results = ref<RecordingResult[]>([]);
 let generation = 0,
     disposed = false;
-let refreshTimer: ReturnType<typeof setInterval> | undefined;
 const activeFolder = computed(() => store.settings?.activeFolder || store.settings?.gameDir || '');
 /** 内容范围：instance=只看当前实例；folder=版本文件夹内的所有（含收藏与共享目录） */
 const scope = ref<'instance' | 'folder'>(
@@ -102,7 +101,7 @@ watch([query, kind, source, sort, scope], () => {
     page.value = 1;
     selected.value = [];
 });
-async function refresh(silent = false) {
+async function refresh(silent = false, force = false) {
     const id = ++generation;
     if (!silent) loading.value = true;
     error.value = '';
@@ -110,7 +109,9 @@ async function refresh(silent = false) {
         const next = await invoke<RecordingCatalog>(
             'recordings:list',
             scope.value,
-            currentTarget.value ?? {}
+            currentTarget.value ?? {},
+            // force：用户点「刷新」= 要一份最新真相；静默刷新/首屏走短 TTL 缓存
+            force
         );
         if (disposed || id !== generation) return;
         data.value = next;
@@ -149,15 +150,25 @@ const { interceptFileDrag } = useSweepSelect({
         selected.value = [...set];
     }
 });
+/**
+ * 自动刷新只在「真的可能变了」时发生：窗口重新获得焦点（从外面拷了文件回来）。
+ * 定时轮询已取消——这类目录只会在用户自己导入/游戏内保存时变化，
+ * 每 15 秒重新列一遍目录纯属白烧磁盘。
+ */
+let lastAutoRefresh = 0;
 function autoRefresh() {
+    const now = Date.now();
+    if (now - lastAutoRefresh < 4000) return;
     if (
         !busy.value &&
         !loading.value &&
         !selected.value.length &&
         !target.value &&
         document.visibilityState === 'visible'
-    )
+    ) {
+        lastAutoRefresh = now;
         void refresh(true);
+    }
 }
 function selectPage() {
     const ids = rows.value.map((e) => e.id);
@@ -254,13 +265,11 @@ onMounted(() => {
     void refresh();
     window.addEventListener('keydown', escape);
     window.addEventListener('focus', autoRefresh);
-    refreshTimer = setInterval(autoRefresh, 15000);
     store.resourceDropHandler = dropImport;
 });
 onUnmounted(() => {
     disposed = true;
     generation++;
-    clearInterval(refreshTimer);
     window.removeEventListener('keydown', escape);
     window.removeEventListener('focus', autoRefresh);
     if (store.resourceDropHandler === dropImport) store.resourceDropHandler = null;
@@ -290,7 +299,7 @@ onUnmounted(() => {
                     data-ui="RecordingsView:54ee9bdbb21c"
                     class="btn btn-ghost"
                     :disabled="busy || loading"
-                    @click="refresh()"
+                    @click="refresh(false, true)"
                 >
                     {{ loading ? '读取中…' : '↻ 刷新' }}
                 </button>
@@ -370,7 +379,7 @@ onUnmounted(() => {
                 <button
                     data-ui="RecordingsView:d86b658466b7"
                     class="btn btn-ghost"
-                    @click="refresh()"
+                    @click="refresh(false, true)"
                 >
                     重试
                 </button>

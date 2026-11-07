@@ -119,6 +119,8 @@ fn try_reveal(app: &AppHandle) {
         let _ = main.set_focus();
         // tao 的 set_visible 会经 apply_diff 把 WS_CAPTION/WS_SYSMENU 写回，显示后补一次无边框复位
         crate::windowctl::schedule_frameless(app);
+        // 同闪屏：窗口化启动时合成层偏移不会像最大化那样被 resize 顺带治愈
+        resync_webview_surface(&main);
     }
     if let Some(splash) = app.get_webview_window("splash") {
         let _ = splash.emit_to("splash", "boot:reveal", ());
@@ -178,6 +180,24 @@ pub fn splash_ready(app: &AppHandle) {
         let _ = splash.show();
         #[cfg(desktop)]
         let _ = splash.set_always_on_top(true);
+        resync_webview_surface(&splash);
         publish(app);
     }
+}
+
+/// 多显示器混合 DPI 下 WebView2 合成层会沿用窗口落位前的旧偏移（窗口本体与
+/// 子窗口矩形都对，唯独内容整体错位，窗口左侧露出一条透出壁纸的缝；任何一次
+/// 真实 resize 都会自愈）。闪屏从不 resize、窗口化的主窗也未必有，所以 show
+/// 之后强制一次 +1px → 60ms → -1px 的尺寸抖动：中间隔一拍是为了让 +1 那次
+/// 真正走完一次异步合成，否则两笔 SetBounds 会被合并成净零。
+fn resync_webview_surface(win: &tauri::WebviewWindow) {
+    let Ok(sz) = win.inner_size() else {
+        return;
+    };
+    let _ = win.set_size(tauri::PhysicalSize::new(sz.width + 1, sz.height));
+    let handle = win.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        let _ = handle.set_size(tauri::PhysicalSize::new(sz.width, sz.height));
+    });
 }

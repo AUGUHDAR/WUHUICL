@@ -24,9 +24,9 @@
 
 ## 注意
 
-正版登录暂时用不了。Client ID 是自建的应用注册，Mojang 白名单没批，最后一步过不去。离线登录和外置登录正常。
+正版登录已可用：微软账号登录走自建应用注册，证书和档案拉取正常。离线登录和外置登录照常。
 
-联机还没接到界面上。点连接会提示"引擎未移植"，这是没做完，不是 BUG。
+联机已接入界面：VoxLink 房间码为主，FRP 内网穿透和陶瓦通道也在。没做完的能力会如实提示，不是 BUG。
 
 早期版本，原版的毛病带过来一些，还在清。遇到不对的地方开 issue 说一声。
 
@@ -43,7 +43,7 @@
 三个渠道同一份文件，国内从 Gitee 或群里下更快。Release 里有 SHA-256：
 
 ```powershell
-Get-FileHash .\WUHUICL-0.1.0.exe -Algorithm SHA256
+Get-FileHash .\WUHUICL-1.0.1-x64.exe -Algorithm SHA256
 ```
 
 ## 运行
@@ -117,9 +117,9 @@ Install versions, keep instances, download mods and packs, manage skins, set mem
 
 ## Notes
 
-Official login doesn't work yet. The Client ID is a separate app registration and Mojang hasn't approved it, so the last call fails. Offline and external auth are fine.
+Official (Microsoft) login works now: the self-registered Client ID passes certificate and profile fetches. Offline and external auth keep working.
 
-Multiplayer isn't wired to the interface. Connect says "engine not ported". Unfinished work, not a bug.
+Multiplayer is wired in: VoxLink room codes lead, with FRP tunneling and Terracotta as alternates. Missing abilities say so honestly instead of pretending to be bugs.
 
 Early version. Some of the original's problems came along and are being cleared out. Open an issue when something looks wrong.
 
@@ -136,7 +136,7 @@ Much of the code was written with AI to keep up the pace. Not your taste, use so
 Same file on all three; inside China, Gitee or the group downloads faster. The release page lists a SHA-256:
 
 ```powershell
-Get-FileHash .\WUHUICL-0.1.0.exe -Algorithm SHA256
+Get-FileHash .\WUHUICL-1.0.1-x64.exe -Algorithm SHA256
 ```
 
 ## Running it
