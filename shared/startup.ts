@@ -52,12 +52,20 @@ export interface GlassShard {
     velocityY: number;
     from?: GlassPose;
 }
+export interface GlassZone {
+    /** 漂浮区中心与半宽/半高：碎片只在头像拼合板四周的紧凑中央区活动，不靠近窗口边界 */
+    cx: number;
+    cy: number;
+    hx: number;
+    hy: number;
+}
 export interface GlassGeometry {
     board: number;
     left: number;
     top: number;
     width: number;
     height: number;
+    zone: GlassZone;
     shards: GlassShard[];
 }
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
@@ -89,6 +97,15 @@ export function makeBootGlass(width: number, height: number): GlassGeometry {
     const left = Math.round((width - board) / 2),
         top = Math.round((height - board) / 2),
         cell = board / 6;
+    // 漂浮区＝拼合板四周的紧凑带（半宽 = 板半宽 + 240：容纳指针斥力的 ±180 弹簧上限 + 半径余量），
+    // 小窗口时收缩进窗口并留 40px 离边余量。碎片散满全窗时，贴边碎片叠上透出的桌面会读成
+    // 「窗口边界」；理想态是只有中间的碎片聚成头像，屏幕其余部分保持干净的桌面。
+    const zone: GlassZone = {
+        cx: left + board / 2,
+        cy: top + board / 2,
+        hx: Math.max(0, Math.min(board / 2 + 240, width / 2 - 40)),
+        hy: Math.max(0, Math.min(board / 2 + 240, height / 2 - 40))
+    };
     const points: GlassPoint[] = [];
     for (let row = 0; row <= 6; row++)
         for (let col = 0; col <= 6; col++)
@@ -101,15 +118,16 @@ export function makeBootGlass(width: number, height: number): GlassGeometry {
         const sourceX = vertices.reduce((n, p) => n + p.x, 0) / 3,
             sourceY = vertices.reduce((n, p) => n + p.y, 0) / 3;
         const relative = vertices.map((p) => ({ x: p.x - sourceX, y: p.y - sourceY }));
+        const radius = Math.max(...relative.map((p) => Math.hypot(p.x, p.y)));
         shards.push({
             vertices: relative,
-            radius: Math.max(...relative.map((p) => Math.hypot(p.x, p.y))),
+            radius,
             sourceX,
             sourceY,
             targetX: left + sourceX,
             targetY: top + sourceY,
-            x: width * (0.1 + random() * 0.8),
-            y: height * (0.14 + random() * 0.62),
+            x: zone.cx + (random() * 2 - 1) * Math.max(0, zone.hx - radius * 1.2 - 24),
+            y: zone.cy + (random() * 2 - 1) * Math.max(0, zone.hy - radius * 1.2 - 24),
             phase: random() * Math.PI * 2,
             spin: (random() - 0.5) * 2.4,
             delay: random() * 180,
@@ -133,7 +151,7 @@ export function makeBootGlass(width: number, height: number): GlassGeometry {
                 add([a, d, c]);
             }
         }
-    return { board, left, top, width, height, shards };
+    return { board, left, top, width, height, zone, shards };
 }
 
 const glassBase = (shard: GlassShard, elapsed: number): GlassPoint => ({
@@ -141,7 +159,7 @@ const glassBase = (shard: GlassShard, elapsed: number): GlassPoint => ({
     y: shard.y + Math.cos(elapsed / 1800 + shard.phase) * 11
 });
 
-/** Half-extent of any rotated pose (scale ≤1.2) plus wobble headroom and a calm strip off the border. */
+/** Half-extent of any rotated pose (scale ≤1.2) plus wobble headroom and a calm strip off the zone border. */
 const glassEdgeMargin = (shard: GlassShard): number => shard.radius * 1.2 + 22;
 
 function floating(shard: GlassShard, elapsed: number): GlassPose {
@@ -161,21 +179,24 @@ export function advanceBootGlass(
     elapsed: number,
     deltaMs: number,
     pointer: GlassPoint | null,
-    width: number,
-    height: number
+    zone: GlassZone
 ): void {
     const dt = Math.min(32, Math.max(0, deltaMs)) / 1000;
+    const loX = zone.cx - zone.hx,
+        hiX = zone.cx + zone.hx,
+        loY = zone.cy - zone.hy,
+        hiY = zone.cy + zone.hy;
     for (const shard of shards) {
         const p = floating(shard, elapsed),
             m = glassEdgeMargin(shard);
         let fx = 0,
             fy = 0;
-        // Glass clipped by the window edge reads as a glitch: drift back before reaching it.
-        const zone = m + 64;
-        if (p.x < zone) fx += (zone - p.x) * 42;
-        if (p.x > width - zone) fx -= (p.x - (width - zone)) * 42;
-        if (p.y < zone) fy += (zone - p.y) * 42;
-        if (p.y > height - zone) fy -= (p.y - (height - zone)) * 42;
+        // 碎片只待在中央漂浮区：贴区边和贴窗口边一样会读成「边界」，留 m+64 缓冲带回推
+        const band = m + 64;
+        if (p.x < loX + band) fx += (loX + band - p.x) * 42;
+        if (p.x > hiX - band) fx -= (p.x - (hiX - band)) * 42;
+        if (p.y < loY + band) fy += (loY + band - p.y) * 42;
+        if (p.y > hiY - band) fy -= (p.y - (hiY - band)) * 42;
         if (pointer) {
             let dx = p.x - pointer.x,
                 dy = p.y - pointer.y;
@@ -196,20 +217,20 @@ export function advanceBootGlass(
         shard.velocityY = (shard.velocityY + (fy - shard.offsetY * 8) * dt) * drag;
         shard.offsetX = Math.max(-180, Math.min(180, shard.offsetX + shard.velocityX * dt));
         shard.offsetY = Math.max(-180, Math.min(180, shard.offsetY + shard.velocityY * dt));
-        // Hard containment on top of the ±180 spring bound: a shard never crosses the window edge.
+        // Hard containment on top of the ±180 spring bound: a shard never leaves the float zone.
         const base = glassBase(shard, elapsed);
-        if (base.x + shard.offsetX < m) {
-            shard.offsetX = m - base.x;
+        if (base.x + shard.offsetX < loX + m) {
+            shard.offsetX = loX + m - base.x;
             shard.velocityX = Math.max(0, shard.velocityX);
-        } else if (base.x + shard.offsetX > width - m) {
-            shard.offsetX = width - m - base.x;
+        } else if (base.x + shard.offsetX > hiX - m) {
+            shard.offsetX = hiX - m - base.x;
             shard.velocityX = Math.min(0, shard.velocityX);
         }
-        if (base.y + shard.offsetY < m) {
-            shard.offsetY = m - base.y;
+        if (base.y + shard.offsetY < loY + m) {
+            shard.offsetY = loY + m - base.y;
             shard.velocityY = Math.max(0, shard.velocityY);
-        } else if (base.y + shard.offsetY > height - m) {
-            shard.offsetY = height - m - base.y;
+        } else if (base.y + shard.offsetY > hiY - m) {
+            shard.offsetY = hiY - m - base.y;
             shard.velocityY = Math.min(0, shard.velocityY);
         }
     }
@@ -220,15 +241,14 @@ export function glassPosition(
     shard: GlassShard,
     elapsed: number,
     convergeAt: number | null,
-    width: number,
-    height: number
+    zone: GlassZone
 ): GlassPose {
     if (convergeAt === null) {
         const pose = floating(shard, elapsed),
             m = glassEdgeMargin(shard);
-        // Per-frame safety net under the physics containment: shards stay fully on-window.
-        pose.x = clampTo(pose.x, m, width - m);
-        pose.y = clampTo(pose.y, m, height - m);
+        // Per-frame safety net under the physics containment: shards stay in the float zone.
+        pose.x = clampTo(pose.x, zone.cx - zone.hx + m, zone.cx + zone.hx - m);
+        pose.y = clampTo(pose.y, zone.cy - zone.hy + m, zone.cy + zone.hy - m);
         return pose;
     }
     shard.from ??= floating(shard, convergeAt);
