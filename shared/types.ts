@@ -140,6 +140,8 @@ export interface InstalledVersion {
     resolution?: GameResolution;
     /** 实例图标：'mob:<内置生物头像id>' | 'file:<自定义图标文件名>'（空 = 默认图标） */
     icon?: string;
+    /** 版本目录自带的 icon.png 收编名（HMCL/PCL 口径的实例图标；配合默认文件夹的 icons 目录用） */
+    iconPath?: string;
     /** 首页启动卡专属缩略图；主进程只返回已验证的 KAMUCL 受管文件路径。 */
     thumbnail?: string;
     /** 专属缩略图显示方式。 */

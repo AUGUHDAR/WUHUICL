@@ -63,6 +63,37 @@ fn text<'a>(j: &'a Value, key: &str) -> Option<&'a str> {
     j.get(key).and_then(Value::as_str).filter(|s| !s.is_empty())
 }
 
+/// 版本目录 icon.png 收编：拷进受管 icons 目录（kamucl-asset 协议只授权受管根，
+/// 版本目录不在其列）。文件名按「来源路径哈希」防多文件夹同名版本互相覆盖；
+/// 源文件比已收编副本新才重拷，扫描成本恒定。
+fn collect_version_icon(
+    icons_dir: &Path,
+    source_root: &str,
+    name: &str,
+    src: &Path,
+) -> Option<String> {
+    let meta = std::fs::metadata(src).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::hash::Hash::hash(&format!("{source_root}/{name}"), &mut hasher);
+    let dest_name = format!("vicon-{:016x}.png", std::hash::Hasher::finish(&hasher));
+    let dest = icons_dir.join(&dest_name);
+    let stale = match std::fs::metadata(&dest) {
+        Ok(d) => match (d.modified(), meta.modified()) {
+            (Ok(dm), Ok(sm)) => sm > dm,
+            _ => true,
+        },
+        Err(_) => true,
+    };
+    if stale {
+        std::fs::create_dir_all(icons_dir).ok()?;
+        std::fs::copy(src, &dest).ok()?;
+    }
+    Some(dest_name)
+}
+
 fn scan_folder(root: &str, default_folder: Option<&str>, active_root: Option<&str>) -> (Vec<Value>, Vec<String>) {
     let mut out: Vec<Value> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
@@ -83,6 +114,9 @@ fn scan_folder(root: &str, default_folder: Option<&str>, active_root: Option<&st
         }
     };
     let base_default = default_folder.unwrap_or(root_s.as_str()).to_string();
+    // 收编 icon.png 的落点：默认文件夹的受管 icons 目录（kamucl-asset 协议只授权这里）；
+    // 仅正式扫描（list_installed）收编，文件夹预览扫描不落盘
+    let icons_dir_opt = default_folder.map(|d| PathBuf::from(d).join(DATA_DIR_NAME).join("icons"));
     if let Some(active) = active_root {
         if installer::same_path(active, &root_s) {
             for entry in &entries {
@@ -180,12 +214,25 @@ fn scan_folder(root: &str, default_folder: Option<&str>, active_root: Option<&st
             }
         }
         // 默认图标：加载器实例用真实加载器 logo，原版用草方块（用户自定义 _icon 优先；
-        // 对应 PCL ModMinecraft.vb:786-800 的按加载器选图逻辑，图标文件来自 HMCL 官方同款素材）
+        // 对应 PCL ModMinecraft.vb:786-800 的按加载器选图逻辑，图标文件来自 HMCL 官方同款素材）。
+        // 都没有时收编版本目录自带的 icon.png——HMCL/PCL 口径：其他启动器/整合包写入的实例图标
         if text(&j, "_icon").is_none() {
-            item["icon"] = json!(match resolved.loader {
-                Some(loader @ ("forge" | "fabric" | "quilt" | "neoforge")) => format!("logo:{loader}"),
-                _ => "logo:grass".to_string(),
+            let collected = icons_dir_opt.as_deref().and_then(|dir| {
+                collect_version_icon(dir, &root_s, &name, &vdir.join(&name).join("icon.png"))
             });
+            match collected {
+                Some(dest_name) => {
+                    item["iconPath"] = json!(dest_name);
+                }
+                None => {
+                    item["icon"] = json!(match resolved.loader {
+                        Some(loader @ ("forge" | "fabric" | "quilt" | "neoforge")) => {
+                            format!("logo:{loader}")
+                        }
+                        _ => "logo:grass".to_string(),
+                    });
+                }
+            }
         }
         if j.get("_javaAuto") == Some(&Value::Bool(true)) {
             item["javaAuto"] = json!(true);

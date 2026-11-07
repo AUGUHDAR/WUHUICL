@@ -6,6 +6,20 @@
 /* Keep the native traffic lights clear of branding and editable page content. */
 html[data-platform="darwin"] .sidebar { padding-top: 38px; }
 html[data-platform="darwin"] .shell { border-radius: 0; }
+/* macOS 兜底：WKWebView 不画底色（wry 对一切 background_color 关 drawsBackground），
+   页面自身必须铺一层主题实底，否则桌面壁纸透过 shell/侧边栏直见。
+   --bg 随主题色板注入（App.vue applyCustomVars），窗口底色与 overscroll 露底由 Rust 侧 NSWindow 补 */
+html[data-platform="darwin"] body { background: var(--bg); }
+
+/* -------- macOS Overlay 标题栏安全区：红绿灯/原生标题占窗口顶部，浮层必须让位 --------
+   Windows 自绘标题栏占位在布局流内（topbar 72px），无需让位，--titlebar-inset 恒 0 */
+:root { --titlebar-inset: 0px; }
+html[data-platform="darwin"] { --titlebar-inset: 38px; }
+/* 全屏遮罩居中弹窗：顶部让位后，超高弹窗（皮肤绘制等 100dvh-32px 大板）不再顶进红绿灯 */
+html[data-platform="darwin"] .modal-mask { padding-top: var(--titlebar-inset); }
+html[data-platform="darwin"] .drop-mask { padding-top: var(--titlebar-inset); }
+/* 顶部居中的悬浮提示条同步让位 */
+html[data-platform="darwin"] .edit-tip { top: calc(14px + var(--titlebar-inset)); }
 
 /* -------- Android：触控基线（去点按高光/禁双击缩放延迟/阻尼滚动），文本输入保留选择 -------- */
 html[data-platform="android"] {

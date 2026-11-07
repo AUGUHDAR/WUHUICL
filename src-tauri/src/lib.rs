@@ -336,15 +336,24 @@ fn setup_windows(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error
         .visible(false)
         // 对应原版 windowAppearance.ts：Windows 上窗口本身不能 transparent（layered window 会绕过
         // DWM 的 Acrylic 合成），透明只交给 WebContents 的 backgroundColor alpha。
-        .transparent(false)
-        .background_color(tauri::window::Color(0, 0, 0, 0));
+        .transparent(false);
+    // Windows：alpha-0 底色让 DWM Acrylic 玻璃透进来。macOS 不能跟：wry 对一切
+    // background_color（哪怕不透明）都会关掉 WKWebView 的 drawsBackground，可见底色
+    // 全靠 NSWindow——给 alpha-0 就等于没底色，桌面壁纸直接透过侧边栏和卡片。
+    // 这里先给不透明深色兜底，窗口创建后 apply_native_appearance 会按主题改色。
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.background_color(tauri::window::Color(0, 0, 0, 0));
+    #[cfg(target_os = "macos")]
+    let builder = builder.background_color(tauri::window::Color(0x21, 0x21, 0x21, 255));
     // macOS 用原生装饰（红绿灯按钮，前端已预留间距）；Windows/Linux 自绘标题栏。
     // title_bar_style(Overlay)：标题栏透明、内容延伸到标题栏下方，红绿灯浮在自绘顶栏上。
     // 只用 decorations(true) 会额外叠一条系统标题栏 → 双标题栏。
     #[cfg(target_os = "macos")]
     let builder = builder
         .decorations(true)
-        .title_bar_style(tauri::TitleBarStyle::Overlay);
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        // Overlay 只保留红绿灯：原生窗口标题文字会叠印在侧边栏品牌区上，应用有自己的品牌标识
+        .hidden_title(true);
     #[cfg(not(target_os = "macos"))]
     let builder = builder.decorations(false);
     // Acrylic 窗口效果依赖 DWM 合成，仅 Windows；macOS/Linux 的毛玻璃后续按平台补
@@ -432,6 +441,9 @@ fn setup_windows(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error
         .unwrap_or(false);
     windowctl::configure_auto_fit(app, auto_fit);
     gate::arm_watchdog(app);
+    // 启动期更新检查（对应 index.ts 启动链）：三端都查，发现新版推 event:updatePrompt；
+    // 内部带监听注册缓冲延时，macOS/Linux 弹窗只引导去发布页（应用内替换仅 Windows）
+    selfupdate::startup_check(app);
 
     // 光标跟随定时器（32ms，对应原版 pointerTimer）
     let timer_app = app.clone();

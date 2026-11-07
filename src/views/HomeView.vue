@@ -75,7 +75,14 @@ const cap = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 const loaderText = (version: InstalledVersion) =>
     version.loader
         ? `${version.loader === 'neoforge' ? 'NeoForge' : cap(version.loader)} ${version.loaderVersion ?? ''}`.trim()
-        : '正式版';
+        : // 原版实例按版本形态判型：快照挂「正式版」徽章=自相矛盾（26.4-snapshot-5 / 23w14a / rc）
+          vanillaTypeText(version.mcVersion);
+const vanillaTypeText = (mcVersion?: string) => {
+    const v = mcVersion ?? '';
+    if (/snapshot/i.test(v) || /^\d{2}w\d{1,2}[a-z]/i.test(v)) return '快照版';
+    if (/-pre\d/i.test(v) || /-rc\d/i.test(v)) return '预发布版';
+    return '正式版';
+};
 // 与下方实例卡片共用命名规则；技术版本只读真实元数据，不从名称推断。
 const heroName = computed(() =>
     currentVersion.value ? versionLabel(currentVersion.value) : '选择游戏实例'

@@ -2215,8 +2215,8 @@ function confirmDownload() {
 }
 .community-page .kind-capsules {
     margin: 0;
-    padding: 0 0 8px;
-    border-bottom: 1px solid var(--border);
+    /* 恢复 base 的对称内衬：0 0 8px 会让首/尾胶囊顶着容器圆角，滑动指示块出界 */
+    padding: 3px;
 }
 .community-page .search-card .filter-row {
     margin: 0;

@@ -1474,7 +1474,21 @@ pub fn collect_libraries(vj: &Value) -> Vec<LibEntry> {
             .and_then(|n| n.get(os_name()))
             .and_then(|v| v.as_str())
         {
-            let key = natives.replace("${arch}", "64");
+            let mut key = natives.replace("${arch}", "64");
+            // 第三方 json（Pojav 系）常给 macOS 备好 arm64 分类器但 natives.osx 仍指 x64 包：
+            // Apple Silicon + aarch64 Java 会 UnsatisfiedLinkError。分类器里带
+            // natives-macos-arm64 时优先取它；官方 json 的 mac natives 按 os.arch 规则
+            // 分列为独立库，不走 natives 键，不受影响。
+            if cfg!(target_arch = "aarch64") && os_name() == "osx" && key != "natives-macos-arm64" {
+                if lib
+                    .get("downloads")
+                    .and_then(|d| d.get("classifiers"))
+                    .and_then(|c| c.get("natives-macos-arm64"))
+                    .is_some()
+                {
+                    key = "natives-macos-arm64".into();
+                }
+            }
             if let Some(art) = downloads
                 .and_then(|d| d.get("classifiers"))
                 .and_then(|c| c.get(key.as_str()))

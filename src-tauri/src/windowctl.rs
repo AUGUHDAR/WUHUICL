@@ -524,7 +524,7 @@ pub fn schedule_frameless(app: &AppHandle) {
 
 /// 对应原版 nativeAppearance.ts applyNativeAppearance：DWM 帧延入客户区 + 主题染色 + 圆角 + Acrylic。
 /// 不做帧扩展时 DWM 不会把桌面模糊合成进客户区，玻璃层只剩窗口底色，比原版暗约 80 灰度。
-/// DWM 部分仅 Windows；macOS/Linux 只锁 WebView 主题（毛玻璃效果后续按平台补）。
+/// DWM 部分仅 Windows；macOS 锁 WebView 主题并给 NSWindow 实底色（见 cfg 块）。
 pub fn apply_native_appearance(win: &tauri::WebviewWindow, settings: &serde_json::Value) {
     let light = is_light_theme(settings);
     // 对应原版 nativeTheme.themeSource = light ? 'light' : 'dark'：
@@ -534,6 +534,18 @@ pub fn apply_native_appearance(win: &tauri::WebviewWindow, settings: &serde_json
     } else {
         tauri::Theme::Dark
     }));
+    #[cfg(target_os = "macos")]
+    {
+        // macOS 的 NSWindow 是唯一可见底色（WKWebView 不画底色，见 setup_windows 注释），
+        // 必须按主题给实底，否则壁纸直透、浅色主题下还压着深色底。色值取色板锚点：
+        // 深=默认·黑紫 #212121，浅=蓝白 #edf0f7。外观设置变更时 ipc.rs 会重进这里。
+        let (r, g, b) = if light {
+            (0xED, 0xF0, 0xF7)
+        } else {
+            (0x21, 0x21, 0x21)
+        };
+        let _ = win.set_background_color(Some(tauri::window::Color(r, g, b, 255)));
+    }
     #[cfg(windows)]
     {
         apply_dwm_appearance(win, light);

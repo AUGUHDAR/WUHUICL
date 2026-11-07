@@ -539,22 +539,27 @@ export function displayVersionSub(v: InstalledVersion): string {
     return v.id;
 }
 
-/** 实例图标 URL：加载器 logo / 内置 mob 头像走渲染包静态资源；自定义图标走 file://（空 = 默认图标） */
+/** 受管 icons 目录里的图标文件 → kamucl-asset URL（def = 默认文件夹路径） */
+function managedIconUrl(fileName: string): string {
+    const def =
+        store.settings?.folders.find((f) => f.isDefault)?.path ?? store.settings?.gameDir ?? '';
+    if (!def) return '';
+    // 自定义图标在默认文件夹的受管 icons 目录，走 kamucl-asset 协议（file:// 在 Tauri 页面里不可读）；
+    // 按平台选分隔符拼接（managedAssets 的 key 匹配两端都做了分隔符归一）
+    const sep = window.kamucl.platform === 'win32' ? '\\' : '/';
+    return managedImageUrl([def, '.wuhuicl', 'icons', fileName].join(sep));
+}
+
+/** 实例图标 URL：加载器 logo / 内置 mob 头像走渲染包静态资源；自定义图标/收编 icon.png 走协议（空 = 默认图标） */
 export function versionIconUrl(v: InstalledVersion): string {
     const icon = v.icon;
-    if (!icon) return '';
+    if (!icon) {
+        // HMCL/PCL 口径：版本目录 icon.png（其他启动器写入的实例图标）自动收编，直接采用
+        return v.iconPath ? managedIconUrl(v.iconPath) : '';
+    }
     if (icon.startsWith('logo:')) return `loaders/${icon.slice(5)}.png`;
     if (icon.startsWith('mob:')) return `mobs/${icon.slice(4)}.png`;
-    if (icon.startsWith('file:')) {
-        const def =
-            store.settings?.folders.find((f) => f.isDefault)?.path ?? store.settings?.gameDir ?? '';
-        if (!def) return '';
-        // 自定义图标在默认文件夹的受管 icons 目录，走 kamucl-asset 协议（file:// 在 Tauri 页面里不可读）；
-        // 按平台选分隔符拼接（managedAssets 的 key 匹配两端都做了分隔符归一）
-        const sep = window.kamucl.platform === 'win32' ? '\\' : '/';
-        const p = [def, '.wuhuicl', 'icons', icon.slice(5)].join(sep);
-        return managedImageUrl(p);
-    }
+    if (icon.startsWith('file:')) return managedIconUrl(icon.slice(5));
     return '';
 }
 

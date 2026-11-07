@@ -253,15 +253,20 @@ fn export_launch_script(app: &AppHandle, args: &[Value]) -> Result<Value, String
     let cwd = last["cwd"].as_str().unwrap_or("");
     let vid = last["versionId"].as_str().unwrap_or("Minecraft");
 
-    let quoted_argv = argv
-        .iter()
-        .filter_map(|a| a.as_str())
-        .map(windows_quote)
-        .collect::<Vec<_>>()
-        .join(" ");
     let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-    let script = format!(
-        "@echo off
+    // Windows 落 .bat（chcp/cd /d 是 CMD 语法）；Unix 落 .sh 并补执行位——
+    // windows_quote 的裸引号包裹在 shell 下不成立（单引号参数会截断），走 POSIX 单引号转义
+    #[cfg(windows)]
+    let (script, def_name, filter_label, filter_ext) = {
+        let quoted_argv = argv
+            .iter()
+            .filter_map(|a| a.as_str())
+            .map(windows_quote)
+            .collect::<Vec<_>>()
+            .join(" ");
+        (
+            format!(
+                "@echo off
 chcp 65001 >nul
 title Minecraft - {vid}
 rem 由 WUHUICL 导出的启动脚本（{stamp}）
@@ -270,15 +275,44 @@ cd /d \"{cwd}\"
 \"{java_path}\" {quoted_argv}
 if %errorlevel% neq 0 pause
 "
-    );
+            ),
+            format!("WUHUICL-启动脚本-{vid}.bat"),
+            "批处理脚本",
+            "bat",
+        )
+    };
+    #[cfg(not(windows))]
+    let (script, def_name, filter_label, filter_ext) = {
+        let sh_quote = |s: &str| format!("'{}'", s.replace('\'', "'\\''"));
+        let quoted_argv = argv
+            .iter()
+            .filter_map(|a| a.as_str())
+            .map(sh_quote)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let cwd_q = sh_quote(cwd);
+        let java_q = sh_quote(java_path);
+        (
+            format!(
+                "#!/bin/sh
+# 由 WUHUICL 导出的启动脚本（{stamp}）
+# 含完整 classpath/JVM 参数，可直接排障；工作目录即游戏目录
+cd {cwd_q} || exit 1
+exec {java_q} {quoted_argv}
+"
+            ),
+            format!("WUHUICL-启动脚本-{vid}.sh"),
+            "Shell 脚本",
+            "sh",
+        )
+    };
 
     use tauri_plugin_dialog::DialogExt;
-    let def_name = format!("WUHUICL-启动脚本-{vid}.bat");
     let picked = app
         .dialog()
         .file()
         .set_file_name(&def_name)
-        .add_filter("批处理脚本", &["bat"])
+        .add_filter(filter_label, &[filter_ext])
         .blocking_save_file();
     let Some(picked) = picked else {
         return Ok(Value::Null);
@@ -288,6 +322,12 @@ if %errorlevel% neq 0 pause
         let _ = std::fs::create_dir_all(dir);
     }
     std::fs::write(&dest, script).map_err(|e| format!("脚本写入失败：{e}"))?;
+    // Unix 上补执行位：从启动器落盘的文件不会继承 +x
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755));
+    }
     Ok(json!(dest.to_string_lossy()))
 }
 
@@ -1351,7 +1391,14 @@ fn launch_owned(
             let folder2 = folder.to_string();
             let launch_id2 = inv.launch_id.clone();
             std::thread::spawn(move || {
+                // Windows 观察到真实游戏窗口再转 running；macOS/Linux 没有轻量等价物
+                // （read_owned_game_window 恒 None），等满窗会把状态卡在「等待窗口出现」
+                // 整整 90 秒。改为 3 秒缓冲 + 进程存活即转 running，秒退/崩溃仍由
+                // 退出监视管线收尾。
+                #[cfg(windows)]
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(90);
+                #[cfg(not(windows))]
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
                 loop {
                     if read_owned_game_window(pid).is_some() {
                         break;

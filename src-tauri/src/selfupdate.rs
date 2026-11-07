@@ -351,6 +351,9 @@ fn list_releases() -> Value {
 pub fn startup_check(app: &tauri::AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
+        // 先缓 6 秒再查：等主窗口显示、前端挂上 event:updatePrompt 监听。
+        // 检查太快完成时事件发进还没人听的窗口，发后即焚——提示就永远不出现了。
+        std::thread::sleep(std::time::Duration::from_secs(6));
         let result = check(&handle, false);
         if result["ok"] == true && result["hasUpdate"] == true {
             let version = result["release"]["version"].as_str().unwrap_or("");
