@@ -993,6 +993,7 @@ export const IPC = {
     communityFiles: 'community:files', // (source: 'modrinth'|'curseforge', projectId: string) => CommunityFile[]
     communityDownload: 'community:download', // (file: CommunityFile, target: { versionId: string; kind: CommunityKind }) => string  同步下载完成返回保存路径；kind=modpack 时下载后自动进入整合包安装流程
     communityMcmod: 'community:mcmod', // ({ keyword: string }) => { hits: { wikiId: string; title: string; zh: string; en: string; url: string }[]; keyword: string }  MC 百科精确检索
+    communitySuggest: 'community:suggest', // ({ keyword: string, kind: CommunityKind }) => { suggestions: CommunitySuggestion[] }  输入联想（纯本地词典/别名）
 
     tasksCancel: 'tasks:cancel', // (taskId: string) => Promise<boolean>  底层退出并清理完成后才返回
     tasksPause: 'tasks:pause', // (taskId: string) => boolean
@@ -1073,8 +1074,10 @@ export interface CommunityQuery {
     source: 'all' | CommunitySource;
     mcVersion?: string;
     loader?: LoaderName | '';
-    /** 排序：相关度（默认）/ 最多下载 / 最新发布 */
-    sort?: 'relevance' | 'downloads' | 'newest';
+    /** 分类标签，PCL 口径 "CF categoryId/Modrinth slug"（如 "412/technology"，任一侧可空） */
+    category?: string;
+    /** 排序：相关度（默认）/ 最多下载 / 最新发布 / 最近更新 */
+    sort?: 'relevance' | 'downloads' | 'newest' | 'updated';
     /** 分页偏移 */
     offset: number;
     limit: number;
@@ -1087,6 +1090,8 @@ export interface CommunityResult {
     title: string;
     /** 源站原始名称，不包含启动器追加的中文译名。 */
     originalTitle?: string;
+    /** mcmod.cn class 页 id（>0 时百科链接直达 class/{id}.html，0/缺省 = 无） */
+    mcmodId?: number;
     author: string;
     description: string;
     iconUrl: string;
@@ -1095,9 +1100,19 @@ export interface CommunityResult {
     categories: string[];
 }
 
+/** 输入联想项（community:suggest，纯本地词典/别名，零网络） */
+export interface CommunitySuggestion {
+    /** 主文案：中文名或别名 */
+    label: string;
+    /** 副文案：英文原名（缩写） */
+    sublabel: string;
+    /** mcmod.cn class 页 id（有则联想可直接跳百科详情） */
+    mcmodId?: number;
+}
+
 /** An identity can open download/metadata without inventing absent search metrics. */
 export type CommunityProjectReference = Pick<CommunityResult, 'source' | 'projectId' | 'title'> &
-    Partial<Pick<CommunityResult, 'slug' | 'originalTitle' | 'iconUrl'>>;
+    Partial<Pick<CommunityResult, 'slug' | 'originalTitle' | 'iconUrl' | 'mcmodId'>>;
 export interface CommunityModProject extends CommunityProjectReference {
     kind: 'mod';
     iconUrl?: string;

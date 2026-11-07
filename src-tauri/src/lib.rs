@@ -83,6 +83,7 @@ pub mod cachefs;
 pub mod catalog;
 pub mod centercmd;
 pub mod community;
+pub mod community_wiki;
 pub mod crashanalyzer;
 pub mod direct;
 pub mod download;

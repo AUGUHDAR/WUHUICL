@@ -14,6 +14,7 @@ import {
     communityFiles,
     communityMcmod,
     communitySearch,
+    communitySuggest,
     errText,
     getManifest,
     getModTargets,
@@ -22,7 +23,7 @@ import {
 import { store, toast, selectedInstance, displayVersionName as versionLabel } from '../store';
 import { instanceKey } from '@shared/modCompatibility';
 import { communityFileMatchesInstance, usesCommunityLoader } from '@shared/communityPolicy';
-import { mcmodSearchUrl } from '@shared/communityLinks';
+import { mcmodSearchUrl, mcmodPageUrl } from '@shared/communityLinks';
 import SelectMenu from '../components/SelectMenu.vue';
 import UiGlyph from '../components/UiGlyph.vue';
 import CommunityVersionFilter from '../components/CommunityVersionFilter.vue';
@@ -48,6 +49,7 @@ import type {
     CommunityProjectReference,
     CommunityResult,
     CommunitySource,
+    CommunitySuggestion,
     LoaderName
 } from '@shared/types';
 import type { InstalledVersion, RemoteVersion } from '@shared/types';
@@ -68,8 +70,14 @@ function sourceUrl(r: CommunityProjectReference, kind: CommunityKind = query.kin
     return `https://www.curseforge.com/minecraft/${CF_KIND_SEGMENT[kind] ?? 'mc-mods'}/${r.slug || r.projectId}`;
 }
 
-/** MC 百科：先精确检索（PCL 式直达 class 页），失败或无命中回退搜索页 */
+/** MC 百科：词典/百科桥已附身份（mcmodId）直达 class 详情页（PCL 口径）；
+ *  否则先实时精确检索，失败或无命中回退搜索页 */
 async function openMcmod(item: CommunityProjectReference) {
+    const direct = mcmodPageUrl({ ...item, slug: item.slug ?? '' });
+    if (direct && item.mcmodId && item.mcmodId > 0) {
+        openExternal(direct);
+        return;
+    }
     const searchUrl = mcmodSearchUrl({ ...item, slug: item.slug ?? '' });
     if (!searchUrl) {
         toast('该项目没有可用于检索的英文名称', 'error');
@@ -287,11 +295,46 @@ watch(
 const supportsLoader = computed(() => usesCommunityLoader(query.kind));
 const usesPagination = computed(() => !supportsLoader.value);
 
-/** 排序选项 */
+/** 排序选项（updated 映射：Modrinth index=updated / CurseForge sortField=3，HMCL 同款） */
 const sortOptions = [
     { value: 'relevance', label: '相关度' },
     { value: 'downloads', label: '最多下载' },
-    { value: 'newest', label: '最新发布' }
+    { value: 'newest', label: '最新发布' },
+    { value: 'updated', label: '最近更新' }
+];
+
+/**
+ * 分类标签（PCL PageDownloadMod.xaml 的 27 分类表，Tag 格式 "CF categoryId/Modrinth slug"：
+ * CF 侧用 categoryId，Modrinth 侧用 slug；一侧为空则只发给另一侧）
+ */
+const categoryOptions: Array<{ value: string; label: string }> = [
+    { value: '', label: '全部分类' },
+    { value: '406/worldgen', label: '世界元素' },
+    { value: '407/', label: '生物群系' },
+    { value: '410/', label: '维度' },
+    { value: '408/', label: '矿物与资源' },
+    { value: '409/', label: '天然结构' },
+    { value: '412/technology', label: '科技' },
+    { value: '415/', label: '管道与物流' },
+    { value: '4843/', label: '自动化' },
+    { value: '417/', label: '能源' },
+    { value: '4558/', label: '红石' },
+    { value: '436/food', label: '食物与烹饪' },
+    { value: '416/', label: '农业' },
+    { value: '/game-mechanics', label: '游戏机制' },
+    { value: '414/transportation', label: '运输' },
+    { value: '420/storage', label: '仓储' },
+    { value: '419/magic', label: '魔法' },
+    { value: '422/adventure', label: '冒险' },
+    { value: '424/decoration', label: '装饰' },
+    { value: '411/mobs', label: '生物' },
+    { value: '5191/utility', label: '实用' },
+    { value: '434/equipment', label: '装备与工具' },
+    { value: '9026/', label: '创造模式' },
+    { value: '6814/optimization', label: '性能优化' },
+    { value: '423/', label: '信息显示' },
+    { value: '435/social', label: '服务器' },
+    { value: '421/library', label: '支持库' }
 ];
 
 // ---------------- 搜索与列表 ----------------
@@ -365,6 +408,7 @@ async function doSearch(reset: boolean, page = currentPage.value) {
             source: query.source,
             mcVersion: query.mcVersion || undefined,
             loader: supportsLoader.value ? query.loader || undefined : undefined,
+            category: query.category || undefined,
             sort: query.sort,
             offset: requestedOffset,
             limit: PAGE_SIZE
@@ -405,6 +449,72 @@ async function doSearch(reset: boolean, page = currentPage.value) {
 
 const onSearch = () => void doSearch(true);
 const onLoadMore = () => void doSearch(false);
+
+// ---------------- 输入联想（离线词典 LCS + 内置别名，纯本地零网络） ----------------
+const suggestions = ref<CommunitySuggestion[]>([]);
+const suggestOpen = ref(false);
+const suggestActive = ref(-1);
+let suggestTimer: ReturnType<typeof setTimeout> | undefined;
+let suggestSeq = 0;
+
+function closeSuggest() {
+    suggestOpen.value = false;
+    suggestActive.value = -1;
+}
+
+function onKeywordInput() {
+    // 输入变化：先收起旧下拉，200ms 防抖后本地查联想（美西螈 use-browse-search 同款节流）
+    closeSuggest();
+    const keyword = query.keyword.trim();
+    if (suggestTimer) clearTimeout(suggestTimer);
+    if (keyword.length < 1 || query.kind !== 'mod') {
+        suggestions.value = [];
+        return;
+    }
+    const seq = ++suggestSeq;
+    suggestTimer = setTimeout(async () => {
+        try {
+            const r = await communitySuggest(keyword, query.kind);
+            if (seq !== suggestSeq) return;
+            suggestions.value = r.suggestions;
+            suggestOpen.value = r.suggestions.length > 0;
+            suggestActive.value = -1;
+        } catch {
+            suggestions.value = [];
+        }
+    }, 200);
+}
+
+function pickSuggestion(s: CommunitySuggestion) {
+    query.keyword = s.sublabel ? s.sublabel.replace(/\s*\([^)]*\)\s*$/, '') : s.label;
+    suggestions.value = [];
+    suggestOpen.value = false;
+    suggestActive.value = -1;
+    void doSearch(true);
+}
+
+function onKeywordKeydown(e: KeyboardEvent) {
+    if (!suggestOpen.value || !suggestions.value.length) return;
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        suggestActive.value = (suggestActive.value + 1) % suggestions.value.length;
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        suggestActive.value =
+            (suggestActive.value - 1 + suggestions.value.length) % suggestions.value.length;
+    } else if (e.key === 'Escape') {
+        closeSuggest();
+    }
+}
+
+/** 输入即搜：中文关键词停止输入 400ms 后自动搜索（英文仍走回车，避免打爆远端配额） */
+let liveTimer: ReturnType<typeof setTimeout> | undefined;
+function onKeywordSettled() {
+    const keyword = query.keyword.trim();
+    if (liveTimer) clearTimeout(liveTimer);
+    if (!keyword || !/[\u3400-\u4dbf\u4e00-\u9fff]/u.test(keyword)) return;
+    liveTimer = setTimeout(() => void doSearch(true), 400);
+}
 async function goToPage(page: number) {
     if (loading.value || page < 1 || page > totalPages.value || page === currentPage.value) return;
     await doSearch(false, page);
@@ -521,8 +631,10 @@ function onReset() {
     query.source = 'all';
     query.mcVersion = '';
     query.loader = '';
+    query.category = '';
     query.sort = 'relevance';
     versionInput.value = '';
+    closeSuggest();
     Object.assign(versionSelection, { source: 'all', instance: '', loaderSource: 'all' });
     void doSearch(true);
 }
@@ -931,17 +1043,52 @@ function confirmDownload() {
                 </section>
 
                 <div data-ui="CommunityView:d516b82f0eb8" class="search-row">
-                    <input
-                        data-ui="CommunityView:bc0450fd9c8f"
-                        v-model="query.keyword"
-                        class="input"
-                        :placeholder="
-                            query.kind === 'mod'
-                                ? '输入 MOD 中文名、常用别名或英文名，回车搜索…'
-                                : '输入资源名称，回车搜索…'
-                        "
-                        @keyup.enter="onSearch"
-                    />
+                    <div class="search-input-wrap">
+                        <input
+                            data-ui="CommunityView:bc0450fd9c8f"
+                            v-model="query.keyword"
+                            class="input"
+                            :placeholder="
+                                query.kind === 'mod'
+                                    ? '输入 MOD 中文名、常用别名或英文名（支持模糊）…'
+                                    : '输入资源名称，回车搜索…'
+                            "
+                            @input="
+                                onKeywordInput();
+                                onKeywordSettled();
+                            "
+                            @keyup.enter="
+                                suggestActive >= 0
+                                    ? pickSuggestion(suggestions[suggestActive])
+                                    : onSearch()
+                            "
+                            @keydown="onKeywordKeydown"
+                            @blur="closeSuggest"
+                        />
+                        <!-- 输入联想下拉：词典命中 + 内置别名，键盘上下选择、回车采用 -->
+                        <div
+                            v-if="suggestOpen && suggestions.length"
+                            class="suggest-pop"
+                            role="listbox"
+                        >
+                            <button
+                                v-for="(s, i) in suggestions"
+                                :key="`${s.label}|${s.sublabel}`"
+                                type="button"
+                                class="suggest-item"
+                                :class="{ active: i === suggestActive }"
+                                role="option"
+                                :aria-selected="i === suggestActive"
+                                @mousedown.prevent="pickSuggestion(s)"
+                            >
+                                <span class="suggest-label">{{ s.label }}</span>
+                                <span v-if="s.sublabel" class="suggest-sub">
+                                    {{ s.sublabel }}
+                                </span>
+                                <span v-if="s.mcmodId" class="suggest-tag">百科</span>
+                            </button>
+                        </div>
+                    </div>
                     <button
                         data-ui="CommunityView:ce39174e4563"
                         class="btn btn-gold search-btn"
@@ -994,6 +1141,13 @@ function confirmDownload() {
                         class="filter-select"
                         :options="loaderOptions"
                         @change="loaderChanged"
+                    />
+                    <SelectMenu
+                        aria-label="分类"
+                        v-model="query.category"
+                        class="filter-select"
+                        :options="categoryOptions"
+                        @change="onFilterChange"
                     />
                     <SelectMenu
                         aria-label="排序"
@@ -2245,5 +2399,76 @@ function confirmDownload() {
     color: var(--text);
     background: var(--accent-soft);
     text-shadow: none;
+}
+/* ---------- 搜索联想下拉 ---------- */
+.search-input-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+}
+.search-input-wrap > .input {
+    width: 100%;
+}
+.suggest-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    padding: 6px;
+    max-height: 300px;
+    overflow-y: auto;
+    background: color-mix(in srgb, var(--card-solid, var(--card)) 97%, transparent);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+}
+.suggest-item {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: var(--radius-sm, 8px);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: var(--text-sm);
+    text-align: left;
+    cursor: pointer;
+}
+.suggest-item:hover,
+.suggest-item.active {
+    background: var(--accent-soft);
+}
+.suggest-label {
+    flex-shrink: 0;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+.suggest-sub {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-dim);
+    font-size: var(--text-xs);
+}
+.suggest-tag {
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 11px;
 }
 </style>

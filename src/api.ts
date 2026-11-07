@@ -12,6 +12,7 @@ import type {
     CommunityModProject,
     CommunityQuery,
     CommunitySearchPage,
+    CommunitySuggestion,
     CommunitySource,
     FabricApiVersion,
     FolderScanResult,
@@ -259,6 +260,9 @@ export const communityMcmod = (keyword: string) =>
         hits: { wikiId: string; title: string; zh: string; en: string; url: string }[];
         keyword: string;
     }>(IPC.communityMcmod, { keyword });
+/** 输入联想：离线词典 LCS + 内置别名（纯本地零网络） */
+export const communitySuggest = (keyword: string, kind: CommunityKind) =>
+    invoke<{ suggestions: CommunitySuggestion[] }>(IPC.communitySuggest, { keyword, kind });
 /** Read verified MOD metadata independently of downloadable file versions. */
 export const communityProject = (source: CommunitySource, projectId: string) =>
     invoke<CommunityModProject>(IPC.communityProject, source, projectId, 'mod');

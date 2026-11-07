@@ -15,3 +15,16 @@ export function mcmodSearchUrl(
           : '';
     return keyword ? `https://search.mcmod.cn/s?key=${encodeURIComponent(keyword)}` : null;
 }
+
+/**
+ * 百科链接：词典/百科桥命中的条目带 mcmodId，直达 class 详情页（PCL PageDownloadCompDetail
+ * 同款口径 `mcmod.cn/class/{id}.html`）；无身份时退回搜索页。
+ */
+export function mcmodPageUrl(
+    item: Pick<CommunityResult, 'title' | 'originalTitle' | 'slug' | 'mcmodId'>
+): string | null {
+    if (item.mcmodId && item.mcmodId > 0) {
+        return `https://www.mcmod.cn/class/${item.mcmodId}.html`;
+    }
+    return mcmodSearchUrl(item);
+}

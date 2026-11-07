@@ -19,6 +19,7 @@ export function initialCommunityQuery(previous?: {
         source: 'all' as const,
         mcVersion: '',
         loader: '' as '' | LoaderName,
+        category: '',
         sort: 'relevance' as const,
         ...previous?.query
     };

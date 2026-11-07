@@ -495,7 +495,7 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         | "modpack:openFile"
         | "import:probe" => Err("整合包未移植".into()),
         "world:probe" | "world:import" => Err("世界导入未移植".into()),
-        "community:search" | "community:project" | "community:files" | "community:download" => {
+        "community:search" | "community:suggest" | "community:project" | "community:files" | "community:download" => {
             Err("社区资源未移植".into())
         }
         "mods:parse"

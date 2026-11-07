@@ -1433,6 +1433,7 @@ fn mr_sort_index(sort: Option<&str>) -> &'static str {
     match sort {
         Some("downloads") => "downloads",
         Some("newest") => "newest",
+        Some("updated") => "updated",
         _ => "relevance",
     }
 }
@@ -1443,6 +1444,8 @@ struct Query {
     source: String,
     mc_version: Option<String>,
     loader: Option<String>,
+    /// 分类标签，PCL 口径 "CF categoryId/Modrinth slug"（如 "412/technology"，可只留一侧）
+    category: Option<String>,
     sort: Option<String>,
     offset: u64,
     limit: u64,
@@ -1456,6 +1459,7 @@ impl Query {
             source: v.get("source").and_then(|x| x.as_str()).unwrap_or("all").to_string(),
             mc_version: v.get("mcVersion").and_then(|x| x.as_str()).map(str::to_string),
             loader: v.get("loader").and_then(|x| x.as_str()).map(str::to_string),
+            category: v.get("category").and_then(|x| x.as_str()).map(str::to_string),
             sort: v.get("sort").and_then(|x| x.as_str()).map(str::to_string),
             offset: v.get("offset").and_then(|x| x.as_i64()).unwrap_or(0).max(0) as u64,
             limit: v.get("limit").and_then(|x| x.as_i64()).unwrap_or(20).max(1) as u64,
@@ -1469,6 +1473,7 @@ impl Query {
             source: self.source.clone(),
             mc_version: self.mc_version.clone(),
             loader: self.loader.clone(),
+            category: self.category.clone(),
             sort: self.sort.clone(),
             offset,
             limit,
@@ -1483,6 +1488,7 @@ impl Query {
         obj.insert("source".into(), json!(source));
         obj.insert("mcVersion".into(), json!(self.mc_version));
         obj.insert("loader".into(), json!(self.loader));
+        obj.insert("category".into(), json!(self.category));
         obj.insert("sort".into(), json!(self.sort));
         obj.insert("offset".into(), json!(0));
         obj.insert("limit".into(), json!(0));
@@ -1502,6 +1508,13 @@ fn mr_search(q: &Query) -> Result<Page, String> {
     if let Some(loader) = &q.loader {
         if uses_community_loader(Some(&q.kind)) {
             facets.push(vec![format!("categories:{loader}")]);
+        }
+    }
+    // 分类标签（PCL "CF categoryId/Modrinth slug" 组合，任一侧为空就只发另一侧）
+    if let Some(cat) = &q.category {
+        let mr_slug = cat.split('/').nth(1).unwrap_or("").trim();
+        if !mr_slug.is_empty() {
+            facets.push(vec![format!("categories:{mr_slug}")]);
         }
     }
     let params = query_string(&[
@@ -1716,7 +1729,9 @@ fn cf_fetch(app: &tauri::AppHandle, path: &str) -> Result<Value, String> {
 fn cf_sort_field(sort: Option<&str>) -> u32 {
     match sort {
         Some("downloads") => 6,
-        Some("newest") => 3,
+        // HMCL 口径对齐：newest=创建日期(1)，updated=最近更新(3)
+        Some("newest") => 1,
+        Some("updated") => 3,
         _ => 2,
     }
 }
@@ -1738,6 +1753,13 @@ fn cf_search(app: &tauri::AppHandle, q: &Query) -> Result<Page, String> {
     if let Some(loader) = &q.loader {
         if uses_community_loader(Some(&q.kind)) {
             params.push(("modLoaderType".into(), cf_loader_type(loader).to_string()));
+        }
+    }
+    if let Some(cat) = &q.category {
+        if let Ok(id) = cat.split('/').next().unwrap_or("").trim().parse::<u32>() {
+            if id > 0 {
+                params.push(("categoryId".into(), id.to_string()));
+            }
         }
     }
     let data = cf_fetch(app, &format!("/mods/search?{}", query_string_owned(&params)))?;
@@ -1999,9 +2021,16 @@ fn raw_provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> Resul
     }
 }
 
-/// providerSearch()：中文关键词 → 百科身份桥接 + 内置别名；其余直查
+/// providerSearch()：中文关键词 → 离线词典（PCL/HMCL/美西螈三家共识路线，LCS 模糊匹配），
+/// 词典未命中退内置别名表，再退 MC 百科实时抓取（白嫖 mcmod.cn）联合搜索；其余直查
 fn provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> Result<Page, String> {
     let chinese = q.kind == "mod" && has_cjk(&q.keyword);
+    if chinese {
+        let wiki_hits = crate::community_wiki::search_wiki(&q.keyword, 5);
+        if !wiki_hits.is_empty() {
+            return wiki_provider_search(app, source, q, &wiki_hits);
+        }
+    }
     let mut builtin: Option<Page> = None;
     if chinese && has_exact_chinese_mod_name(&q.keyword) {
         let b = builtin_provider_search(app, source, q)?;
@@ -2110,6 +2139,8 @@ fn provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> Result<Pa
             warnings.push("原中文关键词匹配较多，本次百科关联合并前 50 项；请缩小关键词查看其他结果。".into());
         }
         let items = dedup_items(items);
+        let items: Vec<Value> = items.into_iter().map(attach_wiki_identity).collect();
+        let items = rerank_items(items, &q.keyword);
         let warnings = dedup_warnings(warnings);
         let total = items.len() as u64;
         // 百科不可用/失败查询不入缓存（空结果与失败可立即重试）；缓存保存全量列表
@@ -2205,26 +2236,174 @@ fn builtin_provider_search(app: &tauri::AppHandle, source: &str, q: &Query) -> R
     Ok(Page { items: paged, total, offset: q.offset, limit: q.limit, warnings })
 }
 
-/// withZhTitle()：slug 命中映射表时给标题加中文名前缀
-fn with_zh_title(list: Vec<Value>) -> Vec<Value> {
-    list.into_iter()
-        .map(|r| {
-            let title = r.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let had_original = r.get("originalTitle").and_then(|v| v.as_str()).is_some();
-            let original = r.get("originalTitle").and_then(|v| v.as_str()).unwrap_or(&title).to_string();
-            let slug = r.get("slug").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let mut out = r;
-            if let Some(obj) = out.as_object_mut() {
-                obj.insert("originalTitle".into(), json!(original));
-                if let Some(zh) = mod_zh_lookup(&slug) {
-                    if !title.starts_with(zh) && !(had_original && title != original) {
-                        obj.insert("title".into(), json!(format!("{zh} | {title}")));
+/// 词典身份检索（HMCL LocalizedRemoteAddonRepository 口径 + PCL 重排公式）：
+/// 词典 LCS 命中条目的英文原名作为身份锚点联合搜索，保留原中文关键词结果，
+/// 统一去重 → 词典身份附加 → 相关度重排。MC 百科实时抓取只在词典未命中时兜底。
+fn wiki_provider_search(
+    app: &tauri::AppHandle,
+    source: &str,
+    q: &Query,
+    hits: &[crate::community_wiki::WikiMatch<'_>],
+) -> Result<Page, String> {
+    let key = q.cache_key(source, true);
+    if let Some(catalog) = alias_cache_get(&key) {
+        let total = catalog.items.len() as u64;
+        let items: Vec<Value> = catalog
+            .items
+            .into_iter()
+            .skip(q.offset as usize)
+            .take(q.limit as usize)
+            .collect();
+        return Ok(Page { items, total, offset: q.offset, limit: q.limit, warnings: catalog.warnings });
+    }
+    // 身份锚点：英文原名（缺则缩写），去重后最多 5 条——与 chinese_mod_search_terms 的 5 slug 上限一致
+    let mut anchors: Vec<String> = Vec::new();
+    let mut zh_slugs: Vec<String> = Vec::new(); // 词典命中的 CF slug（小写），CF 侧精确核对用
+    for hit in hits {
+        let e = hit.entry;
+        let english = if !e.subname.is_empty() {
+            e.subname.clone()
+        } else if !e.abbr.is_empty() {
+            e.abbr.clone()
+        } else {
+            continue;
+        };
+        if !anchors.iter().any(|a: &String| a.eq_ignore_ascii_case(&english)) {
+            anchors.push(english);
+        }
+        if !e.cf_slug.is_empty() {
+            zh_slugs.push(e.cf_slug.to_lowercase());
+        }
+        if anchors.len() >= 5 {
+            break;
+        }
+    }
+    let mut items: Vec<Value> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+    let mut provider_succeeded = false;
+    // 词典桥不替代下载仓库：原中文关键词结果保留在前（与百科桥同口径）
+    match raw_provider_search(app, source, &q.clone_with(None, 0, 50)) {
+        Ok(page) => {
+            provider_succeeded = true;
+            items.extend(page.items.iter().cloned());
+            warnings.extend(page.warnings.iter().cloned());
+        }
+        Err(_) => warnings.push("原中文关键词查询失败，当前仅显示词典命中的关联项目；可重试。".into()),
+    }
+    for english in &anchors {
+        match raw_provider_search(app, source, &q.clone_with(Some(english.as_str()), 0, 50)) {
+            Ok(page) => {
+                provider_succeeded = true;
+                for item in page.items {
+                    let item_slug = item.get("slug").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                    let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                    let original = item
+                        .get("originalTitle")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&title)
+                        .to_lowercase();
+                    // CF 侧 slug 精确核对；Modrinth slug 体系与 CF 不同，退用标题包含核对
+                    // （查询词即词典英文原名，误配风险低）
+                    let matched = zh_slugs.iter().any(|s| item_slug == *s)
+                        || title.contains(&english.to_lowercase())
+                        || original.contains(&english.to_lowercase());
+                    if matched {
+                        items.push(item);
                     }
                 }
             }
-            out
+            Err(_) => warnings.push(format!(
+                "词典关联“{english}”的 {} 查询失败，已保留其他结果；可重试。",
+                if source == "modrinth" { "Modrinth" } else { "CurseForge" }
+            )),
+        }
+    }
+    if !provider_succeeded {
+        return Err("社区来源查询失败，请稍后重试".into());
+    }
+    warnings.push(format!(
+        "离线词典身份关联：{} → {}；保留原中文结果并按相关度重排。",
+        q.keyword,
+        anchors.join("、")
+    ));
+    let items = dedup_items(items);
+    let items: Vec<Value> = items.into_iter().map(attach_wiki_identity).collect();
+    let items = rerank_items(items, &q.keyword);
+    let warnings = dedup_warnings(warnings);
+    let total = items.len() as u64;
+    if !warnings.iter().any(|w| w.contains("失败")) {
+        alias_cache_put(key, items.clone(), warnings.clone());
+    }
+    let paged: Vec<Value> = items.into_iter().skip(q.offset as usize).take(q.limit as usize).collect();
+    Ok(Page { items: paged, total, offset: q.offset, limit: q.limit, warnings })
+}
+
+/// 词典身份附加：CF slug / 英文原名命中离线词典时写 mcmodId（百科直达 class 页）并加中文名前缀
+fn attach_wiki_identity(r: Value) -> Value {
+    let title = r.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let had_original = r.get("originalTitle").and_then(|v| v.as_str()).is_some();
+    let original = r.get("originalTitle").and_then(|v| v.as_str()).unwrap_or(&title).to_string();
+    let slug = r.get("slug").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let wiki = crate::community_wiki::lookup_by_cf_slug(&slug)
+        .or_else(|| crate::community_wiki::lookup_by_name(&original));
+    let mut out = r;
+    if let Some(obj) = out.as_object_mut() {
+        obj.insert("originalTitle".into(), json!(original));
+        if let Some(e) = wiki {
+            if e.mcmod_id > 0 {
+                obj.insert("mcmodId".into(), json!(e.mcmod_id));
+            }
+            if !e.zh.is_empty() && !title.starts_with(&e.zh) && !(had_original && title != original) {
+                obj.insert("title".into(), json!(format!("{} | {title}", e.zh)));
+            }
+        } else if let Some(zh) = mod_zh_lookup(&slug) {
+            if !title.starts_with(zh) && !(had_original && title != original) {
+                obj.insert("title".into(), json!(format!("{zh} | {title}")));
+            }
+        }
+    }
+    out
+}
+
+/// 统一相关度重排（PCL ResourceSearcher.vb:499-509 口径）：
+/// 相似度（标题包含=1 / 分词部分命中=0.6）+ log10(下载量+1)/9 + 词典身份 0.2；
+/// 关键词为空时不计相似度，等效纯下载量序。稳定排序保持同分先后。
+fn rerank_items(items: Vec<Value>, keyword: &str) -> Vec<Value> {
+    if items.len() < 2 {
+        return items;
+    }
+    let key = keyword.trim().to_lowercase();
+    let words: Vec<&str> = key.split_whitespace().filter(|w| !w.is_empty()).collect();
+    let mut scored: Vec<(f64, Value)> = items
+        .into_iter()
+        .map(|item| {
+            let title = item
+                .get("originalTitle")
+                .and_then(|v| v.as_str())
+                .or_else(|| item.get("title").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .to_lowercase();
+            let downloads = item.get("downloads").and_then(|v| v.as_u64()).unwrap_or(0);
+            let wiki_boost = if item.get("mcmodId").and_then(|v| v.as_u64()).unwrap_or(0) > 0 { 0.2 } else { 0.0 };
+            let sim = if key.is_empty() {
+                0.0
+            } else if title.contains(&key) {
+                1.0
+            } else if words.iter().any(|w| title.contains(w)) {
+                0.6
+            } else {
+                0.0
+            };
+            (sim + (downloads as f64 + 1.0).log10() / 9.0 + wiki_boost, item)
         })
-        .collect()
+        .collect();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored.into_iter().map(|(_, v)| v).collect()
+}
+
+/// withZhTitle()：词典/映射表命中时给标题加中文名前缀并附 mcmodId（百科直达 class 页）
+fn with_zh_title(list: Vec<Value>) -> Vec<Value> {
+    list.into_iter().map(attach_wiki_identity).collect()
 }
 
 struct SourceCounts {
@@ -2246,8 +2425,128 @@ fn covers(pages: &HashMap<&'static str, (u64, u64, Vec<Value>)>, source: &str, o
     }
 }
 
-/// communitySearchPage()：单源直查；all = 双源计数 + 交错分页 + 存活源重规划
+struct PageCacheEntry {
+    at: u64,
+    value: Value,
+}
+
+/// 60s 页缓存：前端输入即搜（防抖后）会短时间重复同参请求，这里兜底零网络
+const PAGE_CACHE_TTL_MS: u64 = 60_000;
+const PAGE_CACHE_CAP: usize = 32;
+
+fn page_cache() -> &'static Mutex<(HashMap<String, PageCacheEntry>, VecDeque<String>)> {
+    static M: OnceLock<Mutex<(HashMap<String, PageCacheEntry>, VecDeque<String>)>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new((HashMap::new(), VecDeque::new())))
+}
+
+fn page_cache_get(key: &str) -> Option<Value> {
+    let mut guard = page_cache().lock().unwrap();
+    if let Some(hit) = guard
+        .0
+        .get(key)
+        .filter(|e| crate::download::now_ms() - e.at < PAGE_CACHE_TTL_MS)
+        .map(|e| e.value.clone())
+    {
+        return Some(hit);
+    }
+    if guard.0.remove(key).is_some() {
+        if let Some(pos) = guard.1.iter().position(|k| k == key) {
+            guard.1.remove(pos);
+        }
+    }
+    None
+}
+
+fn page_cache_put(key: String, value: Value) {
+    let mut guard = page_cache().lock().unwrap();
+    while guard.0.len() >= PAGE_CACHE_CAP {
+        match guard.1.pop_front() {
+            Some(old) => {
+                guard.0.remove(&old);
+            }
+            None => break,
+        }
+    }
+    guard.1.push_back(key.clone());
+    guard.0.insert(key, PageCacheEntry { at: crate::download::now_ms(), value });
+}
+
+fn push_suggestion(
+    out: &mut Vec<Value>,
+    seen: &mut HashSet<String>,
+    label: &str,
+    sublabel: &str,
+    mcmod_id: u32,
+) {
+    if label.is_empty() || !seen.insert(format!("{label}|{sublabel}")) {
+        return;
+    }
+    let mut obj = serde_json::Map::new();
+    obj.insert("label".into(), json!(label));
+    obj.insert("sublabel".into(), json!(sublabel));
+    if mcmod_id > 0 {
+        obj.insert("mcmodId".into(), json!(mcmod_id));
+    }
+    out.push(Value::Object(obj));
+}
+
+/// community:suggest：输入联想。纯本地（离线词典 LCS + 内置别名 + 英文精确名），零网络零配额
+pub fn community_suggest(input: &Value) -> Value {
+    let keyword = input
+        .get("keyword")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let kind = input.get("kind").and_then(|v| v.as_str()).unwrap_or("mod").to_string();
+    let mut out: Vec<Value> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    if kind == "mod" && !keyword.is_empty() {
+        // 内置别名组（同义词组是词典单条覆盖不了的：物品管理器 → JEI/REI/EMI）
+        let key = normalize_chinese_mod_keyword(&keyword);
+        if !key.is_empty() {
+            for (name, slugs) in MOD_ZH_ALIASES {
+                let n = normalize_chinese_mod_keyword(name);
+                if n == key || (key.chars().count() >= 2 && n.contains(&key)) {
+                    push_suggestion(&mut out, &mut seen, name, &slugs.join(" / "), 0);
+                }
+            }
+        }
+        // 离线词典 LCS 模糊命中（HMCL searchMod 同款算法，中英文都能命中）
+        for hit in crate::community_wiki::search_wiki(&keyword, 8) {
+            let e = hit.entry;
+            let mut sub = e.subname.clone();
+            if !e.abbr.is_empty() && !sub.eq_ignore_ascii_case(&e.abbr) {
+                sub = format!("{sub} ({})", e.abbr);
+            }
+            push_suggestion(&mut out, &mut seen, &e.zh, &sub, e.mcmod_id);
+        }
+        // 英文精确名直查（覆盖 LCS 阈值外的短词）
+        if out.len() < 8 {
+            if let Some(e) = crate::community_wiki::lookup_by_name(&keyword) {
+                push_suggestion(&mut out, &mut seen, &e.zh, &e.subname, e.mcmod_id);
+            }
+        }
+    }
+    if out.len() > 8 {
+        out.truncate(8);
+    }
+    json!({ "suggestions": out })
+}
+
+/// communitySearchPage()：60s 结果缓存外壳（同参短时重复请求零网络；失败不入缓存可立即重试）
 pub fn community_search_page(app: &tauri::AppHandle, input: &Value) -> Result<Value, String> {
+    let key = input.to_string();
+    if let Some(cached) = page_cache_get(&key) {
+        return Ok(cached);
+    }
+    let out = community_search_page_uncached(app, input)?;
+    page_cache_put(key, out.clone());
+    Ok(out)
+}
+
+/// communitySearchPage()：单源直查；all = 双源计数 + 交错分页 + 存活源重规划
+fn community_search_page_uncached(app: &tauri::AppHandle, input: &Value) -> Result<Value, String> {
     let mut q = Query::from_value(input);
     let filter = effective_filter(&FileFilter {
         mc_version: q.mc_version.clone(),
@@ -3219,6 +3518,7 @@ fn community_download_ipc(app: &tauri::AppHandle, args: &[Value]) -> Result<Valu
 pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
     match channel {
         "community:search" => Some(installer::run_blocking(|| community_search_page(app, args.first().unwrap_or(&Value::Null)))),
+        "community:suggest" => Some(installer::run_blocking(|| Ok(community_suggest(args.first().unwrap_or(&Value::Null))))),
         "community:project" => Some(installer::run_blocking(|| {
             let source = arg_str(args, 0).unwrap_or("").to_string();
             let project_id = arg(args, 1).map(|v| v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string())).unwrap_or_default();

@@ -6,6 +6,22 @@ with their respective holders, and no file below is relicensed by this project
 except where its own license (MIT, or LGPL-3.0 via the upgrade in LGPL-3.0
 section 4) permits it.
 
+## MC 百科离线词典数据 — mcmod.cn
+
+Files: `src-tauri/assets/mod_data.txt`, `src-tauri/assets/modpack_data.txt`
+Data origin: mcmod.cn (https://www.mcmod.cn). Distributed via HMCL's
+`parseModData` pipeline (input `mod.json` / `modpack.json` crawled from
+mcmod.cn; format `cfSlug;mcmodId;modIds;中文名;EnglishName;Abbr`).
+Upstream pipeline: https://github.com/HMCL-dev/HMCL (GPL-3.0),
+`buildSrc/.../ParseModDataTask.java` and `HMCL/src/main/resources/assets/`.
+Used for offline Chinese-name → project-identity bridging (PCL2, HMCL and
+Axolotl Launcher take the same approach). Entry-level Chinese titles and the
+mcmod class ids remain the property of their respective authors and mcmod.cn;
+this project claims no ownership over the data, only over the lookup code
+(`src-tauri/src/community_wiki.rs`, original work).
+Two locally maintained entries (沃克联机 / VoxLink, 沃克键盘 / VoxKbd) are the
+project author's own and are not from mcmod.cn.
+
 ## VoxLink protocol integration — LGPL-3.0-only
 
 Upstream: https://github.com/AUGUHDAR/VoxLink
