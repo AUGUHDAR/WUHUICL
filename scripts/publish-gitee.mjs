@@ -38,9 +38,11 @@ async function retry(label, fn, attempts = 3) {
     throw new Error(`${label} 重试 ${attempts} 次仍失败：${last?.message}`);
 }
 
-// 1) 取 GitHub Release 的标题与正文做镜像（github-release job 已生成 notes）
+// 1) 取 GitHub Release 的标题、正文与 target_commitish 做镜像
+// （Gitee 建 release 强制要求 target_commitish——tag 所在 commit SHA）
 let name = `WUHUICL ${VERSION}`;
 let body = `WUHUICL ${VERSION}`;
+let commitish = '';
 try {
     const r = await fetch(`https://api.github.com/repos/${GH_REPO}/releases/tags/${VERSION}`, {
         headers: GH_HEADERS
@@ -49,7 +51,8 @@ try {
         const j = await r.json();
         name = j.name || name;
         body = j.body || body;
-        console.log(`[gitee] 已取 GitHub Release 文案：${name}`);
+        commitish = j.target_commitish || '';
+        console.log(`[gitee] 已取 GitHub Release 文案：${name}（commit ${commitish.slice(0, 8)}）`);
     } else {
         console.warn(`[gitee] GitHub Release 读取失败（HTTP ${r.status}），用默认文案`);
     }
@@ -72,7 +75,13 @@ if (!release) {
         const r = await fetch(`${base}/releases`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ access_token: TOKEN, tag_name: VERSION, name, body })
+            body: JSON.stringify({
+                access_token: TOKEN,
+                tag_name: VERSION,
+                name,
+                body,
+                target_commitish: commitish || undefined
+            })
         });
         if (!r.ok) {
             const text = await r.text();
