@@ -40,7 +40,8 @@ async function retry(label, fn, attempts = 3) {
 
 // 1) 取 GitHub Release 的标题、正文与 target_commitish 做镜像
 // （Gitee 建 release 强制要求 target_commitish——tag 所在 commit SHA）
-let name = `WUHUICL ${VERSION}`;
+// 标题口径与 VoxLink 一致：就一个纯数字版本号，不带产品名前缀
+let name = VERSION;
 let body = `WUHUICL ${VERSION}`;
 let commitish = '';
 try {

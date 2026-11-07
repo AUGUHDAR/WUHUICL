@@ -167,7 +167,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.preflight.outputs.version }}
-          name: WUHUICL ${{ needs.preflight.outputs.version }}
+          name: ${{ needs.preflight.outputs.version }}
           generate_release_notes: true
           make_latest: true
           files: release/*
