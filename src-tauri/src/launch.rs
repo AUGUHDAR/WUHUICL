@@ -1053,15 +1053,26 @@ fn launch_owned(
         *LAUNCH_VARS.lock().unwrap() = Some(vars);
 
         // e) 内存 / JVM 参数（json 自带 -Djava.library.path 时不再重复）
+        // 实例级 `_memoryMB` / `_jvmArgs` 优先于全局设置：崩溃自愈要能只调崩的那个实例
         let total_mem_mb = total_mem_mb();
-        let mem: u64 = if s["memoryAuto"].as_bool().unwrap_or(true) {
-            auto_memory_mb(total_mem_mb)
-        } else {
-            ((s["memoryMB"].as_i64().unwrap_or(4096).max(512)) as i64)
-                .min(total_mem_mb as i64)
-                .max(0) as u64
+        let mem: u64 = match merged.get("_memoryMB").and_then(|v| v.as_i64()) {
+            Some(mb) if mb > 0 => (mb as u64).min(total_mem_mb),
+            _ => {
+                if s["memoryAuto"].as_bool().unwrap_or(true) {
+                    auto_memory_mb(total_mem_mb)
+                } else {
+                    ((s["memoryMB"].as_i64().unwrap_or(4096).max(512)) as i64)
+                        .min(total_mem_mb as i64)
+                        .max(0) as u64
+                }
+            }
         };
-        let user_jvm = split_args(s["jvmArgs"].as_str().unwrap_or(""));
+        let user_jvm = split_args(
+            merged
+                .get("_jvmArgs")
+                .and_then(|v| v.as_str())
+                .unwrap_or_else(|| s["jvmArgs"].as_str().unwrap_or("")),
+        );
         let client_jar_name = client_jar
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -1261,8 +1272,14 @@ fn launch_owned(
         deadline.touch();
 
         // g) 启动进程（脱离式：Tauri/Rust 子进程不在 Job Object 内，天然与启动器生命周期解耦）
-        // 崩溃报告基线：启动前快照 crash-reports，退出后 diff（美西螈 process.rs 口径）
+        // 崩溃报告基线：启动前快照 crash-reports，退出后 diff（美西螈 process.rs 口径）；
+        // 同时记下启动时刻，崩溃分析用它精确判定「本次」写过的日志（替代 600 秒 mtime 猜测）
         let crash_before = snapshot_crash_reports(&effective_dir);
+        let launch_started_at = std::time::SystemTime::now();
+        // mod 基线：启动前拍快照并与上一份对比，崩溃归因时回答「这次启动前刚加了什么 mod」
+        let _ = crate::modbaseline::snapshot_before_launch(
+            &Path::new(&effective_dir).join("mods"),
+        );
         let mut cmd = std::process::Command::new(&java_path);
         cmd.args(&args)
             .current_dir(&effective_dir)
@@ -1470,6 +1487,7 @@ fn launch_owned(
         let crash_dir2 = effective_dir.clone();
         let out_tail2 = out_tail.clone();
         let send_log2 = send_log.clone();
+        let started_at2 = launch_started_at;
         std::thread::spawn(move || {
             // 轮询等待退出（对应 DetachedGameProcess.waitForExit 的 250ms 零超时探测；
             // 不长期持有 child 锁，保证 kill/强杀路径能随时进入）
@@ -1523,6 +1541,10 @@ fn launch_owned(
                 format!("游戏已退出 (code={})", code)
             };
             let mut crash_analysis: Option<Value> = None;
+            let mut crash_fixes: Option<Value> = None;
+            // 崩溃自愈建议要算「从当前内存提到多少」，这里把本次实际用的内存与总内存带进闭包
+            let eff_mem_mb2 = mem;
+            let total_mem_mb2 = total_mem_mb;
             // 崩溃分析（PCL ModCrash.vb 移植）：新崩溃报告/最新日志/输出尾行 → 规则表归因
             if exit_kind == "abnormal" {
                 let crash_path = newest_new_crash(&crash_dir2, &crash_before);
@@ -1531,6 +1553,7 @@ fn launch_owned(
                     Path::new(&crash_dir2),
                     crash_path.as_deref(),
                     &tail_lines,
+                    Some(started_at2),
                 );
                 let reasons = if reasons.is_empty()
                     || (reasons.len() == 1 && reasons[0].title == crashanalyzer::REASON_NONE)
@@ -1539,6 +1562,12 @@ fn launch_owned(
                 } else {
                     reasons
                 };
+                // 本次启动前的 mod 变动（新增/改动/移除）：规则匹配答不了「这次加了什么 mod」，
+                // 而用户最先怀疑的往往正是它。它作为线索附加，不参与「首要原因」排序。
+                let mod_changes = crate::modbaseline::read_pending_changes(
+                    &Path::new(&crash_dir2).join("mods"),
+                );
+                let change_line = mod_changes.summary();
                 if !reasons.is_empty() {
                     let top = crashanalyzer::reason_text(&reasons[0]);
                     let suffix = if ev2.killed_by_watchdog.load(Ordering::SeqCst) {
@@ -1547,17 +1576,65 @@ fn launch_owned(
                         ""
                     };
                     text = format!("游戏崩溃：{}{}", top, suffix);
-                    crash_analysis = Some(crashanalyzer::to_json(&reasons));
+                    let mut with_changes = reasons.clone();
+                    if let Some(line) = change_line.as_ref() {
+                        with_changes.push(crashanalyzer::CrashReason {
+                            title: "最近改动过 mods".into(),
+                            details: vec![line.clone()],
+                        });
+                    }
+                    crash_analysis = Some(crashanalyzer::to_json(&with_changes));
                     for r in &reasons {
                         send_log2(
                             &format!("[WUHUICL] 崩溃分析：{}", crashanalyzer::reason_text(r)),
                             0,
                         );
                     }
+                    if let Some(line) = change_line.as_ref() {
+                        send_log2(&format!("[WUHUICL] {line}"), 0);
+                    }
                 } else if let Some(desc) = crash_path.as_deref().and_then(crash_description) {
                     text = format!("游戏崩溃：{}", desc);
                 } else if ev2.other_failure.load(Ordering::SeqCst) {
                     text = format!("游戏异常退出（疑似崩溃，code={}，日志已保留）", code);
+                }
+                // 规则没命中但有 mod 变动：仍然给出这条线索，别让用户只看到一句「异常退出」
+                if reasons.is_empty() && crash_analysis.is_none() {
+                    if let Some(line) = change_line.as_ref() {
+                        crash_analysis = Some(crashanalyzer::to_json(&[crashanalyzer::CrashReason {
+                            title: "最近改动过 mods".into(),
+                            details: vec![line.clone()],
+                        }]));
+                        send_log2(&format!("[WUHUICL] {line}"), 0);
+                    }
+                }
+                // 可执行的修复建议（只做可逆动作；无建议时不带此字段）
+                let mods_dir = Path::new(&crash_dir2).join("mods");
+                let mod_names: Vec<String> = crate::modbaseline::scan_mods(&mods_dir)
+                    .into_iter()
+                    .map(|m| m.name)
+                    .collect();
+                let cause_pairs: Vec<(String, Vec<String>)> = reasons
+                    .iter()
+                    .map(|r| (r.title.clone(), r.details.clone()))
+                    .collect();
+                let fixes = crate::crashfix::suggestions(
+                    &cause_pairs,
+                    &mod_names,
+                    eff_mem_mb2,
+                    total_mem_mb2,
+                );
+                if !fixes.is_empty() {
+                    crash_fixes = Some(json!(fixes
+                        .iter()
+                        .map(|f| json!({
+                            "id": f.id,
+                            "title": f.title,
+                            "detail": f.detail,
+                            "payload": f.payload,
+                            "risk": f.risk,
+                        }))
+                        .collect::<Vec<_>>()));
                 }
             }
             send_state(
@@ -1570,6 +1647,7 @@ fn launch_owned(
                     "intentionalStop": intentional,
                     "text": text,
                     "crashAnalysis": crash_analysis,
+                    "crashFixes": crash_fixes,
                     "versionId": version2,
                     "folder": folder2,
                     "launchId": launch_id2

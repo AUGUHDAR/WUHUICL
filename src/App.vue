@@ -7,6 +7,7 @@ const isMac = window.kamucl.platform === 'darwin';
 const isAndroid = window.kamucl.platform === 'android';
 import LaunchNotice from './components/LaunchNotice.vue';
 import UiGlyph from './components/UiGlyph.vue';
+import ConfirmModal from './components/ConfirmModal.vue';
 import { pollTickets } from './voxlinkTickets';
 import CreatorMotto from './components/CreatorMotto.vue';
 import ModpackSupplement from './components/ModpackSupplement.vue';
@@ -277,7 +278,8 @@ const navEntries = computed<Array<{ group: NavGroup; entries: NavEntry[] }>>(() 
         .map((group) => {
             const items = visibleNavItems.value.filter((n) => n.group === group);
             const entries: NavEntry[] = [];
-            if (group === 'content' && !isFeatureOff('resources')) entries.push({ kind: 'resources' });
+            if (group === 'content' && !isFeatureOff('resources'))
+                entries.push({ kind: 'resources' });
             entries.push(...items.map((item) => ({ kind: 'item' as const, item })));
             return { group, entries };
         })
@@ -355,9 +357,17 @@ const resourceSubItems: Array<{ key: ViewName; label: string; icon: string }> = 
 const resourceExpanded = ref(localStorage.getItem('kamucl.resourceExpanded') === 'true');
 watch(resourceExpanded, (value) => localStorage.setItem('kamucl.resourceExpanded', String(value)));
 const inResourceGroup = computed(() =>
-    ['mods', 'packs', 'shaders', 'servers', 'recordings', 'screenshots', 'projections', 'seedmap', 'worldmap'].includes(
-        store.currentView
-    )
+    [
+        'mods',
+        'packs',
+        'shaders',
+        'servers',
+        'recordings',
+        'screenshots',
+        'projections',
+        'seedmap',
+        'worldmap'
+    ].includes(store.currentView)
 );
 
 // Route timings also respect the OS preference when Vue uses explicit timeout fallback.
@@ -978,7 +988,88 @@ function toggleNotices() {
 }
 
 // ---------------- 启动失败日志导出 ----------------
-const launchFail = reactive({ open: false, title: '', text: '', exporting: false });
+// reasons 为空时弹窗只显示一句通用文案；有诊断结果时列出具体原因（内存/Java/缺依赖…）
+const launchFail = reactive<{
+    open: boolean;
+    title: string;
+    text: string;
+    reasons: { title: string; details: string[] }[];
+    fixes: {
+        id: string;
+        title: string;
+        detail: string;
+        payload: Record<string, unknown>;
+        risk: string;
+    }[];
+    fixing: string;
+    exporting: boolean;
+}>({ open: false, title: '', text: '', reasons: [], fixes: [], fixing: '', exporting: false });
+
+/** caution 档修复的二次确认（会禁用 mod，需要用户明确点头） */
+const crashFixConfirm = reactive<{
+    open: boolean;
+    busy: boolean;
+    fix: {
+        id: string;
+        payload: Record<string, unknown>;
+        risk: string;
+        title: string;
+        detail: string;
+    } | null;
+}>({ open: false, busy: false, fix: null });
+
+/** 执行一条崩溃自愈修复（后端 crashfix:apply） */
+async function applyCrashFix(fix: { id: string; payload: Record<string, unknown> }) {
+    if (launchFail.fixing) return;
+    launchFail.fixing = fix.id;
+    try {
+        const r = await window.kamucl.invoke(
+            'crashfix:apply',
+            fix.id,
+            fix.payload,
+            store.launchingVersionId ?? '',
+            store.launchingFolder ?? ''
+        );
+        const text = (r as { text?: string })?.text ?? '已执行';
+        toast(text, 'success');
+        // 执行过一条后关掉弹窗：剩下的建议基于旧状态，继续点会与实际情况脱节
+        launchFail.open = false;
+        void refreshInstalled().catch(() => undefined);
+    } catch (e) {
+        toast(errText(e), 'error');
+    } finally {
+        launchFail.fixing = '';
+    }
+}
+
+/** caution 档（会禁用 mod）先弹确认；safe 档直接执行 */
+function onApplyCrashFix(fix: {
+    id: string;
+    payload: Record<string, unknown>;
+    risk: string;
+    title: string;
+    detail: string;
+}) {
+    if (fix.risk === 'caution') {
+        crashFixConfirm.fix = fix;
+        crashFixConfirm.open = true;
+        return;
+    }
+    void applyCrashFix(fix);
+}
+
+async function confirmCrashFixApply() {
+    const fix = crashFixConfirm.fix;
+    if (!fix) return;
+    crashFixConfirm.busy = true;
+    try {
+        await applyCrashFix(fix);
+    } finally {
+        crashFixConfirm.busy = false;
+        crashFixConfirm.open = false;
+        crashFixConfirm.fix = null;
+    }
+}
 
 async function onExportLogs() {
     if (launchFail.exporting) return;
@@ -1506,6 +1597,8 @@ onMounted(async () => {
                 // 启动失败：弹窗提示并提供「导出错误日志」
                 launchFail.open = true;
                 launchFail.title = '游戏启动失败';
+                launchFail.reasons = [];
+                launchFail.fixes = [];
                 launchFail.text = s.text;
             } else if (s.status === 'exited') {
                 if (
@@ -1521,8 +1614,13 @@ onMounted(async () => {
                 if (shouldReportGameCrash(s)) {
                     launchFail.open = true;
                     launchFail.title = `游戏异常退出（代码 ${signedExitCode(s.code ?? null) ?? '未知'}）`;
-                    launchFail.text =
-                        '游戏进程崩溃或被异常终止。可导出错误日志（含 crash-report 与 latest.log）用于排查。';
+                    // 后端已分析出具体原因时直接摆出来，用户不必再去诊断页翻
+                    const reasons = s.crashAnalysis?.reasons ?? [];
+                    launchFail.reasons = reasons;
+                    launchFail.fixes = (s.crashFixes ?? []) as typeof launchFail.fixes;
+                    launchFail.text = reasons.length
+                        ? '已分析出以下可能原因，可导出错误日志用于排查。'
+                        : '游戏进程崩溃或被异常终止。可导出错误日志（含 crash-report 与 latest.log）用于排查。';
                 } else {
                     toast(s.exitKind === 'shutdown-timeout' ? s.text : '游戏已退出', 'info');
                 }
@@ -1683,7 +1781,10 @@ onUnmounted(() => {
                         <span class="nav-group-title" aria-hidden="true">{{
                             navGroupLabels[section.group]
                         }}</span>
-                        <template v-for="entry in section.entries" :key="entry.kind === 'item' ? entry.item.key : 'resources'">
+                        <template
+                            v-for="entry in section.entries"
+                            :key="entry.kind === 'item' ? entry.item.key : 'resources'"
+                        >
                             <!-- 资源管理组（内容组首位）：父项可展开，子项是内容页（模组/资源包/光影/录像/截图/投影/种子地图/服务器） -->
                             <template v-if="entry.kind === 'resources'">
                                 <button
@@ -1710,7 +1811,9 @@ onUnmounted(() => {
                                             <path d="M3 11h18" />
                                         </svg>
                                     </span>
-                                    <span data-ui="App:215ddb49217f" class="nav-label">资源管理</span>
+                                    <span data-ui="App:215ddb49217f" class="nav-label"
+                                        >资源管理</span
+                                    >
                                     <svg
                                         class="nav-caret"
                                         :class="{ open: resourceExpanded || inResourceGroup }"
@@ -2452,6 +2555,34 @@ onUnmounted(() => {
             <div data-ui="App:a55c730a5660" class="modal launchfail-modal">
                 <h3 data-ui="App:ffddaed1dca5" class="modal-title">{{ launchFail.title }}</h3>
                 <p data-ui="App:9ede176a5a84" class="launchfail-text">{{ launchFail.text }}</p>
+                <ul
+                    v-if="launchFail.reasons.length"
+                    data-ui="App:crashReasons"
+                    class="crash-reasons"
+                >
+                    <li v-for="(r, i) in launchFail.reasons" :key="i">
+                        <strong>{{ r.title }}</strong>
+                        <span v-if="r.details.length">{{ r.details.join('；') }}</span>
+                    </li>
+                </ul>
+                <!-- 可执行的修复建议：safe 档直接执行，caution 档二次确认（会禁用 mod，文件名可还原） -->
+                <div v-if="launchFail.fixes.length" data-ui="App:crashFixes" class="crash-fixes">
+                    <div class="crash-fixes-head">可以试试这些修复（都会备份原值，可还原）</div>
+                    <button
+                        v-for="f in launchFail.fixes"
+                        :key="f.id"
+                        class="crash-fix"
+                        :class="{ 'crash-fix-caution': f.risk === 'caution' }"
+                        :disabled="launchFail.fixing !== ''"
+                        @click="onApplyCrashFix(f)"
+                    >
+                        <span class="crash-fix-title">
+                            {{ f.title }}
+                            <span v-if="f.risk === 'caution'" class="crash-fix-risk">需确认</span>
+                        </span>
+                        <span class="crash-fix-detail">{{ f.detail }}</span>
+                    </button>
+                </div>
                 <div data-ui="App:b5caea38dc55" class="modal-actions">
                     <button
                         class="btn btn-ghost"
@@ -2498,6 +2629,24 @@ onUnmounted(() => {
             </div>
         </div>
     </Teleport>
+
+    <!-- 崩溃自愈 caution 档二次确认：会禁用 mod，必须用户明确点头 -->
+    <ConfirmModal
+        :open="crashFixConfirm.open"
+        title="确认执行这条修复？"
+        :message="
+            crashFixConfirm.fix
+                ? `${crashFixConfirm.fix.title}\n\n${crashFixConfirm.fix.detail}`
+                : ''
+        "
+        confirm-text="执行修复"
+        :busy="crashFixConfirm.busy"
+        @cancel="
+            crashFixConfirm.open = false;
+            crashFixConfirm.fix = null;
+        "
+        @confirm="confirmCrashFixApply"
+    />
 
     <!-- 整合包导入确认弹窗 -->
     <Teleport to="body">
@@ -3551,6 +3700,91 @@ onUnmounted(() => {
     max-height: 220px;
     overflow-y: auto;
     white-space: pre-wrap;
+}
+/* 崩溃诊断原因列表：与通用文案同区，逐条列出可能原因 */
+.crash-reasons {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    max-height: 220px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+.crash-reasons li {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--card);
+    font-size: var(--text-sm);
+    line-height: 1.6;
+}
+.crash-reasons strong {
+    color: var(--text);
+    font-weight: 600;
+}
+.crash-reasons span {
+    color: var(--text-dim);
+    word-break: break-all;
+}
+/* 崩溃自愈建议：卡片式按钮，标题 + 影响说明 */
+.crash-fixes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    max-height: 200px;
+    overflow-y: auto;
+}
+.crash-fixes-head {
+    font-size: var(--text-xs);
+    color: var(--text-dim);
+}
+.crash-fix {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--card);
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.crash-fix:hover:not(:disabled) {
+    border-color: var(--accent);
+    background: var(--card-2);
+}
+.crash-fix:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+.crash-fix-title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+/* caution 档标记：会禁用 mod，点击后还要二次确认 */
+.crash-fix-risk {
+    font-size: var(--text-xs);
+    font-weight: 400;
+    color: var(--danger);
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    padding: 0 6px;
+    line-height: 1.5;
+}
+.crash-fix-detail {
+    font-size: var(--text-xs);
+    color: var(--text-dim);
+    word-break: break-all;
 }
 .notice-item {
     display: flex;

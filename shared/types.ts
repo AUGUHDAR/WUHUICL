@@ -764,6 +764,23 @@ export interface ProgressEvent {
     taskTitle?: string;
 }
 
+export interface CrashAnalysis {
+    reasons: { title: string; details: string[] }[];
+    /** 首要原因的拼合文案（title + details），空数组时为空串 */
+    text: string;
+}
+
+/** 一条崩溃自愈修复建议（后端 crashfix 产出） */
+export interface CrashFix {
+    id: string;
+    title: string;
+    detail: string;
+    /** 执行参数（如 memoryMB / name / slug / javaMajor） */
+    payload: Record<string, unknown>;
+    /** safe=只改配置且可还原；caution=会禁用 mod（文件名可还原） */
+    risk: 'safe' | 'caution';
+}
+
 export interface LaunchState {
     savedWindowSize?: {
         scope: 'global' | 'instance';
@@ -779,6 +796,10 @@ export interface LaunchState {
     intentionalRestart?: boolean;
     intentionalStop?: boolean;
     exitKind?: import('./gameExit').GameExitKind;
+    /** 崩溃诊断结果（后端 crashanalyzer 产出；无诊断原因时不带此字段） */
+    crashAnalysis?: CrashAnalysis | null;
+    /** 可执行的修复建议（后端 crashfix 产出；无建议时不带此字段） */
+    crashFixes?: CrashFix[] | null;
 }
 
 // ---------------- IPC 通道（invoke: 前端 await 调用） ----------------

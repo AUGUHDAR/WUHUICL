@@ -67,6 +67,7 @@ import {
 } from '@shared/versionCategories';
 const favoritesReady = ref(true);
 import ThumbnailPickerModal from '../components/ThumbnailPickerModal.vue';
+import LauncherImportModal from '../components/LauncherImportModal.vue';
 import type {
     FabricApiVersion,
     FolderScanResult,
@@ -193,6 +194,8 @@ let catalogTimer: ReturnType<typeof setInterval> | undefined;
 
 /** Each visit starts with local instances; remote metadata is loaded only on demand. */
 const tab = ref<'download' | 'installed'>('installed');
+/** 跨启动器实例导入弹窗 */
+const launcherImportOpen = ref(false);
 watch(tab, (value) => {
     if (value === 'download') void load();
 });
@@ -1244,11 +1247,21 @@ async function confirmIsolation() {
 
 <template>
     <div class="page" :data-design-page="tab">
-        <!-- 标题 -->
-        <div class="page-head">
-            <h1 class="page-title">游戏版本</h1>
-            <p class="page-sub">浏览、安装与管理 Minecraft 版本</p>
-        </div>
+        <!-- 标题：右侧放「导入实例」，对齐 ProjectionsView 的 recording-heading 惯例 -->
+        <header class="page-head game-heading" data-ui="games:heading">
+            <div>
+                <h1 class="page-title">游戏版本</h1>
+                <p class="page-sub">浏览、安装与管理 Minecraft 版本</p>
+            </div>
+            <button
+                class="btn btn-ghost"
+                data-ui="games:import-instances"
+                title="从 PCL2 / HMCL / Prism 导入已有实例"
+                @click="launcherImportOpen = true"
+            >
+                导入实例
+            </button>
+        </header>
 
         <div class="game-tabs" ref="gameTabs">
             <span class="game-tabs-blob" :style="tabBlobStyle" aria-hidden="true"></span>
@@ -2277,6 +2290,12 @@ async function confirmIsolation() {
             :current-path="thumbnailModal.current"
             :current-fit="thumbnailModal.fit"
             @close="thumbnailModal.open = false"
+        />
+
+        <LauncherImportModal
+            :open="launcherImportOpen"
+            :default-folder="installFolder"
+            @close="launcherImportOpen = false"
         />
 
         <!-- 游戏文件夹显示名称 -->
@@ -3622,6 +3641,16 @@ async function confirmIsolation() {
 }
 .page-head {
     margin-bottom: 0;
+}
+/* 标题行两端对齐：左边标题+副标题，右边「导入实例」（同 ProjectionsView recording-heading） */
+.game-heading {
+    display: flex;
+    flex-direction: row;
+    text-align: left;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
 }
 .page-sub {
     margin-bottom: 0;

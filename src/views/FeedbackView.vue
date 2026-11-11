@@ -30,7 +30,12 @@ import {
     fbTicketsPoll,
     fbIssueSubmit,
     fbLogsPreview,
+    fbProfile,
+    fbSetNick,
+    fbSetAvatar,
+    fbOpenWeb,
     type FBComment,
+    type FBProfile,
     type FBIssueDetail,
     type FBIssueRow,
     type FBTicketDetail,
@@ -42,6 +47,8 @@ const tab = ref<Tab>('board');
 
 // ---------------- 元信息 / 登录 ----------------
 const meta = ref<Awaited<ReturnType<typeof fbMeta>> | null>(null);
+// 账号档案：UID 是服务端按入站顺序分配的数字号，昵称/头像覆盖都记在服务端账号上。
+const profile = ref<FBProfile | null>(null);
 const loggedIn = computed(() => !!meta.value?.loggedIn);
 const loginBusy = ref(false);
 /** 配对码：网页配对页要求用户核对，必须真的显示出来 */
@@ -50,6 +57,16 @@ const pairCode = ref('');
 async function refreshMeta() {
     try {
         meta.value = await fbMeta();
+        // 已登录时顺带取账号档案（UID / 昵称 / 头像版本）；失败不打扰，只是顶栏退回字母头像。
+        if (meta.value?.loggedIn) {
+            try {
+                profile.value = await fbProfile();
+            } catch {
+                profile.value = null;
+            }
+        } else {
+            profile.value = null;
+        }
     } catch (e) {
         toast(`反馈服务暂不可达：${e}`, 'error');
     }
@@ -137,6 +154,11 @@ function refilter() {
 function turnPage(d: number) {
     page.value = Math.max(1, page.value + d);
     loadList();
+}
+/** 该条反馈是不是我自己提交的（而非只是我评论过）。 */
+function isMineIssue(it: FBIssueRow): boolean {
+    const uid = meta.value?.identity?.uid;
+    return !!uid && it.authorUid === uid;
 }
 
 async function openIssue(num: number) {
@@ -258,13 +280,27 @@ const logsPreview = ref<{ name: string; size: number }[]>([]);
 const submitBusy = ref(false);
 const submitErr = ref('');
 
+/**
+ * 提交弹层的默认类型：挑一个"不强制附件、不限附件"的中性项，
+ * 让用户打开弹层就能直接填标题正文，不必先点一次类型。
+ * 早期默认空串，用户填完提交才被拦「请先选择反馈类型」，白失败一次。
+ */
+function defaultKind(): string {
+    const kinds = meta.value?.kinds || [];
+    const pref = kinds.find((k) => k.logMode === 'optional' && k.key === 'question');
+    if (pref) return pref.key;
+    const anyOptional = kinds.find((k) => k.logMode === 'optional');
+    if (anyOptional) return anyOptional.key;
+    return kinds[0]?.key || '';
+}
+
 function openSubmit() {
     if (!loggedIn.value) {
         showLoginHint.value = true;
         return;
     }
     showSubmit.value = true;
-    subKind.value = '';
+    subKind.value = defaultKind();
     subTitle.value = '';
     subBody.value = '';
     subWithLogs.value = true;
@@ -530,6 +566,152 @@ onUnmounted(() => {
     offLoginDone?.();
     offLoginDone = null;
 });
+
+// ---------------- 账号设置（UID / 昵称 / 头像）----------------
+// 与网页端同一套口径：账号主键是数字 UID，昵称与头像都是展示层覆盖，
+// 改完由服务端按 UID 反查，历史内容自动跟着变（客户端无需回写任何记录）。
+// 拖拽高亮状态：必须在任何使用它的函数之前声明（const 存在暂时性死区）。
+const avatarDrag = ref(false);
+const showAccount = ref(false);
+const accNick = ref('');
+const accBusy = ref(false);
+const accErr = ref('');
+const accHint = ref('');
+
+/** 头像 URL：带版本号破缓存，换头像后立刻拿到新图。 */
+const avatarSrc = computed(() => {
+    const uid = profile.value?.uid;
+    const base = fbBaseUrl();
+    // 基址或 uid 缺失时返回空串：界面自动退回首字母，不会发一个必然失败的相对请求。
+    if (!uid || !base) return '';
+    const v = profile.value?.avatarVer || 0;
+    return `${base}/api/user/avatar?uid=${uid}${v ? `&v=${v}` : ''}`;
+});
+
+/** 站点基址：由 Rust 侧经 meta.baseUrl 下发，前端不再重复写死域名。
+ *  meta 尚未到达时返回空串，调用方拼绝对 URL 前会先判空（避免打成相对路径）。 */
+function fbBaseUrl(): string {
+    const base = (meta.value as { baseUrl?: string } | null)?.baseUrl;
+    return base && base.trim() ? base.trim().replace(/\/$/, '') : '';
+}
+
+async function openAccount() {
+    if (!loggedIn.value) {
+        showLoginHint.value = true;
+        return;
+    }
+    accErr.value = '';
+    accHint.value = '';
+    try {
+        profile.value = await fbProfile();
+    } catch (e) {
+        accErr.value = `读取账号失败：${e}`;
+    }
+    accNick.value = profile.value?.nick || '';
+    showAccount.value = true;
+}
+
+function closeAccount() {
+    showAccount.value = false;
+}
+
+/** 保存昵称：空串 = 恢复登录账号的默认名。 */
+async function saveNick() {
+    if (accBusy.value) return;
+    accErr.value = '';
+    const maxLen = profile.value?.maxNickLen || 7;
+    const nick = accNick.value.trim();
+    if ([...nick].length > maxLen) {
+        accErr.value = `名字最多 ${maxLen} 个字`;
+        return;
+    }
+    accBusy.value = true;
+    try {
+        await fbSetNick(nick);
+        await refreshMeta();
+        toast(nick ? '昵称已更新' : '已恢复默认名字', 'success');
+    } catch (e) {
+        accErr.value = String(e);
+    } finally {
+        accBusy.value = false;
+    }
+}
+
+/**
+ * 上传头像：这里只做类型/体积预检并把 base64 交给服务端，
+ * 统一裁成 256×256 由服务端负责（客户端不重复实现图像处理）。
+ */
+async function uploadAvatar(file: File) {
+    accErr.value = '';
+    accHint.value = '';
+    if (!/^image\/(png|jpeg)$/.test(file.type)) {
+        accErr.value = '只支持 PNG 或 JPEG 图片';
+        return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+        accErr.value = '图片太大，请选 2MB 以内的图片';
+        return;
+    }
+    accHint.value = '上传中…';
+    accBusy.value = true;
+    try {
+        const b64 = await readFileAsBase64(file);
+        await fbSetAvatar(b64);
+        await refreshMeta();
+        accHint.value = '已更新';
+        toast('头像已更新', 'success');
+    } catch (e) {
+        accHint.value = '';
+        accErr.value = String(e);
+    } finally {
+        accBusy.value = false;
+    }
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => {
+            const s = String(r.result || '');
+            const comma = s.indexOf(',');
+            resolve(comma >= 0 ? s.slice(comma + 1) : s);
+        };
+        r.onerror = () => reject(new Error('读取图片失败，请重试'));
+        r.readAsDataURL(file);
+    });
+}
+
+function pickAvatarFile() {
+    avatarInput.value?.click();
+}
+
+function onAvatarPicked(e: Event) {
+    const el = e.target as HTMLInputElement;
+    const f = el.files?.[0];
+    el.value = '';
+    if (f) void uploadAvatar(f);
+}
+
+const avatarInput = ref<HTMLInputElement | null>(null);
+
+/** 头像区也接受拖拽（拖拽是最直接的交互，与网页端一致）。 */
+function onAvatarDrop(e: DragEvent) {
+    e.preventDefault();
+    avatarDrag.value = false;
+    const files = e.dataTransfer?.files;
+    if (!files || !files.length) return;
+    if (files.length > 1) toast('一次只能上传一张头像', 'error');
+    void uploadAvatar(files[0]);
+}
+/** 用系统浏览器打开网页端；deep 为可选的 hash 深链（如 '#/mine'）。 */
+async function openWeb(deep?: string | Event) {
+    try {
+        // 模板里 @click="openWeb" 会把事件对象传进来，非字符串一律按「打开首页」处理。
+        await fbOpenWeb(typeof deep === 'string' ? deep : '');
+    } catch (e) {
+        toast(`打开网页端失败：${e}`, 'error');
+    }
+}
 </script>
 
 <template>
@@ -550,9 +732,18 @@ onUnmounted(() => {
                         匿名私信<span v-if="unreadTickets" class="fb-dot"></span>
                     </button>
                 </div>
+                <!-- 网页端入口：不少玩家不知道这套反馈其实也有网页版（手机/iPad 上更好用）。 -->
+                <button class="btn btn-ghost btn-sm" title="用系统浏览器打开反馈站网页版" @click="openWeb">
+                    <UiGlyph name="globe" :size="13" /> 网页端
+                </button>
                 <template v-if="loggedIn">
-                    <span class="muted">{{ meta?.identity?.name }}</span>
-                    <button class="btn btn-ghost btn-sm" @click="doLogout">退出</button>
+                <!-- 登录后：账号入口（点开可看 UID、改昵称、换头像），与网页端行为一致 -->
+                <button class="fb-userchip" title="账号设置" @click="openAccount">
+                    <img v-if="profile?.hasAvatar" class="fb-userchip-av" :src="avatarSrc" alt="" />
+                    <span v-else class="fb-userchip-av fb-userchip-fb">{{ (meta?.identity?.name || '?').slice(0, 1).toUpperCase() }}</span>
+                    <span class="fb-userchip-name">{{ meta?.identity?.name }}</span>
+                </button>
+                <button class="btn btn-ghost btn-sm" @click="doLogout">退出</button>
                 </template>
                 <!-- 等待授权期间：把配对码摆出来供核对，并给取消出口 -->
                 <template v-else-if="loginBusy">
@@ -638,7 +829,7 @@ onUnmounted(() => {
                         <SelectMenu v-model="filterStatus" :options="statusOptions" @update:model-value="refilter" />
                         <input v-model="keyword" class="input" placeholder="搜索标题与内容…" @keyup.enter="refilter" />
                         <button class="btn btn-ghost btn-sm" @click="refilter">搜索</button>
-                        <button class="btn btn-sm" :class="mineOnly ? 'btn-gold' : 'btn-ghost'" @click="loggedIn ? ((mineOnly = !mineOnly), refilter()) : (showLoginHint = true)">只看我的</button>
+                        <button class="btn btn-sm" :class="mineOnly ? 'btn-gold' : 'btn-ghost'" :title="'包含你提交的反馈，以及你参与过评论的讨论'" @click="loggedIn ? ((mineOnly = !mineOnly), refilter()) : (showLoginHint = true)">只看我的</button>
                         <button class="btn btn-gold btn-sm" @click="openSubmit">＋ 提交反馈</button>
                     </div>
                 </div>
@@ -646,7 +837,7 @@ onUnmounted(() => {
                 <div v-if="listLoading" class="muted" style="padding: 24px; text-align: center">加载中…</div>
                 <template v-else>
                     <div v-if="!issues.length" class="card empty">
-                        <p>{{ mineOnly ? '你还没有发过反馈。第一条会出现在这里，处理进度一目了然。' : filterKind || filterStatus || keyword ? '没有符合条件的反馈，换个筛选试试。' : '这里会展示玩家提交的反馈与建议，现在就可以发出第一条。' }}</p>
+                        <p>{{ mineOnly ? '这里显示你提交的反馈，以及你参与过评论的讨论。还没有记录。' : filterKind || filterStatus || keyword ? '没有符合条件的反馈，换个筛选试试。' : '这里会展示玩家提交的反馈与建议，现在就可以发出第一条。' }}</p>
                         <button v-if="mineOnly || filterKind || filterStatus || keyword" class="btn btn-ghost btn-sm" @click="mineOnly = false; filterKind = ''; filterStatus = ''; keyword = ''; refilter()">清空筛选</button>
                         <button v-else class="btn btn-gold btn-sm" @click="openSubmit">＋ 提交反馈</button>
                     </div>
@@ -657,6 +848,11 @@ onUnmounted(() => {
                             <span class="fb-row-meta">
                                 <span class="tag" :style="{ background: it.kindColor, color: '#fff' }">{{ it.kindName }}</span>
                                 <span class="tag" :style="{ color: it.statusColor, borderColor: it.statusColor }">{{ it.statusName }}</span>
+                                <!-- 只看我的时标出身份：mine 的口径是"我发的 + 我评论过的"，
+                                     不标清楚用户会困惑"这条不是我发的怎么在这"。 -->
+                                <span v-if="mineOnly" class="tag" :class="isMineIssue(it) ? 'tag-gold' : ''">
+                                    {{ isMineIssue(it) ? '我提交的' : '我参与过' }}
+                                </span>
                                 <span class="muted">{{ it.author }} · {{ fmtTime(it.time) }}</span>
                                 <span v-if="it.comments" class="muted"><UiGlyph name="comment" :size="12" /> {{ it.comments }}</span>
                                 <span v-if="it.attachments" class="muted"><UiGlyph name="clip" :size="12" /> {{ it.attachments }}</span>
@@ -749,9 +945,9 @@ onUnmounted(() => {
                 <!-- v-for 与 v-else-if 混写会让列表挂在空状态判断上，这里拆成独立分支 -->
                 <template v-else-if="!showTicketNew">
                     <button v-for="t in tickets.filter((x) => !x.deleted)" :key="t.id" class="card fb-row" @click="openTicket(t.id)">
-                        <span class="fb-num mono">{{ t.id }}</span>
+                        <span class="fb-num mono">{{ t.id.slice(0, 8) }}</span>
                         <span class="fb-row-main">
-                            <span class="fb-row-title">{{ t.title || '私信 ' + t.id }}</span>
+                            <span class="fb-row-title">{{ t.title || '未命名私信' }}</span>
                             <span class="fb-row-meta"><span class="muted">{{ fmtTime(Math.round(t.lastTimeMs / 1000)) }}</span></span>
                         </span>
                         <span class="fb-row-right">
@@ -763,15 +959,78 @@ onUnmounted(() => {
             </template>
         </template>
 
+        <!-- 账号设置弹层：UID / 昵称 / 头像 -->
+        <div v-if="showAccount" class="modal-mask" @click.self="closeAccount">
+            <div class="modal fb-modal" style="max-width: 460px">
+                <h3>账号设置</h3>
+                <p class="muted" style="margin: 4px 0 12px">
+                    默认使用登录账号的名字与头像。名字最多 {{ profile?.maxNickLen || 7 }} 个字；头像会统一缩放到 256×256。
+                </p>
+
+                <div class="fb-acc-id">
+                    <span class="muted">UID</span>
+                    <code class="fb-acc-uid">{{ profile?.uid ?? '—' }}</code>
+                    <span class="muted" style="margin-left: auto">{{ profile?.name }}</span>
+                </div>
+
+                <div class="fb-acc-avatar-row">
+                    <div
+                        class="fb-acc-avatar"
+                        :class="{ dragging: avatarDrag }"
+                        :style="profile?.hasAvatar ? { backgroundImage: `url('${avatarSrc}')` } : {}"
+                        title="点击选择，或把图片拖到这里"
+                        @click="pickAvatarFile"
+                        @dragenter.prevent="avatarDrag = true"
+                        @dragover.prevent
+                        @dragleave.prevent="avatarDrag = false"
+                        @drop.prevent="onAvatarDrop"
+                    >
+                        <span v-if="!profile?.hasAvatar">{{ (profile?.name || '?').slice(0, 1).toUpperCase() }}</span>
+                        <span v-else-if="avatarDrag" class="fb-acc-drop">松开上传</span>
+                    </div>
+                    <div class="fb-acc-avatar-side">
+                        <button class="btn btn-ghost btn-sm" :disabled="accBusy" @click="pickAvatarFile">选择图片</button>
+                        <div class="muted" style="font-size: var(--text-xs)">点击或拖入图片 · PNG / JPEG，最大 2MB</div>
+                        <div v-if="accHint" class="muted" style="font-size: var(--text-xs)">{{ accHint }}</div>
+                        <input ref="avatarInput" type="file" accept="image/png,image/jpeg" style="display: none" @change="onAvatarPicked" />
+                    </div>
+                </div>
+
+                <div class="fb-acc-nick">
+                    <label class="muted" style="font-size: var(--text-xs)">显示名</label>
+                    <input
+                        v-model="accNick"
+                        class="input"
+                        :maxlength="profile?.maxNickLen || 7"
+                        :placeholder="profile?.name ? `留空则使用「${profile.name}」` : '留空则使用默认名字'"
+                    />
+                    <div class="muted" style="font-size: var(--text-xs); margin-top: 4px">
+                        最多 {{ profile?.maxNickLen || 7 }} 个字
+                    </div>
+                </div>
+
+                <p v-if="accErr" class="fb-err">{{ accErr }}</p>
+                <div class="modal-actions" style="margin-top: 14px">
+                    <button class="btn btn-ghost btn-sm" @click="closeAccount">取消</button>
+                    <button class="btn btn-gold btn-sm" :disabled="accBusy" @click="saveNick">保存</button>
+                </div>
+            </div>
+        </div>
+
         <!-- 提交反馈弹层 -->
         <div v-if="showSubmit" class="modal-mask" @click.self="showSubmit = false">
             <div class="modal fb-modal">
                 <h3>提交反馈</h3>
                 <p class="muted" style="margin: 4px 0 10px">选一个类型。崩溃 / Bug 需要附上游戏日志，帮开发者快速定位。</p>
-                <div class="fb-kind-grid">
-                    <button v-for="k in meta?.kinds || []" :key="k.key" class="fb-kind" :class="{ sel: subKind === k.key }" @click="pickKind(k.key)">
-                        <span class="tag" :style="{ background: k.color, color: '#fff' }">{{ k.name }}</span>
-                        <small>{{ k.logMode === 'required' ? '需附日志' : k.logMode === 'none' ? '无需日志' : '日志可选' }}</small>
+                <div class="fb-kind-pills">
+                    <button
+                        v-for="k in meta?.kinds || []"
+                        :key="k.key"
+                        class="fb-kind-pill"
+                        :class="{ sel: subKind === k.key }"
+                        @click="pickKind(k.key)"
+                    >
+                        <span class="fb-kind-dot" :style="{ background: k.color }"></span>{{ k.name }}
                     </button>
                 </div>
                 <p v-if="currentKind?.logMode === 'required'" class="fb-hint">该类型必须附带日志：当前实例的崩溃报告与 latest.log 会自动带上（见下方预览）。</p>
@@ -1167,26 +1426,155 @@ onUnmounted(() => {
     gap: var(--space-3);
     padding: var(--space-2) 0;
 }
-.fb-kind-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
+/* 反馈类型：一行胶囊。类型只是提交时的一个字段，
+   早前做成三列大卡网格（每张还要占两行文字），弹层被类型区吃掉大半高度。 */
+.fb-kind-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
 }
-.fb-kind {
+.fb-kind-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    font-size: var(--text-xs);
+    color: var(--text-dim);
+    background: var(--card-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: border-color var(--motion-fast), color var(--motion-fast), background var(--motion-fast);
+}
+.fb-kind-pill:hover {
+    color: var(--text);
+    border-color: var(--border-strong, var(--border));
+}
+.fb-kind-pill.sel {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    font-weight: 600;
+}
+.fb-kind-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+/* ---- 账号设置（UID / 昵称 / 头像）---- */
+/* 顶栏用户入口：头像 + 名字，点开进账号设置 */
+.fb-userchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px 3px 3px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--card);
+    color: var(--text);
+    font-size: var(--text-xs);
+    cursor: pointer;
+    max-width: 160px;
+    transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+.fb-userchip:hover {
+    border-color: var(--accent);
+    background: var(--card-2);
+}
+.fb-userchip-av {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    object-fit: cover;
+    background: var(--accent-soft);
+}
+.fb-userchip-fb {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+    font-weight: 700;
+}
+.fb-userchip-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fb-acc-id {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    background: var(--card-2);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+}
+.fb-acc-uid {
+    font-family: var(--mono, monospace);
+    font-size: var(--text-sm, 14px);
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.fb-acc-avatar-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 14px;
+}
+/* 预览框兼作放置区：拖拽是最直接的交互，点击也保留 */
+.fb-acc-avatar {
+    width: 82px;
+    height: 82px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-soft) center / cover no-repeat;
+    color: var(--accent);
+    font-size: 28px;
+    font-weight: 700;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    outline: 2px dashed transparent;
+    outline-offset: 3px;
+    transition: outline-color var(--motion-fast), transform var(--motion-fast);
+}
+.fb-acc-avatar:hover {
+    outline-color: var(--accent);
+}
+.fb-acc-avatar.dragging {
+    outline-color: var(--accent);
+    transform: scale(1.03);
+}
+.fb-acc-drop {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.45);
+    color: #fff;
+    font-size: var(--text-xs);
+    font-weight: 600;
+}
+.fb-acc-avatar-side {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    align-items: center;
-    padding: 10px 6px;
-    border-radius: var(--radius-md);
-    background: var(--card-2);
-    border: 2px solid transparent;
-    cursor: pointer;
-    transition: border-color var(--motion-fast);
-    color: var(--text-dim);
+    min-width: 0;
 }
-.fb-kind.sel {
-    border-color: var(--accent);
+.fb-acc-nick {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 .fb-hint {
     margin: 8px 0 0;
@@ -1292,8 +1680,8 @@ onUnmounted(() => {
     margin: 0;
 }
 @media (max-width: 660px) {
-    .fb-kind-grid {
-        grid-template-columns: repeat(2, 1fr);
+    .fb-kind-pill {
+        padding: 5px 9px;
     }
 }
 </style>

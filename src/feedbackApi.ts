@@ -142,3 +142,27 @@ export const fbAttachment = (kind: 'issue' | 'ticket', owner: string, fid: strin
 export const fbLogsPreview = () =>
     invoke<{ name: string; size: number }[]>('feedback:logs:preview');
 export const fbPickFiles = () => invoke<string[]>('feedback:pickFiles');
+
+// ---- 账号设置（UID / 昵称 / 头像）----
+// 账号主键是服务端按入站顺序分配的数字 UID；昵称与头像都由服务端按 UID 反查，
+// 因此改名/换头像后全站历史内容自动跟随，客户端不需要回写任何本地记录。
+export interface FBProfile {
+    uid: number;
+    name: string;
+    nick: string;
+    display: string;
+    hasAvatar: boolean;
+    avatarVer: number;
+    providers: string[];
+    maxNickLen: number;
+}
+export const fbProfile = () => invoke<FBProfile>('feedback:profile');
+/** nick 为空串 = 恢复登录账号的默认名字。 */
+export const fbSetNick = (nick: string) =>
+    invoke<{ display: string; nick: string }>('feedback:nick', { nick });
+/** image 为 base64（不含 data: 前缀）；服务端会裁成 256×256。 */
+export const fbSetAvatar = (image: string) =>
+    invoke<{ avatarVer: number }>('feedback:avatar', { image });
+/** 用系统浏览器打开反馈站网页端；path 为空打开首页，可传 '#/issue/12' 这类深链。 */
+export const fbOpenWeb = (path?: string) =>
+    invoke<{ url: string }>('feedback:openWeb', { path: path || '' });

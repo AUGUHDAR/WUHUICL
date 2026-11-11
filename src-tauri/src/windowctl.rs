@@ -650,9 +650,33 @@ unsafe extern "system" fn frame_subclass_proc(
 
 #[cfg(windows)]
 fn ensure_frameless_win(win: &tauri::WebviewWindow) {
+    let maximized = win.is_maximized().unwrap_or(false);
+    const DWMWCP_DEFAULT: u32 = 0;
+    const DWMWCP_ROUND: u32 = 2;
+    // 圆角按「非最大化」设置：最大化窗口不该有圆角。
+    let corner = if maximized { DWMWCP_DEFAULT } else { DWMWCP_ROUND };
+    strip_dwm_frame(win, corner);
+}
+
+/// 闪屏专用：铺满屏幕的透明图层不该有圆角，也不该有描边。
+/// Windows 11 默认给每个窗口套圆角 + 1px 边框，屏幕边缘就会露出一圈透明框；
+/// 闪屏要的是「只有碎片和头像」，所以这里用 DONOTROUND 而不是主窗口那套 ROUND。
+pub fn ensure_borderless(win: &tauri::WebviewWindow) {
+    #[cfg(windows)]
+    {
+        const DWMWCP_DONOTROUND: u32 = 1;
+        strip_dwm_frame(win, DWMWCP_DONOTROUND);
+    }
+    #[cfg(not(windows))]
+    let _ = win;
+}
+
+/// 去掉 DWM 画的窗口框：不圆角（或指定圆角）、描边/caption/文字色全设为「无」，
+/// 并剥掉 WS_SYSMENU（否则右上角会叠原生幽灵按钮）。
+#[cfg(windows)]
+fn strip_dwm_frame(win: &tauri::WebviewWindow, corner: u32) {
     use windows_sys::Win32::UI::Shell::SetWindowSubclass;
     let Ok(hwnd) = win.hwnd() else { return };
-    let maximized = win.is_maximized().unwrap_or(false);
     let h = hwnd.0 as *mut std::ffi::c_void;
     extern "system" {
         fn DwmSetWindowAttribute(
@@ -667,20 +691,13 @@ fn ensure_frameless_win(win: &tauri::WebviewWindow) {
     const DWMWA_CAPTION_COLOR: u32 = 35;
     const DWMWA_TEXT_COLOR: u32 = 36;
     const DWMWA_COLOR_NONE: u32 = 0xFFFF_FFFE;
-    const DWMWCP_DEFAULT: u32 = 0;
-    const DWMWCP_ROUND: u32 = 2;
-    let round = if maximized {
-        DWMWCP_DEFAULT
-    } else {
-        DWMWCP_ROUND
-    };
     // 装子类并立即剥一次 WS_SYSMENU（幂等：同 id 重复 SetWindowSubclass 只是替换）
     unsafe {
         SetWindowSubclass(hwnd.0, Some(frame_subclass_proc), 0x5748_4353, 0);
     }
     strip_caption_sysmenu(hwnd.0 as isize);
     unsafe {
-        DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &round, 4);
+        DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, 4);
         // 三者一起设才有效：只设其一仍会留下原生 caption 的一段
         DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR, &DWMWA_COLOR_NONE, 4);
         DwmSetWindowAttribute(h, DWMWA_CAPTION_COLOR, &DWMWA_COLOR_NONE, 4);

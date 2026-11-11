@@ -20,7 +20,9 @@ import {
     exportLaunchLogs,
     selectFile,
     probeWorld,
-    importWorld
+    importWorld,
+    exportMrpack,
+    exportCurseforge
 } from '../api';
 import SelectMenu from './SelectMenu.vue';
 const previousFocus = document.activeElement as HTMLElement | null;
@@ -155,6 +157,98 @@ async function perform(action: () => Promise<unknown>) {
 }
 const op = (operation: Omit<InstanceOperation, 'target'> & { planId?: string }) =>
     invoke(IPC.centerOperation, { ...operation, target });
+
+/** 导出进行中的格式（'' = 空闲）。导出耗时随包体增长，用独立状态避免和 busy 互相阻塞 */
+const exporting = ref<'' | 'mrpack' | 'curseforge'>('');
+/** 二分会话状态（idle 时 status 为空串） */
+const bisect = ref<{
+    status: '' | 'testing' | 'found';
+    candidates: string[];
+    testing: string[];
+    excluded: string[];
+    round: number;
+    culprit: string | null;
+    contradiction: string | null;
+}>({
+    status: '',
+    candidates: [],
+    testing: [],
+    excluded: [],
+    round: 0,
+    culprit: null,
+    contradiction: null
+});
+const bisectBusy = ref(false);
+
+/** 二分定位：start / report / finish / cancel 四个动作共用一条通道 */
+async function bisectAct(action: string, payload: Record<string, unknown> = {}, quiet = false) {
+    if (bisectBusy.value) return;
+    bisectBusy.value = true;
+    error.value = '';
+    try {
+        const r = await invoke<Record<string, unknown>>(
+            'bisect:action',
+            action,
+            target.id,
+            target.folder,
+            payload
+        );
+        if (r && typeof r === 'object' && 'status' in r) {
+            bisect.value = {
+                status: (r.status as 'testing' | 'found') ?? '',
+                candidates: (r.candidates as string[]) ?? [],
+                testing: (r.testing as string[]) ?? [],
+                excluded: (r.excluded as string[]) ?? [],
+                round: (r.round as number) ?? 0,
+                culprit: (r.culprit as string | null) ?? null,
+                contradiction: (r.contradiction as string | null) ?? null
+            };
+            if (r.status === 'idle') bisect.value.status = '';
+            // 后端统一给了「下一步做什么」，直接用，不在这里重复拼文案
+            if (r.next && !quiet) toast(String(r.next), 'info');
+        } else {
+            // finish / cancel 返回 { ok }
+            bisect.value = {
+                status: '',
+                candidates: [],
+                testing: [],
+                excluded: [],
+                round: 0,
+                culprit: null,
+                contradiction: null
+            };
+            if (r?.culprit && !quiet) toast(`已禁用 ${r.culprit}`, 'success');
+        }
+        await refresh();
+    } catch (e) {
+        error.value = errText(e);
+    } finally {
+        bisectBusy.value = false;
+    }
+}
+/**
+ * 导出为整合包。成功后直接把落盘路径告诉用户（打开所在目录才是下一步动作），
+ * 失败按「原因 + 怎么处理」两段说清，不只甩一句失败。
+ */
+async function exportPack(format: 'mrpack' | 'curseforge') {
+    if (exporting.value) return;
+    exporting.value = format;
+    error.value = '';
+    try {
+        const call = format === 'mrpack' ? exportMrpack : exportCurseforge;
+        const r = await call(target.id, target.folder, { name: target.id });
+        const listed = r.listed;
+        const extra = r.overrides;
+        toast(
+            `已导出：${r.path}（${listed} 个模组写进清单${extra ? `，${extra} 个文件随包附带` : ''}）`,
+            'success'
+        );
+    } catch (e) {
+        error.value = `导出失败：${errText(e)}。可先确认实例没在运行，再重试一次。`;
+    } finally {
+        exporting.value = '';
+    }
+}
 function navigate(view: 'mods' | 'packs' | 'shaders' | 'game') {
     instanceCenter.target = null;
     store.currentView = view;
@@ -277,7 +371,11 @@ onMounted(async () => {
     document.addEventListener('keydown', key, true);
     await refresh();
     document.querySelector<HTMLElement>('[aria-label="关闭实例管理"]')?.focus();
-    if (tab.value === 'diagnostics') await diagnose();
+    if (tab.value === 'diagnostics') {
+        await diagnose();
+        // 续做上次没做完的二分（会话在实例目录里，重启启动器也不丢）；静默读，不弹提示
+        void bisectAct('status', {}, true);
+    }
 });
 onUnmounted(() => {
     document.removeEventListener('keydown', key, true);
@@ -402,6 +500,38 @@ onUnmounted(() => {
                             >
                                 复制实例
                             </button>
+                        </div>
+                        <!-- 导出为整合包：给别人用 Prism/PCL/官方启动器导入（与「复制实例」同属整实例操作） -->
+                        <div class="ic-card">
+                            <h3>导出为整合包</h3>
+                            <p>
+                                打包成 Modrinth（.mrpack）或 CurseForge 格式，别人拿到就能导入。
+                                社区认得的模组写进清单（对方启动器自动重下），认不得的随包附带，
+                                不会缺文件。
+                            </p>
+                            <div class="ic-export-actions">
+                                <!-- 两种格式等价（都能打包整个实例），同级配色，不拿主按钮暗示偏好 -->
+                                <button
+                                    class="btn btn-ghost"
+                                    data-ui="instance-center:export-mrpack"
+                                    :disabled="busy || overview?.running || exporting !== ''"
+                                    @click="exportPack('mrpack')"
+                                >
+                                    {{ exporting === 'mrpack' ? '导出中…' : '导出 Modrinth 包' }}
+                                </button>
+                                <button
+                                    class="btn btn-ghost"
+                                    data-ui="instance-center:export-curseforge"
+                                    :disabled="busy || overview?.running || exporting !== ''"
+                                    @click="exportPack('curseforge')"
+                                >
+                                    {{
+                                        exporting === 'curseforge'
+                                            ? '导出中…'
+                                            : '导出 CurseForge 包'
+                                    }}
+                                </button>
+                            </div>
                         </div>
                     </template>
                     <template v-else-if="tab === 'worlds'">
@@ -558,6 +688,85 @@ onUnmounted(() => {
                             <button class="btn btn-gold" :disabled="busy" @click="diagnose">
                                 {{ busy ? '正在处理…' : '开始检查' }}
                             </button>
+                        </div>
+                        <!-- 二分定位：不知道是哪个 mod 崩时，用「禁一半看还崩不崩」快速收敛 -->
+                        <div class="ic-card" data-ui="instance-center:bisect">
+                            <h3>二分定位肇事模组</h3>
+                            <p v-if="!bisect.status">
+                                装了多个模组又不知道是哪个导致崩溃时，用它把范围砍半：每轮禁用一半，
+                                启动一次告诉我结果，几轮就能锁定到具体那个。所有改动都是 .jar ↔
+                                .jar.disabled 改名，随时可以整体取消并完整复原。
+                            </p>
+                            <p v-else>
+                                第 {{ bisect.round }} 轮 · 剩
+                                {{ bisect.candidates.length }} 个候选<template
+                                    v-if="bisect.excluded.length"
+                                    >，已排除 {{ bisect.excluded.length }} 个</template
+                                >
+                            </p>
+                            <p v-if="bisect.status === 'testing'" class="ic-bisect-next">
+                                已禁用 {{ bisect.testing.length }} 个：{{
+                                    bisect.testing.slice(0, 4).join('、')
+                                }}<template v-if="bisect.testing.length > 4">…</template><br />
+                                现在启动游戏：进得去主界面就点「起来了」，仍然崩溃就点「还是崩」。
+                            </p>
+                            <p v-if="bisect.culprit" class="ic-bisect-found">
+                                定位到 {{ bisect.culprit }}
+                            </p>
+                            <p v-if="bisect.contradiction" class="ic-bisect-warn">
+                                {{ bisect.contradiction }}
+                            </p>
+                            <div class="ic-actions">
+                                <template v-if="!bisect.status">
+                                    <button
+                                        class="btn btn-ghost"
+                                        :disabled="busy || bisectBusy || overview?.running"
+                                        @click="bisectAct('start')"
+                                    >
+                                        {{ bisectBusy ? '准备中…' : '开始二分定位' }}
+                                    </button>
+                                </template>
+                                <template v-else-if="bisect.status === 'testing'">
+                                    <button
+                                        class="btn btn-gold"
+                                        :disabled="bisectBusy"
+                                        @click="bisectAct('report', { gameStarted: true })"
+                                    >
+                                        起来了
+                                    </button>
+                                    <button
+                                        class="btn btn-ghost"
+                                        :disabled="bisectBusy"
+                                        @click="bisectAct('report', { gameStarted: false })"
+                                    >
+                                        还是崩
+                                    </button>
+                                    <button
+                                        class="btn btn-ghost"
+                                        :disabled="bisectBusy"
+                                        @click="bisectAct('cancel')"
+                                    >
+                                        取消并复原
+                                    </button>
+                                </template>
+                                <template v-else>
+                                    <button
+                                        v-if="bisect.culprit"
+                                        class="btn btn-gold"
+                                        :disabled="bisectBusy"
+                                        @click="bisectAct('finish', { disableCulprit: true })"
+                                    >
+                                        结束并禁用它
+                                    </button>
+                                    <button
+                                        class="btn btn-ghost"
+                                        :disabled="bisectBusy"
+                                        @click="bisectAct('finish', { disableCulprit: false })"
+                                    >
+                                        结束（全部保留）
+                                    </button>
+                                </template>
+                            </div>
                         </div>
                         <div v-for="(f, i) in findings" :key="f.rule + i" class="ic-card">
                             <div class="ic-tools">
@@ -975,9 +1184,32 @@ onUnmounted(() => {
     margin-bottom: 14px;
     font: inherit;
 }
+/* 导出整合包：两个并列按钮等宽等距（相邻元素等长，避免一长一短） */
+.ic-export-actions {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+.ic-export-actions > .btn {
+    flex: 1 1 0;
+    min-width: 150px;
+    justify-content: center;
+}
+/* 二分定位的下一步提示：与正文区分开，读起来像「该你操作了」 */
+.ic-bisect-next {
+    color: var(--text) !important;
+    border-left: 2px solid var(--accent);
+    padding-left: var(--space-3);
+}
+.ic-bisect-found {
+    color: var(--accent);
+    font-weight: 600;
+}
+.ic-bisect-warn {
+    color: var(--danger);
+}
 .ic-grid .ic-card {
-    margin: 0;
-    cursor: pointer;
+    margin: 0;    cursor: pointer;
     transition:
         background 0.18s,
         transform 0.18s;

@@ -79,12 +79,14 @@ pub mod accounts;
 pub mod appearance;
 pub mod assetproto;
 pub mod bridge;
+pub mod bisect;
 pub mod cachefs;
 pub mod catalog;
 pub mod centercmd;
 pub mod community;
 pub mod community_wiki;
 pub mod crashanalyzer;
+pub mod crashfix;
 pub mod direct;
 pub mod download;
 pub mod dragout;
@@ -96,16 +98,19 @@ pub mod gamefolders;
 pub mod gameoptions;
 pub mod gate;
 pub mod hero_scenes;
+pub mod importlauncher;
 pub mod installer;
 pub mod ipc;
 pub mod javaman;
 pub mod launch;
 pub mod misc;
+pub mod modbaseline;
 pub mod modpacks;
 pub mod mods;
 pub mod mslogin;
 pub mod nbt;
 pub mod net;
+pub mod packexport;
 pub mod platform;
 pub mod projections;
 pub mod recordings;
@@ -436,6 +441,10 @@ fn setup_windows(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error
     let splash_h = size.height as f64 / scale;
     let _ = splash.set_size(tauri::Size::Logical(tauri::LogicalSize::new(splash_w + 1.0, splash_h)));
     let _ = splash.set_size(tauri::Size::Logical(tauri::LogicalSize::new(splash_w, splash_h)));
+    // 闪屏是铺满屏幕的透明图层：Windows 11 默认给窗口加圆角 + 1px 描边，
+    // 屏幕上就出现一圈透明边框，破坏"只有碎片和头像"的观感。
+    // 主窗口一直由 ensure_frameless 处理，闪屏此前漏掉了 —— 这里补上（不圆角、去描边）。
+    windowctl::ensure_borderless(&splash);
     splash.set_ignore_cursor_events(true)?;
     let auto_fit = crate::settings::get(app)["uiWindowAutoFit"]
         .as_bool()

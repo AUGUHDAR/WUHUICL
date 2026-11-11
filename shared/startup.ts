@@ -19,28 +19,37 @@ export class StartupGate {
     }
 }
 
-export const GLASS_FLOAT_MIN_MS = 900;
+export const BOOT_FLOAT_MIN_MS = 900;
 export const CONVERGE_DURATION = 1400;
 export const ASSEMBLED_HOLD_MS = 2000;
 export const BOOT_FRAME_MS = 1000 / 60;
-export const GLASS_POINTER_RADIUS = 140;
-export interface GlassPoint {
+export const POINTER_RADIUS = 140;
+/**
+ * 头像切成 BOOT_GRID² 块像素碎片。
+ * 8×8＝64 块：头像原图正是 8×8 个 32px 的美术像素，于是每块碎片就是头像的一个像素，
+ * 散开时每块都有确定的颜色（发丝/皮肤/眼睛各不同），落位后就是原图的马赛克拼合。
+ * 网格数必须整除 8：12 会切进美术像素内部，拼合处出现碎边。
+ */
+export const BOOT_GRID = 8;
+
+export interface BootPoint {
     x: number;
     y: number;
 }
-export interface GlassPose extends GlassPoint {
+export interface TilePose extends BootPoint {
     rotation: number;
     scale: number;
     progress: number;
 }
-export interface GlassShard {
-    vertices: GlassPoint[];
-    /** Max centroid-to-vertex distance; invariant under rotation, bounds any pose. */
-    radius: number;
-    sourceX: number;
-    sourceY: number;
+export interface BootTile {
+    /** 源图切片索引；取像素矩形时按实际图宽高换算，保证 144 块严丝合缝地拼回整张图 */
+    col: number;
+    row: number;
+    /** 落位后的边长与中心 */
+    size: number;
     targetX: number;
     targetY: number;
+    /** 散布期的漂移中心（整窗坐标） */
     x: number;
     y: number;
     phase: number;
@@ -50,23 +59,16 @@ export interface GlassShard {
     offsetY: number;
     velocityX: number;
     velocityY: number;
-    from?: GlassPose;
+    from?: TilePose;
 }
-export interface GlassZone {
-    /** 漂浮区中心与半宽/半高：碎片只在头像拼合板四周的紧凑中央区活动，不靠近窗口边界 */
-    cx: number;
-    cy: number;
-    hx: number;
-    hy: number;
-}
-export interface GlassGeometry {
+export interface BootGeometry {
     board: number;
     left: number;
     top: number;
+    size: number;
     width: number;
     height: number;
-    zone: GlassZone;
-    shards: GlassShard[];
+    tiles: BootTile[];
 }
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
 /** Falls back to the midpoint when a tiny window cannot fit the margin on both sides. */
@@ -86,179 +88,168 @@ export function canAssembleBoot(state: BootState): boolean {
     );
 }
 
-/** Jittered triangulation tiles the exact portrait; no rectangular pixel tiles. */
-export function makeBootGlass(width: number, height: number): GlassGeometry {
+/**
+ * 64 块头像像素碎片铺满整窗漂浮，最后逐块落位拼回头像。
+ * 散布范围是全窗（四边留一块碎片的安全边），不是拼合板四周的紧凑带：
+ * 碎片散开才是开屏的观感，只有落位瞬间才收拢到中间的拼图板。
+ */
+export function makeBootTiles(width: number, height: number): BootGeometry {
     let seed = 1041;
     const random = () => {
         seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
         return seed / 4294967296;
     };
-    const board = Math.max(80, Math.floor(Math.min(224, width * 0.26, height * 0.32)));
+    // 板宽取 BOOT_GRID 的整数倍：每块边长整数，落位时相邻块不会出现半像素缝。
+    // 上限 280＝每块 35px：64 块散满整窗时仍读得出是「头像碎片」，
+    // 但拼合后的头像不至于占满小半屏（384 时每块 48px、整块 384px，观感偏重）。
+    const size = Math.max(7, Math.floor(Math.min(280, width * 0.24, height * 0.32) / BOOT_GRID));
+    const board = size * BOOT_GRID;
     const left = Math.round((width - board) / 2),
-        top = Math.round((height - board) / 2),
-        cell = board / 6;
-    // 漂浮区＝拼合板四周的紧凑带（半宽 = 板半宽 + 240：容纳指针斥力的 ±180 弹簧上限 + 半径余量），
-    // 小窗口时收缩进窗口并留 40px 离边余量。碎片散满全窗时，贴边碎片叠上透出的桌面会读成
-    // 「窗口边界」；理想态是只有中间的碎片聚成头像，屏幕其余部分保持干净的桌面。
-    const zone: GlassZone = {
-        cx: left + board / 2,
-        cy: top + board / 2,
-        hx: Math.max(0, Math.min(board / 2 + 240, width / 2 - 40)),
-        hy: Math.max(0, Math.min(board / 2 + 240, height / 2 - 40))
-    };
-    const points: GlassPoint[] = [];
-    for (let row = 0; row <= 6; row++)
-        for (let col = 0; col <= 6; col++)
-            points.push({
-                x: (col + (col > 0 && col < 6 ? (random() - 0.5) * 0.65 : 0)) * cell,
-                y: (row + (row > 0 && row < 6 ? (random() - 0.5) * 0.65 : 0)) * cell
+        top = Math.round((height - board) / 2);
+    const tiles: BootTile[] = [];
+    // 分层抖动网格：把整窗切成 BOOT_GRID² 个格子，每块落进独立格子再格内随机。
+    // 纯随机会在中间扎堆、四角留空；分格散布才是「铺满整屏」的观感
+    const cellW = width / BOOT_GRID,
+        cellH = height / BOOT_GRID;
+    for (let row = 0; row < BOOT_GRID; row++)
+        for (let col = 0; col < BOOT_GRID; col++) {
+            // 旋转后的外接半径（45° 最坏情况）；留这个余量碎片才不会顶出窗口被裁掉
+            const margin = size * 0.75 + 6;
+            const loX = Math.min(margin, width / 2),
+                loY = Math.min(margin, height / 2);
+            // 格内留边，避免相邻格子里的碎片各自贴边重叠成「双块」
+            const inset = Math.min(cellW, cellH) * 0.16;
+            const jx = Math.max(0, cellW - inset * 2),
+                jy = Math.max(0, cellH - inset * 2);
+            tiles.push({
+                col,
+                row,
+                size,
+                targetX: left + (col + 0.5) * size,
+                targetY: top + (row + 0.5) * size,
+                x: clampTo(col * cellW + inset + random() * jx, loX, width - loX),
+                y: clampTo(row * cellH + inset + random() * jy, loY, height - loY),
+                phase: random() * Math.PI * 2,
+                // 像素块允许小幅转角：散开时要能读出「每块都在自己转」，太大又会读出「方块」
+                spin: (random() - 0.5) * 1.4,
+                delay: random() * 220,
+                offsetX: 0,
+                offsetY: 0,
+                velocityX: 0,
+                velocityY: 0
             });
-    const shards: GlassShard[] = [];
-    const add = (vertices: GlassPoint[]) => {
-        const sourceX = vertices.reduce((n, p) => n + p.x, 0) / 3,
-            sourceY = vertices.reduce((n, p) => n + p.y, 0) / 3;
-        const relative = vertices.map((p) => ({ x: p.x - sourceX, y: p.y - sourceY }));
-        const radius = Math.max(...relative.map((p) => Math.hypot(p.x, p.y)));
-        shards.push({
-            vertices: relative,
-            radius,
-            sourceX,
-            sourceY,
-            targetX: left + sourceX,
-            targetY: top + sourceY,
-            x: zone.cx + (random() * 2 - 1) * Math.max(0, zone.hx - radius * 1.2 - 24),
-            y: zone.cy + (random() * 2 - 1) * Math.max(0, zone.hy - radius * 1.2 - 24),
-            phase: random() * Math.PI * 2,
-            spin: (random() - 0.5) * 2.4,
-            delay: random() * 180,
-            offsetX: 0,
-            offsetY: 0,
-            velocityX: 0,
-            velocityY: 0
-        });
-    };
-    for (let row = 0; row < 6; row++)
-        for (let col = 0; col < 6; col++) {
-            const a = points[row * 7 + col],
-                b = points[row * 7 + col + 1],
-                c = points[(row + 1) * 7 + col],
-                d = points[(row + 1) * 7 + col + 1];
-            if ((row + col) % 2) {
-                add([a, b, c]);
-                add([b, d, c]);
-            } else {
-                add([a, b, d]);
-                add([a, d, c]);
-            }
         }
-    return { board, left, top, width, height, zone, shards };
+    return { board, left, top, size, width, height, tiles };
 }
 
-const glassBase = (shard: GlassShard, elapsed: number): GlassPoint => ({
-    x: shard.x + Math.sin(elapsed / 1500 + shard.phase) * 14,
-    y: shard.y + Math.cos(elapsed / 1800 + shard.phase) * 11
-});
+/** 漂浮期只做缓速漂移，幅度随窗口等比（大屏不显得静止、小窗不显得乱窜）。 */
+const driftScale = (width: number, height: number) =>
+    Math.max(0.6, Math.min(1.6, Math.min(width, height) / 800));
 
-/** Half-extent of any rotated pose (scale ≤1.2) plus wobble headroom and a calm strip off the zone border. */
-const glassEdgeMargin = (shard: GlassShard): number => shard.radius * 1.2 + 22;
-
-function floating(shard: GlassShard, elapsed: number): GlassPose {
-    const base = glassBase(shard, elapsed);
+const tileBase = (tile: BootTile, elapsed: number, width: number, height: number): BootPoint => {
+    const s = driftScale(width, height);
     return {
-        x: base.x + shard.offsetX,
-        y: base.y + shard.offsetY,
-        rotation: shard.spin + Math.sin(elapsed / 2100 + shard.phase) * 0.22,
-        scale: 1.06 + Math.sin(elapsed / 1900 + shard.phase) * 0.12,
+        x: tile.x + Math.sin(elapsed / 1500 + tile.phase) * 16 * s,
+        y: tile.y + Math.cos(elapsed / 1800 + tile.phase) * 13 * s
+    };
+};
+
+function floating(tile: BootTile, elapsed: number, width: number, height: number): TilePose {
+    const base = tileBase(tile, elapsed, width, height);
+    return {
+        x: base.x + tile.offsetX,
+        y: base.y + tile.offsetY,
+        rotation: tile.spin + Math.sin(elapsed / 2100 + tile.phase) * 0.16,
+        scale: 1 + Math.sin(elapsed / 1900 + tile.phase) * 0.08,
         progress: 0
     };
 }
 
-/** Bounded spring motion. Cursor sampling is independent of click-through windows. */
-export function advanceBootGlass(
-    shards: GlassShard[],
+/** 有界弹簧：光标靠近时把碎片推开，但碎片永远留在窗口内。 */
+export function advanceBootTiles(
+    geometry: BootGeometry,
     elapsed: number,
     deltaMs: number,
-    pointer: GlassPoint | null,
-    zone: GlassZone
+    pointer: BootPoint | null
 ): void {
     const dt = Math.min(32, Math.max(0, deltaMs)) / 1000;
-    const loX = zone.cx - zone.hx,
-        hiX = zone.cx + zone.hx,
-        loY = zone.cy - zone.hy,
-        hiY = zone.cy + zone.hy;
-    for (const shard of shards) {
-        const p = floating(shard, elapsed),
-            m = glassEdgeMargin(shard);
+    const { width, height } = geometry;
+    for (const tile of geometry.tiles) {
+        const p = floating(tile, elapsed, width, height),
+            m = tile.size * 0.75 + 6;
         let fx = 0,
             fy = 0;
-        // 碎片只待在中央漂浮区：贴区边和贴窗口边一样会读成「边界」，留 m+64 缓冲带回推
-        const band = m + 64;
-        if (p.x < loX + band) fx += (loX + band - p.x) * 42;
-        if (p.x > hiX - band) fx -= (p.x - (hiX - band)) * 42;
-        if (p.y < loY + band) fy += (loY + band - p.y) * 42;
-        if (p.y > hiY - band) fy -= (p.y - (hiY - band)) * 42;
+        // 贴窗口边会被裁掉半块，留一段缓冲带把碎片推回窗内
+        const band = m + 40;
+        if (p.x < band) fx += (band - p.x) * 42;
+        if (p.x > width - band) fx -= (p.x - (width - band)) * 42;
+        if (p.y < band) fy += (band - p.y) * 42;
+        if (p.y > height - band) fy -= (p.y - (height - band)) * 42;
         if (pointer) {
             let dx = p.x - pointer.x,
                 dy = p.y - pointer.y;
             const distance = Math.hypot(dx, dy);
-            if (distance < GLASS_POINTER_RADIUS) {
+            if (distance < POINTER_RADIUS) {
                 if (distance < 1) {
-                    dx = Math.cos(shard.phase);
-                    dy = Math.sin(shard.phase);
+                    dx = Math.cos(tile.phase);
+                    dy = Math.sin(tile.phase);
                 }
-                const force =
-                    (2400 * (1 - distance / GLASS_POINTER_RADIUS) ** 2) / Math.max(1, distance);
+                const force = (2400 * (1 - distance / POINTER_RADIUS) ** 2) / Math.max(1, distance);
                 fx = dx * force;
                 fy = dy * force;
             }
         }
         const drag = Math.exp(-5 * dt);
-        shard.velocityX = (shard.velocityX + (fx - shard.offsetX * 8) * dt) * drag;
-        shard.velocityY = (shard.velocityY + (fy - shard.offsetY * 8) * dt) * drag;
-        shard.offsetX = Math.max(-180, Math.min(180, shard.offsetX + shard.velocityX * dt));
-        shard.offsetY = Math.max(-180, Math.min(180, shard.offsetY + shard.velocityY * dt));
-        // Hard containment on top of the ±180 spring bound: a shard never leaves the float zone.
-        const base = glassBase(shard, elapsed);
-        if (base.x + shard.offsetX < loX + m) {
-            shard.offsetX = loX + m - base.x;
-            shard.velocityX = Math.max(0, shard.velocityX);
-        } else if (base.x + shard.offsetX > hiX - m) {
-            shard.offsetX = hiX - m - base.x;
-            shard.velocityX = Math.min(0, shard.velocityX);
+        tile.velocityX = (tile.velocityX + (fx - tile.offsetX * 8) * dt) * drag;
+        tile.velocityY = (tile.velocityY + (fy - tile.offsetY * 8) * dt) * drag;
+        // 弹簧位移限幅小于缓冲带，保证硬约束永远有解
+        tile.offsetX = Math.max(-180, Math.min(180, tile.offsetX + tile.velocityX * dt));
+        tile.offsetY = Math.max(-180, Math.min(180, tile.offsetY + tile.velocityY * dt));
+        // 硬约束兜底：位移限幅之上再夹一次，碎片绝不越过窗口边
+        const base = tileBase(tile, elapsed, width, height);
+        if (base.x + tile.offsetX < m) {
+            tile.offsetX = m - base.x;
+            tile.velocityX = Math.max(0, tile.velocityX);
+        } else if (base.x + tile.offsetX > width - m) {
+            tile.offsetX = width - m - base.x;
+            tile.velocityX = Math.min(0, tile.velocityX);
         }
-        if (base.y + shard.offsetY < loY + m) {
-            shard.offsetY = loY + m - base.y;
-            shard.velocityY = Math.max(0, shard.velocityY);
-        } else if (base.y + shard.offsetY > hiY - m) {
-            shard.offsetY = hiY - m - base.y;
-            shard.velocityY = Math.min(0, shard.velocityY);
+        if (base.y + tile.offsetY < m) {
+            tile.offsetY = m - base.y;
+            tile.velocityY = Math.max(0, tile.velocityY);
+        } else if (base.y + tile.offsetY > height - m) {
+            tile.offsetY = height - m - base.y;
+            tile.velocityY = Math.min(0, tile.velocityY);
         }
     }
 }
 
-/** Snapshot the displaced pose so assembly cannot jump when the pointer is nearby. */
-export function glassPosition(
-    shard: GlassShard,
+/**
+ * 落位时冻结漂浮姿态再插值，光标在附近也不会跳变。
+ * 落位终点就是拼图格里那一小块的位置，144 块叠加即整张头像。
+ */
+export function tilePose(
+    tile: BootTile,
     elapsed: number,
     convergeAt: number | null,
-    zone: GlassZone
-): GlassPose {
+    geometry: BootGeometry
+): TilePose {
     if (convergeAt === null) {
-        const pose = floating(shard, elapsed),
-            m = glassEdgeMargin(shard);
-        // Per-frame safety net under the physics containment: shards stay in the float zone.
-        pose.x = clampTo(pose.x, zone.cx - zone.hx + m, zone.cx + zone.hx - m);
-        pose.y = clampTo(pose.y, zone.cy - zone.hy + m, zone.cy + zone.hy - m);
+        const pose = floating(tile, elapsed, geometry.width, geometry.height),
+            m = tile.size * 0.75 + 6;
+        // 物理约束之外每帧再夹一次：碎片始终完整落在窗内
+        pose.x = clampTo(pose.x, m, geometry.width - m);
+        pose.y = clampTo(pose.y, m, geometry.height - m);
         return pose;
     }
-    shard.from ??= floating(shard, convergeAt);
-    const progress = smooth((elapsed - convergeAt - shard.delay) / (CONVERGE_DURATION - 180)),
-        from = shard.from;
+    tile.from ??= floating(tile, convergeAt, geometry.width, geometry.height);
+    const progress = smooth((elapsed - convergeAt - tile.delay) / (CONVERGE_DURATION - 220)),
+        from = tile.from;
     if (progress === 1)
-        return { x: shard.targetX, y: shard.targetY, rotation: 0, scale: 1, progress: 1 };
+        return { x: tile.targetX, y: tile.targetY, rotation: 0, scale: 1, progress: 1 };
     return {
-        x: from.x + (shard.targetX - from.x) * progress,
-        y: from.y + (shard.targetY - from.y) * progress,
+        x: from.x + (tile.targetX - from.x) * progress,
+        y: from.y + (tile.targetY - from.y) * progress,
         rotation: from.rotation * (1 - progress),
         scale: from.scale + (1 - from.scale) * progress,
         progress

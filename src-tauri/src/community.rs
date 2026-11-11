@@ -1717,6 +1717,77 @@ pub fn cf_fetch_public(app: &tauri::AppHandle, path: &str) -> Result<Value, Stri
     cf_fetch(app, path)
 }
 
+/// CF 的 POST 请求（带 api key）。目前只给 fingerprints 反查用。
+fn cf_post(app: &tauri::AppHandle, path: &str, body: &Value) -> Result<Value, String> {
+    let ch = cf_channel(app);
+    let url = format!("{}{}", ch.base, path);
+    let req = net::client()
+        .post(&url)
+        .header("User-Agent", UA_SEARCH)
+        .json(body);
+    let req = if ch.official {
+        req.header("x-api-key", &ch.key)
+    } else {
+        req
+    };
+    let resp = req.send().map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("CurseForge 返回 {}", resp.status()));
+    }
+    resp.json::<Value>().map_err(|e| e.to_string())
+}
+
+/// 按文件 SHA1 反查 CurseForge 的 (projectId, fileId)。
+///
+/// 用途是导出整合包：CF 的 `manifest.json` 只认 projectID + fileID，没有 URL 概念。
+/// 步骤对应 Prism `FlamePackExportTask::makeApiRequest`：算 murmur2 指纹 → POST
+/// `/v1/fingerprints` → 在 `exactMatches` 里选 **sha1 也匹配** 的那条（指纹会碰撞，
+/// 单靠指纹不够）。
+///
+/// 返回 None 表示 CF 没有收录这个文件，调用方应把它放进 overrides。
+pub fn cf_file_ids_by_fingerprint(
+    app: &tauri::AppHandle,
+    fingerprint: u64,
+    expect_sha1: &str,
+) -> Option<(u64, u64)> {
+    let body = json!({ "fingerprints": [fingerprint] });
+    let r = cf_post(app, "/fingerprints", &body).ok()?;
+    let list = r.pointer("/data/exactMatches")?.as_array()?;
+    for m in list {
+        let fp_ok = m
+            .pointer("/file/fileFingerprint")
+            .and_then(|v| v.as_u64())
+            .map(|v| v == fingerprint)
+            .unwrap_or(false);
+        if !fp_ok {
+            continue;
+        }
+        let sha_ok = m
+            .pointer("/file/hashes")
+            .and_then(|v| v.as_array())
+            .map(|hs| {
+                hs.iter().any(|h| {
+                    h.get("algo").and_then(|v| v.as_u64()) == Some(1)
+                        && h.get("value")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.eq_ignore_ascii_case(expect_sha1))
+                            .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false);
+        if !sha_ok {
+            continue;
+        }
+        let project = m
+            .pointer("/file/modId")
+            .and_then(|v| v.as_u64())
+            .or_else(|| m.get("id").and_then(|v| v.as_u64()))?;
+        let file = m.pointer("/file/id").and_then(|v| v.as_u64())?;
+        return Some((project, file));
+    }
+    None
+}
+
 fn cf_fetch(app: &tauri::AppHandle, path: &str) -> Result<Value, String> {
     let ch = cf_channel(app);
     if ch.official {

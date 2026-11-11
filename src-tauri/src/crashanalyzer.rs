@@ -35,8 +35,15 @@ pub struct Logs {
 pub const REASON_NONE: &str = "没有可用的分析文件";
 
 /// 从游戏目录收集日志并分析。`crash_path` 是启动器 diff 出的本次新崩溃报告（可空）。
-pub fn analyze(game_dir: &Path, crash_path: Option<&Path>, captured_tail: &[String]) -> Vec<CrashReason> {
-    let mc = read_recent(&game_dir.join("logs").join("latest.log")).or_else(|| {
+/// `since` 是本次启动的开始时刻：只有它之后写过的日志/崩溃报告才算「本次」，
+/// 避免读到上上次启动的残留（此前靠 600 秒 mtime 猜测，启动慢或分析滞后就会误判）。
+pub fn analyze(
+    game_dir: &Path,
+    crash_path: Option<&Path>,
+    captured_tail: &[String],
+    since: Option<std::time::SystemTime>,
+) -> Vec<CrashReason> {
+    let mc = read_recent(&game_dir.join("logs").join("latest.log"), since).or_else(|| {
         // 没有落盘日志时用启动器捕获的输出兜底（PCL 的 RawOutput 语义）
         if captured_tail.is_empty() {
             None
@@ -54,9 +61,9 @@ pub fn analyze(game_dir: &Path, crash_path: Option<&Path>, captured_tail: &[Stri
         }
         _ => mc,
     };
-    let hs = newest_file(game_dir, "hs_err_pid*.log").and_then(|p| read_recent(&p));
-    let crash = crash_path.and_then(read_recent);
-    let debug = read_recent(&game_dir.join("logs").join("debug.log"));
+    let hs = newest_file(game_dir, "hs_err_pid*.log").and_then(|p| read_recent(&p, since));
+    let crash = crash_path.and_then(|p| read_recent(p, since));
+    let debug = read_recent(&game_dir.join("logs").join("debug.log"), since);
 
     let logs = Logs { mc, hs, crash, debug };
     if logs.mc.is_none() && logs.hs.is_none() && logs.crash.is_none() {
@@ -67,19 +74,21 @@ pub fn analyze(game_dir: &Path, crash_path: Option<&Path>, captured_tail: &[Stri
 
 // ---------------- 文件收集 ----------------
 
-fn read_recent(path: &Path) -> Option<String> {
+/// 读取「本次启动」期间写过的文件。
+/// `since` 为 Some 时以本次启动时刻为界（精确判定）；为 None 时退回 10 分钟 mtime 口径
+/// （手动重新分析等拿不到启动时刻的场景）。
+fn read_recent(path: &Path, since: Option<std::time::SystemTime>) -> Option<String> {
     let meta = std::fs::metadata(path).ok()?;
     if !meta.is_file() || meta.len() == 0 {
         return None;
     }
-    // 只在 3 分钟内修改过才算本次崩溃的日志（PCL Collect 的 3 分钟口径放宽到 10 分钟：
-    // 启动器在游戏退出瞬间分析，正常都会命中；手动分析场景留裕量）
-    let fresh = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.elapsed().ok())
-        .map(|d| d.as_secs() < 600)
-        .unwrap_or(false);
+    let mtime = meta.modified().ok()?;
+    let fresh = match since {
+        // 本次启动时刻之后写过即命中（duration_since 只在 mtime >= start 时返回 Ok）
+        Some(start) => mtime.duration_since(start).is_ok(),
+        // 无启动时刻：PCL Collect 的 3 分钟口径放宽到 10 分钟（手动分析留裕量）
+        None => mtime.elapsed().map(|d| d.as_secs() < 600).unwrap_or(false),
+    };
     if !fresh {
         return None;
     }

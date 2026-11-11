@@ -74,6 +74,116 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
     if let Some(r) = modpacks::invoke(app, channel, args) {
         return r;
     }
+    if channel == "crashfix:apply" {
+        // 崩溃自愈执行：args = [fixId, payload, versionId, folder]
+        let id = args.first().and_then(|v| v.as_str()).unwrap_or("");
+        let payload = args.get(1).cloned().unwrap_or(json!({}));
+        let version_id = args.get(2).and_then(|v| v.as_str()).unwrap_or("");
+        let folder = args.get(3).and_then(|v| v.as_str()).unwrap_or("");
+        if id.is_empty() || version_id.is_empty() {
+            return Err("缺少修复标识或目标实例".into());
+        }
+        let folder = if folder.is_empty() {
+            crate::installer::folder_of_version(app, version_id)
+        } else {
+            folder.to_string()
+        };
+        return crate::crashfix::apply_fix(app, id, &payload, version_id, &folder);
+    }
+    // 跨启动器实例导入：args = [] / [sourcePath, targetFolder, optionalName]
+    if channel == "import:scan" {
+        return Ok(crate::importlauncher::scan_all());
+    }
+    if channel == "import:apply" {
+        let source = args.first().and_then(|v| v.as_str()).unwrap_or("");
+        let target = args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+        let name = args.get(2).and_then(|v| v.as_str());
+        if source.is_empty() || target.is_empty() {
+            return Err("缺少源实例路径或目标文件夹".into());
+        }
+        return crate::importlauncher::apply_import(app, source, target, name);
+    }
+    // 整合包导出：args = [versionId, folder, options]
+    if channel == "pack:exportMrpack" || channel == "pack:exportCurseforge" {
+        let version_id = args.first().and_then(|v| v.as_str()).unwrap_or("");
+        let folder = args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+        let opts = args.get(2).cloned().unwrap_or(json!({}));
+        if version_id.is_empty() || folder.is_empty() {
+            return Err("缺少目标实例".into());
+        }
+        return if channel == "pack:exportMrpack" {
+            crate::packexport::export_mrpack(app, version_id, folder, &opts)
+        } else {
+            crate::packexport::export_curseforge(app, version_id, folder, &opts)
+        };
+    }
+    // 二分定位：args = [action, versionId, folder, payload]
+    //   action: start | report | finish | cancel | status
+    if channel == "bisect:action" {
+        let action = args.first().and_then(|v| v.as_str()).unwrap_or("");
+        let version_id = args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+        let folder = args.get(2).and_then(|v| v.as_str()).unwrap_or("");
+        let payload = args.get(3).cloned().unwrap_or(json!({}));
+        if version_id.is_empty() {
+            return Err("缺少目标实例".into());
+        }
+        let folder = if folder.is_empty() {
+            crate::installer::folder_of_version(app, version_id)
+        } else {
+            folder.to_string()
+        };
+        let inst = crate::installer::read_version_json(app, &folder, version_id)?;
+        let state =
+            crate::installer::instance_directory_state(app, &folder, version_id, &inst);
+        let game_dir = std::path::PathBuf::from(state["path"].as_str().unwrap_or(&folder));
+        let mods_dir = game_dir.join("mods");
+        let session_json = |s: &crate::bisect::Session, text: String| {
+            json!({
+                "candidates": s.candidates,
+                "testing": s.testing,
+                "round": s.round,
+                "excluded": s.excluded,
+                "status": s.status,
+                "culprit": s.culprit,
+                "contradiction": s.contradiction,
+                "next": text,
+            })
+        };
+        return match action {
+            "status" => Ok(match crate::bisect::load(&game_dir) {
+                Some(s) => {
+                    let text = crate::bisect::next_text_public(&s);
+                    session_json(&s, text)
+                }
+                None => json!({ "status": "idle" }),
+            }),
+            "start" => {
+                let requested = payload
+                    .get("mods")
+                    .and_then(|m| m.as_array())
+                    .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect());
+                let (s, text) = crate::bisect::start(app, &game_dir, &mods_dir, requested)?;
+                Ok(session_json(&s, text))
+            }
+            "report" => {
+                let ok = payload
+                    .get("gameStarted")
+                    .and_then(|v| v.as_bool())
+                    .ok_or("缺少 gameStarted")?;
+                let (s, text) = crate::bisect::report(app, &game_dir, &mods_dir, ok)?;
+                Ok(session_json(&s, text))
+            }
+            "finish" => {
+                let disable = payload
+                    .get("disableCulprit")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                crate::bisect::finish(app, &game_dir, &mods_dir, disable)
+            }
+            "cancel" => crate::bisect::cancel(app, &game_dir, &mods_dir),
+            _ => Err(format!("未知的二分动作：{action}")),
+        };
+    }
     if let Some(r) = servers::invoke(app, channel, args) {
         return r;
     }

@@ -1705,6 +1705,11 @@ pub fn instance_directory_state(app: &AppHandle, folder: &str, id: &str, j: &Val
 
 // ---------------- 实例元数据（对应原版 instanceMetadata.ts resolveInstanceMetadata） ----------------
 
+/// 跨模块公开包装：导入器要判断源启动器给的版本串是不是合法 MC 版本
+pub fn is_minecraft_version_id_pub(value: &str) -> bool {
+    is_minecraft_version_id(Some(value))
+}
+
 fn is_minecraft_version_id(value: Option<&str>) -> bool {
     let Some(v) = value else { return false };
     if v.is_empty() || v.trim() != v || v == "0.0.0" {
@@ -1724,6 +1729,65 @@ pub struct ResolvedMeta {
 }
 
 /// 解析实例真实 MC 版本与加载器（继承链 + 启动参数 + 库坐标）
+/// 读取老格式实例的 `patches` 数组（HMCL 合并格式）。
+/// 每条形如 `{ id, version, prioritise?, required? }`，id 是组件坐标。
+fn flatten_patches(j: &Value) -> Vec<Value> {
+    j.get("patches")
+        .and_then(|p| p.as_array())
+        .map(|a| a.iter().filter(|p| p.is_object()).cloned().collect())
+        .unwrap_or_default()
+}
+
+/// 把一个 patch 条目翻译成链上可识别的一环。
+///
+/// 映射口径（对应 Prism `mmc-pack.json` 组件 uid 与 HMCL 的 patch id）：
+/// - `net.minecraft` → 原版层：补 `id`（作为 MC 版本候选）与 `inheritsFrom` 无关字段
+/// - `net.fabricmc.fabric-loader` → `_loader=fabric` + `_loaderVersion`
+/// - `org.quiltmc.quilt-loader` / `net.minecraftforge` / `net.neoforged` 同理
+///
+/// 只往链里塞一个「合成层」，让后面统一的探测逻辑（library 扫描/参数提取）自然吃到，
+/// 不去改各探测分支，减少回归面。
+fn push_patch_to_chain(chain: &mut Vec<Value>, patch: &Value) {
+    let uid = patch.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    let version = patch.get("version").and_then(|v| v.as_str()).unwrap_or("");
+    if uid.is_empty() {
+        return;
+    }
+    let mut layer = serde_json::Map::new();
+    if uid == "net.minecraft" {
+        if !version.is_empty() {
+            layer.insert("id".into(), json!(version));
+            layer.insert("_mcVersion".into(), json!(version));
+        }
+    } else if uid == "net.fabricmc.fabric-loader" {
+        layer.insert("_loader".into(), json!("fabric"));
+        if !version.is_empty() {
+            layer.insert("_loaderVersion".into(), json!(version));
+        }
+    } else if uid == "org.quiltmc.quilt-loader" {
+        layer.insert("_loader".into(), json!("quilt"));
+        if !version.is_empty() {
+            layer.insert("_loaderVersion".into(), json!(version));
+        }
+    } else if uid == "net.minecraftforge" {
+        layer.insert("_loader".into(), json!("forge"));
+        if !version.is_empty() {
+            layer.insert("_loaderVersion".into(), json!(version));
+        }
+    } else if uid == "net.neoforged" {
+        layer.insert("_loader".into(), json!("neoforge"));
+        if !version.is_empty() {
+            layer.insert("_loaderVersion".into(), json!(version));
+        }
+    } else {
+        // 其他组件（如 liteloader）不参与版本/加载器判定，跳过
+        return;
+    }
+    if !layer.is_empty() {
+        chain.push(Value::Object(layer));
+    }
+}
+
 pub fn resolve_instance_metadata(
     j: &Value,
     read_parent: &dyn Fn(&str) -> Option<Value>,
@@ -1732,6 +1796,16 @@ pub fn resolve_instance_metadata(
     let mut seen: HashSet<String> = HashSet::new();
     if let Some(id) = j.get("id").and_then(|v| v.as_str()) {
         seen.insert(id.to_string());
+    }
+    // 老 HMCL / 部分 PCL 实例用 `patches` 数组（无 inheritsFrom、无 time）描述叠加层：
+    // [{ "id": "net.minecraft", "version": "1.20.1" }, { "id": "net.fabricmc.fabric-loader", ... }]
+    // 只认 inheritsFrom 时这类实例会显示「未知版本」。
+    //
+    // 注意：patches 层必须与继承链**分开收集**——合成层没有 inheritsFrom，若直接 push 进
+    // chain 会让下面的继承循环看 chain.last() 时立刻 break。等继承链走完再并入扫描范围。
+    let mut patch_layers: Vec<Value> = Vec::new();
+    for patch in flatten_patches(j) {
+        push_patch_to_chain(&mut patch_layers, &patch);
     }
     loop {
         let Some(parent_id) = chain
@@ -1746,10 +1820,20 @@ pub fn resolve_instance_metadata(
         }
         seen.insert(parent_id.to_string());
         match read_parent(parent_id) {
-            Some(p) => chain.push(p),
+            Some(p) => {
+                // 继承到的父层也可能带 patches：一并展平，避免多层叠加时丢掉加载器信息
+                for patch in flatten_patches(&p) {
+                    push_patch_to_chain(&mut patch_layers, &patch);
+                }
+                chain.push(p)
+            }
             None => break,
         }
     }
+    // 原版层（base）必须在并入 patches 之前确定：patches 合成层没有 inheritsFrom，
+    // 混进来会让「base 是否无继承」的判断失真
+    let base = chain.last().cloned().unwrap_or(Value::Null);
+    chain.extend(patch_layers);
     // 启动参数收集（arguments.game + minecraftArguments）
     let mut args: Vec<String> = Vec::new();
     for c in &chain {
@@ -1865,7 +1949,7 @@ pub fn resolve_instance_metadata(
         });
     let forge =
         lib("net.minecraftforge", "forge").or_else(|| lib("net.minecraftforge", "fmlloader"));
-    let base = chain.last().cloned().unwrap_or(Value::Null);
+    // base 已在并入 patches 合成层之前取定（见上方注释），这里直接复用
     let vanilla_id = if base.get("inheritsFrom").is_none() && (loader.is_none() || chain.len() > 1)
     {
         base.get("id").and_then(|v| v.as_str()).map(str::to_string)
@@ -4769,6 +4853,8 @@ pub fn invoke(
                 .map(|ok| json!(ok)),
         ),
         "versions:setJava" => Some(versions_set_java(app, args)),
+        "versions:setMemory" => Some(versions_set_memory(app, args)),
+        "versions:setJvmArgs" => Some(versions_set_jvm_args(app, args)),
         "versions:setResolution" => Some(versions_set_resolution(app, args)),
         "versions:setIcon" => Some(
             arg_str(args, 0)
@@ -4968,9 +5054,54 @@ fn versions_set_java(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, St
     Ok(j)
 }
 
+/// 实例级内存（写入 `_memoryMB`；null/0 清除，回落到全局设置）。
+/// 崩溃自愈的「加内存」修复要能只调这一个实例，而全局内存是所有实例共用的。
+fn versions_set_memory(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
+    let id = arg_str(args, 0)
+        .ok_or_else(|| "缺少参数".to_string())?
+        .to_string();
+    let folder = arg_str(args, 2)
+        .filter(|f| !f.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| folder_of_version(app, &id));
+    let jp = version_json_path_in(&folder, &id);
+    let mut j = read_version_json(app, &folder, &id)?;
+    let mb = args.get(1).and_then(|v| v.as_i64()).unwrap_or(0);
+    if mb > 0 {
+        // 下限 512MB、上限 32768MB：与全局口径一致，避免写出荒唐值
+        j["_memoryMB"] = json!(mb.clamp(512, 32768));
+    } else if let Some(obj) = j.as_object_mut() {
+        obj.remove("_memoryMB");
+    }
+    write_version_json(&jp, &j)?;
+    Ok(j)
+}
+
+/// 实例级 JVM 参数（写入 `_jvmArgs` 字符串；空串清除，回落到全局设置）。
+fn versions_set_jvm_args(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
+    let id = arg_str(args, 0)
+        .ok_or_else(|| "缺少参数".to_string())?
+        .to_string();
+    let folder = arg_str(args, 2)
+        .filter(|f| !f.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| folder_of_version(app, &id));
+    let jp = version_json_path_in(&folder, &id);
+    let mut j = read_version_json(app, &folder, &id)?;
+    let text = arg_str(args, 1).unwrap_or("").trim().to_string();
+    if text.is_empty() {
+        if let Some(obj) = j.as_object_mut() {
+            obj.remove("_jvmArgs");
+        }
+    } else {
+        j["_jvmArgs"] = json!(text);
+    }
+    write_version_json(&jp, &j)?;
+    Ok(j)
+}
+
 /// 对应原版 gameWindow.ts normalizeStoredResolution
-fn normalize_resolution(res: &Value) -> Value {
-    let mode = res.get("mode").and_then(|v| v.as_str()).unwrap_or("");
+fn normalize_resolution(res: &Value) -> Value {    let mode = res.get("mode").and_then(|v| v.as_str()).unwrap_or("");
     let mode = if ["windowed", "maximized", "fullscreen"].contains(&mode) {
         mode.to_string()
     } else if res
@@ -5333,20 +5464,50 @@ pub fn install_vanilla_public(
     };
     let rec_ref = rec.unwrap_or(&fake_rec);
     let emit = |event: &Value| on_event(event);
+    // dest 必须是字面量 "versions" 而不是 folder：install_vanilla 只有 dest=="versions"
+    // 才采用 instance_name，否则实例目录退化成 versions/<MC版本号>/，调用方随后按实例名
+    // 找不到目录（整合包/新建实例线即因此失败）。
+    let loader = loader.map(str::trim).filter(|s| !s.is_empty());
+    if let Some(loader) = loader {
+        // 加载器叠加：loader 存在时走完整加载器安装（fabric/quilt 直写 profile、
+        // forge/neoforge 跑官方安装器），一次落成自包含实例，无需调用方再补装。
+        let requested = loader_version.map(str::trim).filter(|s| !s.is_empty());
+        let name = instance_name.map(str::trim).filter(|s| !s.is_empty());
+        // 未指定加载器版本时取该 MC 版本的首个可用版本（对应 install_version_flow 同口径）
+        let resolved;
+        let loader_version = match requested {
+            Some(v) => v,
+            None => {
+                let list = list_loader_versions(loader, mc_version)?;
+                let Some(first) = list.first() else {
+                    return Err(format!("{} 没有适配 {} 的版本", loader, mc_version));
+                };
+                resolved = first.clone();
+                resolved.as_str()
+            }
+        };
+        check_cancel(rec)?;
+        return install_loader_flow(
+            app,
+            rec_ref,
+            &emit,
+            folder,
+            loader,
+            mc_version,
+            loader_version,
+            name,
+        );
+    }
     install_vanilla(
         app,
         rec_ref,
         &emit,
         folder,
         mc_version,
-        folder,
+        "versions",
         instance_name,
         true,
     )
-    .map(|installed| {
-        // 加载器叠加：loader 存在时由调用方（loaders 通道接入后）补装；当前先落基础实例
-        installed
-    })
 }
 
 /// 整合包自包含化包装
@@ -5359,4 +5520,58 @@ pub fn flatten_instance_public(id: &str, folder: &str) -> Result<bool, String> {
     }
     let _ = jp;
     Ok(false)
+}
+
+#[cfg(test)]
+mod patches_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 老 HMCL 合并格式：没有 inheritsFrom，只有 patches 数组。
+    #[test]
+    fn hmcl_patches_yield_version_and_loader() {
+        let j = json!({
+            "id": "my-old-instance",
+            "patches": [
+                { "id": "net.minecraft", "version": "1.20.1" },
+                { "id": "net.fabricmc.fabric-loader", "version": "0.15.11" }
+            ]
+        });
+        let meta = resolve_instance_metadata(&j, &|_| None);
+        assert_eq!(meta.mc_version, "1.20.1");
+        assert_eq!(meta.loader.as_deref(), Some("fabric"));
+        assert_eq!(meta.loader_version.as_deref(), Some("0.15.11"));
+    }
+
+    #[test]
+    fn forge_patches_map_to_forge() {
+        let j = json!({
+            "id": "old-forge",
+            "patches": [
+                { "id": "net.minecraft", "version": "1.12.2" },
+                { "id": "net.minecraftforge", "version": "14.23.5.2859" }
+            ]
+        });
+        let meta = resolve_instance_metadata(&j, &|_| None);
+        assert_eq!(meta.mc_version, "1.12.2");
+        assert_eq!(meta.loader.as_deref(), Some("forge"));
+    }
+
+    /// 标准 inheritsFrom 实例不受影响（回归保护）
+    #[test]
+    fn inherits_from_still_works() {
+        let parent = json!({ "id": "1.20.1", "libraries": [] });
+        let j = json!({
+            "id": "my-instance",
+            "inheritsFrom": "1.20.1",
+            "libraries": [
+                { "name": "net.fabricmc:fabric-loader:0.15.11" }
+            ]
+        });
+        let meta = resolve_instance_metadata(&j, &|id| {
+            if id == "1.20.1" { Some(parent.clone()) } else { None }
+        });
+        assert_eq!(meta.mc_version, "1.20.1");
+        assert_eq!(meta.loader.as_deref(), Some("fabric"));
+    }
 }

@@ -969,3 +969,20 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
         _ => None,
     }
 }
+
+/// 测试钩子：让导出侧用真实的导入解析器做闭环验证。
+/// 返回 JSON 形态（不改 `Parsed` 的字段可见性，也不把内部结构暴露到公共 API）。
+#[cfg(test)]
+pub fn parse_mrpack_for_test(
+    archive: &mut zip::ZipArchive<std::fs::File>,
+) -> Result<serde_json::Value, String> {
+    let p = parse_mrpack(archive)?;
+    Ok(serde_json::json!({
+        "format": p.format,
+        "name": p.name,
+        "mcVersion": p.mc_version,
+        "loader": p.loader,
+        "loaderVersion": p.loader_version,
+        "files": p.files,
+    }))
+}

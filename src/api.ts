@@ -89,8 +89,7 @@ export const getExitHistory = () =>
         }>
     >(IPC.exitHistoryList);
 export const acknowledgeExitHistory = () => invoke<void>(IPC.exitHistoryAck);
-export const getLaunchHeatmap = () =>
-    invoke<Record<string, number>>(IPC.launchStatsHeatmap);
+export const getLaunchHeatmap = () => invoke<Record<string, number>>(IPC.launchStatsHeatmap);
 export const clearExitHistory = () => invoke<void>(IPC.exitHistoryClear);
 /** 真实系统信息（物理内存总量等），用于内存滑块上限等 */
 export const getSystemInfo = () => invoke<SystemInfo>(IPC.appSystemInfo);
@@ -110,7 +109,8 @@ export const importLaunchThumbnail = () =>
     invoke<Settings | null>(IPC.appearanceImportLaunchThumbnail);
 export const resetLaunchThumbnail = () => invoke<Settings>(IPC.appearanceResetLaunchThumbnail);
 /** 首页启动卡像素动画：单帧渲染（场景注册表与时钟在 src/heroScenes.ts） */
-export const heroFrame = (request: HeroFrameRequest) => invoke<HeroFrameResponse>(IPC.heroFrame, request);
+export const heroFrame = (request: HeroFrameRequest) =>
+    invoke<HeroFrameResponse>(IPC.heroFrame, request);
 /** 游戏目录迁移（异步）；结束经 onGameDirDone 回调 */
 export const migrateGameDir = (newDir: string, migrate: boolean) =>
     invoke<void>(IPC.gameDirMigrate, newDir, migrate);
@@ -159,6 +159,50 @@ export const updateVersionCategories = (action: VersionCategoryAction) =>
     invoke<Settings>(IPC.versionCategoriesUpdate, action);
 export const installVersion = (id: string, opts?: InstallOptions, folder?: string) =>
     invoke<void>(IPC.versionsInstall, id, opts, folder);
+
+/** 跨启动器实例导入：扫描本机可导入实例 */
+export interface ImportRoot {
+    launcher: string;
+    id: string;
+    root: string;
+    count: number;
+}
+export interface ImportCandidate {
+    launcher: string;
+    launcherId: string;
+    path: string;
+    name: string;
+    mcVersion: string;
+    loader: string | null;
+    loaderVersion: string | null;
+    isolated: boolean;
+    icon: string | null;
+    note: string | null;
+}
+export interface ImportScanResult {
+    roots: ImportRoot[];
+    instances: ImportCandidate[];
+}
+export const scanLauncherInstances = () => invoke<ImportScanResult>('import:scan');
+export const applyLauncherImport = (sourcePath: string, targetFolder: string, name?: string) =>
+    invoke<{ id: string; files: number }>('import:apply', sourcePath, targetFolder, name);
+
+/** 整合包导出结果：进清单的文件数 / 随包附带数 / 落盘路径 */
+export interface PackExportResult {
+    listed: number;
+    overrides: number;
+    path: string;
+}
+export const exportMrpack = (
+    versionId: string,
+    folder: string,
+    opts?: { name?: string; version?: string; summary?: string; destPath?: string }
+) => invoke<PackExportResult>('pack:exportMrpack', versionId, folder, opts ?? {});
+export const exportCurseforge = (
+    versionId: string,
+    folder: string,
+    opts?: { name?: string; version?: string; destPath?: string }
+) => invoke<PackExportResult>('pack:exportCurseforge', versionId, folder, opts ?? {});
 export const requestFavoriteVersions = (
     source: string,
     projectId: string,

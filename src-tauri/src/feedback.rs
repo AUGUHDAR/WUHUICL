@@ -626,6 +626,9 @@ fn meta(app: &AppHandle) -> Result<Value, String> {
         }
     }
     out["tickets"] = json!(tickets_local(app).len());
+    // 站点基址：前端拼头像 URL、网页端深链都用它，避免前端再写死一遍公网域名
+    // （本地联调设 FB_BASE 时头像与深链才会指向同一个实例）。
+    out["baseUrl"] = json!(fb_base());
     Ok(out)
 }
 
@@ -741,6 +744,117 @@ pub fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Option<Result<V
             .collect::<Vec<Value>>()))),
         // 反馈附件选择：多选 + 通用过滤（日志/崩溃报告/图片/压缩包），不动 app:selectFile 的整合包语义。
         "feedback:pickFiles" => Some(pick_files(app)),
+        // 账号设置：档案读取 / 改名 / 换头像 / 打开网页端。
+        // 账号主键是服务端按入站顺序分配的数字 UID，改名与头像都由服务端按 UID 反查，
+        // 因此这里不做任何本地缓存回写，改完重新拉 meta 即可。
+        "feedback:profile" => Some(profile(app)),
+        "feedback:nick" => Some(account_set_nick(app, &a0)),
+        "feedback:avatar" => Some(account_set_avatar(app, &a0)),
+        "feedback:openWeb" => Some(open_web(app, a0.get("path").and_then(|v| v.as_str())).map(|v| v)),
         _ => None,
     }
 }
+
+/// feedback:profile —— 当前登录者账号档案。
+fn profile(app: &AppHandle) -> Result<Value, String> {
+    if session(app).is_empty() {
+        return Err("请先登录".into());
+    }
+    api_get(app, "/api/auth/profile", &[])
+}
+
+/// feedback:nick —— 设置显示名（≤7 字）；空串表示恢复登录账号的默认名。
+fn account_set_nick(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let nick = args.get("nick").and_then(|v| v.as_str()).unwrap_or("");
+    let out = api_post_json(app, "/api/auth/nick", &json!({ "nick": nick }))?;
+    // 会话里的展示名在服务端已同步；这里把本地快照也更新，避免顶栏沿用旧名。
+    if let Some(display) = out.get("display").and_then(|v| v.as_str()) {
+        let mut store = load_store(app);
+        if let Some(id) = store.get_mut("identity") {
+            if id.is_object() {
+                id["name"] = json!(display);
+            }
+        }
+        save_store(app, &store);
+    }
+    Ok(out)
+}
+
+/// feedback:avatar —— 上传头像（base64）。服务端会重新裁成 256×256。
+fn account_set_avatar(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let image = args.get("image").and_then(|v| v.as_str()).unwrap_or("");
+    if image.is_empty() {
+        return Err("缺少图片数据".into());
+    }
+    api_post_json(app, "/api/auth/avatar", &json!({ "image": image }))
+}
+
+/// feedback:openWeb —— 用系统浏览器打开反馈站网页端。
+/// path 为空时打开首页；也用于「这条反馈在网页端查看」这类深链。
+fn open_web(app: &AppHandle, path: Option<&str>) -> Result<Value, String> {
+    let p = path.unwrap_or("").trim();
+    let url = if p.is_empty() {
+        fb_base()
+    } else if p.starts_with("http://") || p.starts_with("https://") {
+        p.to_string()
+    } else {
+        format!("{}/{}", fb_base(), p.trim_start_matches('/'))
+    };
+
+    // 先走 opener 插件；失败再退到底层系统调用。
+    // 实测某些环境下插件返回 Ok 但浏览器没起来（ACL/协议注册差异），
+    // 所以这里把「真的拉起浏览器」当作标准，而不是只看返回值。
+    #[cfg(windows)]
+    {
+        if shell_open_windows(&url).is_ok() {
+            return Ok(json!({ "url": url }));
+        }
+    }
+    {
+        use tauri_plugin_opener::OpenerExt;
+        app.opener()
+            .open_url(url.as_str(), None::<&str>)
+            .map_err(|e| format!("打开浏览器失败：{e}"))?;
+    }
+    Ok(json!({ "url": url }))
+}
+
+/// Windows：直接调 ShellExecuteW 用默认浏览器打开 URL。
+/// 不依赖 Tauri opener 插件与权限声明，避免「命令成功但浏览器没出来」。
+#[cfg(windows)]
+fn shell_open_windows(url: &str) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut core::ffi::c_void,
+            operation: *const u16,
+            file: *const u16,
+            parameters: *const u16,
+            directory: *const u16,
+            show: i32,
+        ) -> isize;
+    }
+    fn wide(s: &str) -> Vec<u16> {
+        OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    }
+    let op = wide("open");
+    let file = wide(url);
+    // ShellExecuteW 返回值 > 32 表示成功
+    let r = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            op.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1, // SW_SHOWNORMAL
+        )
+    };
+    if r > 32 {
+        Ok(())
+    } else {
+        Err(format!("ShellExecuteW 返回 {}", r))
+    }
+}
+
