@@ -1,6 +1,7 @@
 <script setup lang="ts">
-/** 通用二次确认模态框（删除等危险操作） */
-defineProps<{
+/** 通用二次确认模态框（删除等危险操作）。
+ *  焦点陷阱/Esc/初始焦点由全局 modalFocus.ts 接管；这里补 Enter 主操作与 dismiss 标记。 */
+const props = defineProps<{
     open: boolean;
     title: string;
     message: string;
@@ -13,17 +14,29 @@ const emit = defineEmits<{
     (e: 'confirm'): void;
     (e: 'cancel'): void;
 }>();
+
+function onKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter' && !props.busy && !event.defaultPrevented) {
+        event.preventDefault();
+        emit('confirm');
+    }
+}
 </script>
 
 <template>
     <Teleport to="body">
         <div v-if="open" class="modal-mask" @pointerdown.self="!busy && emit('cancel')">
-            <div class="modal">
+            <div class="modal" role="alertdialog" @keydown="onKeydown">
                 <h3 class="modal-title">{{ title }}</h3>
                 <p class="confirm-text">{{ message }}</p>
                 <p v-if="error" class="confirm-error" role="alert">{{ error }}</p>
                 <div class="modal-actions">
-                    <button class="btn btn-ghost" :disabled="busy" @click="emit('cancel')">
+                    <button
+                        class="btn btn-ghost"
+                        data-modal-dismiss
+                        :disabled="busy"
+                        @click="emit('cancel')"
+                    >
                         取消
                     </button>
                     <button class="btn btn-danger" :disabled="busy" @click="emit('confirm')">

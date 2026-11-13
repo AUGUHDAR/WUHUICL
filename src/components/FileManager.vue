@@ -40,6 +40,7 @@ import type { AggregatedFs } from '../api';
 import ConfirmModal from './ConfirmModal.vue';
 import DupCleanModal from './DupCleanModal.vue';
 import SelectMenu from './SelectMenu.vue';
+import TabPills from './TabPills.vue';
 import ResourceScopeFields from './ResourceScopeFields.vue';
 import ResourcePathChip from './ResourcePathChip.vue';
 import ResourcePagination from './ResourcePagination.vue';
@@ -765,7 +766,7 @@ const fmtDate = (ts: number) => {
     return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('zh-CN');
 };
 
-/** PCL 口径四分类 tab；「更新」类数量只有在已有检测报告时才显示（count = -1 表示不渲染角标） */
+/** PCL 口径四分类 tab（TabPills 共享药丸）；「更新」类数量只有在已有检测报告时才显示（count = -1 表示不渲染角标） */
 const jarCount = computed(
     () => entries.value.filter((e) => !e.isDir && /\.jar$/i.test(e.name)).length
 );
@@ -777,7 +778,9 @@ const modTabs = computed(() => [
     {
         value: 'updates',
         label: '更新',
-        count: updatePanel.report ? updatableEntries.value.length : -1
+        count: updatePanel.report ? updatableEntries.value.length : -1,
+        disabled: scope.value === 'folder',
+        disabledReason: '更新检测只针对当前实例，请先切回「当前实例」'
     }
 ]);
 function setTab(v: string) {
@@ -1055,32 +1058,14 @@ async function applyUpdates(fileNames: string[]) {
                 :aria-label="'搜索' + props.title"
                 :placeholder="'搜索文件名或' + props.title + '名称…'"
             />
-            <div
+            <TabPills
                 v-if="props.rel === 'mods'"
                 data-ui="FileManager:mod-tabs"
-                class="fm-tabs"
-                role="tablist"
+                :items="modTabs"
+                :model-value="modFilter"
                 aria-label="模组分类"
-            >
-                <button
-                    v-for="tab in modTabs"
-                    :key="tab.value"
-                    class="fm-tab"
-                    :class="{ active: modFilter === tab.value }"
-                    role="tab"
-                    :aria-selected="modFilter === tab.value"
-                    :disabled="tab.value === 'updates' && scope === 'folder'"
-                    :title="
-                        tab.value === 'updates' && scope === 'folder'
-                            ? '更新检测只针对当前实例，请先切回「当前实例」'
-                            : ''
-                    "
-                    @click="setTab(tab.value)"
-                >
-                    {{ tab.label
-                    }}<span v-if="tab.count >= 0" class="fm-tab-count">{{ tab.count }}</span>
-                </button>
-            </div>
+                @update:model-value="setTab"
+            />
             <div class="fm-sort">
                 <SelectMenu
                     v-model="sortBy"
@@ -1659,43 +1644,7 @@ async function applyUpdates(fileNames: string[]) {
 .fm-sort :deep(.select-menu-btn) {
     width: 100%;
 }
-/* PCL 口径四分类：分段 tab（全部/已启用/已禁用/更新） */
-.fm-tabs {
-    display: inline-flex;
-    gap: 4px;
-    padding: 3px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--card);
-    flex-shrink: 0;
-}
-.fm-tab {
-    border: 0;
-    background: transparent;
-    padding: 5px 14px;
-    border-radius: 8px;
-    font-size: 13px;
-    color: var(--text-dim);
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
-}
-.fm-tab:hover:not(:disabled) {
-    color: var(--text);
-    background: var(--card-2);
-}
-.fm-tab.active {
-    background: var(--accent);
-    color: var(--on-accent);
-}
-.fm-tab:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-.fm-tab-count {
-    margin-left: 6px;
-    font-size: 11px;
-    opacity: 0.75;
-}
+/* 四分类 tab 已收编为 TabPills 共享药丸（UI_SYSTEM.md §5），旧分段容器样式删除 */
 /* 使用说明：与路径条并排，开关钉在右侧（同录像/截图/投影页） */
 .fm-help {
     margin-left: auto;
