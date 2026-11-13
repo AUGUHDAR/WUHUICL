@@ -3154,7 +3154,7 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     gap: var(--space-3);
-    height: var(--space-7);
+    height: var(--row-h);
     padding: 0 var(--space-4);
     border: none;
     border-radius: var(--radius-md);
@@ -3256,9 +3256,9 @@ onUnmounted(() => {
 /* 分组小标题：低对比、小字，只做分节提示不抢焦点（对齐 PCL 的分节标题） */
 .nav-group-title {
     display: block;
-    margin: 14px 0 4px;
-    padding: 0 12px;
-    font-size: 11px;
+    margin: var(--space-4) 0 var(--space-1);
+    padding: 0 var(--space-3);
+    font-size: var(--text-xs);
     font-weight: 600;
     letter-spacing: 0.08em;
     color: var(--text-dim);
@@ -3267,7 +3267,7 @@ onUnmounted(() => {
     user-select: none;
 }
 .nav > .nav-group-title:first-of-type {
-    margin-top: 4px;
+    margin-top: var(--space-1);
 }
 /* 子菜单统一展开，避免多次延迟让最后几项迟迟不可用。 */
 .nav-sub {
@@ -3312,25 +3312,10 @@ onUnmounted(() => {
     }
 }
 .nav-sub-item {
-    height: 40px;
+    height: var(--ctl-h);
     padding-left: var(--space-6);
     font-size: var(--text-sm);
     position: relative;
-}
-.nav-sub-item::before {
-    content: none;
-    position: absolute;
-    left: 17px;
-    top: 50%;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: currentColor;
-    opacity: 0.4;
-    transform: translateY(-50%);
-}
-.nav-sub-item.active::before {
-    opacity: 1;
 }
 .nav-sub-item .nav-icon {
     width: 17px;
@@ -3419,8 +3404,8 @@ onUnmounted(() => {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: var(--ctl-h);
-    height: var(--ctl-h);
+    width: 32px;
+    height: 32px;
     padding: 0;
     border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
     border-radius: var(--radius-sm);
@@ -3476,7 +3461,7 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
     gap: var(--space-2);
-    height: var(--ctl-h);
+    height: 32px;
     padding: 0 var(--space-3);
     border: none;
     border-radius: var(--radius-md);
@@ -3503,8 +3488,8 @@ onUnmounted(() => {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: var(--ctl-h);
-    height: var(--ctl-h);
+    width: 32px;
+    height: 32px;
     border: none;
     border-radius: var(--radius-md);
     background: transparent;
