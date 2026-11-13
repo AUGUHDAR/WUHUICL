@@ -5,6 +5,12 @@
  * 不桥接则背景/边框全部解析失败变透明（违反「背景 UI 与总背景拉开色差」）。
  * 全部映射到 wuhuicl 主题变量，浅色/深色/自定义主题自动跟随。
  * 铺在地图/画布上的表面用实底（--surface-solid），避免半透明白底透出地图。
+ *
+ * 2026-11-13 收编：这里只保留「新增名字」的桥接令牌（--surface-N / --color-*），
+ * 它们不与全局令牌冲突，且 teleport 模态需要全局可见。
+ * 原先在此覆盖 --radius-sm/md/lg（8/12/16）会泄漏到全 app、改掉所有页面圆角——
+ * 已删除，lab 直接继承全局圆角（6/10/14，UI_SYSTEM.md §3），实现全站统一。
+ * --radius-xl / --hover-brightness 为 lab 专用新增名，保留。
  */
 :root {
     --color-bg: var(--bg);
@@ -24,9 +30,6 @@
     --color-red: var(--danger);
     --color-red-highlight: var(--danger);
     --color-orange: #e8912d;
-    --radius-sm: 8px;
-    --radius-md: var(--radius, 12px);
-    --radius-lg: 16px;
     --radius-xl: 20px;
     --hover-brightness: 1.08;
 }
