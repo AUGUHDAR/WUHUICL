@@ -912,7 +912,7 @@ async function applyUpdates(fileNames: string[]) {
 
 <template>
     <div
-        class="page file-manager"
+        class="page page--resource file-manager"
         :data-resource="props.rel"
     >
         <header class="fm-head">
@@ -1768,13 +1768,7 @@ async function applyUpdates(fileNames: string[]) {
     flex-shrink: 0;
 }
 
-.page {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sec-gap);
-    max-width: 1440px;
-    margin: 0 auto;
-}
+/* 页面骨架与宽度由全局 .page.page--resource 提供（UI_SYSTEM.md §4，1440 宽度族） */
 
 /* 三页（模组/资源包/光影包）与录像族共用一套头部结构：标题+说明在左、操作在右 */
 .fm-head {

@@ -2719,13 +2719,7 @@ async function onRemovePlugin(p: PluginInfo) {
     /* 定位卡片的聚焦指示画在卡片内沿：外描边会溢出到相邻卡片上 */
     outline-offset: -2px;
 }
-.page {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sec-gap);
-    max-width: 760px;
-    margin: 0 auto;
-}
+/* 页面骨架与宽度由全局 .page / .settings-page 提供（UI_SYSTEM.md §4） */
 
 /* 小卡片两两成行（顺序横向向下），窄窗口自动换行堆叠 */
 .settings-grid {

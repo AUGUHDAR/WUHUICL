@@ -1,87 +1,65 @@
-/* Shared desktop UI contract. Theme colors still come from App/visualDesign. */
-:root {
-  --surface-solid: var(--card-solid, var(--bg));
-  --surface-content: color-mix(in srgb, var(--surface-solid) 94%, transparent);
-  --surface-raised: color-mix(in srgb, var(--surface-solid) 97%, transparent);
-  --text-title: 24px;
-  --motion-carousel: 500ms;
-}
-.content .route-view { min-width:0; }
-.content .page { min-width:0; gap:var(--space-4); }
-.content .page-head { margin-bottom:var(--space-2); }
-.content .page-title { font-size:var(--text-title); line-height:1.35; }
-.content .card { background-color:var(--surface-content); box-shadow:none; }
-.content :is(.group-title,.pane-title) { font-size:var(--text-lg); line-height:1.5; }
-.content :is(.input,.select,.select-menu-btn) { min-height:var(--ctl-h); font-size:var(--text-md); }
-.content :is(.btn,.icon-btn) { flex-shrink:0; }
-.content .btn-sm { min-height:32px; font-size:var(--text-sm); }
-/*
- * btn-sm 只有 28px 是历史遗留的两种尺寸：页内是 32px（上面那条），
- * 而 Teleport 到 body 的下载中心/弹窗拿不到 .content 作用域，掉回 28px——
- * 同一颗按钮在两处不同高，是「按钮不统一」最直接的来源。统一到 32px。
- */
-.btn-sm { min-height: 32px; }
-.content :is(.input,.select,textarea) { max-width:100%; }
-.content :is(.card,.group,.pane,.settings-grid,.toolbar,.filter-bar) { min-width:0; }
-.content :is(.toolbar,.row-actions,.actions,.page-actions) { flex-wrap:wrap; }
-.content .card .card { box-shadow:none; }
-.content .settings-page .group,.content .settings-navigation { margin-bottom:0; }
-.content .settings-page { max-width:1120px; }
-.content .instance-copy strong { font-size:14px; word-break:normal; overflow-wrap:break-word; }
-.content .instance-card { min-height:136px; height:auto; }
-.content .instance-card:hover { transform:none; }
-.content .connection-panel { background:var(--surface-content); }
-.content :is(.card,.connection-panel) { backdrop-filter:blur(16px) saturate(85%); }
-.content .cfg-sections { gap:12px; margin-bottom:0; }
-.content .cfg-sections button { padding:12px 16px; border-radius:var(--radius-md); }
-.content .cfg-sections button.active { background:color-mix(in srgb,var(--accent) 12%,var(--surface-solid)); }
-.content .cfg-page > .page-head { margin-bottom:8px; }
-.content :is(.connection-header h1,.pick-head h1) { font-size:var(--text-title); }
-.content :is(.connection-field,.connection-result,.pick-desc) { font-size:var(--text-md); }
-.content .connection-columns { grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)); }
+/* ============================================================
+   全局组件契约（UI_SYSTEM.md 基线；主题色板仍由 App/visualDesign 注入）
+   2026-11-13 收编：原 `.content xxx` 作用域补丁上移为全局规则，
+   Teleport 到 body 的弹层与页内控件从此同一套尺寸/表面/焦点。
+   页面骨架 .page 与表面令牌 --surface-* 已归 styles.css，这里不重复。
+   ============================================================ */
 
-.modal,.select-menu-list,.instance-more-menu,.context-menu { background-color:var(--surface-raised); }
-.modal { max-width:calc(100vw - 32px); max-height:calc(100vh - 32px); overflow:auto; }
-.modal :is(input,select,textarea) { min-width:0; max-width:100%; }
-.modal-actions { flex-wrap:wrap; }
-.status-strip { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:12px 16px; border-radius:var(--radius-md); background:var(--accent-soft); margin-bottom:12px; font-size:var(--text-sm); }
-.status-strip.error { background:var(--danger-soft); color:var(--text); }
-[inert] { opacity:.65; }
-.content .empty { min-height:120px; padding:32px 16px; }
-.content :is(.server-list-item,.result-card,.recording-row,.installed-row,.fm-row) { transition:background var(--motion-fast),border-color var(--motion-fast); }
-.content :is(.result-card,.server-list-item):hover { transform:none; }
-.content .result-dl { background:var(--card-2); color:var(--text); box-shadow:none; border:1px solid var(--border); }
-.content .result-dl:is(:hover,:focus-visible) { background:var(--accent); color:var(--on-accent); }
+/* ---------------- 排版与容器 ---------------- */
+.route-view { min-width: 0; }
+.group-title, .pane-title { font-size: var(--text-lg); line-height: 1.5; }
+.card { background-color: var(--surface-content); box-shadow: none; }
+.card .card { box-shadow: none; }
+:is(.card, .group, .pane, .settings-grid, .toolbar, .filter-bar) { min-width: 0; }
+:is(.toolbar, .row-actions, .actions, .page-actions) { flex-wrap: wrap; }
+:is(.input, .select, textarea) { max-width: 100%; }
+:is(.input, .select, .select-menu-btn) { min-height: var(--ctl-h); font-size: var(--text-md); }
+:is(.btn, .icon-btn) { flex-shrink: 0; }
+.empty { min-height: 120px; padding: 32px 16px; }
+
+/* ---------------- 玻璃与表面 ---------------- */
+:is(.card, .connection-panel) { backdrop-filter: blur(16px) saturate(85%); }
+.connection-panel { background: var(--surface-content); box-shadow: none; }
+.connection-panel .connection-panel { background: transparent; box-shadow: none; }
+.connection-details { background: transparent; box-shadow: none; padding: 12px 0; border-radius: 0; border-width: 0 0 1px; }
+.modal, .select-menu-list, .instance-more-menu, .context-menu { background-color: var(--surface-raised); }
+.modal { max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; }
+.modal :is(input, select, textarea) { min-width: 0; max-width: 100%; }
+.modal-actions { flex-wrap: wrap; }
+
+/* ---------------- 页内既有语义类的节奏 ---------------- */
+.settings-page { max-width: 1120px; }
+.settings-page .group, .settings-navigation { margin-bottom: 0; }
+.instance-copy strong { font-size: 14px; word-break: normal; overflow-wrap: break-word; }
+.instance-card { min-height: 136px; height: auto; }
+.instance-card:hover { transform: none; }
+.cfg-sections { gap: 12px; margin-bottom: 0; }
+.cfg-sections button { padding: 12px 16px; border-radius: var(--radius-md); }
+.cfg-sections button.active { background: color-mix(in srgb, var(--accent) 12%, var(--surface-solid)); }
+.cfg-page > .page-head { margin-bottom: 8px; }
+:is(.connection-header h1, .pick-head h1) { font-size: var(--text-title); }
+:is(.connection-field, .connection-result, .pick-desc) { font-size: var(--text-md); }
+.connection-columns { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+
+/* ---------------- 状态条与列表行 ---------------- */
+.status-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 16px; border-radius: var(--radius-md); background: var(--accent-soft); margin-bottom: 12px; font-size: var(--text-sm); }
+.status-strip.error { background: var(--danger-soft); color: var(--text); }
+[inert] { opacity: .65; }
+:is(.server-list-item, .result-card, .recording-row, .installed-row, .fm-row) { transition: background var(--motion-fast), border-color var(--motion-fast); }
+:is(.result-card, .server-list-item):hover { transform: none; }
+.result-dl { background: var(--card-2); color: var(--text); box-shadow: none; border: 1px solid var(--border); }
+.result-dl:is(:hover, :focus-visible) { background: var(--accent); color: var(--on-accent); }
+
+/* ---------------- 路由与动效契约 ---------------- */
 /* Only the content enters; outgoing routes disappear immediately, never block clicks. */
-.route-view.fade-leave-active { display:none; }
-.route-view.fade-enter-active { transition:opacity var(--motion-normal) var(--ease-out); }
-.route-view.fade-enter-from { transform:none; }
-html[data-visibility="hidden"] * { animation-play-state:paused !important; }
-html[data-motion="reduced"] *,html[data-motion="reduced"] *::before,html[data-motion="reduced"] *::after {
-  animation-duration:.01ms !important; animation-delay:0ms !important; animation-iteration-count:1 !important;
-  transition-duration:.01ms !important; transition-delay:0ms !important; scroll-behavior:auto !important;
+.route-view.fade-leave-active { display: none; }
+.route-view.fade-enter-active { transition: opacity var(--motion-normal) var(--ease-out); }
+.route-view.fade-enter-from { transform: none; }
+html[data-visibility="hidden"] * { animation-play-state: paused !important; }
+html[data-motion="reduced"] *, html[data-motion="reduced"] *::before, html[data-motion="reduced"] *::after {
+  animation-duration: .01ms !important; animation-delay: 0ms !important; animation-iteration-count: 1 !important;
+  transition-duration: .01ms !important; transition-delay: 0ms !important; scroll-behavior: auto !important;
 }
-@media(max-width:900px) {
-  .content .page { padding:16px; }
-  .content .page-title { font-size:22px; }
-  .content :is(.settings-grid,.recording-filters) { grid-template-columns:minmax(0,1fr); }
-  .content :is(.page-head,.list-head,.page-header) { flex-wrap:wrap; gap:12px; }
-}
-@media(max-width:660px) {
-  .content .page { padding:12px; }
-  .content .card { padding:16px; }
-  .content :is(.fm-controls,.filter-row) { grid-template-columns:minmax(0,1fr); }
-  .content .cfg-sections { grid-template-columns:minmax(0,1fr); }
-  .content .cfg-sections button { flex-direction:row; align-items:center; flex-wrap:wrap; }
-}
-
-/* Management surfaces share rhythm; colors always derive from the active theme. */
-:root{--motion-fast:130ms;--motion-normal:190ms}
-.content:has(.settings-page){overflow:hidden}.content:has(.settings-page)>.route-view{height:100%;min-height:0}
-.content :is(button,input,select,textarea,summary,[tabindex]):focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-.content details>summary{cursor:pointer}.content button:disabled{cursor:not-allowed}
-.content .connection-details{background:transparent;box-shadow:none;padding:12px 0;border-radius:0;border-width:0 0 1px}
-.content .connection-panel{box-shadow:none}.content .connection-panel .connection-panel{background:transparent;box-shadow:none}
 
 /* Motion contract: native disclosures animate both directions without click interception,
    timers, synthetic open state or remounting forms. Electron's Chromium supports intrinsic size. */
@@ -92,41 +70,66 @@ details::details-content {
   overflow: clip;
   transition: block-size 220ms var(--ease-out), opacity 180ms ease, content-visibility 220ms allow-discrete;
 }
-details[open]::details-content { block-size:auto; opacity:1; }
+details[open]::details-content { block-size: auto; opacity: 1; }
 /* Absolute-positioned action menus must escape the disclosure's zero-height flow box. */
-details:has(> summary.btn)::details-content { block-size:auto; overflow:visible; }
-.popover-enter-active,.popover-leave-active { transition:opacity 180ms ease,translate 200ms var(--ease-out); }
-.popover-enter-from,.popover-leave-to { opacity:0; translate:0 -5px; }
-.popover-leave-active { pointer-events:none; }
-.subpage-enter-active { transition:opacity 200ms ease,translate 200ms var(--ease-out); }
-.subpage-enter-from { opacity:0; translate:0 6px; }
-.subpage-leave-active { display:none; }
+details:has(> summary.btn)::details-content { block-size: auto; overflow: visible; }
+.popover-enter-active, .popover-leave-active { transition: opacity 180ms ease, translate 200ms var(--ease-out); }
+.popover-enter-from, .popover-leave-to { opacity: 0; translate: 0 -5px; }
+.popover-leave-active { pointer-events: none; }
+.subpage-enter-active { transition: opacity 200ms ease, translate 200ms var(--ease-out); }
+.subpage-enter-from { opacity: 0; translate: 0 6px; }
+.subpage-leave-active { display: none; }
 /* Display-based tabs retain their existing component state and fade in on every reveal.
    No exit delay: rapid navigation cannot queue clicks or leave invisible controls on top. */
-:is(.cfg-page > .card,.settings-body > *, .game-controls,.list-card,.installed-card,
- .folder-manager-actions,.notice-panel,.float-menu,.instance-more-menu,.menu,.context-menu,
- .modal-mask,.modal,.ic-mask,.ic-dialog-mask,.connection-panel,.settings-search-results,.options-entrances,.tab-body,.ic-content,.connection-result) {
-  transition:opacity 200ms ease;
+:is(.cfg-page > .card, .settings-body > *, .game-controls, .list-card, .installed-card,
+ .folder-manager-actions, .notice-panel, .float-menu, .instance-more-menu, .menu, .context-menu,
+ .modal-mask, .modal, .ic-mask, .ic-dialog-mask, .connection-panel, .settings-search-results, .options-entrances, .tab-body, .ic-content, .connection-result) {
+  transition: opacity 200ms ease;
 }
 @starting-style {
-  :is(.cfg-page > .card,.settings-body > *, .game-controls,.list-card,.installed-card,
-   .folder-manager-actions,.notice-panel,.float-menu,.instance-more-menu,.menu,.context-menu,
-   .modal-mask,.modal,.ic-mask,.ic-dialog-mask,.connection-panel,.settings-search-results,.options-entrances,.tab-body,.ic-content,.connection-result) { opacity:0; }
+  :is(.cfg-page > .card, .settings-body > *, .game-controls, .list-card, .installed-card,
+   .folder-manager-actions, .notice-panel, .float-menu, .instance-more-menu, .menu, .context-menu,
+   .modal-mask, .modal, .ic-mask, .ic-dialog-mask, .connection-panel, .settings-search-results, .options-entrances, .tab-body, .ic-content, .connection-result) { opacity: 0; }
 }
-/* Focus uses one outer glow on composite search controls; keyboard focus remains visible. */
-.content :is(.tool-search,.server-search,.search-box,.input,.select,.capsule,.cfg-sections button),
-.select-menu-btn {
-  transition:background-color 180ms ease,color 180ms ease,border-color 180ms ease,box-shadow 220ms ease,outline-color 180ms ease;
-}
-.content :is(.tool-search,.server-search):focus-within { border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft); }
-.content :is(.tool-search,.server-search) input:focus-visible { outline:none;box-shadow:none; }
-/* Preserve the old persisted theme key while making its default material neutral and calm. */
-html[data-theme="transparent"] { color-scheme:dark; }
-html[data-theme="transparent"] .btn-gold { background:var(--accent-deep);box-shadow:none; }
-html[data-motion="reduced"] details::details-content { transition:none; }
-@media(prefers-reduced-motion:reduce) {
-  details::details-content { transition:none; }
-  .popover-enter-active,.popover-leave-active,.subpage-enter-active { transition:none; }
+html[data-motion="reduced"] details::details-content { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  details::details-content { transition: none; }
+  .popover-enter-active, .popover-leave-active, .subpage-enter-active { transition: none; }
 }
 
-.ic-tabs button { transition:background-color 180ms ease,color 180ms ease; }
+/* ---------------- 焦点与交互 ---------------- */
+:is(button, input, select, textarea, summary, [tabindex]):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+details > summary { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+/* Focus uses one outer glow on composite search controls; keyboard focus remains visible. */
+:is(.tool-search, .server-search, .search-box, .input, .select, .capsule, .cfg-sections button),
+.select-menu-btn {
+  transition: background-color 180ms ease, color 180ms ease, border-color 180ms ease, box-shadow 220ms ease, outline-color 180ms ease;
+}
+:is(.tool-search, .server-search):focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+:is(.tool-search, .server-search) input:focus-visible { outline: none; box-shadow: none; }
+.ic-tabs button { transition: background-color 180ms ease, color 180ms ease; }
+
+/* ---------------- 主题兜底 ---------------- */
+/* Preserve the old persisted theme key while making its default material neutral and calm. */
+html[data-theme="transparent"] { color-scheme: dark; }
+html[data-theme="transparent"] .btn-gold { background: var(--accent-deep); box-shadow: none; }
+
+/* ---------------- 响应式 ---------------- */
+@media (max-width: 900px) {
+  .page { padding: 16px; }
+  .page-title { font-size: 22px; }
+  :is(.settings-grid, .recording-filters) { grid-template-columns: minmax(0, 1fr); }
+  :is(.page-head, .list-head, .page-header) { flex-wrap: wrap; gap: 12px; }
+}
+@media (max-width: 660px) {
+  .page { padding: 12px; }
+  .card { padding: 16px; }
+  :is(.fm-controls, .filter-row) { grid-template-columns: minmax(0, 1fr); }
+  .cfg-sections { grid-template-columns: minmax(0, 1fr); }
+  .cfg-sections button { flex-direction: row; align-items: center; flex-wrap: wrap; }
+}
+
+/* 设置页内部自滚（外壳不双滚） */
+.content:has(.settings-page) { overflow: hidden; }
+.content:has(.settings-page) > .route-view { height: 100%; min-height: 0; }

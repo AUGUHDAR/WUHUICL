@@ -486,7 +486,7 @@ async function onRemove(acc: Account) {
 </script>
 
 <template>
-    <div class="page">
+    <div class="page page--form">
         <!-- 返回 + 标题 -->
         <div class="acc-top">
             <button class="back-btn" @click="store.currentView = 'home'">
@@ -926,13 +926,7 @@ async function onRemove(acc: Account) {
 </template>
 
 <style scoped>
-.page {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sec-gap);
-    max-width: 720px;
-    margin: 0 auto;
-}
+/* 页面骨架与宽度由全局 .page.page--form 提供（UI_SYSTEM.md §4） */
 
 .acc-top {
     display: flex;

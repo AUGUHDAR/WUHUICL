@@ -119,6 +119,13 @@ html[data-platform="android"] .modal {
   --banner-h: 430px;
   --sidebar-text: var(--text-dim);
   --bn-text: #ffffff;
+  /* -------- 表面三层与页标题（UI_SYSTEM.md §2/§3；色板仍由 App/visualDesign 注入） --------
+     内容面 = 页内卡片/面板；浮层面 = 弹窗/下拉/抽屉。两者与总背景拉开色差。 */
+  --surface-solid: var(--card-solid, var(--bg));
+  --surface-content: color-mix(in srgb, var(--surface-solid) 94%, transparent);
+  --surface-raised: color-mix(in srgb, var(--surface-solid) 97%, transparent);
+  --text-title: 24px;
+  --motion-carousel: 500ms;
 }
 
 /* -------- 黑橙主题的无脚本回退值 -------- */
@@ -345,8 +352,10 @@ body {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
 }
 
+/* 小按钮全局 32px：页内与 Teleport 弹层同一颗按钮必须同高（UI_SYSTEM.md §3）。
+   此前页内 32 / 弹层 28 的分裂由本条统一收编，ui-system.css 不再重复定义。 */
 .btn-sm {
-  min-height: calc(var(--ctl-h) - 8px);
+  min-height: 32px;
   padding: 4px 12px;
   font-size: var(--text-sm);
   border-radius: var(--radius-sm);
@@ -646,7 +655,7 @@ input[type='number'] {
   gap: 4px;
 }
 .page-title {
-  font-size: var(--text-xl);
+  font-size: var(--text-title);
   font-weight: 700;
   letter-spacing: 0;
   line-height: 1.35;
@@ -655,6 +664,22 @@ input[type='number'] {
   font-size: var(--text-sm);
   color: var(--text-dim);
 }
+
+/* ---------------- 页面骨架（全局唯一定义；视图不再各自写 .page） ----------------
+   宽度族见 UI_SYSTEM.md §4：form 760 / content 940 / wide 1240 / resource 1440。
+   视图用既有语义类（settings-page 等）挂宽度，结构统一由这里提供。 */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+  min-width: 0;
+  margin: 0 auto;
+}
+.page--form { max-width: 760px; }
+.page--content { max-width: 940px; }
+.page--wide { max-width: 1240px; }
+.page--resource { max-width: 1440px; }
+.page-head { margin-bottom: var(--space-2); }
 
 /* ---------------- 空状态 ---------------- */
 .empty {

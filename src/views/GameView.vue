@@ -1246,7 +1246,7 @@ async function confirmIsolation() {
 </script>
 
 <template>
-    <div class="page" :data-design-page="tab">
+    <div class="page page--wide" :data-design-page="tab">
         <!-- 标题：右侧放「导入实例」，对齐 ProjectionsView 的 recording-heading 惯例 -->
         <header class="page-head game-heading" data-ui="games:heading">
             <div>
@@ -2858,13 +2858,7 @@ async function confirmIsolation() {
     flex-shrink: 0;
 }
 
-.page {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sec-gap);
-    max-width: 940px;
-    margin: 0 auto;
-}
+/* 页面骨架与宽度由全局 .page.page--wide 提供（UI_SYSTEM.md §4） */
 
 /* 游戏文件夹统一管理 */
 .folder-manager {
@@ -3646,10 +3640,6 @@ async function confirmIsolation() {
 }
 
 /* Compact instance management, using the existing theme and spacing system. */
-.page {
-    max-width: 1240px;
-    gap: 16px;
-}
 .page-head {
     margin-bottom: 0;
 }

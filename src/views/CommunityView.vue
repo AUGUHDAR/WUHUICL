@@ -883,7 +883,7 @@ function confirmDownload() {
 <template>
     <div
         data-ui="CommunityView:6e56fae5e7dd"
-        class="page community-page"
+        class="page page--content community-page"
         :data-design-page="query.kind"
     >
         <!-- 标题 -->
@@ -1879,13 +1879,7 @@ function confirmDownload() {
     color: var(--text-dim);
     font-size: var(--text-xs);
 }
-.page {
-    display: flex;
-    flex-direction: column;
-    gap: var(--sec-gap);
-    max-width: 940px;
-    margin: 0 auto;
-}
+/* 页面骨架与宽度由全局 .page.page--content 提供（UI_SYSTEM.md §4） */
 
 /* ---------------- 搜索卡片 ---------------- */
 .search-card {
