@@ -1,8 +1,26 @@
 import type { CommunityFile } from './types';
 import type { RecordingKind } from './recordings';
+
+/**
+ * 建实例时可以顺手预装的模组。
+ * 与 RecordingKind 分开：录像模组还要决定录像目录（RECORDING_DIRS），
+ * 而 VoxLink 是联机模组、没有录像目录概念——混进 RecordingKind 会让目录映射说谎。
+ */
+export type OptionalModKind = RecordingKind | 'voxlink';
+
 export const RECORDING_PROJECTS: Record<RecordingKind, string> = {
     replaymod: 'Nv2fQJo5',
     flashback: '4das1Fjq'
+};
+/** 全部可选预装模组 → Modrinth project id（与 src-tauri/src/mods.rs 的 OPTIONAL_MOD_PROJECTS 保持一致） */
+export const OPTIONAL_MOD_PROJECTS: Record<OptionalModKind, string> = {
+    ...RECORDING_PROJECTS,
+    voxlink: 'qqeQJjgq'
+};
+export const OPTIONAL_MOD_LABELS: Record<OptionalModKind, string> = {
+    replaymod: 'ReplayMod',
+    flashback: 'Flashback',
+    voxlink: 'VoxLink'
 };
 export function compatibleRecordingMod(file: CommunityFile, mc: string, loader: string) {
     return (

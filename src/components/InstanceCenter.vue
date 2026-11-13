@@ -11,6 +11,7 @@ import type {
 } from '@shared/instanceCenter';
 import type { ModChangePlan } from '@shared/modManagement';
 import UiGlyph from './UiGlyph.vue';
+import InstanceSnapshots from './InstanceSnapshots.vue';
 import { instanceCenter } from '../instanceCenter';
 import { managedImageUrl } from '../managedAssets';
 import { store, refreshInstalled, toast, openSettings } from '../store';
@@ -674,6 +675,16 @@ onUnmounted(() => {
                         <p v-if="!backups.length" class="ic-empty">
                             还没有备份，创建第一份备份以保护游戏进度
                         </p>
+                        <!--
+                            快照与上面的整实例备份是两件事，同一标签页分区共存：
+                            备份 = 整个实例（含存档/配置），全量、偏慢；
+                            快照 = 只管模组/资源包/光影，轻量、专治「模组把游戏搞崩了」。
+                        -->
+                        <InstanceSnapshots
+                            :folder="target.folder"
+                            :version-id="target.id"
+                            :instance-name="overview?.name || target.id"
+                        />
                     </template>
                     <template v-else-if="tab === 'diagnostics'">
                         <div class="ic-summary">
@@ -1120,27 +1131,35 @@ onUnmounted(() => {
     margin: 0;
 }
 .ic-tabs {
+    /* 每个 tab 各自是一颗有边框的按钮（按钮体系里的 ghost 药丸），不做整体包裹容器 */
     display: flex;
-    gap: 6px;
+    gap: var(--space-2);
     padding: 0 30px 16px;
     border-bottom: 1px solid var(--border);
     overflow: auto;
     flex-shrink: 0;
 }
 .ic-tabs button {
-    border: 0;
-    background: transparent;
+    background: var(--card-2);
+    border: 1px solid var(--border);
     color: var(--text-dim);
-    padding: 10px 24px;
+    padding: 8px 20px;
     white-space: nowrap;
-    border-radius: 12px;
+    border-radius: 999px;
+    font-size: var(--text-sm);
     font: inherit;
     cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.ic-tabs button:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--border-strong);
 }
 .ic-tabs button.active {
-    background: var(--accent-soft);
-    color: var(--accent);
-    font-weight: 700;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+    font-weight: 600;
 }
 .ic-content {
     padding: 24px 30px;
@@ -1410,7 +1429,7 @@ onUnmounted(() => {
         padding: 0 14px 14px;
     }
     .ic-tabs button {
-        padding: 10px 15px;
+        padding: 7px 14px;
     }
     .ic-row,
     .ic-summary {

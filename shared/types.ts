@@ -170,7 +170,8 @@ export type LoaderName = 'forge' | 'fabric' | 'quilt' | 'neoforge';
 export interface InstallOptions {
     favoriteMods?: import('./modFavorites').FavoriteSelection[];
     favoriteInstallIntent?: import('./modFavorites').FavoriteInstallIntent;
-    recordingMod?: { kind: import('./recordings').RecordingKind; fileId: string };
+    /** 建实例时顺手预装的可选模组（录像 ReplayMod/Flashback，或联机 VoxLink） */
+    recordingMod?: { kind: import('./recordingMods').OptionalModKind; fileId: string };
     loader?: LoaderName;
     loaderVersion?: string;
     /** Fabric 专用：同时安装的 Fabric API 版本号（不传 = 不装） */
@@ -386,6 +387,8 @@ export interface Settings {
     reduceMotion?: boolean;
     /** 最小化时自动整理内存（换出自身工作集 + 暂停 WebView2 渲染 + 释放可重建缓存）；缺省视为开启。 */
     memTrimOnMinimize?: boolean;
+    /** Windows 专用：窗口失焦后仍保持 Acrylic 玻璃背景（不按系统省电策略退回纯色）；缺省关闭。 */
+    keepGlassWhenUnfocused?: boolean;
     visualDesign?: import('./visualDesign').VisualDesign;
     gameDir: string;
     /** 游戏文件夹登记列表（每个文件夹独立 versions/；libraries/assets/runtimes 共享于默认文件夹） */
@@ -455,12 +458,8 @@ export interface Settings {
     configVersion?: number;
     /** 跳过提示的版本号（该版本不再弹更新提示，直到更新的版本出现） */
     skipUpdateVersion?: string;
-    /** 更新下载源：auto=GitHub/Gitee/镜像竞速；direct=仅 GitHub；gitee=仅 Gitee；mirror=Gitee+镜像 */
-    updateSource?: 'auto' | 'direct' | 'gitee' | 'mirror';
-    /** 自定义镜像前缀（拼接在 GitHub 文件 URL 前，如 https://ghproxy.net/） */
-    updateMirrorUrl?: string;
-    /** Additional update mirrors; the old singular field remains readable. */
-    updateMirrorUrls?: string[];
+    /** 更新下载源：auto=GitHub 与 Gitee 竞速；github=仅 GitHub；gitee=仅 Gitee（旧值 direct/mirror 读取时按上述映射兼容） */
+    updateSource?: 'auto' | 'github' | 'gitee';
     /** 内测群号覆盖（免打包临时改；默认取 shared/branding.ts 的 QQ_GROUP_NUMBER） */
     qqGroupNumber?: string;
     /** CurseForge 官方 API Key（console.curseforge.com 免费申请）；留空走 MCIM 镜像兜底 */

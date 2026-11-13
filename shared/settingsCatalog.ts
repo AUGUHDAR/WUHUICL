@@ -56,6 +56,12 @@ export const settingsCatalog = [
         keywords: '窗口 自适应 分辨率 缩放 小屏幕 1366 768 DPI 多屏'
     },
     {
+        id: 'glass-on-blur',
+        category: 'appearance',
+        name: '失焦时保持玻璃背景',
+        keywords: '玻璃 毛玻璃 透明 失焦 失去焦点 焦点 背景 acrylic 亚克力 省电 性能 灰 变白'
+    },
+    {
         id: 'isolation',
         category: 'directories',
         name: '新版本默认隔离',
@@ -106,7 +112,7 @@ export const settingsCatalog = [
         id: 'update',
         category: 'about',
         name: '关于与更新',
-        keywords: '版本 自动更新 检查更新 下载源 镜像 回退 还原 本地更新 许可 开源'
+        keywords: '版本 自动更新 检查更新 下载源 Gitee GitHub 回退 还原 本地更新 许可 开源'
     },
     {
         id: 'cache',

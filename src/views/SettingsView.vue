@@ -172,6 +172,8 @@ const defaultDownloadFolder = computed(
 );
 const windowSizeBusy = ref(false);
 const canRememberWindow = window.kamucl.platform === 'win32';
+/** Acrylic 玻璃只有 Windows 有；这档开关在 macOS/Linux 上无意义，直接不显示 */
+const isWindows = window.kamucl.platform === 'win32';
 async function toggleWindowSize(event: Event) {
     const input = event.target as HTMLInputElement;
     if (!store.settings || windowSizeBusy.value) return;
@@ -977,6 +979,39 @@ async function onRemovePlugin(p: PluginInfo) {
                             @change="changeWindowFit" /><span
                             data-ui="SettingsView:990eeb2df557"
                             class="switch-ui"
+                    /></label>
+                </div>
+                <div
+                    data-ui="SettingsView:glass-on-blur"
+                    v-if="store.settings && isWindows"
+                    v-show="category === 'appearance'"
+                    class="card group group-inline setting-target"
+                    data-section="glass-on-blur"
+                    tabindex="-1"
+                >
+                    <div data-ui="SettingsView:glass-on-blur-body">
+                        <h3 data-ui="SettingsView:glass-on-blur-title" class="group-title">
+                            失焦时保持玻璃背景
+                        </h3>
+                        <p data-ui="SettingsView:glass-on-blur-hint-1" class="muted">
+                            关闭时跟随 Windows 省电策略：窗口失去焦点后，背景玻璃会变成不透明纯色。
+                        </p>
+                        <p data-ui="SettingsView:glass-on-blur-hint-2" class="muted">
+                            开启后始终按激活态合成玻璃，代价是后台期间仍占用显卡做模糊。
+                        </p>
+                    </div>
+                    <label data-ui="SettingsView:glass-on-blur-switch" class="switch"
+                        ><input
+                            data-ui="SettingsView:glass-on-blur-input"
+                            type="checkbox"
+                            aria-label="失焦时保持玻璃背景"
+                            :checked="store.settings.keepGlassWhenUnfocused === true"
+                            @change="
+                                save({
+                                    keepGlassWhenUnfocused: ($event.target as HTMLInputElement)
+                                        .checked
+                                })
+                            " /><span data-ui="SettingsView:glass-on-blur-knob" class="switch-ui"
                     /></label>
                 </div>
                 <div
@@ -1896,7 +1931,7 @@ async function onRemovePlugin(p: PluginInfo) {
                             class="upd-row upd-failed-row"
                         >
                             <span data-ui="SettingsView:5ae61f0d3e62" class="upd-failed-text"
-                                >你的网络可能无法连接 GitHub，检查更新失败</span
+                                >暂时连不上更新源（GitHub 与 Gitee 都没响应），稍后再试</span
                             >
                             <button
                                 data-ui="SettingsView:c30ef48b6984"
@@ -1978,9 +2013,8 @@ async function onRemovePlugin(p: PluginInfo) {
                             </div>
                         </details>
                         <p data-ui="SettingsView:108b83a3465d" class="muted group-hint">
-                            更新包同时发布在 GitHub 与
-                            Gitee（国内镜像）；下载较慢时可在上方更新源里改用镜像测速，或到 WUHUICL
-                            群（{{
+                            更新包同时发布在 GitHub 与 Gitee；下载较慢时可在上方更新源里切到 Gitee
+                            直连，或到 WUHUICL 群（{{
                                 store.settings.qqGroupNumber?.trim() || QQ_GROUP_NUMBER
                             }}）获取，两处文件与 GitHub 版本一致。
                         </p>

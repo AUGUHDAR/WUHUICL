@@ -4153,6 +4153,13 @@ pub fn favorite_versions(app: &tauri::AppHandle, source: &str, project: &str, mc
 // ---------------- recordingMods.ts（shared/recordingMods.ts） ----------------
 
 pub const RECORDING_PROJECTS: &[(&str, &str)] = &[("replaymod", "Nv2fQJo5"), ("flashback", "4das1Fjq")];
+/// 建实例时可选的预装模组：录像两项 + 联机模组 VoxLink（Modrinth qqeQJjgq）。
+/// 与 shared/recordingMods.ts 的 OPTIONAL_MOD_PROJECTS 保持一致。
+pub const OPTIONAL_MOD_PROJECTS: &[(&str, &str)] = &[
+    ("replaymod", "Nv2fQJo5"),
+    ("flashback", "4das1Fjq"),
+    ("voxlink", "qqeQJjgq"),
+];
 
 pub fn compatible_recording_mod(file: &Value, mc: &str, loader: &str) -> bool {
     let sha1 = file.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
@@ -4167,11 +4174,13 @@ pub fn compatible_recording_mod(file: &Value, mc: &str, loader: &str) -> bool {
 }
 
 /// recordingModVersions()（recordings:modVersions 由 recordings 模块复用）
+/// kind 接受录像模组，也接受联机模组 voxlink——两者只是 Modrinth 项目不同，
+/// 兼容性判定（游戏版本 / 加载器 / sha1 / jar）完全一致。
 pub fn recording_mod_versions(app: &tauri::AppHandle, kind: &str, mc: &str, loader: &str) -> Result<Vec<Value>, String> {
-    if !RECORDING_PROJECTS.iter().any(|(k, _)| *k == kind) || !["fabric", "quilt", "forge", "neoforge"].contains(&loader) || mc.is_empty() || mc.len() > 100 {
-        return Err("请选择游戏版本、加载器和录像模组".into());
+    if !OPTIONAL_MOD_PROJECTS.iter().any(|(k, _)| *k == kind) || !["fabric", "quilt", "forge", "neoforge"].contains(&loader) || mc.is_empty() || mc.len() > 100 {
+        return Err("请选择游戏版本、加载器和要安装的模组".into());
     }
-    let project = RECORDING_PROJECTS.iter().find(|(k, _)| *k == kind).unwrap().1;
+    let project = OPTIONAL_MOD_PROJECTS.iter().find(|(k, _)| *k == kind).unwrap().1;
     let files = community_files(app, "modrinth", project, Some(&community::FileFilter { mc_version: Some(mc.to_string()), loader: Some(loader.to_string()), kind: Some("mod".into()) }))?;
     Ok(files
         .into_iter()

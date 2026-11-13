@@ -274,7 +274,7 @@ onBeforeUnmount(() => {
         />
 
         <!-- 分区导航（VoxLink 同款胶囊） -->
-        <nav class="connect-tabs" aria-label="FRP 分区" data-ui="frp:nav">
+        <nav class="connect-tabs" aria-label="樱花穿透分区" data-ui="frp:nav">
             <button
                 v-for="item in NAV"
                 :key="item.key"

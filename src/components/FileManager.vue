@@ -843,6 +843,26 @@ async function applyUpdates(fileNames: string[]) {
             size: e.update!.size
         }));
     if (!targets.length) return;
+    /*
+     * 大批量更新前自动拍快照（「后悔药」的自动触发点）。
+     * 阈值与后端 snapshots::should_auto_snapshot 同一口径（≥30）。
+     * 失败不拦更新：备份是保险，不是前置条件——但会提示玩家备份没做成。
+     */
+    if (targets.length >= 30) {
+        try {
+            await window.kamucl.invoke(
+                'snapshots:create',
+                v.folder,
+                v.id,
+                v.id,
+                `批量更新 ${targets.length} 个模组前自动备份`,
+                true
+            );
+            toast(`已自动备份当前状态（${targets.length} 个模组待更新）`, 'info');
+        } catch (e) {
+            toast('自动备份失败，仍会继续更新：' + errText(e), 'error');
+        }
+    }
     updatePanel.applying = true;
     const operation = ++updateOperation;
     for (const target of targets) {
@@ -1320,7 +1340,7 @@ async function applyUpdates(fileNames: string[]) {
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
-                            stroke-width="1.8"
+                            stroke-width="1.7"
                             stroke-linecap="round"
                             stroke-linejoin="round"
                         >
@@ -1338,7 +1358,7 @@ async function applyUpdates(fileNames: string[]) {
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
-                            stroke-width="1.8"
+                            stroke-width="1.7"
                             stroke-linecap="round"
                             stroke-linejoin="round"
                         >

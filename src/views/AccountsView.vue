@@ -787,7 +787,7 @@ async function onRemove(acc: Account) {
                             height="12"
                             fill="none"
                             stroke="currentColor"
-                            stroke-width="3"
+                            stroke-width="1.7"
                             stroke-linecap="round"
                             stroke-linejoin="round"
                         >

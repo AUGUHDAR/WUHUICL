@@ -509,7 +509,7 @@ async function copyAddress(s: ServerEntry) {
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    stroke-width="1.8"
+                    stroke-width="1.7"
                     aria-hidden="true"
                 >
                     <circle cx="10.5" cy="10.5" r="6.5" />
@@ -588,7 +588,7 @@ async function copyAddress(s: ServerEntry) {
             class="connection-panel connection-empty"
         >
             <span data-ui="ServersView:ace2288ec1cd" class="connection-symbol" aria-hidden="true"
-                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
                     <rect x="3" y="3" width="18" height="8" rx="2" />
                     <rect x="3" y="13" width="18" height="8" rx="2" />
                     <path d="M7 7h2m-2 10h2" /></svg

@@ -22,15 +22,16 @@ const methodCards: Array<{
     tag: string;
     scene: string;
     desc: string;
+    /** 官方品牌图标（public/loaders/，取自各家官方包/favicon，256×256 透明底） */
     icon: string;
 }> = [
     {
         key: 'frp',
-        name: 'FRP 内网穿透',
+        name: '樱花穿透',
         tag: '公网隧道',
         scene: '适合愿意配置隧道的玩家',
         desc: '注册樱花穿透（natfrp.com）并创建隧道，用官方 frpc 把本地世界映射到公网。填写访问密钥后选择或创建隧道；可用性取决于节点、账号权限和网络。',
-        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V9m5 11V5m5 15v-8m5 8V8"/></svg>'
+        icon: 'loaders/sakurafrp.png'
     },
     {
         key: 'voxlink',
@@ -38,7 +39,7 @@ const methodCards: Array<{
         tag: '6 位房间码 · 免公网 IP',
         scene: '适合所有普通玩家的连接方式',
         desc: '创建房间，把 6 位房间码发给好友即可开始连接。直连尝试 20 秒后，可由玩家主动选择 TURN 中继；连接成功后，按页面指引在游戏内输入地址。',
-        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="7" width="19" height="10" rx="5"/><path d="M8 12h2m4 0h2"/><circle cx="9" cy="12" r="0.8" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="0.8" fill="currentColor" stroke="none"/></svg>'
+        icon: 'loaders/voxlink.png'
     },
     {
         key: 'terracotta',
@@ -46,7 +47,7 @@ const methodCards: Array<{
         tag: '独立开源 · 开箱即用',
         scene: '适合使用官方工具和房间码联机的玩家',
         desc: '独立开源联机项目（GitHub burningtnt/Terracotta，基于 EasyTier，AGPL-3.0）：手动下载官方工具并校验，创建/加入房间开箱即用，连接效果取决于双方网络。',
-        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4Z"/><path d="M4 7l8 4 8-4M12 11v10"/></svg>'
+        icon: 'loaders/terracotta.png'
     }
 ];
 
@@ -95,8 +96,12 @@ function pick(key: ConnectPage) {
                                     data-ui="FriendConnectView:31825c41753f"
                                     class="pick-icon"
                                     aria-hidden="true"
-                                    v-html="card.icon"
-                                ></span>
+                                    ><img
+                                        data-ui="FriendConnectView:pick-icon-img"
+                                        :src="card.icon"
+                                        alt=""
+                                        draggable="false"
+                                /></span>
                                 <span data-ui="FriendConnectView:515ae59ff746" class="pick-copy">
                                     <span data-ui="FriendConnectView:5f129609c578" class="pick-name"
                                         >{{ card.name
@@ -282,15 +287,20 @@ function pick(key: ConnectPage) {
     display: grid;
     place-items: center;
     border-radius: var(--radius-md);
-    background: var(--accent-soft);
+    /* 真实品牌图自带完整形象，不再叠色块底；透明底的图标也能贴合任意主题 */
+    background: none;
+    overflow: hidden;
     transition: transform 0.2s cubic-bezier(0.22, 0.9, 0.32, 1.2);
 }
 .pick-card:hover .pick-icon {
     transform: scale(1.08);
 }
-.pick-icon :deep(svg) {
-    width: 22px;
-    height: 22px;
+.pick-icon img {
+    width: 38px;
+    height: 38px;
+    object-fit: contain;
+    display: block;
+    border-radius: 6px;
 }
 .pick-copy {
     display: flex;

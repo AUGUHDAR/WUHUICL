@@ -454,12 +454,40 @@ function openUpdateModal(release: ReleaseInfo, rollback = false) {
     updateModal.rollback = rollback;
     updateModal.open = true;
 }
+/** 用户主动点顶栏提示：这时才开弹窗，并清掉红点（本会话不再提示） */
+function openAvailableUpdate() {
+    const release = store.availableUpdate;
+    if (!release) return;
+    store.availableUpdate = null;
+    openUpdateModal(release, false);
+}
+/**
+ * 「自动安装更新」开启时的静默下载：检测到新版直接在后台拉包，不弹窗。
+ * 进度仍进下载中心；装好后再由 event:updateReady 提示一次。
+ * 关掉这个开关（autoUpdate === false）就只亮红点，等玩家自己决定。
+ */
+let autoDownloadStarted = '';
+async function autoDownloadIfEnabled(release: ReleaseInfo) {
+    if (store.settings?.autoUpdate === false) return;
+    if (!canAutoUpdate) return; // 非 Windows 无法应用内替换，静默下载没有意义
+    if (!release.version || autoDownloadStarted === release.version) return;
+    if (updateModal.open) return; // 玩家正在手动更新，别抢
+    autoDownloadStarted = release.version;
+    try {
+        // 复用 update:start 的竞速下载；taskId 交给下载中心展示即可
+        await startUpdateDownload(release, 'upgrade');
+    } catch {
+        // 静默路径失败不打扰：红点还在，玩家点开弹窗可以自己重试
+        autoDownloadStarted = '';
+    }
+}
 /** 应用内替换仅 Windows 便携版；macOS/Linux 弹窗按钮指向发布页 */
 const canAutoUpdate = window.kamucl.platform === 'win32';
 function onUpdateOpenReleases() {
-    // 跟随 updateSource 设置：直连用户给 GitHub，其余（auto/gitee/mirror）给 Gitee
+    // 跟随 updateSource 设置：仅 GitHub 档（含旧值 direct）给 GitHub，其余（auto/gitee）给 Gitee
+    const updateSource = store.settings?.updateSource;
     const url =
-        store.settings?.updateSource === 'direct'
+        updateSource === 'github' || updateSource === 'direct'
             ? 'https://github.com/AUGUHDAR/WUHUICL/releases/latest'
             : 'https://gitee.com/AUGUHDAR/WUHUICL/releases';
     window.open(url, '_blank');
@@ -1536,7 +1564,10 @@ onMounted(async () => {
                 );
                 return;
             }
-            store.updatePrompt = { release: payload, rollback: false };
+            // 后台静默检测：只点亮顶栏提示，不打断当前操作。
+            // 玩家点顶栏才开弹窗（见 openAvailableUpdate）。
+            store.availableUpdate = payload as ReleaseInfo;
+            void autoDownloadIfEnabled(payload as ReleaseInfo);
         }),
         onUpdateSlowHint((r) => {
             if (updateModal.open && r.taskId === updateModal.taskId) updateModal.slowHint = true;
@@ -1928,7 +1959,7 @@ onUnmounted(() => {
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
-                            stroke-width="2.2"
+                            stroke-width="1.7"
                             stroke-linecap="round"
                             stroke-linejoin="round"
                         >
@@ -2006,6 +2037,27 @@ onUnmounted(() => {
                             <span data-ui="App:34ac91e6ba07" class="dl-badge compact">{{
                                 activeTaskCount
                             }}</span>
+                        </button>
+                        <button
+                            data-ui="App:update-available"
+                            v-if="store.availableUpdate"
+                            class="top-icon-btn upd-avail-btn"
+                            :title="'新版本 v' + store.availableUpdate.version + ' 可用'"
+                            @click="openAvailableUpdate"
+                        >
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <path d="M12 3v11" />
+                                <path d="m7 10 5 5 5-5" />
+                                <path d="M4 21h16" />
+                            </svg>
+                            <span data-ui="App:update-available-dot" class="upd-avail-dot"></span>
                         </button>
                         <button
                             data-ui="App:0a28f190d06e"
@@ -3386,6 +3438,7 @@ onUnmounted(() => {
     cursor: default;
 }
 .top-back svg {
+    /* 顶栏图标统一 16px：此前 back=16 / btn=15 / icon-btn=17 / win=15 四套，高低不齐 */
     width: 16px;
     height: 16px;
 }
@@ -3441,8 +3494,8 @@ onUnmounted(() => {
     color: var(--accent-2);
 }
 .top-btn svg {
-    width: 15px;
-    height: 15px;
+    width: 16px;
+    height: 16px;
 }
 
 .top-icon-btn {
@@ -3466,10 +3519,28 @@ onUnmounted(() => {
     color: var(--text);
 }
 .top-icon-btn svg {
-    width: 17px;
-    height: 17px;
+    width: 16px;
+    height: 16px;
 }
 .bell-dot {
+    position: absolute;
+    top: 7px;
+    right: 8px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 1.5px solid var(--bg-2);
+}
+/* 后台发现的更新：与铃铛同一套红点语言，但用强调色描边区分「有可做的事」 */
+.upd-avail-btn {
+    position: relative;
+    color: var(--accent-2);
+}
+.upd-avail-btn:hover:not(:disabled) {
+    color: var(--accent);
+}
+.upd-avail-dot {
     position: absolute;
     top: 7px;
     right: 8px;
@@ -3528,8 +3599,8 @@ onUnmounted(() => {
     position: fixed;
     top: 82px;
     right: 92px;
-    width: 320px;
-    max-height: 420px;
+    width: 360px;
+    max-height: 520px;
     z-index: 9001;
     display: flex;
     flex-direction: column;
@@ -3548,7 +3619,7 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--space-3) var(--space-4);
+    padding: var(--space-4) var(--space-5);
     border-bottom: 1px solid var(--border);
 }
 .notice-title {
@@ -3586,17 +3657,18 @@ onUnmounted(() => {
     justify-content: center;
 }
 .dl-panel {
-    width: 380px;
+    width: 440px;
+    max-height: 560px;
 }
 .dl-item {
-    padding: var(--space-3) var(--space-4);
+    padding: var(--space-4) var(--space-5);
     border-bottom: 1px solid var(--border);
 }
 .dl-item-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 10px;
 }
 .dl-actions {
     display: inline-flex;
@@ -3634,15 +3706,16 @@ onUnmounted(() => {
 }
 .dl-stages {
     display: grid;
-    gap: 10px;
-    margin-top: 14px;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
 }
 .dl-stage {
     min-width: 0;
-    padding: 9px 10px;
+    padding: var(--space-3);
     border: 1px solid var(--border);
-    border-radius: 9px;
-    background: var(--card-2);
+    border-radius: var(--radius-sm);
+    /* 面板内子区块：描边分组即可，不再叠一层底（同页内一致的「块上有块」问题） */
+    background: transparent;
 }
 .dl-stage-heading {
     display: flex;
@@ -3847,8 +3920,8 @@ onUnmounted(() => {
         color 0.15s ease;
 }
 .win-btn svg {
-    width: 15px;
-    height: 15px;
+    width: 16px;
+    height: 16px;
 }
 .win-btn:hover {
     background: var(--card-2);

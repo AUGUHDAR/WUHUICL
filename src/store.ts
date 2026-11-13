@@ -140,11 +140,17 @@ export const store = reactive({
         versionId: string;
         nonce: number;
     },
-    /** 启动器更新弹窗触发器（设置页手动检查/启动自动检查写入，App.vue 监听打开弹窗） */
+    /** 启动器更新弹窗触发器（设置页手动检查/用户点顶栏提示写入，App.vue 监听打开弹窗） */
     updatePrompt: null as {
         release: import('@shared/types').ReleaseInfo;
         rollback: boolean;
     } | null,
+    /**
+     * 后台静默检测到的可用更新（启动检查写入）。
+     * 不弹窗、不打断：顶栏只点亮一个小红点，玩家想更新时自己点。
+     * 与 updatePrompt 的区别就是「有没有主动打断」。清空由用户点开弹窗时完成。
+     */
+    availableUpdate: null as import('@shared/types').ReleaseInfo | null,
     /** 外置登录提供商拖拽入口；切换到账号页期间先暂存在 pending 中。 */
     yggdrasilImportHandler: null as ((input: YggdrasilProviderInput) => void) | null,
     pendingYggdrasilImport: null as YggdrasilProviderInput | null,

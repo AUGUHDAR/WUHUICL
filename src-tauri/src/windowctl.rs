@@ -326,6 +326,13 @@ fn maybe_resume_from_trim(window: &Window) {
 /// 最小化自整理去重：最小化/还原途中 Resized 会连发，只在状态翻转时各处理一次
 static TRIMMED_WHILE_MINIMIZED: AtomicBool = AtomicBool::new(false);
 
+/// 「失焦时保持玻璃背景」（keepGlassWhenUnfocused，Windows 专用，默认关）。
+/// 窗口过程在 WM_NCACTIVATE 里读这份静态位而不是 settings——UI 线程消息里不能去拿
+/// settings 的 Mutex（与 apply_native_appearance 的写路径会和消息泵互相等待）。
+/// 唯一写入方是 apply_native_appearance，它在窗口创建和每次 settings:set 都会跑。
+#[cfg(windows)]
+static KEEP_GLASS_UNFOCUSED: AtomicBool = AtomicBool::new(false);
+
 /// 主窗口的 WebView2 控制器（setup 阶段捕获）。
 /// 不在事件回调里临时 with_webview：那条路径走 user-message 泵，
 /// 最小化/还原的嵌套消息循环期间不可靠。
@@ -551,6 +558,15 @@ pub fn apply_native_appearance(win: &tauri::WebviewWindow, settings: &serde_json
         apply_dwm_appearance(win, light);
         // 圆角与「隐藏原生边框/标题/文字色」统一由 ensure_frameless 按最大化状态处理
         ensure_frameless(win);
+        // 「失焦时保持玻璃背景」：窗口已存在时改开关要立刻见效，不能等下一次焦点变化。
+        // 这里同时更新 wndproc 读的那份静态位并补一次激活态，二者必须同步改。
+        let keep = settings
+            .get("keepGlassWhenUnfocused")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if KEEP_GLASS_UNFOCUSED.swap(keep, SeqCst) != keep {
+            sync_nc_active(win, keep);
+        }
     }
 }
 
@@ -640,12 +656,42 @@ unsafe extern "system" fn frame_subclass_proc(
     _data: usize,
 ) -> windows_sys::Win32::Foundation::LRESULT {
     use windows_sys::Win32::UI::Shell::DefSubclassProc;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_STYLE, WM_STYLECHANGED};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        DefWindowProcW, IsIconic, GWL_STYLE, WM_NCACTIVATE, WM_STYLECHANGED,
+    };
     // wparam 高位 = GWL_STYLE 时表示窗口样式刚被改写，重新剥一次 WS_SYSMENU
     if msg == WM_STYLECHANGED && wparam as i32 == GWL_STYLE {
         strip_caption_sysmenu(hwnd as isize);
     }
-    DefSubclassProc(hwnd, msg, wparam, lparam)
+    let result = DefSubclassProc(hwnd, msg, wparam, lparam);
+    // 「失焦时保持玻璃背景」：DWM 收到失活会按系统策略把 background acrylic 换成纯色。
+    // 这里让 tao 先照常看到失活（Focused(false) / window:visibility / 最小化恢复都靠它），
+    // 再单独补一条「我仍是激活态」——DWM 只看 DefWindowProc 处理后的非客户区激活状态。
+    // lparam = -1 按 WM_NCACTIVATE 文档抑制非客户区重绘，避免切换瞬间闪一下。
+    // 最小化时必须原样交回系统：文档要求最小化期间照常传递该消息。
+    if msg == WM_NCACTIVATE
+        && wparam == 0
+        && KEEP_GLASS_UNFOCUSED.load(SeqCst)
+        && IsIconic(hwnd) == 0
+    {
+        DefWindowProcW(hwnd, WM_NCACTIVATE, 1, -1);
+    }
+    result
+}
+
+/// 立刻把窗口的「非客户区激活态」同步到开关状态（开关切换时用，不等下一次焦点变化）。
+/// 只有窗口确实失焦时才补：前台窗口的激活态由系统维护，别去动它。
+#[cfg(windows)]
+fn sync_nc_active(win: &tauri::WebviewWindow, keep: bool) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{DefWindowProcW, GetForegroundWindow, IsIconic, WM_NCACTIVATE};
+    let Ok(hwnd) = win.hwnd() else { return };
+    let h = hwnd.0 as windows_sys::Win32::Foundation::HWND;
+    unsafe {
+        if GetForegroundWindow() == h || IsIconic(h) != 0 {
+            return;
+        }
+        DefWindowProcW(h, WM_NCACTIVATE, if keep { 1 } else { 0 }, -1);
+    }
 }
 
 #[cfg(windows)]

@@ -171,12 +171,14 @@ function showQueue() {
     display: flex;
     justify-content: flex-end;
     padding: var(--space-2);
-    background: var(--card-solid);
+    /* 吸顶条必须够不透明才能压住滚上去的内容，但纯 card-solid 在玻璃页面上太突兀：
+       取 92% + 与卡片同一档模糊，视觉上仍属同一层材料。 */
+    background: color-mix(in srgb, var(--card-solid) 92%, transparent);
+    backdrop-filter: blur(16px) saturate(85%);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
 }
 .queue-shortcut {
-    box-shadow: var(--shadow-md);
     font-size: var(--text-xs);
 }
 .queue-head {

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { CommunityFile, InstallOptions, LoaderName } from '@shared/types';
-import type { RecordingKind } from '@shared/recordings';
+import type { OptionalModKind } from '@shared/recordingMods';
+import { OPTIONAL_MOD_LABELS } from '@shared/recordingMods';
 import SelectMenu from './SelectMenu.vue';
 import UiGlyph from './UiGlyph.vue';
 import { errText } from '../api';
@@ -14,12 +15,19 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: 'update:modelValue', value: InstallOptions['recordingMod']): void;
 }>();
-const kind = ref(''),
+const kind = ref<OptionalModKind | ''>(''),
     file = ref(''),
     choices = ref<CommunityFile[]>([]),
     busy = ref(false),
     error = ref(''),
     retry = ref(0);
+/** 顺手装的可选模组：录像两个 + 联机 VoxLink；默认不装，不替玩家做决定 */
+const OPTIONS = [
+    { value: '', label: '不安装' },
+    { value: 'voxlink', label: 'VoxLink（联机模组）' },
+    { value: 'replaymod', label: 'ReplayMod（录像）' },
+    { value: 'flashback', label: 'Flashback（录像）' }
+];
 const options = computed(() =>
     choices.value.map((f) => ({
         value: f.fileId,
@@ -37,10 +45,7 @@ watch(
         file.value = '';
         error.value = '';
         busy.value = false;
-        emit(
-            'update:modelValue',
-            kind.value ? { kind: kind.value as RecordingKind, fileId: '' } : undefined
-        );
+        emit('update:modelValue', kind.value ? { kind: kind.value, fileId: '' } : undefined);
         if (!kind.value || !props.loader) return;
         busy.value = true;
         try {
@@ -54,7 +59,7 @@ watch(
             choices.value = list;
             file.value =
                 list.find((f) => f.releaseType === 'release')?.fileId || list[0]?.fileId || '';
-            emit('update:modelValue', { kind: kind.value as RecordingKind, fileId: file.value });
+            emit('update:modelValue', { kind: kind.value as OptionalModKind, fileId: file.value });
         } catch (e) {
             if (!stale) error.value = errText(e);
         } finally {
@@ -64,20 +69,16 @@ watch(
     { immediate: true }
 );
 function choose(value: string) {
-    emit('update:modelValue', { kind: kind.value as RecordingKind, fileId: value });
+    emit('update:modelValue', { kind: kind.value as OptionalModKind, fileId: value });
 }
+const kindLabel = computed(() =>
+    kind.value ? OPTIONAL_MOD_LABELS[kind.value as OptionalModKind] : ''
+);
 </script>
 <template>
     <section class="recording-picker" data-ui="recording-mod:picker">
-        <p class="modal-label">同时安装录像模组（可选）</p>
-        <SelectMenu
-            v-model="kind"
-            :options="[
-                { value: '', label: '不安装录像模组' },
-                { value: 'replaymod', label: 'ReplayMod' },
-                { value: 'flashback', label: 'Flashback' }
-            ]"
-        />
+        <p class="modal-label">同时安装模组（可选）</p>
+        <SelectMenu v-model="kind" :options="OPTIONS" />
         <template v-if="kind">
             <p v-if="!loader" class="muted">请先选择模组加载器，以检查兼容版本。</p>
             <p v-else-if="busy" class="muted">正在检查兼容的模组版本…</p>
@@ -95,14 +96,13 @@ function choose(value: string) {
                 />
                 <p v-else class="recording-unavailable" role="alert">
                     <strong
-                        ><UiGlyph name="warning" :size="13" />
-                        {{ kind === 'replaymod' ? 'ReplayMod' : 'Flashback' }} 暂无兼容版本</strong
-                    ><br />当前 Minecraft {{ mc }} /
-                    {{ loader }} 无法安装此录像模组。请更换加载器或选择“不安装录像模组”。
+                        ><UiGlyph name="warning" :size="13" /> {{ kindLabel }} 暂无兼容版本</strong
+                    ><br />当前 Minecraft {{ mc }} / {{ loader }}
+                    无法安装该模组。请更换加载器或选择“不安装”。
                 </p></template
             >
             <p class="muted">
-                创建独立实例，同时下载所选版本及兼容的必要前置；不会修改其他实例的模组。
+                创建实例时一并下载所选版本及兼容的必要前置；不会修改其他实例的模组。
             </p>
         </template>
     </section>

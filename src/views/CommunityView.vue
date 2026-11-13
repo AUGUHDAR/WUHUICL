@@ -70,12 +70,24 @@ function sourceUrl(r: CommunityProjectReference, kind: CommunityKind = query.kin
     return `https://www.curseforge.com/minecraft/${CF_KIND_SEGMENT[kind] ?? 'mc-mods'}/${r.slug || r.projectId}`;
 }
 
+/**
+ * 在启动器内打开网页（内联浏览器）。
+ * 白名单之外或内联打开失败时，自动退回系统浏览器——玩家永远不会「点了没反应」。
+ */
+async function openInline(url: string, title: string) {
+    try {
+        await window.kamucl.invoke('inlineWeb:open', url, title);
+    } catch {
+        openExternal(url);
+    }
+}
+
 /** MC 百科：词典/百科桥已附身份（mcmodId）直达 class 详情页（PCL 口径）；
  *  否则先实时精确检索，失败或无命中回退搜索页 */
 async function openMcmod(item: CommunityProjectReference) {
     const direct = mcmodPageUrl({ ...item, slug: item.slug ?? '' });
     if (direct && item.mcmodId && item.mcmodId > 0) {
-        openExternal(direct);
+        await openInline(direct, item.title || 'MC 百科');
         return;
     }
     const searchUrl = mcmodSearchUrl({ ...item, slug: item.slug ?? '' });
@@ -88,13 +100,13 @@ async function openMcmod(item: CommunityProjectReference) {
         const r = await communityMcmod(keyword);
         const hit = r.hits[0];
         if (hit?.url) {
-            openExternal(hit.url);
+            await openInline(hit.url, item.title || 'MC 百科');
             return;
         }
     } catch {
         // 百科查询失败：回退到搜索页
     }
-    openExternal(searchUrl);
+    await openInline(searchUrl, item.title || 'MC 百科');
 }
 
 function openExternal(url: string) {
@@ -202,16 +214,22 @@ async function loadManifest() {
     manifestLoading.value = true;
     try {
         const list = await getManifest();
-        // 全量清单（正式版+快照+旧版），排序：正式版在前按新到旧，其余按新到旧缀后；类型供彩色角标
-        const rank: Record<RemoteVersion['type'], number> = {
-            release: 0,
-            snapshot: 1,
-            old_beta: 2,
-            old_alpha: 3
+        /*
+         * 排序口径（PCL2 同款直觉）：正式版在前，按新到旧。
+         * Mojang 清单把 26.3-rc-3 / 26.3-pre-3 这类预发布也标成 snapshot，
+         * 只按 type 排会让它们与正式版交错（26.3 → 26.3-rc-3 → 26.3-rc-2 …），
+         * 读起来像一堆同名版本。所以再按 id 后缀细分一档：预发布排在所有正式版之后。
+         */
+        const preRelease = /-(?:rc|pre)\d*$/i;
+        const rank = (v: RemoteVersion) => {
+            if (v.type === 'release') return 0;
+            if (v.type === 'snapshot') return preRelease.test(v.id) ? 2 : 1;
+            if (v.type === 'old_beta') return 3;
+            return 4;
         };
         manifestVersions.value = [...list]
             .sort((a, b) => {
-                const r = rank[a.type] - rank[b.type];
+                const r = rank(a) - rank(b);
                 if (r) return r;
                 return a.releaseTime < b.releaseTime ? 1 : -1;
             })
@@ -1220,7 +1238,7 @@ function confirmDownload() {
                         height="40"
                         fill="none"
                         stroke="currentColor"
-                        stroke-width="1.6"
+                        stroke-width="1.7"
                         stroke-linecap="round"
                         stroke-linejoin="round"
                     >
@@ -1515,13 +1533,28 @@ function confirmDownload() {
                         <button
                             data-ui="CommunityView:6fabba70cd3a"
                             class="btn btn-ghost btn-sm"
-                            @click="openExternal(sourceUrl(modal.item, modal.kind))"
+                            :title="'在启动器内打开源页面'"
+                            @click="
+                                openInline(
+                                    sourceUrl(modal.item, modal.kind),
+                                    modal.item.title || '源页面'
+                                )
+                            "
                         >
                             {{
                                 modal.item.source === 'modrinth'
                                     ? 'Modrinth 源页面'
                                     : 'CurseForge 源页面'
                             }}
+                        </button>
+                        <button
+                            data-ui="CommunityView:source-external"
+                            class="icon-btn"
+                            title="用系统浏览器打开"
+                            aria-label="用系统浏览器打开源页面"
+                            @click="openExternal(sourceUrl(modal.item, modal.kind))"
+                        >
+                            <UiGlyph name="expand" :size="14" />
                         </button>
                         <button
                             data-ui="CommunityView:03eb0c52ad3e"
@@ -1533,12 +1566,10 @@ function confirmDownload() {
                     </div>
                     <div class="filter-row">
                         <label data-ui="CommunityView:9b7baa1d1a72" class="modal-field"
-                            >Minecraft 版本<input
-                                data-ui="CommunityView:75b46121b566"
+                            >Minecraft 版本<CommunityVersionFilter
                                 v-model="modal.mcVersion"
-                                class="input"
-                                list="mod-minecraft-versions"
-                                placeholder="全部版本"
+                                :versions="manifestVersions"
+                                :loading="manifestLoading"
                                 @change="loadFiles"
                         /></label>
                         <label
@@ -1550,9 +1581,6 @@ function confirmDownload() {
                                 :options="loaderOptions"
                                 @change="loadFiles"
                         /></label>
-                        <datalist data-ui="CommunityView:3ea5bc9c8890" id="mod-minecraft-versions">
-                            <option v-for="v in manifestVersions" :key="v.id" :value="v.id" />
-                        </datalist>
                     </div>
 
                     <p class="modal-label">选择文件版本</p>
@@ -1712,7 +1740,8 @@ function confirmDownload() {
     align-items: center;
     gap: 6px;
     padding: 4px;
-    background: var(--card-2);
+    /* 分段控件：外圈靠描边成组，选中项自己带底，不再整体垫一层 */
+    background: transparent;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     align-self: flex-start;
@@ -1746,7 +1775,8 @@ function confirmDownload() {
     min-width: 20px;
     height: 20px;
     padding: 0 5px;
-    background: var(--card);
+    /* 计数徽标：半透明淡底即可，避免又一个小实心块 */
+    background: color-mix(in srgb, var(--card-solid, var(--card)) 45%, transparent);
     border-radius: 6px;
     font-size: 11px;
     font-variant-numeric: tabular-nums;
@@ -1758,10 +1788,13 @@ function confirmDownload() {
 .version-filter-panel {
     display: grid;
     gap: var(--space-3);
-    padding: var(--space-3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--card-2);
+    padding: 0 0 var(--space-4);
+    /* 卡内区块：靠「底部一条分隔线 + 间距」分组，既不再垫第二层底，
+       也不再用整圈描边把自己变成「卡中卡」。 */
+    border: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    border-radius: 0;
+    background: transparent;
 }
 .version-filter-heading {
     display: flex;
@@ -1880,7 +1913,8 @@ function confirmDownload() {
     padding: 3px;
     border: 1px solid var(--border);
     border-radius: 999px;
-    background: var(--card-2);
+    /* 同上：实心胶囊已经靠 blob 高亮，外圈不再垫第二层底 */
+    background: transparent;
     width: fit-content;
 }
 /* Selection follows the active category with the shared deceleration curve. */
@@ -2001,12 +2035,13 @@ function confirmDownload() {
     flex-shrink: 0;
     border-radius: var(--radius-md);
     overflow: hidden;
-    background: var(--card);
-    border: 1px solid var(--border);
+    /* 不再给图标底再叠一层 --card：与卡片同色 → 读成卡里嵌了块脏色块。
+       图标本身就带自己的底色/透明底，留空即可（与模组页图标块同口径）。 */
+    background: transparent;
+    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .result-icon img {
     width: 100%;
@@ -2120,6 +2155,12 @@ function confirmDownload() {
     gap: var(--space-1);
     font-size: var(--text-xs);
     color: var(--text-dim);
+}
+/* 弹窗里的版本选择器复用页面级组件：它在 grid 里没有 flex 语境，按列铺满 */
+.modal-field :deep(.community-version-filter) {
+    flex: none;
+    width: 100%;
+    min-width: 0;
 }
 .modal-title {
     font-size: var(--text-lg);
@@ -2253,10 +2294,10 @@ function confirmDownload() {
     margin-top: var(--space-5);
 }
 .search-card {
-    padding: 16px;
+    padding: var(--card-pad);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-4);
 }
 .search-row {
     margin: 0;
@@ -2317,9 +2358,10 @@ function confirmDownload() {
 }
 .result-head .tag {
     font-size: 11px;
-    background: var(--card-2);
+    /* 标签读作「说明文字」，不读作「卡里的小卡」：给极淡底 + 描边即可 */
+    background: color-mix(in srgb, var(--card-solid, var(--card)) 55%, transparent);
     color: var(--text-dim);
-    border: 0;
+    border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
 }
 .result-links .icon-btn {
     width: 34px;

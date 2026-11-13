@@ -15,6 +15,12 @@
 .content :is(.input,.select,.select-menu-btn) { min-height:var(--ctl-h); font-size:var(--text-md); }
 .content :is(.btn,.icon-btn) { flex-shrink:0; }
 .content .btn-sm { min-height:32px; font-size:var(--text-sm); }
+/*
+ * btn-sm 只有 28px 是历史遗留的两种尺寸：页内是 32px（上面那条），
+ * 而 Teleport 到 body 的下载中心/弹窗拿不到 .content 作用域，掉回 28px——
+ * 同一颗按钮在两处不同高，是「按钮不统一」最直接的来源。统一到 32px。
+ */
+.btn-sm { min-height: 32px; }
 .content :is(.input,.select,textarea) { max-width:100%; }
 .content :is(.card,.group,.pane,.settings-grid,.toolbar,.filter-bar) { min-width:0; }
 .content :is(.toolbar,.row-actions,.actions,.page-actions) { flex-wrap:wrap; }

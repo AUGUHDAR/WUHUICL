@@ -254,7 +254,7 @@ const sortOptions = [
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                stroke-width="1.3"
+                stroke-width="1.7"
                 aria-hidden="true"
             >
                 <path
@@ -309,7 +309,7 @@ const sortOptions = [
                             height="24"
                             fill="none"
                             stroke="currentColor"
-                            stroke-width="1.5"
+                            stroke-width="1.7"
                         >
                             <path d="m12 3 9 5v8l-9 5-9-5V8Z M3 8l9 5 9-5 M12 13v8" /></svg
                     ></span>

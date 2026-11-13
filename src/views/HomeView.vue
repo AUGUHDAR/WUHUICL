@@ -983,7 +983,7 @@ onUnmounted(() => {
                                     viewBox="0 0 24 24"
                                     fill="none"
                                     stroke="currentColor"
-                                    stroke-width="1.9"
+                                    stroke-width="1.7"
                                     stroke-linecap="round"
                                     stroke-linejoin="round"
                                 >
@@ -1048,7 +1048,7 @@ onUnmounted(() => {
                                     viewBox="0 0 24 24"
                                     fill="none"
                                     stroke="currentColor"
-                                    stroke-width="2.2"
+                                    stroke-width="1.7"
                                     stroke-linecap="round"
                                     stroke-linejoin="round"
                                 >
@@ -1085,7 +1085,7 @@ onUnmounted(() => {
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
-                        stroke-width="1.8"
+                        stroke-width="1.7"
                         stroke-linecap="round"
                         stroke-linejoin="round"
                     >
@@ -1118,7 +1118,7 @@ onUnmounted(() => {
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
-                        stroke-width="1.8"
+                        stroke-width="1.7"
                         stroke-linecap="round"
                         stroke-linejoin="round"
                     >
@@ -1152,7 +1152,7 @@ onUnmounted(() => {
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
-                        stroke-width="1.8"
+                        stroke-width="1.7"
                         stroke-linecap="round"
                         stroke-linejoin="round"
                     >
@@ -1186,7 +1186,7 @@ onUnmounted(() => {
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
-                            stroke-width="1.8"
+                            stroke-width="1.7"
                         >
                             <rect x="3" y="3" width="7" height="7" rx="1" />
                             <rect x="14" y="3" width="7" height="7" rx="1" />
@@ -1395,7 +1395,7 @@ onUnmounted(() => {
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
-                            stroke-width="1.9"
+                            stroke-width="1.7"
                             stroke-linecap="round"
                             stroke-linejoin="round"
                         >

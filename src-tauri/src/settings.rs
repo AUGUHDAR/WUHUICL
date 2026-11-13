@@ -243,6 +243,8 @@ pub fn defaults() -> Value {
         "defaultIsolation": true,
         "reduceMotion": false,
         "memTrimOnMinimize": true,
+        // Windows：失焦仍按激活态合成 Acrylic 玻璃。默认关＝跟随系统省电策略
+        "keepGlassWhenUnfocused": false,
         "msClientId": MS_CLIENT_ID,
         "theme": "transparent",
         "custom": {

@@ -1,8 +1,8 @@
 //! 自更新（对应原版 core/selfUpdate + applyUpdate 的通道合同面）。
 //! WUHUICL 独立版本线：update:check 同时查 GitHub Releases 与 Gitee 发行版——两源
-//! 并发等满后取 tag 更大者（不能先到先赢：Gitee 镜像常滞后，会钉死版本）。下载走
-//! GitHub 直连 + Gitee 镜像同开竞争（先完成者胜，另一方切断），SHA-256 按 Release
-//! asset digest 校验；apply 写替换脚本，进程退出后完成替换并重启。
+//! 并发等满后取 tag 更大者（不能先到先赢：Gitee 镜像常滞后，会钉死版本）。下载按
+//! updateSource 设置走 GitHub 直连 / Gitee / 两源同开竞争（先完成者胜，另一方切断），
+//! SHA-256 按 Release asset digest 校验；apply 写替换脚本，进程退出后完成替换并重启。
 //! 检查/列表/跳过三端通用；应用内替换仅 Windows（macOS/Linux 弹窗引导去发布页）。
 //!
 //! tag 规范：**纯数字版本号**（如 `1.0.0`），禁止 v 前缀/beta 等后缀——一个版本号对应
@@ -19,67 +19,35 @@ const GITEE_API: &str = "https://gitee.com/api/v5/repos/AUGUHDAR/WUHUICL/release
 const GH_DOWNLOAD: &str = "https://github.com/AUGUHDAR/WUHUICL/releases/download";
 /// Gitee 下载基址
 const GITEE_DOWNLOAD: &str = "https://gitee.com/AUGUHDAR/WUHUICL/releases/download";
-/// 预设 gh 前缀镜像（与 shared/updateMirrors.ts 保持一致）
-const PRESET_MIRRORS: &[&str] = &[
-    "https://ghproxy.net/",
-    "https://gh-proxy.com/",
-    "https://ghfast.top/",
-];
 
-/// 读取玩家设置的更新来源：('auto'|'direct'|'mirror', 镜像前缀列表)
+/// 读取玩家设置的更新来源：'auto' | 'github' | 'gitee'。
+/// 旧档位兼容：direct → github，mirror（镜像优先）→ gitee——自定义加速镜像已下线，
+/// Gitee 承接国内直连。
 #[cfg(windows)]
-fn update_sources_config(app: &tauri::AppHandle) -> (String, Vec<String>) {
-    let s = crate::settings::get(app);
-    let source = s["updateSource"].as_str().unwrap_or("auto").to_string();
-    let mut mirrors: Vec<String> = s["updateMirrorUrls"]
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| v.as_str())
-                .filter(|u| u.starts_with("https://") && !u.contains(['?', '#', '@']))
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
-    if let Some(legacy) = s["updateMirrorUrl"].as_str() {
-        if legacy.starts_with("https://") && !mirrors.iter().any(|m| m == legacy) {
-            mirrors.push(legacy.to_string());
-        }
+fn update_source(app: &tauri::AppHandle) -> String {
+    match crate::settings::get(app)["updateSource"]
+        .as_str()
+        .unwrap_or("auto")
+    {
+        "github" | "direct" => "github".to_string(),
+        "gitee" | "mirror" => "gitee".to_string(),
+        _ => "auto".to_string(),
     }
-    (source, mirrors)
 }
 
-/// 按 updateSource 设置拼出下载候选（label, url）；direct=仅 GitHub，gitee=仅 Gitee，
-/// mirror = Gitee + 预设/自定义 gh 前缀镜像，auto = 全部。
+/// 按 updateSource 设置拼出下载候选（label, url）；github=仅 GitHub，gitee=仅 Gitee，
+/// auto = 两源同开竞速。
 #[cfg(windows)]
 fn download_candidates(app: &tauri::AppHandle, version: &str, name: &str) -> Vec<(String, String)> {
-    let (source, custom) = update_sources_config(app);
+    let source = update_source(app);
     let gh = format!("{GH_DOWNLOAD}/{version}/{}", name);
     let gitee = format!("{GITEE_DOWNLOAD}/{version}/{}", name);
     let mut out: Vec<(String, String)> = Vec::new();
-    if source != "mirror" && source != "gitee" {
-        out.push(("GitHub".into(), gh.clone()));
+    if source != "gitee" {
+        out.push(("GitHub".into(), gh));
     }
-    if source != "direct" {
+    if source != "github" {
         out.push(("Gitee".into(), gitee));
-        if source == "auto" || source == "mirror" {
-            let preset_iter = PRESET_MIRRORS.iter().copied();
-            let custom_iter = custom.iter().map(|s| s.as_str());
-            for m in preset_iter.chain(custom_iter) {
-                let base = if m.ends_with('/') {
-                    m.to_string()
-                } else {
-                    format!("{m}/")
-                };
-                out.push((
-                    format!(
-                        "镜像 {}",
-                        base.trim_start_matches("https://").trim_end_matches('/')
-                    ),
-                    format!("{base}{gh}"),
-                ));
-            }
-        }
     }
     out
 }
@@ -345,9 +313,10 @@ fn list_releases() -> Value {
     )
 }
 
-/// 更新提示事件（启动检查发现新版本时推 updatePrompt——对应 index.ts 启动链）。
-/// 三端都检查；macOS/Linux 弹窗引导去发布页（应用内替换仅 Windows）。
-/// 用户点过"跳过此版本"的版本不再启动时打扰（设置页手动检查不受限）。
+/// 后台静默更新检测：发现新版本时只在顶栏点亮一个提示，不弹窗、不打断。
+/// 「无感」是主导目标：没更新 → 什么都不发生；有更新 → 一个可忽略的红点。
+/// 三端都查；macOS/Linux 点开后在弹窗里引导去发布页（应用内替换仅 Windows）。
+/// 用户点过「跳过此版本」的版本不再提示（设置页手动检查不受限）。
 pub fn startup_check(app: &tauri::AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
@@ -365,6 +334,8 @@ pub fn startup_check(app: &tauri::AppHandle) {
             if !skipped.is_empty() && version == skipped {
                 return;
             }
+            // 事件名沿用 updatePrompt（前端只有一个监听点），但语义已改为「后台发现」，
+            // 由 App.vue 写进 store.availableUpdate 点亮顶栏，而不是直接开弹窗。
             if let Some(win) = handle.get_webview_window("main") {
                 let _ = win.emit_to("main", "event:updatePrompt", result["release"].clone());
             }

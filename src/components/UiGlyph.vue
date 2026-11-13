@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 
-const props = withDefaults(
-    defineProps<{ name: string; size?: number; filled?: boolean }>(),
-    { size: 20, filled: false }
-);
+const props = withDefaults(defineProps<{ name: string; size?: number; filled?: boolean }>(), {
+    size: 20,
+    filled: false
+});
 
 // 加载器/版本类型走真实图标（HMCL 官方同款素材，public/loaders/）；
 // 其余保持内置线性图形
@@ -38,6 +38,8 @@ const paths: Record<string, string> = {
     upload: 'M12 16V3m-5 5 5-5 5 5M3 16v5h18v-5',
     close: 'm5 5 14 14M19 5 5 19',
     check: 'm5 12.5 4.5 4.5L19 7',
+    // 快照：倒带/历史语义，比通用 clock 更能表达「回到过去」
+    clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7.5V12l3.2 2',
     warning: 'M12 3 2.5 20h19L12 3zM12 9.5v5M12 17.5h.01',
     star: 'm12 3 2.7 5.8 6.3.8-4.6 4.3 1.2 6.1-5.6-3.1-5.6 3.1 1.2-6.1L3 9.6l6.3-.8z',
     clip: 'm21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48',

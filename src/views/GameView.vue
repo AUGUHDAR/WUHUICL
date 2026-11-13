@@ -1797,7 +1797,7 @@ async function confirmIsolation() {
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
-                            stroke-width="1.8"
+                            stroke-width="1.7"
                             stroke-linecap="round"
                             stroke-linejoin="round"
                         >
@@ -3097,6 +3097,11 @@ async function confirmIsolation() {
     border-radius: var(--radius-md);
     transition: border-color 0.15s ease;
 }
+/* 大版本之间也要有肉眼可辨的边界：收起的组之间原本只有 4px 间隙，和展开组的边框割裂 */
+.version-group + .version-group {
+    border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+    border-radius: 0;
+}
 .version-group[open] {
     border-color: var(--border);
 }
@@ -3122,7 +3127,8 @@ async function confirmIsolation() {
 }
 .version-group-body {
     gap: 0;
-    border-top: 0;
+    /* 组头与组内首行之间也要有线，否则展开后组名和第一行糊在一起 */
+    border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
     padding: 0 var(--space-1) var(--space-1);
 }
 .version-row {
@@ -3134,6 +3140,11 @@ async function confirmIsolation() {
     padding: var(--space-2) var(--space-3);
     border-radius: var(--radius-md);
     transition: background 0.15s ease;
+}
+/* 行间分隔：与「已安装」列表同一套 1px 淡线，整块不再糊成一片（UX 准则「同级相邻元素要有边界感」） */
+.version-group-body .version-row + .version-row {
+    border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+    border-radius: 0;
 }
 .version-row:hover {
     background: var(--card-2);
