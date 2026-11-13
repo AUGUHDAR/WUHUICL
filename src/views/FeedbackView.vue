@@ -1373,6 +1373,12 @@ async function openWeb(deep?: string | Event) {
     gap: var(--space-2);
     align-items: center;
 }
+/* 类型/状态两个筛选下拉并排等宽（横竖排并用），窄窗自动换行 */
+.fb-filters :deep(.select-menu-btn) {
+    flex: 1 1 200px;
+    width: auto;
+    min-width: 160px;
+}
 .fb-filters .input {
     flex: 1;
     min-width: 180px;

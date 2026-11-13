@@ -1655,8 +1655,8 @@ watch(
 .skins-page {
     display: grid;
     grid-template-columns: minmax(260px, 2fr) minmax(300px, 3fr);
-    align-items: start;
-    gap: 16px;
+    align-items: stretch;
+    gap: var(--card-gap);
 }
 .skins-page > :is(.page-head, .status-strip, .need-ms) {
     grid-column: 1/-1;
@@ -1685,13 +1685,15 @@ watch(
 }
 .skins-page .pane-preview {
     grid-column: 1;
-    grid-row: 2;
+    /* 跨第 2-3 行：左预览高度恒等于右栏（信息面板 + 历史皮肤）之和，左右等长（UX"相邻等长"） */
+    grid-row: 2 / 4;
     width: 100%;
     max-width: 100%;
     min-height: 0;
 }
 .skins-page.local-preview .pane-preview {
     grid-column: 1/-1;
+    grid-row: 2;
 }
 .skins-page .pane-preview .viewer3d {
     min-height: 320px;
@@ -1727,8 +1729,12 @@ watch(
     padding: 16px;
 }
 .skins-page .pane-history {
-    grid-column: 1/-1;
+    /* 移入右栏第 3 行，与信息面板上下堆叠，填满左预览对应的右栏高度 */
+    grid-column: 2;
     grid-row: 3;
+}
+.skins-page.local-preview .pane-history {
+    grid-column: 1/-1;
 }
 .skins-page .pane-history:has(.pane-empty) {
     display: flex;

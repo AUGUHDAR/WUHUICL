@@ -1819,12 +1819,15 @@ async function applyUpdates(fileNames: string[]) {
 .fm-toggle {
     flex-shrink: 0;
 }
+/* 禁用状态成套表达（UX"状态最好用成套视觉语言"）：底色圈定作用范围 + 置灰 + 删除线 + 标签，
+   不只靠一条删除线。--text-3/--line 为未定义令牌，修正为 --text-dim/--border。 */
 .fm-row-disabled {
-    opacity: 0.55;
+    opacity: 0.7;
+    background: color-mix(in srgb, var(--text-dim) 7%, transparent);
 }
 .fm-row-disabled .fm-name {
     text-decoration: line-through;
-    text-decoration-color: var(--text-3);
+    text-decoration-color: var(--text-dim);
 }
 .fm-disabled-tag {
     flex-shrink: 0;
@@ -1832,8 +1835,8 @@ async function applyUpdates(fileNames: string[]) {
     padding: 1px 8px;
     border-radius: 999px;
     background: var(--card-2);
-    color: var(--text-3);
-    border: 1px solid var(--line);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
 }
 .empty-icon {
     display: flex;
