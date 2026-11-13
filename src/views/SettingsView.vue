@@ -2380,20 +2380,12 @@ async function onRemovePlugin(p: PluginInfo) {
 </template>
 
 <style scoped>
-.settings-navigation {
-    position: sticky;
-    top: 0;
-    z-index: 15;
-    padding: 12px;
-    margin-bottom: 16px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--surface-solid);
-}
+/* 导航布局由下方 .settings-page grid 统一接管（display:contents）；
+   这里只保留搜索框内部、分类选中态、搜索结果与聚焦指示等仍生效的规则。 */
 .settings-search {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--space-3);
 }
 .settings-search > span {
     white-space: nowrap;
@@ -2406,8 +2398,6 @@ async function onRemovePlugin(p: PluginInfo) {
 .settings-categories {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 12px;
 }
 .settings-categories [aria-current] {
     background: var(--accent-soft);
@@ -2416,37 +2406,22 @@ async function onRemovePlugin(p: PluginInfo) {
 }
 .settings-search-results {
     display: grid;
-    max-height: 40vh;
-    overflow: auto;
-    gap: 8px;
-    padding-top: 12px;
+    gap: var(--space-2);
 }
 .settings-search-results button {
     justify-content: space-between;
     white-space: normal;
     text-align: left;
 }
-.settings-page [data-section] {
-    scroll-margin-top: 150px;
-}
 .settings-page [data-section]:focus {
     outline: 2px solid var(--accent);
     /* 定位卡片的聚焦指示画在卡片内沿：外描边会溢出到相邻卡片上 */
     outline-offset: -2px;
 }
-.settings-page .group {
-    margin-bottom: 0;
-}
 @media (max-width: 800px) {
-    .settings-navigation {
-        position: relative;
-    }
     .settings-search {
         align-items: stretch;
         flex-direction: column;
-    }
-    .settings-page [data-section] {
-        scroll-margin-top: 16px;
     }
 }
 
@@ -3186,9 +3161,9 @@ async function onRemovePlugin(p: PluginInfo) {
     display: grid !important;
     grid-template-columns: minmax(0, 1fr) minmax(220px, 340px);
     grid-template-rows: auto auto auto minmax(0, 1fr);
-    gap: 10px !important;
+    gap: var(--space-3) !important;
     padding: 0 !important;
-    max-width: 1080px !important;
+    max-width: 1120px !important;
     position: relative;
 }
 .settings-page > .page-head {
@@ -3209,13 +3184,13 @@ async function onRemovePlugin(p: PluginInfo) {
     grid-column: 1/-1;
     grid-row: 2;
     display: flex;
-    gap: 6px;
+    gap: var(--space-2);
 }
 .settings-scopes .btn {
-    font-size: 15px;
+    font-size: var(--text-md);
     font-weight: 650;
-    min-height: 38px;
-    padding: 8px 18px;
+    min-height: var(--ctl-h);
+    padding: var(--space-2) var(--space-4);
     border-color: transparent;
 }
 .settings-scopes [aria-current] {
@@ -3227,15 +3202,15 @@ async function onRemovePlugin(p: PluginInfo) {
     grid-row: 3;
     margin: 0;
     border-bottom: 1px solid var(--border);
-    padding: 0 0 8px;
-    gap: 4px;
+    padding: 0 0 var(--space-2);
+    gap: var(--space-1);
 }
 .settings-categories .btn {
     border: 0;
     border-radius: var(--radius-sm);
     min-height: 32px;
-    padding: 6px 12px;
-    font-size: 13px;
+    padding: var(--space-1) var(--space-3);
+    font-size: var(--text-sm);
 }
 .settings-body {
     grid-column: 1/-1;
@@ -3245,8 +3220,8 @@ async function onRemovePlugin(p: PluginInfo) {
     scrollbar-gutter: stable;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 2px 8px 20px 0;
+    gap: var(--space-3);
+    padding: 2px var(--space-2) var(--space-5) 0;
 }
 .settings-body > * {
     flex-shrink: 0;
@@ -3265,13 +3240,16 @@ async function onRemovePlugin(p: PluginInfo) {
     border-radius: var(--radius-md);
     box-shadow: var(--shadow);
 }
+/* 设置卡片两两成行（横竖排并用，UX"相邻等长"）：窄窗口自动换行堆叠。
+   此前被强制单列导致左栏拉长、右栏留白，现恢复 auto-fit 两列。 */
 .settings-page .settings-grid {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: start;
-    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    align-items: stretch;
+    gap: var(--card-gap);
 }
 .settings-page .settings-grid > .card {
     height: auto;
+    min-width: 0;
 }
 .settings-page [data-section] {
     scroll-margin-top: 12px;
