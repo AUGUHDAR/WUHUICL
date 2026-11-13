@@ -473,7 +473,7 @@ function addCustom() {
 }
 .palette-color-fields input[aria-invalid='true'],
 .palette-alpha-number input[aria-invalid='true'] {
-    border-color: var(--error, #dd6370);
+    border-color: var(--danger);
 }
 .palette-hex-field {
     display: flex;
@@ -537,7 +537,7 @@ function addCustom() {
     line-height: 1.5;
 }
 .palette-error {
-    color: var(--error, #dd6370);
+    color: var(--danger);
 }
 .palette-group {
     margin-top: 12px;

@@ -126,6 +126,8 @@ html[data-platform="android"] .modal {
   --surface-raised: color-mix(in srgb, var(--surface-solid) 97%, transparent);
   --text-title: 24px;
   --motion-carousel: 500ms;
+  /* 等宽字体单一来源（代码/房间码/UUID 等）；此前 --mono/--font-mono 散落且部分无 fallback */
+  --font-mono: 'Cascadia Code', Consolas, 'Courier New', monospace;
 }
 
 /* -------- 黑橙主题的无脚本回退值 -------- */
@@ -848,7 +850,7 @@ input[type='number'] {
   color: var(--text-dim);
 }
 .mono {
-  font-family: 'Cascadia Code', Consolas, 'Courier New', monospace;
+  font-family: var(--font-mono);
 }
 .spin {
   display: inline-block;

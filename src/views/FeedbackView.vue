@@ -1197,7 +1197,7 @@ async function openWeb(deep?: string | Event) {
     color: var(--text-dim);
 }
 .fb-paircode code {
-    font-family: var(--mono);
+    font-family: var(--font-mono);
     font-size: var(--text-md);
     letter-spacing: 2px;
     color: var(--text);
@@ -1227,7 +1227,7 @@ async function openWeb(deep?: string | Event) {
     align-items: baseline;
 }
 .fb-num {
-    font-family: var(--mono);
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text-dim);
 }
@@ -1521,7 +1521,7 @@ async function openWeb(deep?: string | Event) {
     font-size: var(--text-xs);
 }
 .fb-acc-uid {
-    font-family: var(--mono, monospace);
+    font-family: var(--font-mono);
     font-size: var(--text-sm, 14px);
     color: var(--accent);
     font-weight: 700;
@@ -1663,7 +1663,7 @@ async function openWeb(deep?: string | Event) {
     background: var(--card-2);
     padding: 4px 10px;
     border-radius: var(--radius-sm);
-    font-family: var(--mono);
+    font-family: var(--font-mono);
     font-size: var(--text-sm);
     color: var(--text);
     word-break: break-all;
@@ -1677,7 +1677,7 @@ async function openWeb(deep?: string | Event) {
     background: var(--card-2);
     border-radius: var(--radius-sm);
     padding: var(--space-3);
-    font-family: var(--mono);
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     line-height: 1.6;
     white-space: pre-wrap;

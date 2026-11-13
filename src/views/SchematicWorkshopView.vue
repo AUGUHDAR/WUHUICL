@@ -2503,7 +2503,7 @@ onBeforeUnmount(() => {
     border-radius: var(--radius-md);
     padding: 0.25rem;
     background: color-mix(in srgb, var(--color-bg) 90%, transparent);
-    box-shadow: var(--shadow-card);
+    box-shadow: var(--shadow);
     backdrop-filter: blur(12px);
 }
 
