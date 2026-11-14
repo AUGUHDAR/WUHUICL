@@ -2983,6 +2983,13 @@ onUnmounted(() => {
     width: 100%;
     height: 100%;
     background: var(--shell-surface);
+    /* 全站唯一一层玻璃模糊（缝隙模糊更深 bug 的根修）：此前 blur 只存在于各卡片
+     * 自身的 backdrop-filter，卡与卡之间的缝隙无模糊层 → 直接透出 DWM Acrylic
+     * 的原始桌面像素（更暗/更清晰），卡面却是模糊后的——「缝隙透出更深的一层」。
+     * 模糊上收到壳层一次，卡面与缝隙透过同一层玻璃，亮度/纹理完全一致；
+     * 卡片从此只做半透色（见 ui-system.css 的 .card 规则），不再自带 blur。 */
+    backdrop-filter: blur(16px) saturate(85%);
+    -webkit-backdrop-filter: blur(16px) saturate(85%);
     position: relative;
     z-index: 1;
     overflow: hidden;

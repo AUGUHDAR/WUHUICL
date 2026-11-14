@@ -12,7 +12,7 @@
 .connect-page .btn:focus-visible, .connect-page summary:focus-visible, .connection-modal .btn:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 3px; }
 .connect-page .input, .connect-page .select, .connection-modal .input, .connection-modal .select { width: 100%; min-width: 0; min-height: var(--ctl-h); padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); background-color: var(--card-2); color: var(--text); font-size: var(--text-sm); }
 .connect-page .select, .connection-modal .select { padding-right: var(--space-6); text-overflow: ellipsis; }
-.connection-panel, .network-overview { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--card) 94%, var(--bg)); box-shadow: var(--shadow); }
+.connection-panel, .network-overview { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); /* 实底（模糊只在 .shell 一层，见 App.vue） */ background: var(--surface-solid); box-shadow: var(--shadow); }
 .connection-panel-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--card-pad); border-bottom: 1px solid var(--border); }
 .connection-panel-head h2 { font-size: var(--text-sm); font-weight: 700; }
 .connection-panel-head p { color: var(--text-dim); font-size: var(--text-xs); line-height: 1.6; margin-top: var(--space-1); }

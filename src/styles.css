@@ -566,9 +566,11 @@ input[type='number'] {
   cursor: pointer;
 }
 
-/* ---------------- 卡片 / 标签 ---------------- */
+/* ---------------- 卡片 / 标签 ----------------
+ * 卡面用 surface-solid 实底（模糊只做一层：blur 在 .shell 统一采样，见 App.vue；
+ * 卡面自带 backdrop-filter 会让卡缝透出未模糊的更深层）。 */
 .card {
-  background: var(--surface-content);
+  background: var(--surface-solid);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--card-pad);

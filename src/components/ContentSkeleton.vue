@@ -173,7 +173,9 @@ onUnmounted(() => clearTimeout(timer));
     padding: 16px;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg, var(--radius));
-    background: var(--card);
+    /* 预加载骨架与结果卡同表面（surface-solid 实底）：模糊只在 .shell 一层，
+     * 半透卡面会让骨架态的缝隙透出更深一层（与加载后同 bug 同源）。 */
+    background: var(--surface-solid);
 }
 .skeleton-card i,
 .skeleton-card span,

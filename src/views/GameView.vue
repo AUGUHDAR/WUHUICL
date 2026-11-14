@@ -3460,7 +3460,8 @@ async function confirmIsolation() {
     padding: 0 16px;
     border: 0;
     box-shadow: none;
-    background: color-mix(in srgb, var(--card-solid, var(--card)) 92%, transparent);
+    /* 实底（模糊只在 .shell 一层，见 App.vue） */
+    background: var(--surface-solid);
     border-radius: var(--radius-md);
 }
 .installed-scope {

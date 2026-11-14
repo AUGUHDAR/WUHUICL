@@ -2447,7 +2447,8 @@ onUnmounted(() => {
     word-break: normal;
 }
 .runtime-strip {
-    background: var(--surface-content) !important;
+    /* 与主规则同源实底（模糊只在 .shell 一层） */
+    background: var(--surface-solid) !important;
 }
 .home-side {
     align-self: start;
@@ -2537,7 +2538,7 @@ onUnmounted(() => {
     opacity: 1;
 }
 .hero-card.no-banner {
-    background: var(--surface-content);
+    background: var(--surface-solid);
     box-shadow: none;
 }
 .no-banner .hero-content,
@@ -2849,10 +2850,10 @@ onUnmounted(() => {
     overflow: hidden;
     border: 1px solid var(--border);
     border-radius: 15px;
-    background: color-mix(in srgb, var(--card) 80%, transparent);
+    /* 实底（模糊只在 .shell 一层，见 App.vue）：不再自带 backdrop blur，
+     * 与卡缝透出的同一层玻璃保持一致观感 */
+    background: var(--surface-solid);
     box-shadow: var(--shadow);
-    backdrop-filter: blur(18px) saturate(130%);
-    -webkit-backdrop-filter: blur(18px) saturate(130%);
 }
 /* 悬浮浮块：跟随指针在三格间平滑滑动（浮起+落下+格间转移过渡） */
 .runtime-blob {
@@ -3160,7 +3161,8 @@ onUnmounted(() => {
 .skin-panel {
     border: 1px solid var(--border);
     border-radius: 15px;
-    background: var(--surface-content);
+    /* 实底（模糊只在 .shell 一层，见 App.vue） */
+    background: var(--surface-solid);
     box-shadow: var(--shadow);
 }
 .account-panel {
@@ -3978,7 +3980,8 @@ onUnmounted(() => {
     flex: 1;
     display: flex;
     flex-direction: column;
-    background: var(--surface-content);
+    /* 实底（模糊只在 .shell 一层，见 App.vue） */
+    background: var(--surface-solid);
     border-radius: var(--radius-lg);
     padding: 16px;
 }
@@ -4007,7 +4010,8 @@ onUnmounted(() => {
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     box-shadow: none;
-    background: var(--surface-content);
+    /* 行卡实底与区块同族（模糊只在 .shell 一层） */
+    background: var(--surface-solid);
 }
 .instance-card.selected {
     background: var(--accent-soft);
@@ -4070,7 +4074,7 @@ onUnmounted(() => {
     height: 28px;
 }
 .instances-block {
-    background: var(--surface-content);
+    background: var(--surface-solid);
     border-radius: var(--radius-lg);
     padding: 16px;
 }
@@ -4530,7 +4534,8 @@ onUnmounted(() => {
     overflow: hidden;
     border: 1px solid color-mix(in srgb, var(--border) 95%, white 4%);
     border-radius: var(--radius-lg);
-    background: var(--surface-content);
+    /* 实底（模糊只在 .shell 一层） */
+    background: var(--surface-solid);
     box-shadow: var(--shadow);
 }
 .m-stage-bg {

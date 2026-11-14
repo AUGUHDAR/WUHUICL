@@ -15,8 +15,12 @@
 :is(.btn, .icon-btn) { flex-shrink: 0; }
 .empty { min-height: 120px; padding: 32px 16px; }
 
-/* ---------------- 玻璃与表面 ---------------- */
-:is(.card, .connection-panel) { backdrop-filter: blur(16px) saturate(85%); }
+/* ---------------- 玻璃与表面 ----------------
+ * 模糊只做一层（App.vue .shell）：页面级玻璃 blur 在壳层统一采样，
+ * 卡片不再自带 backdrop-filter——否则卡面模糊/缝隙原样，「缝隙透出更深的一层」。
+ * 卡面深度补偿：卡面从 94% 提亮到 100%（surface-solid 实底），深色下与
+ * 缝隙(壳 30% α 的灰)保持既定色差，且卡面不再有「玻璃里再开玻璃」的暗缝观感。 */
+:is(.card, .connection-panel) { background: var(--surface-solid); }
 .connection-panel { background: var(--surface-content); box-shadow: none; }
 .connection-panel .connection-panel { background: transparent; box-shadow: none; }
 .connection-details { background: transparent; box-shadow: none; padding: 12px 0; border-radius: 0; border-width: 0 0 1px; }

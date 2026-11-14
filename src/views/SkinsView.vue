@@ -1091,12 +1091,11 @@ watch(
     font-size: var(--text-xs);
     color: var(--text-dim);
 }
-/* 毛玻璃卡片：内边距 / 圆角 / 背景模糊统一走令牌 */
+/* 皮肤页卡片：内边距 / 圆角统一走令牌。模糊只在 .shell 一层（App.vue）——
+ * 卡面自带 backdrop-filter 会让卡缝透出未模糊的更深一层（全站同源 bug）。 */
 .skins-page .card {
     padding: var(--card-pad);
     border-radius: var(--radius-lg);
-    backdrop-filter: blur(24px) saturate(130%);
-    -webkit-backdrop-filter: blur(24px) saturate(130%);
 }
 .row-main,
 .row-sub {
@@ -1611,7 +1610,8 @@ watch(
     grid-column: 2;
     grid-row: 2;
     min-width: 0;
-    background: var(--surface-content);
+    /* 实底（模糊只在 .shell 一层，见 App.vue） */
+    background: var(--surface-solid);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     overflow: hidden;

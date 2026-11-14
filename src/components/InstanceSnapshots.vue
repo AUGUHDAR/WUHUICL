@@ -241,7 +241,8 @@ const totalBytes = computed(() => list.value.reduce((s, m) => s + (m.zipBytes ||
     padding: var(--card-pad);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    background: var(--surface-content);
+    /* 实底（模糊只在 .shell 一层，见 App.vue） */
+    background: var(--surface-solid);
     display: grid;
     gap: var(--space-3);
 }

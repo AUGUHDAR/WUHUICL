@@ -940,7 +940,8 @@ async function copyAddress(s: ServerEntry) {
     min-height: var(--row-h);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    background: var(--card);
+    /* 实底（模糊只在 .shell 一层，见 App.vue）：半透底会在行间隙透出更深层 */
+    background: var(--surface-solid);
     transition:
         background 160ms ease,
         border-color 160ms ease;
@@ -1246,7 +1247,8 @@ async function copyAddress(s: ServerEntry) {
 }
 .servers-page .server-list {
     gap: 0;
-    background: var(--surface-content);
+    /* 实底与行面同族（模糊只在 .shell 一层） */
+    background: var(--surface-solid);
     padding: 0 12px;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);

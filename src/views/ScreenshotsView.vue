@@ -791,7 +791,8 @@ onUnmounted(() => {
     pointer-events: none;
 }
 .skeleton-pulse {
-    background: var(--card);
+    /* 骨架脉冲底与卡面(card-2→实底族)同源：半透底会在缝隙处透出更深层 */
+    background: var(--surface-solid);
     animation: shot-skeleton-pulse 1.4s ease-in-out infinite;
 }
 @keyframes shot-skeleton-pulse {
@@ -922,7 +923,8 @@ onUnmounted(() => {
 .shot-thumb {
     position: relative;
     aspect-ratio: 16/9;
-    background: var(--card);
+    /* 缩略图占位底实底化（模糊只在 .shell 一层） */
+    background: var(--surface-solid);
     cursor: grab;
 }
 .shot-thumb img {

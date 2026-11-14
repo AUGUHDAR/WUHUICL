@@ -762,7 +762,8 @@ onBeforeUnmount(() => {
     gap: 12px;
     flex-wrap: wrap;
     padding: 10px 16px;
-    background: var(--surface-content);
+    /* 实底（模糊只在 .shell 一层，见 App.vue） */
+    background: var(--surface-solid);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     font-size: 13px;
@@ -791,7 +792,8 @@ onBeforeUnmount(() => {
     padding: 18px 20px;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    background: var(--surface-content);
+    /* 实底（模糊只在 .shell 一层，见 App.vue） */
+    background: var(--surface-solid);
 }
 .frp-card.is-running {
     border-color: color-mix(in srgb, var(--ok) 45%, var(--border));

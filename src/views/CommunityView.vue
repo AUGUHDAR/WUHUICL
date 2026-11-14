@@ -1640,7 +1640,8 @@ function confirmDownload() {
     padding: var(--space-4);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    background: var(--card);
+    /* 实底与 .card 同族（模糊只做一层在 .shell；半透卡面会在缝隙处露出更深层） */
+    background: var(--surface-solid);
     transition:
         border-color var(--motion-fast) ease,
         box-shadow var(--motion-normal) ease;

@@ -230,9 +230,8 @@ function pick(key: ConnectPage) {
     width: 100%;
     border-radius: var(--radius-lg);
     border: 1px solid var(--border-strong);
-    background: var(--surface-content);
-    backdrop-filter: blur(24px) saturate(130%);
-    -webkit-backdrop-filter: blur(24px) saturate(130%);
+    /* 实底（模糊只在 .shell 一层，见 App.vue；半透+自带 blur 会露出更深的缝隙层） */
+    background: var(--surface-solid);
     color: var(--text);
     cursor: pointer;
     transition:
