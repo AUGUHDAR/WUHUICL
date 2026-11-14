@@ -92,15 +92,26 @@ function place() {
     if (!rect) return;
     const width = Math.min(Math.max(props.minWidth, 220), innerWidth - 24);
     const desired = 360;
-    const below = Math.max(0, innerHeight - rect.bottom - 12);
-    const above = Math.max(0, rect.top - 12);
-    const maxH = Math.min(desired, innerHeight - 24, Math.max(below, above, 140));
-    const up = below < Math.min(desired, 200) && above > below;
+    // 锚点夹持进视口：页面自身滚出视口外时（极矮窗口），菜单仍贴边完整呈现而非跟到屏外
+    const top = Math.max(0, Math.min(rect.top, innerHeight));
+    const bottom = Math.max(0, Math.min(rect.bottom, innerHeight));
+    const below = Math.max(0, innerHeight - bottom - 12);
+    const above = Math.max(0, top - 12);
+    const fit = Math.min(desired, Math.max(innerHeight - 24, 140));
     let left = props.align === 'end' ? rect.right - width : rect.left;
     left = Math.max(12, Math.min(left, innerWidth - width - 12));
+    /* 翻转判定（用户实测 bug：底行卡片菜单朝下展开、捅出视口底部被截断）——
+     * 旧式 `up = below < 200 && above > below` 配 `maxH = max(below, above)` 自相矛盾：
+     * 判定向下的分支里 maxH 仍取上下空间较大者，菜单以 360px 全高渲染在下方空间里
+     * 直接捅穿视口底（顶行同理：below < 360 时向下展开必然溢出）。
+     * 修法：优先选能完整放下 fit 的一侧（below ≥ fit → 向下，否则 above 更大 → 向上），
+     * 两侧都不足 fit 时选空间更大的一边、maxH 钳到该侧空间——菜单永不溢出，
+     * 内容超限时菜单内部滚动（危险区项滚动可达；能放下 fit 的一侧完整无滚动）。 */
+    const up = below >= fit ? false : above >= below;
+    const maxH = Math.min(fit, up ? above : below);
     style.value = up
-        ? { left: left + 'px', bottom: innerHeight - rect.top + 6 + 'px', width: width + 'px', maxHeight: maxH + 'px' }
-        : { left: left + 'px', top: rect.bottom + 6 + 'px', width: width + 'px', maxHeight: maxH + 'px' };
+        ? { left: left + 'px', bottom: innerHeight - top + 6 + 'px', width: width + 'px', maxHeight: maxH + 'px' }
+        : { left: left + 'px', top: bottom + 6 + 'px', width: width + 'px', maxHeight: maxH + 'px' };
 }
 
 function openMenu() {

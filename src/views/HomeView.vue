@@ -615,24 +615,52 @@ watch(
 // ---------------- 最近游戏与菜单 ----------------
 // 收藏优先 + 最近游玩排序；启动某实例后 recordLastPlayed 更新使其自然提前。
 // 选中实例不再直接置顶——只有启动过才排到第一个。
-// 首页一屏化：矮视口（≤700px 高）只收纳 2 个、中档（≤900px 高）收纳 3 个最近实例，
-// 分别对齐 960×620 / 1360×860 的一屏预算（3 张恰好一行收纳网格）。
-const wideRecent = ref(window.innerWidth >= 1500);
-const midViewport = ref(window.innerHeight <= 900);
-const shortViewport = ref(window.innerHeight <= 700);
+//
+// 响应式统一（用户拍板「内容组成不随窗口尺寸跳变」）：废除上一轮 ≥1500w / ≤900h / ≤700h
+// 的 recent 散碎分档——卡数在 2/3/4/8 四档间跳变、右栏打卡卡凭空消失的根因就在这里。
+// 收敛为两个断点，且与 CSS 一一对应：
+//   1) 行数：视口高 ≥800px → 2 行、<800px → 1 行（唯一高度断点，唯一会翻转的量）；
+//   2) 列数：完全交给 .instance-grid 的 auto-fill minmax(240px,1fr) 按容器宽度自然决定
+//      （dashboard 上限 1160px ⇒ 天然封顶 3 列，用户拍板「一行放 3 个就够了」），
+//      JS 不按宽度分档，只读网格解析后的列轨道数（getComputedStyle().gridTemplateColumns），
+//      卡数 = 列数 × 行数，恰好填满网格。
+// 于是「全屏 3×2=6、非全屏 3×1=3、960 窄屏 1×1=1」成立：相邻宽度只有列数的连续渐变，
+// 内容组成恒定不跳变，宽卡实例名完整；实例少于格子时 auto-fill 轨道恒在，
+// 网格尾部自然留白对齐（不塌陷、不拉伸）。
+const twoRowViewport = ref(window.innerHeight >= 800);
+const instanceGridEl = ref<HTMLElement | null>(null);
+const gridColumns = ref(0);
+let gridColumnsObserver: ResizeObserver | null = null;
+/** 读网格解析后的列轨道数：auto-fill 的分列结果由布局决定，JS 不复算宽度公式 */
+function measureGridColumns() {
+    const grid = instanceGridEl.value;
+    if (!grid) return;
+    gridColumns.value = getComputedStyle(grid)
+        .gridTemplateColumns.split(' ')
+        .filter(Boolean).length;
+}
+watch(instanceGridEl, (grid, _prev, onCleanup) => {
+    gridColumnsObserver?.disconnect();
+    gridColumnsObserver = null;
+    if (!grid) return;
+    gridColumnsObserver = new ResizeObserver(measureGridColumns);
+    gridColumnsObserver.observe(grid);
+    measureGridColumns(); // 挂载当下同步读一次，避免首帧只渲染 1 张卡
+    onCleanup(() => {
+        gridColumnsObserver?.disconnect();
+        gridColumnsObserver = null;
+    });
+});
+const recentRows = computed(() => (twoRowViewport.value ? 2 : 1));
+const recentSlots = computed(() => Math.max(1, gridColumns.value * recentRows.value));
+const recent = computed(() =>
+    sortWithFavorite(activeInstalled.value).slice(0, recentSlots.value)
+);
 const updateViewportTier = () => {
-    wideRecent.value = window.innerWidth >= 1500;
-    midViewport.value = window.innerHeight <= 900;
-    shortViewport.value = window.innerHeight <= 700;
+    twoRowViewport.value = window.innerHeight >= 800;
 };
 onMounted(() => window.addEventListener('resize', updateViewportTier));
 onUnmounted(() => window.removeEventListener('resize', updateViewportTier));
-const recent = computed(() =>
-    sortWithFavorite(activeInstalled.value).slice(
-        0,
-        shortViewport.value ? 2 : midViewport.value ? 3 : wideRecent.value ? 8 : 4
-    )
-);
 const sortedInstalled = computed(() => sortWithFavorite(store.installed));
 
 /** 版本切换抽屉（用户实测否决 float-menu 下拉：实例多时挤压 banner 且内滚体验差）——
@@ -710,23 +738,56 @@ const drawerFolderName = (folder: string) =>
     folder.split(/[\\/]/).filter(Boolean).pop() ||
     '游戏文件夹';
 
-/** 分组折叠：默认全部展开，记忆进 localStorage（kamucl.homever.folded）——
- *  「不想下滑就折叠前面的文件夹找后面的版本」 */
+/** 分组折叠：默认「有实例的组展开、空文件夹组折叠」，记忆只记用户手动折叠/展开过的组
+ *  （kamucl.homever.folded）——「不想下滑就折叠前面的文件夹找后面的版本」。
+ *  记忆格式：「f:路径」= 手动折叠、「!路径」= 手动展开（覆盖空组默认折叠）、
+ *  裸「路径」= 旧格式手动折叠（语义不变）。
+ *  旧数据自愈（用户实测：抽屉只见 3 个组头、实例全藏 =「上次全折叠」被固化成默认态）：
+ *  检测到全部有实例的组都被记忆折叠且未迁移过时，清空记忆一次（打迁移标记，之后
+ *  用户再手动全折叠属于真实意愿，不再干预）。 */
 const FOLD_KEY = 'kamucl.homever.folded';
+const FOLD_MIGRATED_KEY = 'kamucl.homever.folded.allFoldedMigrated';
 const foldedFolders = ref<Set<string>>(
     new Set(JSON.parse(localStorage.getItem(FOLD_KEY) || '[]') as string[])
 );
-const isFolded = (folder: string) => foldedFolders.value.has(folder);
-function toggleFold(folder: string) {
-    const next = new Set(foldedFolders.value);
-    if (next.has(folder)) next.delete(folder);
-    else next.add(folder);
-    foldedFolders.value = next;
-    localStorage.setItem(FOLD_KEY, JSON.stringify([...next]));
+/** 全折叠固化自愈：installed 就绪后（含异步加载完成）检查一次 */
+function migrateAllFoldedLegacy() {
+    if (localStorage.getItem(FOLD_MIGRATED_KEY)) return;
+    const instanceFolders = [...new Set(store.installed.map((v) => v.folder || ''))];
+    if (instanceFolders.length < 2) return;
+    if (
+        instanceFolders.every(
+            (f) => foldedFolders.value.has(f) || foldedFolders.value.has(`f:${f}`)
+        )
+    ) {
+        foldedFolders.value = new Set();
+        localStorage.removeItem(FOLD_KEY);
+    }
+    localStorage.setItem(FOLD_MIGRATED_KEY, '1');
+}
+migrateAllFoldedLegacy();
+watch(
+    () => store.installed.map((v) => v.folder || '').join('|'),
+    () => migrateAllFoldedLegacy()
+);
+const isFolded = (folder: string, hasItems = true) => {
+    const mem = foldedFolders.value;
+    if (mem.has(`f:${folder}`) || mem.has(folder)) return true; // 手动折叠（含旧格式）
+    if (mem.has(`!${folder}`)) return false; // 手动展开
+    return !hasItems; // 默认：有实例展开、空文件夹组折叠
+};
+function toggleFold(folder: string, hasItems = true) {
+    const mem = new Set(foldedFolders.value);
+    mem.delete(`f:${folder}`);
+    mem.delete(`!${folder}`);
+    mem.delete(folder);
+    mem.add(isFolded(folder, hasItems) ? `!${folder}` : `f:${folder}`);
+    foldedFolders.value = mem;
+    localStorage.setItem(FOLD_KEY, JSON.stringify([...mem]));
 }
 
 /** 文件夹顺序：settings.folders 数组顺序即分组顺序，set 全量保存（无新后端通道）。
- *  拖拽（HTML5 dnd）与上移/下移按钮（WCAG 2.2 AA 单指针替代）两套并存，落到同一函数。 */
+ *  拖拽（Pointer 自制）与上移/下移按钮（WCAG 2.2 AA 单指针替代）两套并存，落到同一函数。 */
 const dragFolder = ref('');
 const dragOverFolder = ref('');
 async function persistFolderOrder(folders: GameFolder[]) {
@@ -764,29 +825,85 @@ function moveFolder(folder: string, dir: -1 | 1) {
     [next[idx], next[to]] = [next[to], next[idx]];
     void persistFolderOrder(next);
 }
-function onGroupDragStart(folder: string, event: DragEvent) {
-    dragFolder.value = folder;
-    if (event.dataTransfer) {
-        event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', folder);
+/** 分组拖拽排序：Pointer 事件自制拖拽（用户实测真鼠标拖不动的根因修复）——
+ *  Tauri/wry 的 dragDropEnabled 在 OS 层接管拖放（见 shim.ts：HTML5 拖放事件被整段拦截、
+ *  只转写 tauri://drag-* 文件/文本拖入），页面内 HTML5 dnd（dragstart/dragover/drop）
+ *  在打包壳里从未真正启动过；Chrome 里能测通造成误判。改用 pointerdown/move/up 自制拖拽：
+ *  不进浏览器拖拽管线，壳内外都工作，CDP 合成鼠标可测。
+ *  监听挂 window（pointerdown 不做 setPointerCapture——捕获会把 click 重定向到组头、
+ *  吞掉折叠钮的 click）；过 6px 位移阈值才「起拖」并补 setPointerCapture（此时吞 click
+ *  正是想要的），按下不动仍是普通点击，折叠钮不受影响。上移/下移按钮不作为拖拽把手，
+ *  仍是键盘替代路径。 */
+let armedFolder = ''; // pointerdown 已按下、未过位移阈值
+let armedEl: HTMLElement | null = null;
+let dragPointerId = -1;
+let dragStartX = 0;
+let dragStartY = 0;
+let dragClickGuard = false; // 起拖后为 true：吞掉本次手势的 click
+function releaseGroupDragListeners() {
+    window.removeEventListener('pointermove', onGroupPointerMove);
+    window.removeEventListener('pointerup', onGroupPointerUp);
+    window.removeEventListener('pointercancel', endGroupDrag);
+    window.removeEventListener('blur', endGroupDrag);
+}
+function endGroupDrag() {
+    releaseGroupDragListeners();
+    armedFolder = '';
+    armedEl = null;
+    dragPointerId = -1;
+    dragFolder.value = '';
+    dragOverFolder.value = '';
+}
+function onGroupPointerDown(folder: string, event: PointerEvent) {
+    if (event.button !== 0) return;
+    if ((event.target as Element | null)?.closest('.drawer-move')) return; // 上移/下移按钮不拖
+    armedFolder = folder;
+    armedEl = event.currentTarget as HTMLElement;
+    dragPointerId = event.pointerId;
+    dragStartX = event.clientX;
+    dragStartY = event.clientY;
+    window.addEventListener('pointermove', onGroupPointerMove);
+    window.addEventListener('pointerup', onGroupPointerUp);
+    window.addEventListener('pointercancel', endGroupDrag);
+    window.addEventListener('blur', endGroupDrag);
+}
+function onGroupPointerMove(event: PointerEvent) {
+    if (!armedFolder || event.pointerId !== dragPointerId) return;
+    if (!dragFolder.value) {
+        if (Math.hypot(event.clientX - dragStartX, event.clientY - dragStartY) < 6) return;
+        dragFolder.value = armedFolder; // 过阈值，正式起拖
+        dragClickGuard = true;
+        // 起拖后捕获指针：移出抽屉/窗口也能持续收 move/up；此后 click 重定向到组头，
+        // 正好被 dragClickGuard 吞掉
+        try {
+            armedEl?.setPointerCapture(event.pointerId);
+        } catch {
+            /* 指针已释放等瞬时错误：忽略 */
+        }
     }
+    const hovered = document
+        .elementFromPoint(event.clientX, event.clientY)
+        ?.closest('.drawer-group-head')
+        ?.getAttribute('data-folder');
+    dragOverFolder.value = hovered && hovered !== armedFolder ? hovered : '';
 }
-function onGroupDragOver(folder: string, event: DragEvent) {
-    if (!dragFolder.value || dragFolder.value === folder) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-    dragOverFolder.value = folder;
-}
-function onGroupDrop(folder: string) {
+function onGroupPointerUp(event: PointerEvent) {
+    if (!armedFolder || event.pointerId !== dragPointerId) return;
     const from = dragFolder.value;
-    dragOverFolder.value = '';
-    dragFolder.value = '';
-    if (!from || from === folder) return;
-    reorderFolderTo(from, folder);
+    const to = dragOverFolder.value;
+    const dragged = !!from;
+    endGroupDrag();
+    if (!dragged) return; // 未过阈值 = 普通点击，交给折叠钮
+    dragClickGuard = true; // click 在 pointerup 之后派发，必须继续吞
+    setTimeout(() => (dragClickGuard = false), 0);
+    if (to) reorderFolderTo(from, to);
 }
-function onGroupDragEnd() {
-    dragFolder.value = '';
-    dragOverFolder.value = '';
+/** 起拖手势的 follow-up click 在捕获阶段吞掉，避免松手误触折叠 */
+function onGroupClickCapture(event: MouseEvent) {
+    if (!dragClickGuard) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragClickGuard = false;
 }
 
 /** 抽屉键盘支持（与 AppMenu/SelectMenu 同一套纪律）：↑↓/Home/End 在实例行间移动、Enter 选中、
@@ -1410,6 +1527,7 @@ onUnmounted(() => {
 
                 <div
                     data-ui="HomeView:204c17c101ec"
+                    ref="instanceGridEl"
                     v-if="store.installed.length"
                     class="instance-grid"
                 >
@@ -1678,7 +1796,8 @@ onUnmounted(() => {
                             :class="{ 'drag-over': dragOverFolder === group.folder }"
                         >
                             <!-- 组头：折叠开关（主钮）+ 当前标记 + 上移/下移（WCAG 2.2 AA 拖拽的单指针替代）。
-                                 整头可拖拽重排（HTML5 dnd），顺序落 settings.folders 全量保存。 -->
+                                 整头可拖拽重排（Pointer 自制拖拽，见 script：Tauri dragDropEnabled 拦截
+                                 HTML5 dnd，改 pointer 事件后真鼠标/合成鼠标都能拖），顺序落 settings.folders 全量保存。 -->
                             <div
                                 data-ui="HomeView:4aa05f9d0808"
                                 class="drawer-group-head"
@@ -1686,32 +1805,37 @@ onUnmounted(() => {
                                     'drag-over': dragOverFolder === group.folder,
                                     dragging: dragFolder === group.folder
                                 }"
-                                draggable="true"
+                                :data-folder="group.folder"
                                 :title="
                                     drawerFolderName(group.folder) +
                                     '：拖拽或用上移/下移调整分组顺序（右键管理文件夹）'
                                 "
-                                @dragstart="onGroupDragStart(group.folder, $event)"
-                                @dragover="onGroupDragOver(group.folder, $event)"
-                                @drop.prevent="onGroupDrop(group.folder)"
-                                @dragend="onGroupDragEnd"
+                                @pointerdown="onGroupPointerDown(group.folder, $event)"
+                                @pointermove="onGroupPointerMove"
+                                @pointerup="onGroupPointerUp"
+                                @pointercancel="endGroupDrag"
+                                @click.capture="onGroupClickCapture"
                                 @contextmenu.prevent="showFolderContextMenu(group.folder)"
                             >
                                 <button
                                     class="drawer-fold"
-                                    :aria-expanded="!isFolded(group.folder)"
+                                    :aria-expanded="!isFolded(group.folder, group.items.length > 0)"
                                     :aria-label="
-                                        (isFolded(group.folder) ? '展开 ' : '折叠 ') +
+                                        (isFolded(group.folder, group.items.length > 0)
+                                            ? '展开 '
+                                            : '折叠 ') +
                                         drawerFolderName(group.folder) +
                                         '（' +
                                         group.items.length +
                                         ' 个实例）'
                                     "
-                                    @click.stop="toggleFold(group.folder)"
+                                    @click.stop="
+                                        toggleFold(group.folder, group.items.length > 0)
+                                    "
                                 >
                                     <UiGlyph
                                         class="drawer-fold-chevron"
-                                        :class="{ open: !isFolded(group.folder) }"
+                                        :class="{ open: !isFolded(group.folder, group.items.length > 0) }"
                                         name="chevron-right"
                                         :size="13"
                                     />
@@ -1752,7 +1876,7 @@ onUnmounted(() => {
                                     </button>
                                 </span>
                             </div>
-                            <template v-if="!isFolded(group.folder)">
+                            <template v-if="!isFolded(group.folder, group.items.length > 0)">
                                 <button
                                     data-ui="HomeView:dedcb316a30b"
                                     v-for="version in group.items"
@@ -2089,10 +2213,8 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.recent-grid,
-.instance-grid {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)) !important;
-}
+/* 旧 !important 网格覆盖（auto-fit 190px，会让空轨道塌陷、卡数随内容伸缩）已删除；
+ * 列数唯一来源 = 下方「最近实例收纳」的 .instance-grid auto-fill 规则（响应式统一轮收敛）。 */
 .recent-card {
     min-height: 140px;
     height: auto !important;
@@ -2663,11 +2785,7 @@ onUnmounted(() => {
     width: 15px;
     height: 15px;
 }
-.instance-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 14px;
-}
+/* 旧固定 4 列基础档已并入下方「最近实例收纳」唯一 .instance-grid 规则（响应式统一轮收敛） */
 /* Cards appear together so every action is available at the same time. */
 .instance-card {
     position: relative;
@@ -3072,8 +3190,9 @@ onUnmounted(() => {
     position: fixed;
     inset: 0;
     z-index: var(--z-drawer);
+    /* 性能（用户实测开抽屉卡顿掉帧）：backdrop blur 在 1360+ 大窗是全屏逐帧重采样，
+     * 是滑入动画掉帧的主因——换纯色半透明遮罩，只承担变暗不做模糊 */
     background: var(--mask);
-    backdrop-filter: blur(4px);
 }
 .version-drawer {
     position: fixed;
@@ -3084,9 +3203,9 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     width: min(420px, calc(100vw - 32px));
-    background: color-mix(in srgb, var(--card-solid, var(--card)) 96%, transparent);
-    backdrop-filter: blur(16px) saturate(85%);
-    -webkit-backdrop-filter: blur(16px) saturate(85%);
+    /* 性能（用户实测）：420px 全高玻璃面板的 backdrop-filter 逐帧重采样，滑入期间 GPU 占满；
+     * 改实底卡面色（不透明），玻璃质感让位流畅度 */
+    background: var(--card-solid, var(--card));
     border-left: 1px solid var(--border);
     box-shadow: var(--shadow-lg);
     outline: none;
@@ -3107,24 +3226,34 @@ onUnmounted(() => {
     overscroll-behavior: contain;
     padding: var(--space-2) var(--space-2) var(--space-3);
 }
+.drawer-group {
+    /* 性能（用户实测）：视口外的分组整组跳过渲染/布局，长列表滚动与展开更跟手；
+     * contain-intrinsic-size 用估算组高占位，auto 记住上次实测高度防滚动条跳动 */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 320px;
+}
 .drawer-group + .drawer-group {
-    margin-top: var(--space-2);
-    padding-top: var(--space-2);
+    /* 组间间距收紧一档（用户实测「显示的太少」配套）：8px→5px，组头行高 34→30 */
+    margin-top: 5px;
+    padding-top: 5px;
     border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
 }
 /* 组头：折叠主钮（chevron 旋转指示）+ 当前标记 + 上移/下移（WCAG 单指针替代）；
- * 整头 draggable（HTML5 dnd），drop 落 settings.folders 全量保存，两套排序并存 */
+ * 整头 Pointer 自制拖拽重排（Tauri dragDropEnabled 拦截 HTML5 dnd，见 script 注释），
+ * 顺序落 settings.folders 全量保存，两套排序并存 */
 .drawer-group-head {
     display: flex;
     align-items: center;
     gap: 8px;
     width: 100%;
-    min-height: 34px;
-    margin-bottom: 4px;
+    min-height: 30px;
+    margin-bottom: 3px;
     padding: 2px 4px 2px 2px;
     border-radius: var(--radius-sm);
     background: transparent;
     cursor: grab;
+    /* 触屏/笔：手势归拖拽（位移阈值 6px 起拖），滚动从实例列表区发起 */
+    touch-action: none;
 }
 .drawer-group-head:active {
     cursor: grabbing;
@@ -3541,8 +3670,13 @@ onUnmounted(() => {
 .runtime-item {
     padding: 10px 12px;
 }
-/* 最近实例收纳：auto-fill 网格按容器宽度自适应列数；flex:1 + align-content 把区块内
- * 剩余高度均匀分给行间（用户实测修正：一屏化后底部不再留大空洞，任意卡数都撑满区块） */
+/* 最近实例收纳（响应式统一轮：列数唯一来源）：auto-fill 网格按容器宽度自适应列数——
+ * minmax 240px 一箭双雕（用户拍板「一行放 3 个就够了」）：dashboard 上限 1160px 时
+ * 网格最宽 830px，240px 起步天然封顶 3 列（842/252=3.3），1360/1390/1600 视口都是
+ * 3 列宽卡（约 250~270px，实例名不再截断）；960 视口网格 384px 收成 1 列整宽卡。
+ * 必须 auto-fill 而非 auto-fit：空轨道不塌陷——实例少于 列×行 格子时尾部留白对齐，
+ * 而不是把剩余卡拉伸变形；卡数 = 列×行 由 JS 读解析轨道数后填满（见 script 顶部分档注释）。
+ * flex:1 + align-content 把区块内剩余高度均匀分给行间（一屏化后底部不留大空洞）。 */
 .instances-block {
     flex: 1;
     display: flex;
@@ -3744,9 +3878,18 @@ onUnmounted(() => {
     flex: none;
     min-height: 0;
 }
+/* 右栏密度随视口高连续缩放（响应式统一轮，无新断点）：900~1010h 区间基础档
+ * 右栏四卡 899px 会超出内容预算（1000h 实测 878px，恰好差 ~20px 顶出滚动）——
+ * 皮肤舞台与热力格子改 vh 钳制后 1000h 右栏 ~788px 零滚动；四卡组成不变，
+ * ≤900h 由文末一屏化档接管更紧的钳制值（此处规则在后、同特异性的媒体档覆盖之）。
+ * 组成恒定 = 账号/皮肤/创作者/启动打卡四卡在任何 ≥700h 视口都完整在栏。 */
 .home-side .skin-stage {
-    height: 230px;
+    height: clamp(120px, 15vh, 230px);
     min-height: 0;
+}
+.home-side .home-heatmap :deep(.heatmap-cell) {
+    height: clamp(6px, 0.85vh, 13px);
+    aspect-ratio: auto;
 }
 .skin-panel .skin-tip {
     margin-bottom: 0;
@@ -3871,16 +4014,19 @@ onUnmounted(() => {
     color: var(--text);
 }
 
-/* ---------------- 首页一屏化（2026-11-14 用户拍板）----------------
- * 1360×860 与 960×620 零滚动（desktop 分支；Android 台有自己的一屏布局不受限）。
- * 手段：hero 高度分档 + 实例网格 auto-fill 收纳 + 低频板块（创作者/热力图）矮视口不渲染。
- * 视口预算：chrome(顶栏+logo 160) + content padding(48/32) 之后，860h≈652px、620h≈428px。 */
+/* ---------------- 首页一屏化（2026-11-14 用户拍板；响应式统一轮修订）----------------
+ * 1360×860 / 1390×860 / 1600×860 与 960×620 零滚动（desktop 分支；Android 台有自己的布局不受限）。
+ * 内容组成不随窗口尺寸跳变：右栏四卡只有 <700h 一个降级断点（本档 900h 只收紧密度）；
+ * 最近游戏卡数 = 列数(grid auto-fill) × 行数(≥800h 两行 / <800h 一行)，与 JS 分档一一对应。
+ * 视口预算：顶栏 ~74px + content padding(48/32) 之后，860h≈738px、620h≈514px。 */
 @media (max-height: 900px) {
     .home-dashboard {
         min-height: 0;
     }
     .hero-card {
-        height: 330px;
+        /* 用户追加实测：330h 还太高——降到 300 给右栏四卡完整内容让预算
+         * （准绳 = 右栏创作者正文不截断；实测 860h 右栏 ~699px ≤ 预算 738px） */
+        height: 300px;
         max-height: none;
         min-height: 0;
     }
@@ -3905,15 +4051,36 @@ onUnmounted(() => {
     .home-dashboard .instance-card .instance-last {
         display: none;
     }
+    /* 右栏四卡常驻（响应式统一轮，用户拍板：账号/皮肤/创作者/启动打卡不随窗口尺寸消失，
+     * 旧「900h 藏热力图」规则废除）。本档只做密度收紧、不做删卡、不截内容：
+     * 皮肤舞台与热力格子按 vh 连续缩放、账号卡去 min-height，创作者正文保持完整——
+     * 实测 860h 内容预算 738px 下右栏约 699px，四卡齐住且有余量；<700h 才整卡降级（见 700h 档）。 */
     .home-side {
-        gap: 12px;
+        gap: 10px;
+    }
+    .account-panel {
+        min-height: 0;
+        padding: 14px;
+    }
+    .home-side .skin-panel {
+        padding: 12px;
     }
     .home-side .skin-stage {
-        height: 220px;
+        height: clamp(96px, 14.5vh, 170px);
+        min-height: 0;
     }
-    /* 低频板块收纳：启动热力图让位（创作者卡保留，填充右栏避免下段空虚） */
-    .home-heatmap {
-        display: none;
+    .home-side .home-creator {
+        padding: 12px 14px;
+    }
+    /* 创作者正文不钳行数（用户追加实测：截断不可接受，四卡内容完整优先）——
+     * 预算缺口由 hero 330→300 与本档其余密度收紧找补 */
+    .home-side .home-heatmap {
+        padding: 12px;
+    }
+    /* 热力格子由 aspect-ratio 方格改为随视口高的扁格（0.85vh ≈ 6~9px），16 周 × 7 行随视口收缩 */
+    .home-side .home-heatmap :deep(.heatmap-cell) {
+        height: clamp(6px, 0.85vh, 9px);
+        aspect-ratio: auto;
     }
 }
 @media (max-height: 700px) {
@@ -4016,7 +4183,8 @@ onUnmounted(() => {
     .home-side {
         gap: 10px;
     }
-    /* 矮视口右栏只留 账号+皮肤 两张高频卡（900h 档保留的创作者卡在此让位） */
+    /* 右栏唯一降级断点（响应式统一轮，用户拍板）：视口高 <700px 才藏 创作者+启动打卡
+     * 两张低频卡，只留 账号+皮肤；700h 以上四卡常驻（900h 档只收紧密度，不删卡） */
     .home-creator,
     .home-heatmap {
         display: none;
