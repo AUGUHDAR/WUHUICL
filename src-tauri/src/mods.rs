@@ -1694,88 +1694,225 @@ fn resolve_instance_meta(app: &tauri::AppHandle, folder: &str, id: &str) -> Resu
 
 // ---------------- modUpdates.ts ----------------
 
-/// mapUpdateEntries()：同 sha1 = 已最新；无响应 = 未匹配来源；有响应且文件不同 = 可更新
-fn map_update_entries(entries: &mut [Value], by_hash: &Value) {
-    for entry in entries.iter_mut() {
-        let sha1 = entry.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let version = by_hash.get(&sha1).cloned().unwrap_or(Value::Null);
-        if version.is_null() {
-            continue;
-        }
-        // hash 被 Modrinth 识别即标记来源；无可用文件时不产生更新项
-        entry["source"] = json!("modrinth");
-        let files = version.get("files").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-        if files.is_empty() {
-            continue;
-        }
-        let file = files.iter().find(|f| f.get("primary").and_then(|v| v.as_bool()).unwrap_or(false)).unwrap_or(&files[0]);
-        let url = file.get("url").and_then(|v| v.as_str()).unwrap_or("");
-        let filename = file.get("filename").and_then(|v| v.as_str()).unwrap_or("");
-        if url.is_empty() || filename.is_empty() {
-            continue;
-        }
-        let new_sha1 = file.pointer("/hashes/sha1").and_then(|v| v.as_str()).map(str::to_string);
-        if new_sha1.as_deref() == Some(sha1.as_str()) {
-            entry["alreadyLatest"] = json!(true);
-            continue;
-        }
-        entry["update"] = json!({
-            "projectId": version.get("project_id").and_then(|v| v.as_str()).unwrap_or(""),
-            "versionId": version.get("id").and_then(|v| v.as_str()).unwrap_or(""),
-            "versionNumber": version.get("version_number").and_then(|v| v.as_str()).unwrap_or(""),
-            "fileName": filename,
-            "url": url,
-            "sha1": new_sha1,
-            "size": file.get("size").and_then(|v| v.as_u64()),
-        });
+/// 更新检测结果的有效期：PCL 对同一「hash + MC 版本 + 加载器」的在线信息缓存 6 小时。
+/// 静默检测因此可以每次进页面就跑，而不必每次都等两个 POST 往返。
+const UPDATE_CACHE_TTL_MS: u64 = 6 * 60 * 60 * 1000;
+/// 缓存里超过这个时间的条目直接丢弃（换了整合包/长期不开的实例不该永久占位）
+const UPDATE_CACHE_KEEP_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+const UPDATE_CACHE_FILE: &str = "mod-updates-v1.json";
+
+fn update_cache_path(app: &tauri::AppHandle) -> PathBuf {
+    crate::settings::user_data_dir(app).join("cache").join(UPDATE_CACHE_FILE)
+}
+
+/// 反查的完整口径：同一个 jar hash 在不同 MC 版本/加载器下答案不同，必须一起做键。
+fn update_cache_key(sha1: &str, mc: &str, loader: &str) -> String {
+    format!("{sha1}|{mc}|{loader}")
+}
+
+fn update_cache_read(app: &tauri::AppHandle) -> HashMap<String, Value> {
+    let Ok(raw) = std::fs::read(update_cache_path(app)) else {
+        return HashMap::new();
+    };
+    let Ok(value) = serde_json::from_slice::<Value>(&raw) else {
+        return HashMap::new();
+    };
+    value
+        .get("entries")
+        .and_then(|v| v.as_object())
+        .map(|map| map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default()
+}
+
+fn update_cache_write(app: &tauri::AppHandle, cache: &HashMap<String, Value>) {
+    let path = update_cache_path(app);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let cutoff = now_ms().saturating_sub(UPDATE_CACHE_KEEP_MS);
+    let entries: serde_json::Map<String, Value> = cache
+        .iter()
+        .filter(|(_, v)| v.get("at").and_then(|a| a.as_u64()).unwrap_or(0) >= cutoff)
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let payload = json!({ "version": 1, "entries": entries });
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, payload.to_string()).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
     }
 }
 
-/// checkModUpdates()：按 jar sha1 在 Modrinth version_files 批量反查
-pub fn check_mod_updates(app: &tauri::AppHandle, dir: &Path, folder: &str, version_id: &str) -> Result<Value, String> {
-    let scanned = scan_managed_mod_directory(&dir.to_string_lossy(), "analysis")?;
+/// 用一条 cache 记录填一个 entry：
+/// - `version` 为 null → 该 hash 未被 Modrinth 识别 = 未匹配来源
+/// - `latest` 为 null / 无可用文件 / 与本地 sha1 相同 → 已最新
+/// - 否则产生更新项
+fn fill_update_entry(entry: &mut Value, version: &Value, latest: &Value, sha1: &str) {
+    if version.is_null() {
+        return;
+    }
+    let project = version.get("project_id").and_then(|v| v.as_str()).unwrap_or("");
+    // hash 被 Modrinth 识别即标记来源（无论是否有新版），「未匹配来源」只看这一步
+    entry["source"] = json!("modrinth");
+    entry["projectId"] = json!(project);
+    if !project.is_empty() {
+        entry["changelogUrl"] = json!(format!("https://modrinth.com/mod/{project}/changelog"));
+    }
+    // 本地 jar 里的 version 字段常是内部编号；缺失时用 Modrinth 的版本号补上
+    if entry.get("currentVersion").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+        if let Some(v) = version.get("version_number").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+            entry["currentVersion"] = json!(v);
+        }
+    }
+    if latest.is_null() {
+        entry["alreadyLatest"] = json!(true);
+        return;
+    }
+    let files = latest.get("files").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let Some(file) = files.iter().find(|f| f.get("primary").and_then(|v| v.as_bool()).unwrap_or(false)).or_else(|| files.first()) else {
+        entry["alreadyLatest"] = json!(true);
+        return;
+    };
+    let url = file.get("url").and_then(|v| v.as_str()).unwrap_or("");
+    let filename = file.get("filename").and_then(|v| v.as_str()).unwrap_or("");
+    if url.is_empty() || filename.is_empty() {
+        entry["alreadyLatest"] = json!(true);
+        return;
+    }
+    let new_sha1 = file.pointer("/hashes/sha1").and_then(|v| v.as_str()).map(str::to_string);
+    if new_sha1.as_deref() == Some(sha1) {
+        entry["alreadyLatest"] = json!(true);
+        return;
+    }
+    entry["update"] = json!({
+        "projectId": project,
+        "versionId": latest.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+        "versionNumber": latest.get("version_number").and_then(|v| v.as_str()).unwrap_or(""),
+        "fileName": filename,
+        "url": url,
+        "sha1": new_sha1,
+        "size": file.get("size").and_then(|v| v.as_u64()),
+    });
+}
+
+/// checkModUpdates()：静默检测。两步口径与 PCL 一致——
+/// 1. `/version_files`：这批 hash 是不是 Modrinth 上的文件（建立来源身份）
+/// 2. `/version_files/update`：在本实例的 MC 版本 + 加载器约束下，最新的兼容文件是哪个
+///
+/// 结果按 `hash|MC|加载器` 缓存 6 小时，所以进页面就能直接出数；`force=true` 时跳过缓存。
+/// 网络失败不再让整页变红：返回已有缓存 + 一条 `error` 文案，界面静默处理。
+pub fn check_mod_updates(
+    app: &tauri::AppHandle,
+    dir: &Path,
+    folder: &str,
+    version_id: &str,
+    force: bool,
+) -> Result<Value, String> {
+    let dir_str = dir.to_string_lossy().into_owned();
+    // 只要 hash/名称/版本，不要图标：走 catalog 口径才能命中指纹缓存，不然每次都把整包 jar 读一遍
+    let scanned = scan_managed_mod_directory_cached(app, &dir_str, "catalog")?;
     let (mc, loader, _lv) = resolve_instance_meta(app, folder, version_id)?;
-    let mut report = json!({ "mcVersion": mc, "loader": loader.unwrap_or(""), "entries": [] });
+    let loader = loader.unwrap_or("");
+    let mut report = json!({ "mcVersion": mc, "loader": loader, "entries": [], "stale": false });
     if scanned.is_empty() {
         return Ok(report);
     }
-    if mc.is_empty() || loader.is_none() {
-        return Err("实例缺少加载器或 Minecraft 版本元数据，无法检测更新".into());
-    }
-    let hashes: Vec<String> = scanned
+    // 加载器/版本缺失不再是硬错误：Modrinth 的过滤器都是可选的，退化成「不带该约束」查询
+    let usable: Vec<&Value> = scanned
         .iter()
         .filter(|i| i.get("error").is_none() && i.get("sha1").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false))
-        .map(|i| i.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string())
         .collect();
-    let mut entries: Vec<Value> = scanned
+    if usable.is_empty() {
+        return Ok(report);
+    }
+    let mut entries: Vec<Value> = usable
         .iter()
-        .filter(|i| i.get("error").is_none() && i.get("sha1").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false))
         .map(|i| {
             json!({
                 "fileName": i.get("fileName").cloned().unwrap_or(json!("")),
                 "name": i.get("name").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).or_else(|| i.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())).unwrap_or_else(|| i.get("fileName").and_then(|v| v.as_str()).unwrap_or("")),
                 "modId": i.get("id").and_then(|v| v.as_str()).unwrap_or(""),
                 "currentVersion": i.get("version").and_then(|v| v.as_str()).unwrap_or(""),
-                "sha1": i.get("sha1").cloned().unwrap_or(json!("")),
+                "sha1": i.get("sha1").and_then(|v| v.as_str()).unwrap_or(""),
                 "source": Value::Null,
+                "projectId": Value::Null,
+                "changelogUrl": Value::Null,
                 "alreadyLatest": false,
                 "update": Value::Null,
             })
         })
         .collect();
-    let body = json!({
-        "hashes": hashes,
-        "algorithm": "sha1",
-        "loaders": [loader.unwrap_or("")],
-        "game_versions": [mc],
-    });
-    let by_hash = mr_post(app, "/version_files/update", &body, UA_UPDATES, 15_000)?;
-    map_update_entries(&mut entries, &by_hash);
-    for e in &entries {
-        if let Some(project) = e.pointer("/update/projectId").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
-            let sha1 = e.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
-            remember_mod_identity(app, dir, sha1, &format!("modrinth:{project}"));
+
+    let mut cache = update_cache_read(app);
+    let now = now_ms();
+    // 只有缓存缺失/过期（或强制）的 hash 才需要联网
+    let mut pending: Vec<String> = Vec::new();
+    for entry in &entries {
+        let sha1 = entry.get("sha1").and_then(|v| v.as_str()).unwrap_or("");
+        let key = update_cache_key(sha1, &mc, loader);
+        let fresh = cache
+            .get(&key)
+            .and_then(|v| v.get("at").and_then(|a| a.as_u64()))
+            .map(|at| now.saturating_sub(at) < UPDATE_CACHE_TTL_MS)
+            .unwrap_or(false);
+        if force || !fresh {
+            pending.push(sha1.to_string());
         }
+    }
+    if !pending.is_empty() {
+        let mut error = String::new();
+        match mr_post(app, "/version_files", &json!({ "hashes": pending, "algorithm": "sha1" }), UA_MGMT, 20_000) {
+            Ok(source) => {
+                let mut body = json!({ "hashes": pending, "algorithm": "sha1" });
+                if !loader.is_empty() {
+                    body["loaders"] = json!([loader]);
+                }
+                if !mc.is_empty() {
+                    body["game_versions"] = json!([mc]);
+                }
+                match mr_post(app, "/version_files/update", &body, UA_UPDATES, 15_000) {
+                    Ok(latest) => {
+                        for sha1 in &pending {
+                            let key = update_cache_key(sha1, &mc, loader);
+                            cache.insert(
+                                key,
+                                json!({
+                                    "at": now,
+                                    "version": source.get(sha1).cloned().unwrap_or(Value::Null),
+                                    "latest": latest.get(sha1).cloned().unwrap_or(Value::Null),
+                                }),
+                            );
+                        }
+                        update_cache_write(app, &cache);
+                    }
+                    Err(e) => error = e,
+                }
+            }
+            Err(e) => error = e,
+        }
+        if !error.is_empty() {
+            // 有旧缓存就用旧的（静默降级），没有就让这些 hash 保持「未匹配」并附一条说明
+            report["stale"] = json!(true);
+            report["error"] = json!(error);
+        }
+    }
+
+    for entry in entries.iter_mut() {
+        let sha1 = entry.get("sha1").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let key = update_cache_key(&sha1, &mc, loader);
+        let Some(rec) = cache.get(&key) else { continue };
+        let version = rec.get("version").cloned().unwrap_or(Value::Null);
+        let latest = rec.get("latest").cloned().unwrap_or(Value::Null);
+        fill_update_entry(entry, &version, &latest, &sha1);
+    }
+    // 识别到来源的模组记下 modrinth:<project>，供「切换版本」等按身份定位的功能使用
+    for e in &entries {
+        let (Some(project), Some(sha1)) = (
+            e.get("projectId").and_then(|v| v.as_str()).filter(|s| !s.is_empty()),
+            e.get("sha1").and_then(|v| v.as_str()).filter(|s| !s.is_empty()),
+        ) else {
+            continue;
+        };
+        remember_mod_identity(app, dir, sha1, &format!("modrinth:{project}"));
     }
     report["entries"] = json!(entries);
     Ok(report)
@@ -5295,7 +5432,9 @@ pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<R
             let version_id = arg_str(args, 0).unwrap_or("").to_string();
             let folder = with_game_folder_of(app, &version_id, arg_str(args, 1));
             let dir = resolve_resource_directory(app, &folder, &version_id, "mods")?;
-            check_mod_updates(app, &dir, &folder, &version_id)
+            // 第三参 force：true = 用户点「重新检测」，跳过 6 小时缓存
+            let force = arg(args, 2).and_then(|v| v.as_bool()).unwrap_or(false);
+            check_mod_updates(app, &dir, &folder, &version_id, force)
         })),
         "mods:applyUpdates" => Some(installer::run_blocking(|| {
             let version_id = arg_str(args, 0).unwrap_or("").to_string();

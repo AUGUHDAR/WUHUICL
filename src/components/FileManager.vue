@@ -40,15 +40,16 @@ import type { AggregatedFs } from '../api';
 import ConfirmModal from './ConfirmModal.vue';
 import DupCleanModal from './DupCleanModal.vue';
 import SelectMenu from './SelectMenu.vue';
-import TabPills from './TabPills.vue';
+import TabPills, { type TabPillItem } from './TabPills.vue';
 import ResourceScopeFields from './ResourceScopeFields.vue';
 import ResourcePathChip from './ResourcePathChip.vue';
 import ResourcePagination from './ResourcePagination.vue';
 import { useSweepSelect } from '../composables/sweepSelect';
 import type { FsEntry, ModUpdateEntry, ModUpdateReport } from '@shared/types';
 
-/** 聚合视图里的每一行：FsEntry 携带 instanceId/instanceName/directory；「更新」分类行额外带更新信息 */
-type Row = FsEntry & { instanceId?: string; instanceName?: string; updateInfo?: ModUpdateEntry };
+/** 聚合视图里的每一行：FsEntry 携带 instanceId/instanceName/directory。
+ *  更新信息不再挂到行上——检测结果按文件名索引在 `updateOf(row)` 里查（同一行在任何分类下都一致）。 */
+type Row = FsEntry & { instanceId?: string; instanceName?: string };
 
 /** 行身份键：聚合视图里同名文件可能属于不同实例，必须带上实例区分 */
 const rowKey = (e: Row) => (e.instanceId ? e.instanceId + '/' + e.name : e.name);
@@ -291,7 +292,6 @@ watch(
 /** 清理重复 MOD 弹窗 */
 const dupOpen = ref(false);
 const migrationOpen = ref(false);
-const updateIcons = ref<Record<string, string>>({});
 
 /** 中间省略的路径：versions/neo…2.0.75/mods */
 const fullPath = computed(() => resolvedPath.value);
@@ -356,6 +356,8 @@ const filtered = computed(() => {
                     .includes(keyword.value)) &&
             (props.rel !== 'mods' ||
                 modFilter.value === 'all' ||
+                // updates 放行全部行，可更新条件由 displayEntries 叠一层（见上）
+                modFilter.value === 'updates' ||
                 (modFilter.value === 'enabled' && /\.jar$/i.test(e.name)) ||
                 (modFilter.value === 'disabled' && /\.jar\.disabled$/i.test(e.name)))
     );
@@ -426,10 +428,11 @@ function selectAll(all = false) {
     selection.value = s;
 }
 /** 「更新」分类批量条：勾选即所选，更新操作只作用于其中可更新且未锁定的文件 */
+/** 选中项里可更新的数量（PCL 底栏「更新」按钮的可用性判定）：任何分类下选中都算 */
 const selectedUpdatableCount = computed(
     () =>
-        displayEntries.value.filter(
-            (e) => e.updateInfo && selection.value.has(rowKey(e)) && !catalogOf(e)?.locked
+        entries.value.filter(
+            (e) => updateOf(e)?.update && selection.value.has(rowKey(e)) && !catalogOf(e)?.locked
         ).length
 );
 /** 批量启停/锁定：从选择键还原出行，再按目录分组逐目录调用（聚合视图不能整页传一个实例） */
@@ -526,19 +529,33 @@ watch([localSearch, modFilter, sortBy], () => (page.value = 1));
 watch(modFilter, (v) => localStorage.setItem('kamucl.' + props.rel + '.modFilter', v));
 watch(sortBy, (v) => localStorage.setItem('kamucl.' + props.rel + '.sort', v));
 
-// ---------------- MOD 更新检测状态（仅模组页；按 sha1 反查 Modrinth） ----------------
-// 「更新」分类与 全部/已启用/已禁用 完全同构：同一套行渲染、同样吃搜索/排序/批量/扫选，
-// 检测结果只作为列表的一个过滤面，不再有独立面板。
+// ---------------- MOD 更新检测（PCL 口径：静默后台检测 + 行内箭头） ----------------
+// 与 PCL 的等价关系：
+//   1. 进模组页就开始查，不等用户点任何「更新」入口（PCL 的 LocalResourceOnlineLoader）；
+//   2. 结果按行合并进普通列表——可更新行在名字后面挂一个下载箭头，其余行完全不动；
+//   3. 「可更新」只是顶部一颗筛选药丸，**可更新数为 0 时整颗药丸不渲染**
+//      （PCL：BtnFilterCanUpdate.Visibility = Filter = CanUpdate OrElse UpdateCount > 0）；
+//   4. 没有「更新」专属页面、没有独立列表、没有整页加载态——检测期间照常浏览文件。
 const updatePanel = reactive({
     checking: false,
+    /** 只在「用户主动重新检测」失败时置位；静默失败走 note，不打断浏览 */
     error: '',
+    /** 静默降级提示（联网失败但还有缓存可用） */
+    note: '',
     report: null as ModUpdateReport | null,
     applying: false,
     itemState: {} as Record<string, 'start' | 'ok' | 'error' | undefined>,
     itemError: {} as Record<string, string>
 });
-const updatesTab = computed(() => props.rel === 'mods' && modFilter.value === 'updates');
-const updatableEntries = computed(() => updatePanel.report?.entries.filter((e) => e.update) ?? []);
+/** 检测结果按文件名索引：行渲染直接查表，不再另建一份列表 */
+const updateByFile = computed(() => {
+    const map = new Map<string, ModUpdateEntry>();
+    for (const e of updatePanel.report?.entries ?? []) map.set(e.fileName, e);
+    return map;
+});
+/** 当前实例里可更新的模组数（顶部药丸角标 & 药丸显隐的唯一依据） */
+const updatableCount = computed(() => updatePanel.report?.entries.filter((e) => e.update).length ?? 0);
+const updateOf = (e: Row): ModUpdateEntry | undefined => updateByFile.value.get(e.name);
 const unmatchedCount = computed(
     () => updatePanel.report?.entries.filter((e) => !e.source).length ?? 0
 );
@@ -547,42 +564,12 @@ const latestCount = computed(
         updatePanel.report?.entries.filter((e) => e.alreadyLatest || (e.source && !e.update))
             .length ?? 0
 );
-
-/** 「更新」分类的行来源：检测结果（可更新项）并回联本地文件的大小/时间 */
-const updateRows = computed<Row[]>(() => {
-    const report = updatePanel.report;
-    if (!report) return [];
-    const byName = new Map(entries.value.map((e) => [e.name, e] as const));
-    return report.entries
-        .filter((e) => e.update)
-        .map((e) => {
-            const base = byName.get(e.fileName);
-            return base
-                ? { ...base, updateInfo: e }
-                : {
-                      name: e.fileName,
-                      isDir: false,
-                      size: e.update?.size ?? 0,
-                      mtime: 0,
-                      directory: '',
-                      updateInfo: e
-                  };
-        });
-});
-/** 统一展示行：其余分类走 filtered，「更新」分类同样吃搜索与排序 */
+/** 「可更新」筛选是否生效（PCL 的 FilterType.CanUpdate） */
+const updatesTab = computed(() => props.rel === 'mods' && modFilter.value === 'updates');
+/** 统一展示行：可更新筛选只是 filtered 之外的一层叠加，行本身还是原始文件行 */
 const displayEntries = computed<Row[]>(() => {
     if (!updatesTab.value) return filtered.value;
-    const kw = keyword.value;
-    const rows = updateRows.value.filter(
-        (e) => !kw || (e.name + ' ' + (e.updateInfo?.name || '')).toLowerCase().includes(kw)
-    );
-    return rows.sort((a, b) =>
-        sortBy.value === 'date'
-            ? b.mtime - a.mtime
-            : sortBy.value === 'size'
-              ? b.size - a.size
-              : a.name.localeCompare(b.name, 'zh-CN', { numeric: true })
-    );
+    return filtered.value.filter((e) => !!updateOf(e)?.update);
 });
 const pageCount = computed(() => Math.max(1, Math.ceil(displayEntries.value.length / PAGE_SIZE)));
 const visibleEntries = computed(() =>
@@ -766,77 +753,116 @@ const fmtDate = (ts: number) => {
     return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('zh-CN');
 };
 
-/** PCL 口径四分类 tab（TabPills 共享药丸）；「更新」类数量只有在已有检测报告时才显示（count = -1 表示不渲染角标） */
+/** PCL 口径四分类 tab（TabPills 共享药丸）。
+ *  「可更新」这颗只在真有更新时才出现，且完全隐藏——不是置灰、不是 0（PCL 同款判定）。 */
 const jarCount = computed(
     () => entries.value.filter((e) => !e.isDir && /\.jar$/i.test(e.name)).length
 );
 const disabledCount = computed(() => entries.value.filter(isDisabledMod).length);
-const modTabs = computed(() => [
-    { value: 'all', label: '全部', count: jarCount.value + disabledCount.value },
-    { value: 'enabled', label: '已启用', count: jarCount.value },
-    { value: 'disabled', label: '已禁用', count: disabledCount.value },
-    {
-        value: 'updates',
-        label: '更新',
-        count: updatePanel.report ? updatableEntries.value.length : -1,
-        disabled: scope.value === 'folder',
-        disabledReason: '更新检测只针对当前实例，请先切回「当前实例」'
-    }
-]);
+const modTabs = computed(() => {
+    // PCL 的排列：全部 → 可更新 → 启用 → 禁用（可更新紧跟「全部」，因为它是最常点的第二颗）
+    const tabs: TabPillItem[] = [{ value: 'all', label: '全部', count: jarCount.value + disabledCount.value }];
+    // 正在筛选时可更新项暂时为 0（例如刚更新完清零）也要留着这颗，否则用户会被困住
+    if (updatableCount.value > 0 || (updatesTab.value && !updatePanel.checking))
+        tabs.push({
+            value: 'updates',
+            label: '可更新',
+            count: updatableCount.value,
+            disabled: scope.value === 'folder',
+            disabledReason: '更新检测只针对当前实例，请先切回「当前实例」'
+        });
+    tabs.push(
+        { value: 'enabled', label: '已启用', count: jarCount.value },
+        { value: 'disabled', label: '已禁用', count: disabledCount.value }
+    );
+    return tabs;
+});
 function setTab(v: string) {
     modFilter.value = v;
 }
-function maybeAutoCheck() {
-    if (!updatesTab.value || updatePanel.report || updatePanel.checking || updatePanel.applying)
-        return;
-    if (scope.value === 'folder' || !currentVersion.value) return;
-    void onCheckUpdates();
-}
-watch(updatesTab, (v) => {
-    if (v) maybeAutoCheck();
-});
-watch([effectiveRel, activeFolder, scope], () => {
-    if (updatesTab.value) maybeAutoCheck();
-});
 
-async function onCheckUpdates() {
+/** 静默检测：进页面就跑，不挡列表、不显示加载占位。PCL 的 LocalResourceOnlineLoader 等价物。 */
+let checkedFor = '';
+/** 检测自己的操作号。**不能复用 loadGeneration**：文件列表每次 load() 都会推进代数，
+ *  两者交错时 finally 里的守卫会把 checking 永久钉在 true，页面就一直显示「正在检查」。 */
+let updateOperationId = 0;
+async function silentCheck(reason: 'enter' | 'manual' = 'enter') {
     const v = currentVersion.value;
-    if (!v || updatePanel.checking || updatePanel.applying) return;
-    if (scope.value === 'folder') return;
+    if (props.rel !== 'mods' || !v || updatePanel.applying) return;
+    // 聚合视图没有「当前实例」这一说，检测对象不唯一：清掉标记，切回来时重新查一次
+    if (scope.value === 'folder') {
+        checkedFor = '';
+        return;
+    }
+    const key = v.id + '|' + (v.folder || activeFolder.value);
+    if (reason === 'enter' && (updatePanel.checking || checkedFor === key)) return;
+    checkedFor = key;
+    const ticket = ++updateOperationId;
     updatePanel.checking = true;
     updatePanel.error = '';
-    updatePanel.report = null;
-    updatePanel.itemState = {};
-    updatePanel.itemError = {};
-    const generation = loadGeneration;
+    updatePanel.note = '';
     try {
-        const report = await checkModUpdates(v.id, v.folder);
-        if (generation !== loadGeneration) return;
+        // manual = 用户点「重新检测」，强制跳过 6 小时缓存
+        const report = await checkModUpdates(v.id, v.folder, reason === 'manual');
+        // 已被更新的请求取代（切了实例/又点了一次）：只让最新那次写结果
+        if (ticket !== updateOperationId) return;
         updatePanel.report = report;
-        updateIcons.value = {};
-        const names = report.entries.filter((e) => e.update).map((e) => e.fileName);
-        for (let i = 0; i < names.length; i += 100)
-            void getModIcons(v.id, names.slice(i, i + 100), v.folder || activeFolder.value)
-                .then((icons) => {
-                    if (generation === loadGeneration)
-                        updateIcons.value = { ...updateIcons.value, ...icons };
-                })
-                .catch(() => {});
+        // 静默降级：联网失败但后端回退了缓存，只留一句提示，列表照常用
+        updatePanel.note = report.error
+            ? `更新信息暂未刷新（${report.error}），显示的是上次的结果`
+            : '';
+        updatePanel.error =
+            report.error && !report.entries.some((e) => e.source) ? report.error : '';
+        // 行图标由 modIcons 那一套负责（行本来就是正常扫描出来的文件行），这里不再另取一份
     } catch (e) {
-        if (generation === loadGeneration) updatePanel.error = errText(e);
+        // 静默检测失败不弹错误条：用户没请求，不该被红字打断
+        if (ticket === updateOperationId && reason === 'manual') updatePanel.error = errText(e);
     } finally {
-        if (generation === loadGeneration) updatePanel.checking = false;
+        // 无条件收尾：检查状态属于这个面板，不该被列表加载代数牵连
+        if (ticket === updateOperationId) updatePanel.checking = false;
     }
 }
+const onCheckUpdates = () => silentCheck('manual');
+
+// 进页面 / 切实例 / 切回「当前实例」都重新对一次（后端有 6 小时缓存，重复调用几乎无成本）
+watch(
+    [effectiveRel, activeFolder, scope, () => currentVersion.value?.id],
+    () => {
+        if (props.rel !== 'mods' || scope.value === 'folder') {
+            updatePanel.report = null;
+            checkedFor = '';
+            return;
+        }
+        updatePanel.itemState = {};
+        updatePanel.itemError = {};
+        void silentCheck('enter');
+    },
+    { immediate: true }
+);
+// 「可更新」筛选只在有东西可更新时存在；数量归零就自动退回「全部」，避免卡在一个不存在的分类里
+watch(updatableCount, (n) => {
+    if (n === 0 && updatesTab.value && !updatePanel.checking) setTab('all');
+});
+// 文件变动（导入/删除/更新成功）后结论就旧了：清掉缓存标记，重新查一遍
+watch(
+    () => store.fsRefreshTick,
+    () => {
+        if (props.rel !== 'mods' || scope.value === 'folder') return;
+        checkedFor = '';
+        void silentCheck('enter');
+    }
+);
 
 async function applyUpdates(fileNames: string[]) {
     const v = currentVersion.value;
     const report = updatePanel.report;
     if (!v || !report || updatePanel.applying) return;
+    // 锁定状态按行的实际键查（聚合视图是 instanceId/文件名，直接按 fileName 查会漏掉）
+    const lockedNames = new Set(
+        entries.value.filter((e) => catalogOf(e)?.locked).map((e) => e.name)
+    );
     const targets = report.entries
-        .filter(
-            (e) => e.update && fileNames.includes(e.fileName) && !catalog.value[e.fileName]?.locked
-        )
+        .filter((e) => e.update && fileNames.includes(e.fileName) && !lockedNames.has(e.fileName))
         .map((e) => ({
             fileName: e.fileName,
             oldSha1: e.sha1,
@@ -886,6 +912,7 @@ async function applyUpdates(fileNames: string[]) {
         }
         if (okCount) {
             toast(`已更新 ${okCount} 个 MOD`, 'success');
+            // 更新成功的行立刻摘掉箭头（不必等下一轮检测）
             updatePanel.report = {
                 ...report,
                 entries: report.entries.filter((e) => updatePanel.itemState[e.fileName] !== 'ok')
@@ -895,7 +922,10 @@ async function applyUpdates(fileNames: string[]) {
             const next = new Set(selection.value);
             for (const f of done) next.delete(f);
             selection.value = next;
-            void load();
+            await load();
+            // 文件名变了、hash 也变了：清掉检测标记，让新文件重新走一次（新 hash 必然缓存未命中）
+            checkedFor = '';
+            void silentCheck('enter');
         }
         const failed = results.filter((r) => !r.ok);
         if (failed.length) toast(`${failed.length} 个更新失败：${failed[0].error ?? ''}`, 'error');
@@ -909,6 +939,42 @@ async function applyUpdates(fileNames: string[]) {
     } finally {
         if (operation === updateOperation) updatePanel.applying = false;
     }
+}
+
+/** 行内更新箭头的 tooltip：PCL 同样用「当前版本 / 最新版本 + 点击/右键说明」交代下一步 */
+function rowUpdateTitle(e: Row): string {
+    const info = updateOf(e);
+    if (!info?.update) return '';
+    const state = updatePanel.itemState[e.name];
+    if (catalogOf(e)?.locked) return '此模组已锁定：点击查看可切换的版本';
+    if (state === 'ok') return '已更新，原文件已替换';
+    if (state === 'error') return updatePanel.itemError[e.name] || '更新失败，点击重试';
+    return [
+        `当前版本：${info.currentVersion || '未知'}`,
+        `最新版本：${info.update.versionNumber || info.update.fileName}`,
+        '点击更新，右键查看更新日志'
+    ].join('\n');
+}
+
+/** 行内箭头点击：锁定项跳到「切换版本」，否则就是单条更新 */
+function onRowUpdate(e: Row) {
+    const info = updateOf(e);
+    if (!info?.update) return;
+    if (catalogOf(e)?.locked) {
+        switchFile.value = e.name;
+        return;
+    }
+    void applyUpdates([e.name]);
+}
+
+/** 右键箭头看更新日志（PCL 同款交互），没识别到来源时不假装有链接 */
+function openChangelog(e: Row) {
+    const url = updateOf(e)?.changelogUrl;
+    if (!url) {
+        toast('此模组未匹配到 Modrinth 来源，无法查看更新日志', 'info');
+        return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 </script>
@@ -1083,10 +1149,11 @@ async function applyUpdates(fileNames: string[]) {
             class="fm-batch card"
         >
             <strong>已选 {{ selection.size }} 项</strong
-            ><button
-                v-if="updatesTab"
+            ><!-- PCL 底栏「更新」按钮口径：始终在位，选中项里没有可更新的就置灰 -->
+            <button
                 class="btn btn-gold btn-sm"
                 :disabled="updatePanel.applying || !selectedUpdatableCount"
+                :title="selectedUpdatableCount ? undefined : '选中项里没有可更新的模组'"
                 @click="applyUpdates([...selection])"
             >
                 {{
@@ -1168,40 +1235,27 @@ async function applyUpdates(fileNames: string[]) {
                 </p>
             </div>
         </details>
-        <!-- 「更新」分类的检测中/失败提示（有报告时列表照常展示，不闪断） -->
-        <div v-if="updatesTab && updatePanel.checking" class="card empty upd-state">
-            <span class="spin"></span>
-            <span>正在计算文件哈希并查询 Modrinth…</span>
-        </div>
-        <div v-else-if="updatesTab && updatePanel.error" class="card empty upd-state">
-            <span>检测失败：{{ updatePanel.error }}</span>
-            <button
-                class="btn btn-ghost btn-sm"
-                :disabled="updatePanel.checking"
-                @click="onCheckUpdates"
-            >
-                重试
-            </button>
-        </div>
-        <!-- 文件列表（「更新」分类与其余分类同一张列表，仅行来源不同） -->
+        <!-- 文件列表：更新检测只是行内标记与一颗筛选药丸，列表本身始终是同一个 -->
         <div
             data-ui="FileManager:cdc99c60dc51"
-            v-if="currentVersion && !(updatesTab && (!updatePanel.report || updatePanel.error))"
+            v-if="currentVersion"
             ref="listCard"
             class="card fm-card"
-            :class="{ 'is-updates': updatesTab }"
             :aria-busy="loading"
         >
+            <!-- 静默检测的极简状态：仅在「正在查 / 上次联网失败」时占一条细提示，不挡列表 -->
             <div
-                v-if="updatesTab && updatePanel.report"
-                class="status-strip upd-summary"
+                v-if="updatePanel.checking || updatePanel.note"
+                class="status-strip upd-strip"
                 role="status"
             >
-                共 {{ updatePanel.report.entries.length }} 个 · 可更新
-                {{ updatableEntries.length }} · 已最新 {{ latestCount
-                }}<template v-if="unmatchedCount">
-                    · {{ unmatchedCount }} 个未匹配来源</template
-                >
+                <template v-if="updatePanel.checking">
+                    <span class="spin spin-sm"></span>
+                    <span>正在后台检查模组更新…</span>
+                </template>
+                <template v-else>
+                    <span>{{ updatePanel.note }}</span>
+                </template>
                 <button
                     class="btn btn-ghost btn-sm"
                     :disabled="updatePanel.checking || updatePanel.applying"
@@ -1263,11 +1317,19 @@ async function applyUpdates(fileNames: string[]) {
             <div data-ui="FileManager:40d26ad64938" v-else-if="!displayEntries.length" class="empty">
                 <span>{{
                     updatesTab
-                        ? updatePanel.report?.entries.length
-                            ? '所有已匹配来源的 MOD 均为最新'
-                            : '该实例没有可检测的模组文件'
+                        ? updatePanel.checking
+                            ? '正在检查更新…'
+                            : '没有可更新的模组'
                         : '当前搜索或筛选条件没有匹配的文件'
                 }}</span>
+                <button
+                    v-if="updatesTab && !updatePanel.checking"
+                    data-ui="FileManager:upd-back-all"
+                    class="btn btn-ghost btn-sm"
+                    @click="setTab('all')"
+                >
+                    回到全部
+                </button>
             </div>
             <div
                 data-ui="FileManager:893880828b4a"
@@ -1314,8 +1376,8 @@ async function applyUpdates(fileNames: string[]) {
                     >
                         <img
                             data-ui="FileManager:e82feec99cd2"
-                            v-if="modIcons[rowKey(e)] || (e.updateInfo && updateIcons[e.updateInfo.fileName])"
-                            :src="modIcons[rowKey(e)] || (e.updateInfo ? updateIcons[e.updateInfo.fileName] : '')"
+                            v-if="modIcons[rowKey(e)]"
+                            :src="modIcons[rowKey(e)]"
                             draggable="false"
                             alt=""
                             @error="delete modIcons[rowKey(e)]"
@@ -1358,8 +1420,40 @@ async function applyUpdates(fileNames: string[]) {
                         :title="e.name + ' · 按住拖到桌面或文件夹'"
                         :draggable="!store.editMode && !batchBusy && !loading"
                         @dragstart="dragResource($event, e)"
-                        >{{ readableName(e)
-                        }}<small
+                        ><span class="fm-name-line"
+                            >{{ readableName(e)
+                            }}<!-- PCL 口径：可更新行在名字后紧跟一个箭头按钮，其余行没有这个元素 -->
+                            <button
+                                v-if="updateOf(e)?.update"
+                                data-ui="FileManager:row-update"
+                                class="fm-upd-btn"
+                                :class="{
+                                    'is-start': updatePanel.itemState[e.name] === 'start',
+                                    'is-ok': updatePanel.itemState[e.name] === 'ok',
+                                    'is-error': updatePanel.itemState[e.name] === 'error'
+                                }"
+                                :disabled="
+                                    updatePanel.applying ||
+                                    !!catalogOf(e)?.locked ||
+                                    updatePanel.itemState[e.name] === 'ok'
+                                "
+                                :title="rowUpdateTitle(e)"
+                                :aria-label="'更新 ' + (updateOf(e)?.name || e.name)"
+                                @click.stop="onRowUpdate(e)"
+                                @contextmenu.prevent.stop="openChangelog(e)"
+                            >
+                                <svg
+                                    viewBox="0 0 1024 1024"
+                                    fill="currentColor"
+                                    aria-hidden="true"
+                                >
+                                    <path
+                                        d="M640 768H384l-32-32V509H213l-23-55 298-298h45l298 298-23 55H810v226z m-224-64h192V477l32-32h93L512 223 290 445h94l32 32zM352 831h320v64H352z"
+                                    />
+                                </svg>
+                            </button>
+                        </span>
+                        <small
                             data-ui="FileManager:a0d9b4c442aa"
                             v-if="readableName(e) !== e.name"
                             class="fm-internal"
@@ -1379,17 +1473,17 @@ async function applyUpdates(fileNames: string[]) {
                                     .filter(Boolean)
                                     .join(' · ')
                             }}</small
-                        ><small
-                            v-if="e.updateInfo"
+                        ><!-- 版本对比只在「可更新」筛选里展开；全部列表靠箭头 tooltip 交代，避免每行都多一行字 --><small
+                            v-if="updateOf(e)?.update && updatesTab"
                             class="fm-internal fm-upd-ver"
-                            >{{ e.updateInfo.currentVersion || '未知' }} →
-                            <b>{{ e.updateInfo.update!.versionNumber }}</b>
-                            <template v-if="updatePanel.itemState[e.updateInfo.fileName] === 'error'">
+                            >{{ updateOf(e)!.currentVersion || '未知' }} →
+                            <b>{{ updateOf(e)!.update!.versionNumber }}</b>
+                            <template v-if="updatePanel.itemState[e.name] === 'error'">
                                 <span class="fm-upd-err">{{
-                                    updatePanel.itemError[e.updateInfo.fileName] || '更新失败，请重试'
+                                    updatePanel.itemError[e.name] || '更新失败，请重试'
                                 }}</span>
                             </template>
-                            <template v-else-if="updatePanel.itemState[e.updateInfo.fileName] === 'ok'">
+                            <template v-else-if="updatePanel.itemState[e.name] === 'ok'">
                                 <span>已更新，原文件已替换</span>
                             </template>
                         </small
@@ -1411,7 +1505,7 @@ async function applyUpdates(fileNames: string[]) {
 
                     <label
                         data-ui="FileManager:7fe2dcd1bb05"
-                        v-if="isModEntry(e) && !updatesTab"
+                        v-if="isModEntry(e)"
                         class="switch fm-toggle"
                         :title="isDisabledMod(e) ? '启用模组' : '禁用模组'"
                         ><input
@@ -1426,32 +1520,8 @@ async function applyUpdates(fileNames: string[]) {
                             class="switch-ui"
                         ></span
                     ></label>
-                    <button
-                        v-if="isModEntry(e) && updatesTab && e.updateInfo"
-                        class="btn btn-ghost btn-sm"
-                        :disabled="
-                            updatePanel.applying ||
-                            !!catalogOf(e)?.locked ||
-                            updatePanel.itemState[e.updateInfo.fileName] === 'ok'
-                        "
-                        @click="
-                            catalogOf(e)?.locked
-                                ? (switchFile = e.name)
-                                : applyUpdates([e.updateInfo.fileName])
-                        "
-                    >
-                        {{
-                            catalogOf(e)?.locked
-                                ? '已锁定 · 切换版本'
-                                : updatePanel.itemState[e.updateInfo.fileName] === 'ok'
-                                  ? '已更新'
-                                  : updatePanel.itemState[e.updateInfo.fileName] === 'error'
-                                    ? '重试'
-                                    : '更新'
-                        }}
-                    </button>
                     <span
-                        v-if="props.rel === 'mods' && !(isModEntry(e) && (updatesTab ? e.updateInfo : true))"
+                        v-if="props.rel === 'mods' && !isModEntry(e)"
                         aria-hidden="true"
                     ></span>
                     <details
@@ -1863,21 +1933,80 @@ async function applyUpdates(fileNames: string[]) {
 .fm-upd-err {
     color: var(--danger);
 }
-.upd-state {
-    display: flex;
+/* 行内更新箭头（PCL 口径）：名字后紧跟，低存在感，悬停才提起注意力 */
+.fm-name-line {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+}
+.fm-upd-btn {
+    flex: none;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    min-height: 120px;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    opacity: 0.5;
+    cursor: pointer;
+    border-radius: 4px;
+    transition:
+        opacity 0.15s ease,
+        background 0.15s ease;
 }
-.upd-summary {
+.fm-upd-btn svg {
+    width: 100%;
+    height: 100%;
+}
+.fm-upd-btn:hover:not(:disabled) {
+    opacity: 1;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.fm-upd-btn:disabled {
+    cursor: default;
+}
+.fm-upd-btn.is-start {
+    opacity: 0.9;
+    animation: fm-upd-pulse 1s ease-in-out infinite;
+}
+.fm-upd-btn.is-ok {
+    color: var(--success, var(--accent));
+    opacity: 0.55;
+}
+.fm-upd-btn.is-error {
+    color: var(--danger);
+    opacity: 0.85;
+}
+@keyframes fm-upd-pulse {
+    0%,
+    100% {
+        opacity: 0.35;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+/* 静默检测提示条：一行细字，不出现在页面主体里抢版面 */
+.upd-strip {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     flex-wrap: wrap;
+    font-size: 12px;
+    color: var(--text-dim);
 }
-.upd-summary .btn {
+.upd-strip .btn {
     margin-left: auto;
+}
+.spin-sm {
+    width: 12px;
+    height: 12px;
+    flex: none;
+    border-width: 2px;
 }
 
 @media (max-width: 1180px) {

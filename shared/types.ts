@@ -973,7 +973,7 @@ export const IPC = {
     modsCrossDuplicates: 'mods:crossDuplicates', // (versionIds: string[]) => ModCrossDuplicate[]  跨版本查重
     modsMigrationPlan: 'mods:migrationPlan',
     modsMigrationApply: 'mods:migrationApply',
-    modsCheckUpdates: 'mods:checkUpdates', // (versionId: string) => ModUpdateReport  按 sha1 反查 Modrinth 可更新项
+    modsCheckUpdates: 'mods:checkUpdates', // (versionId: string, folder?: string, force?: boolean) => ModUpdateReport  按 sha1 反查 Modrinth 可更新项（结果缓存 6 小时）
     modsApplyUpdates: 'mods:applyUpdates', // (versionId: string, items: ModUpdateTarget[]) => { fileName, ok, error? }[]
     // 默认按键（启动时同步进实例 options.txt）
     keysGetDefault: 'keys:getDefault', // () => Record<string, string>
@@ -1427,6 +1427,10 @@ export interface ModUpdateEntry {
     sha1: string;
     /** null = 未在 Modrinth 匹配到来源（可能来自 CurseForge 或手动安装） */
     source: 'modrinth' | null;
+    /** 识别到的来源工程 id（「查看更新日志」与按身份切换版本用） */
+    projectId?: string | null;
+    /** 该工程的更新日志地址（识别到来源时才有） */
+    changelogUrl?: string | null;
     alreadyLatest: boolean;
     update: null | {
         projectId: string;
@@ -1443,6 +1447,10 @@ export interface ModUpdateReport {
     mcVersion: string;
     loader: string;
     entries: ModUpdateEntry[];
+    /** true = 本次联网失败，entries 里是缓存里的旧结论 */
+    stale?: boolean;
+    /** 联网失败文案（静默提示用，不等同整页报错） */
+    error?: string;
 }
 
 /** 应用更新的单项：旧文件 + 新文件下载信息 */

@@ -443,8 +443,13 @@ export const findModDuplicates = (versionId: string, folder?: string) =>
     invoke<ModDuplicateGroup[]>(IPC.modsDuplicates, versionId, folder);
 export const getModIcons = (versionId: string, names: string[], folder?: string, kind = 'mods') =>
     invoke<Record<string, string>>(IPC.modsIcons, versionId, names, folder, kind);
-export const checkModUpdates = (versionId: string, folder?: string) =>
-    invoke<import('@shared/types').ModUpdateReport>(IPC.modsCheckUpdates, versionId, folder);
+export const checkModUpdates = (versionId: string, folder?: string, force?: boolean) =>
+    invoke<import('@shared/types').ModUpdateReport>(
+        IPC.modsCheckUpdates,
+        versionId,
+        folder,
+        force
+    );
 export const applyModUpdates = (
     versionId: string,
     items: import('@shared/types').ModUpdateTarget[],
