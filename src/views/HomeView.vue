@@ -13,6 +13,7 @@ import {
     shareLogsToMclogs,
     getSkinProfile,
     getSettings,
+    saveSettings,
     launchGame,
     restartGame,
     cancelGameRestart,
@@ -20,7 +21,6 @@ import {
     setVersionJava,
     openDir,
     removeVersion,
-    setActiveFolder,
     showFolderContextMenu
 } from '../api';
 import {
@@ -55,6 +55,7 @@ import LaunchHeatmap from '../components/LaunchHeatmap.vue';
 // 手机触屏没有 hover 引导，死按钮等于断路：无实例时按钮保持可点并给出引导
 const isAndroid = window.kamucl.platform === 'android';
 import type {
+    GameFolder,
     ImageFit,
     InstalledVersion,
     JavaInfo,
@@ -634,74 +635,193 @@ const recent = computed(() =>
 );
 const sortedInstalled = computed(() => sortWithFavorite(store.installed));
 
-const versionMenu = reactive({ open: false, top: 0, left: 0, width: 230 });
-const folderListOpen = ref(false);
-const folderSwitchBusy = ref(false);
-async function chooseGameFolder(folder: string) {
-    if (folderSwitchBusy.value) return;
-    folderSwitchBusy.value = true;
-    try {
-        await setActiveFolder(folder);
-        store.settings = await getSettings();
-        store.resourceVersionId = '';
-        await refreshInstalled();
-        folderListOpen.value = false;
-    } catch (error) {
-        toast(errText(error), 'error');
-    } finally {
-        folderSwitchBusy.value = false;
-    }
-}
-/** 版本菜单触发元素：一级入口是 hero 大实例卡，launch 右侧小箭头是次入口；
- *  菜单锚随触发元素走（多数决弹性锚点：PCL 左列 + HMCL 版本卡混合模型的落点）。 */
+/** 版本切换抽屉（用户实测否决 float-menu 下拉：实例多时挤压 banner 且内滚体验差）——
+ *  右侧滑出全高面板：搜索过滤 + 按文件夹分组（组头可折叠/可拖拽排序，WCAG 配上移/下移按钮）+ 管理版本金钮收尾。
+ *  唯一入口 = hero 左上当前版本大卡（launch 小箭头已砍，消灭重复入口）。
+ *  注意：面板故意不用 role="dialog" aria-modal——modalFocus.ts 会接管这类元素并把焦点
+ *  归还到"打开者"（程序化打开时是 body），与抽屉自己的焦点管理打架；对齐 notice-panel
+ *  家族的非模态口径，焦点全部由 onVersionMenuKey 手动管理。 */
+const versionDrawer = reactive({ open: false });
+const drawerSearch = ref('');
+const drawerSearchEl = ref<HTMLInputElement | null>(null);
+const folderSaving = ref(false);
+/** 版本菜单唯一入口 = hero 左上当前版本大卡；再点大卡或 ESC/点外关闭 */
 const versionMenuButton = ref<HTMLElement | null>(null);
 
-function toggleVersionMenu(event?: MouseEvent) {
-    if (!versionMenu.open) {
-        const trigger =
-            (event?.currentTarget as HTMLElement | undefined) ?? versionMenuButton.value;
-        if (trigger) {
-            const bounds = trigger.getBoundingClientRect();
-            // 触发元素在左半屏（一级大卡）→ 菜单左对齐展开；右半屏（小箭头）→ 右对齐
-            const alignRight = bounds.left + bounds.width / 2 > window.innerWidth / 2;
-            versionMenu.top = Math.min(window.innerHeight - 300, bounds.bottom + 8);
-            versionMenu.left = alignRight
-                ? Math.max(8, Math.min(window.innerWidth - 238, bounds.right - 230))
-                : Math.max(8, Math.min(bounds.left, window.innerWidth - 238));
-        }
+function toggleVersionMenu() {
+    versionDrawer.open = !versionDrawer.open;
+    if (versionDrawer.open) {
+        drawerSearch.value = '';
+        // 打开即聚焦搜索框：可直接输入过滤，↑↓ 随时进入列表（键盘契约对齐 AppMenu）
+        void nextTick(() => drawerSearchEl.value?.focus());
     }
-    versionMenu.open = !versionMenu.open;
-    // 打开后把焦点移入浮层容器，↑↓/ESC 立即可用（键盘契约对齐 AppMenu）
-    if (versionMenu.open) void nextTick(() => versionMenuEl.value?.focus({ preventScroll: true }));
 }
 
 function chooseVersion(id: string) {
     selectedId.value = id;
-    versionMenu.open = false;
+    versionDrawer.open = false;
 }
 
-/** 实例选择浮层键盘支持（与 AppMenu/SelectMenu 同一套纪律）：↑↓/Home/End 移动、Enter 选中、ESC/Tab 关闭并归还焦点 */
+/** 抽屉内选中：选完归还焦点到大卡（AppMenu choose 同款纪律） */
+function pickFromDrawer(id: string) {
+    chooseVersion(id);
+    versionMenuButton.value?.focus({ preventScroll: true });
+}
+
+/** 抽屉行实例图标：与 GameView 已安装列表同一套逻辑（versionIconUrl 同函数直接复用，不许各显示各的）——
+ *  自定义图标/整合包 icon.png/加载器 logo 素材/mob 头像走 versionIconUrl（img）；
+ *  无存档图标时按 加载器真实素材 → 版本类型（vanilla 草方块 / snapshot 命令方块 / 远古 石头）→ UiGlyph cube 兜底。 */
+function menuVersionGlyph(v: InstalledVersion): string {
+    if (v.loader) return v.loader;
+    const mc = v.mcVersion || '';
+    if (!mc) return 'cube';
+    if (/^(c0|a1|b1|inf)/i.test(mc)) return 'stone';
+    if (/^\d{2}w\d{2}[a-z]/i.test(mc)) return 'snapshot';
+    return 'vanilla';
+}
+
+/** 抽屉分组：组序 = settings.folders 持久顺序（拖拽/上下移的落点），未登记文件夹的实例组追加在后；
+ *  搜索词过滤实例名/id，搜索时隐藏空组 */
+const drawerGroups = computed(() => {
+    const kw = drawerSearch.value.trim().toLowerCase();
+    const byFolder = new Map<string, InstalledVersion[]>();
+    for (const v of sortedInstalled.value) {
+        if (
+            kw &&
+            !versionLabel(v).toLowerCase().includes(kw) &&
+            !v.id.toLowerCase().includes(kw)
+        )
+            continue;
+        const key = v.folder || '';
+        const list = byFolder.get(key);
+        if (list) list.push(v);
+        else byFolder.set(key, [v]);
+    }
+    const known = (store.settings?.folders ?? []).map((f) => f.path);
+    const extra = [...byFolder.keys()].filter((k) => k && !known.includes(k));
+    const groups = [...known, ...extra].map((folder) => ({
+        folder,
+        items: byFolder.get(folder) ?? []
+    }));
+    return kw ? groups.filter((g) => g.items.length) : groups;
+});
+const drawerFolderName = (folder: string) =>
+    store.settings?.folders.find((f) => f.path === folder)?.name ||
+    folder.split(/[\\/]/).filter(Boolean).pop() ||
+    '游戏文件夹';
+
+/** 分组折叠：默认全部展开，记忆进 localStorage（kamucl.homever.folded）——
+ *  「不想下滑就折叠前面的文件夹找后面的版本」 */
+const FOLD_KEY = 'kamucl.homever.folded';
+const foldedFolders = ref<Set<string>>(
+    new Set(JSON.parse(localStorage.getItem(FOLD_KEY) || '[]') as string[])
+);
+const isFolded = (folder: string) => foldedFolders.value.has(folder);
+function toggleFold(folder: string) {
+    const next = new Set(foldedFolders.value);
+    if (next.has(folder)) next.delete(folder);
+    else next.add(folder);
+    foldedFolders.value = next;
+    localStorage.setItem(FOLD_KEY, JSON.stringify([...next]));
+}
+
+/** 文件夹顺序：settings.folders 数组顺序即分组顺序，set 全量保存（无新后端通道）。
+ *  拖拽（HTML5 dnd）与上移/下移按钮（WCAG 2.2 AA 单指针替代）两套并存，落到同一函数。 */
+const dragFolder = ref('');
+const dragOverFolder = ref('');
+async function persistFolderOrder(folders: GameFolder[]) {
+    folderSaving.value = true;
+    try {
+        store.settings = await saveSettings({ folders });
+        toast('文件夹顺序已保存', 'success');
+    } catch (e) {
+        toast('保存文件夹顺序失败：' + errText(e), 'error');
+        store.settings = await getSettings(); // 失败回滚到服务端真相
+    } finally {
+        folderSaving.value = false;
+    }
+}
+function reorderFolderTo(from: string, to: string) {
+    const folders = store.settings?.folders;
+    if (!folders || folderSaving.value) return;
+    const fromIdx = folders.findIndex((f) => f.path === from);
+    const toIdx = folders.findIndex((f) => f.path === to);
+    if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
+    const next = [...folders];
+    const [moved] = next.splice(fromIdx, 1);
+    // 目标索引在移除后回正；向下拖 = 插到目标之后，向上拖 = 插到目标之前
+    const insertAt = fromIdx < toIdx ? toIdx : toIdx;
+    next.splice(insertAt, 0, moved);
+    void persistFolderOrder(next);
+}
+function moveFolder(folder: string, dir: -1 | 1) {
+    const folders = store.settings?.folders;
+    if (!folders || folderSaving.value) return;
+    const idx = folders.findIndex((f) => f.path === folder);
+    const to = idx + dir;
+    if (idx < 0 || to < 0 || to >= folders.length) return;
+    const next = [...folders];
+    [next[idx], next[to]] = [next[to], next[idx]];
+    void persistFolderOrder(next);
+}
+function onGroupDragStart(folder: string, event: DragEvent) {
+    dragFolder.value = folder;
+    if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', folder);
+    }
+}
+function onGroupDragOver(folder: string, event: DragEvent) {
+    if (!dragFolder.value || dragFolder.value === folder) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    dragOverFolder.value = folder;
+}
+function onGroupDrop(folder: string) {
+    const from = dragFolder.value;
+    dragOverFolder.value = '';
+    dragFolder.value = '';
+    if (!from || from === folder) return;
+    reorderFolderTo(from, folder);
+}
+function onGroupDragEnd() {
+    dragFolder.value = '';
+    dragOverFolder.value = '';
+}
+
+/** 抽屉键盘支持（与 AppMenu/SelectMenu 同一套纪律）：↑↓/Home/End 在实例行间移动、Enter 选中、
+ *  ESC 关闭并归还焦点大卡、Tab 在抽屉内循环不漏焦到被遮页面 */
 const versionMenuEl = ref<HTMLElement | null>(null);
 function onVersionMenuKey(event: KeyboardEvent) {
-    const items = [
-        ...(versionMenuEl.value?.querySelectorAll<HTMLButtonElement>(
-            '.menu-item:not(:disabled)'
-        ) || [])
-    ];
+    const root = versionMenuEl.value;
+    if (!root) return;
     if (event.key === 'Escape') {
         event.preventDefault();
         event.stopImmediatePropagation();
-        versionMenu.open = false;
+        versionDrawer.open = false;
         versionMenuButton.value?.focus({ preventScroll: true });
         return;
     }
     if (event.key === 'Tab') {
-        versionMenu.open = false;
+        const focusables = [
+            ...root.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)')
+        ];
+        if (!focusables.length) return;
+        const index = focusables.indexOf(document.activeElement as HTMLElement);
+        const last = focusables.length - 1;
+        if (!event.shiftKey && index >= last) {
+            event.preventDefault();
+            focusables[0].focus();
+        } else if (event.shiftKey && index <= 0) {
+            event.preventDefault();
+            focusables[last].focus();
+        }
         return;
     }
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
+    const items = [...root.querySelectorAll<HTMLButtonElement>('.drawer-item:not(:disabled)')];
     if (!items.length) return;
+    event.preventDefault();
     const index = items.indexOf(document.activeElement as HTMLButtonElement);
     const next =
         event.key === 'Home'
@@ -712,7 +832,10 @@ function onVersionMenuKey(event: KeyboardEvent) {
                 ? event.key === 'ArrowDown'
                   ? 0
                   : items.length - 1
-                : Math.max(0, Math.min(items.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
+                : Math.max(
+                      0,
+                      Math.min(items.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1))
+                  );
     items[next].focus();
 }
 
@@ -1032,7 +1155,6 @@ onUnmounted(() => {
                 ></div>
 
                     <div data-ui="HomeView:2e850cf13849" class="hero-content" data-edit="bannerText">
-                        <span data-ui="HomeView:13616e708e66" class="hero-kicker">当前版本</span>
                         <div data-ui="HomeView:027bc7e292dc" class="hero-metadata-slot">
                             <Transition name="instance-switch" mode="out-in">
                                 <div
@@ -1049,18 +1171,22 @@ onUnmounted(() => {
                                     "
                                     class="hero-metadata"
                                 >
-                                    <!-- 版本管理一级化（用户拍板）：大号当前实例卡 = 图标 + 实例名 + 加载器/MC tag
-                                         + chevron-down，点击展开已键盘化的 version-menu；参照 HMCL 版本卡模型。
-                                         原锚点（h1/edition/tag）随元素保留，不删除。 -->
+                                    <!-- 版本管理一级化（用户拍板）：当前版本大卡一行式紧凑形态 =
+                                         图标 30px + 实例名(--text-lg) + 加载器/MC tag 同行内联 + chevron 行尾；
+                                         原眉标「当前版本」并入 title 属性（少一层占位，高度 ≤64px）。 -->
                                     <div
                                         ref="versionMenuButton"
                                         class="hero-version-card"
                                         role="button"
                                         tabindex="0"
-                                        :aria-expanded="versionMenu.open"
-                                        aria-haspopup="menu"
-                                        aria-label="切换游戏实例"
-                                        @click="toggleVersionMenu($event)"
+                                        :aria-expanded="versionDrawer.open"
+                                        aria-haspopup="dialog"
+                                        :title="
+                                            (currentVersion
+                                                ? '当前版本：' + heroName
+                                                : '尚未选择实例') + '（点击切换实例）'
+                                        "
+                                        @click="toggleVersionMenu()"
                                         @keydown.enter.prevent="toggleVersionMenu()"
                                         @keydown.space.prevent="toggleVersionMenu()"
                                     >
@@ -1072,45 +1198,38 @@ onUnmounted(() => {
                                                 :src="versionIconUrl(currentVersion)"
                                                 alt=""
                                             />
-                                            <UiGlyph v-else name="cube" :size="24" />
+                                            <UiGlyph v-else name="cube" :size="20" />
                                         </span>
-                                        <span class="hero-version-copy">
-                                            <h1
-                                                data-ui="HomeView:d209b16cd00e"
-                                                :title="heroName"
-                                                :class="{ 'long-name': heroName.length > 16 }"
-                                            >
-                                                {{ heroName }}
-                                            </h1>
+                                        <h1
+                                            data-ui="HomeView:d209b16cd00e"
+                                            :class="{ 'long-name': heroName.length > 16 }"
+                                        >
+                                            {{ heroName }}
+                                        </h1>
+                                        <span data-ui="HomeView:273ef3354188" class="hero-edition">
                                             <span
-                                                data-ui="HomeView:273ef3354188"
-                                                class="hero-edition"
+                                                data-ui="HomeView:cbc929d650f0"
+                                                v-if="
+                                                    currentVersion && !heroName.includes(heroVersion)
+                                                "
+                                                class="hero-game-version"
+                                                :title="`Minecraft ${heroVersion}`"
+                                                >{{ heroVersion }}</span
                                             >
-                                                <span
-                                                    data-ui="HomeView:cbc929d650f0"
-                                                    v-if="
-                                                        currentVersion &&
-                                                        !heroName.includes(heroVersion)
-                                                    "
-                                                    class="hero-game-version"
-                                                    :title="`Minecraft ${heroVersion}`"
-                                                    >{{ heroVersion }}</span
-                                                >
-                                                <span
-                                                    data-ui="HomeView:323afa8d269b"
-                                                    v-if="
-                                                        currentVersion &&
-                                                        !heroName.includes(loaderText(currentVersion))
-                                                    "
-                                                    class="loader-badge"
-                                                    >{{ loaderText(currentVersion) }}</span
-                                                >
-                                            </span>
+                                            <span
+                                                data-ui="HomeView:323afa8d269b"
+                                                v-if="
+                                                    currentVersion &&
+                                                    !heroName.includes(loaderText(currentVersion))
+                                                "
+                                                class="loader-badge"
+                                                >{{ loaderText(currentVersion) }}</span
+                                            >
                                         </span>
                                         <UiGlyph
                                             class="hero-version-chevron"
                                             name="chevron-down"
-                                            :size="20"
+                                            :size="15"
                                         />
                                     </div>
                                 </div>
@@ -1178,19 +1297,6 @@ onUnmounted(() => {
                                     <UiGlyph name="play" :size="22" filled />
                                     <span>{{ launchText }}</span>
                                 </span>
-                            </button>
-                            <button
-                                data-ui="HomeView:5ca10c2a5c92"
-                                class="launch-arrow"
-                                title="选择游戏实例"
-                                @click="toggleVersionMenu($event)"
-                            >
-                                <!-- 手绘箭头 SVG 收编 UiGlyph chevron-down（素材已补）；展开态旋转保留 -->
-                                <UiGlyph
-                                    :class="{ open: versionMenu.open }"
-                                    name="chevron-down"
-                                    :size="22"
-                                />
                             </button>
                         </div>
                     </div>
@@ -1527,92 +1633,186 @@ onUnmounted(() => {
             <LaunchHeatmap class="card home-heatmap" />
         </aside>
 
+        <!-- 版本切换抽屉（用户实测否决 float-menu 下拉形态）：点当前版本大卡 → 右侧滑出全高面板。
+             结构：标题+搜索过滤 → 按文件夹分组的实例列表（组头可点=切换活动文件夹，图标走 versionIconUrl 整套，
+             28px 与 GameView 列表同源）→ 底部「管理版本」金钮（文件夹增删改也并入该页，避免双钮同目的地）。
+             z 走 --z-drawer，动效照 notice-panel 家族（translateX + --ease-out，reduced-motion 直切）；
+             键盘契约平移：↑↓/Home/End 移动、Enter 选中、ESC 关闭归还焦点大卡、Tab 圈内循环。 -->
         <Teleport to="body">
-            <div
-                data-ui="HomeView:d64e8ccae3be"
-                v-if="versionMenu.open"
-                class="menu-overlay"
-                @click="versionMenu.open = false"
-            ></div>
-            <!-- 版本/文件夹选择器（「选择器」而非动作菜单：两层列表 + active 标记 + 行右键管理，
-                 不套 AppMenu——AppMenu 契约是纯动作列表；保留 float-menu 形态，
-                 键盘契约对齐 AppMenu/SelectMenu：↑↓/Home/End 移动、Enter 选中、ESC/Tab 关闭归还焦点） -->
-            <div
-                data-ui="HomeView:d4dfd8dd87c8"
-                v-if="versionMenu.open"
-                ref="versionMenuEl"
-                class="float-menu"
-                tabindex="-1"
-                :style="{
-                    top: versionMenu.top + 'px',
-                    left: versionMenu.left + 'px',
-                    width: versionMenu.width + 'px'
-                }"
-                @keydown="onVersionMenuKey"
-            >
-                <button
-                    data-ui="HomeView:9fae1e3ba335"
-                    class="menu-item"
-                    @click="folderListOpen = !folderListOpen"
+            <Transition name="drawer-fade">
+                <div
+                    data-ui="HomeView:d64e8ccae3be"
+                    v-if="versionDrawer.open"
+                    class="drawer-backdrop"
+                    @click="versionDrawer.open = false"
+                ></div>
+            </Transition>
+            <Transition name="drawer-slide">
+                <aside
+                    v-if="versionDrawer.open"
+                    data-ui="HomeView:d4dfd8dd87c8"
+                    ref="versionMenuEl"
+                    class="version-drawer"
+                    role="dialog"
+                    aria-label="切换版本"
+                    @keydown="onVersionMenuKey"
                 >
-                    <template v-if="folderListOpen"
-                        ><UiGlyph name="chevron-left" :size="12" /> 返回版本选择</template
-                    >
-                    <template v-else
-                        >文件夹列表 <UiGlyph name="chevron-right" :size="12"
-                    /></template>
-                </button>
-                <template v-if="folderListOpen">
-                    <button
-                        data-ui="HomeView:4aa05f9d0808"
-                        v-for="folder in store.settings?.folders || []"
-                        :key="folder.path"
-                        class="menu-item"
-                        :class="{ active: folder.path === store.settings?.activeFolder }"
-                        :disabled="folderSwitchBusy"
-                        :title="folder.path"
-                        @click="chooseGameFolder(folder.path)"
-                        @contextmenu.prevent="showFolderContextMenu(folder.path)"
-                    >
-                        {{ folder.name }}
-                    </button>
-                    <button
-                        data-ui="HomeView:a82260e8c53c"
-                        class="menu-item"
-                        @click="store.currentView = 'game'"
-                    >
-                        添加 / 管理文件夹
-                    </button>
-                </template>
-                <template v-else>
-                    <button
-                        data-ui="HomeView:dedcb316a30b"
-                        v-for="version in sortedInstalled"
-                        :key="version.id"
-                        class="menu-item"
-                        :class="{ active: version.id === selectedId }"
-                        @click="chooseVersion(version.id)"
-                        @contextmenu.prevent="showFolderContextMenu(version.folder, version.id)"
-                    >
-                        <!-- 手绘星形 SVG 收编 UiGlyph star（inventory H） -->
-                        <UiGlyph
-                            v-if="isFavorite(version.id, version.folder)"
-                            name="star"
-                            :size="12"
-                            filled
+                    <header class="drawer-head">
+                        <h3>切换版本</h3>
+                        <input
+                            ref="drawerSearchEl"
+                            v-model="drawerSearch"
+                            class="input"
+                            type="search"
+                            placeholder="搜索实例名称、版本…"
+                            aria-label="搜索实例"
                         />
-                        <span data-ui="HomeView:f77a89b73779" v-else class="menu-spacer"></span>
-                        {{ versionLabel(version) }}
-                    </button>
-                    <div
-                        data-ui="HomeView:2de4cc34bb59"
-                        v-if="!sortedInstalled.length"
-                        class="menu-empty"
-                    >
-                        暂无已安装实例
+                    </header>
+                    <div class="drawer-body">
+                        <div
+                            v-for="(group, gi) in drawerGroups"
+                            :key="group.folder"
+                            class="drawer-group"
+                            :class="{ 'drag-over': dragOverFolder === group.folder }"
+                        >
+                            <!-- 组头：折叠开关（主钮）+ 当前标记 + 上移/下移（WCAG 2.2 AA 拖拽的单指针替代）。
+                                 整头可拖拽重排（HTML5 dnd），顺序落 settings.folders 全量保存。 -->
+                            <div
+                                data-ui="HomeView:4aa05f9d0808"
+                                class="drawer-group-head"
+                                :class="{
+                                    'drag-over': dragOverFolder === group.folder,
+                                    dragging: dragFolder === group.folder
+                                }"
+                                draggable="true"
+                                :title="
+                                    drawerFolderName(group.folder) +
+                                    '：拖拽或用上移/下移调整分组顺序（右键管理文件夹）'
+                                "
+                                @dragstart="onGroupDragStart(group.folder, $event)"
+                                @dragover="onGroupDragOver(group.folder, $event)"
+                                @drop.prevent="onGroupDrop(group.folder)"
+                                @dragend="onGroupDragEnd"
+                                @contextmenu.prevent="showFolderContextMenu(group.folder)"
+                            >
+                                <button
+                                    class="drawer-fold"
+                                    :aria-expanded="!isFolded(group.folder)"
+                                    :aria-label="
+                                        (isFolded(group.folder) ? '展开 ' : '折叠 ') +
+                                        drawerFolderName(group.folder) +
+                                        '（' +
+                                        group.items.length +
+                                        ' 个实例）'
+                                    "
+                                    @click.stop="toggleFold(group.folder)"
+                                >
+                                    <UiGlyph
+                                        class="drawer-fold-chevron"
+                                        :class="{ open: !isFolded(group.folder) }"
+                                        name="chevron-right"
+                                        :size="13"
+                                    />
+                                    <UiGlyph name="folder" :size="14" />
+                                    <span class="drawer-group-name">{{
+                                        drawerFolderName(group.folder)
+                                    }}</span>
+                                    <span class="drawer-group-count">{{
+                                        group.items.length
+                                    }}</span>
+                                </button>
+                                <span
+                                    v-if="group.folder === store.settings?.activeFolder"
+                                    class="drawer-group-now"
+                                    >当前</span
+                                >
+                                <span
+                                    v-show="!drawerSearch"
+                                    class="drawer-group-movers"
+                                >
+                                    <button
+                                        class="drawer-move"
+                                        :disabled="gi === 0 || folderSaving"
+                                        aria-label="上移文件夹"
+                                        title="上移该文件夹分组"
+                                        @click.stop="moveFolder(group.folder, -1)"
+                                    >
+                                        上移
+                                    </button>
+                                    <button
+                                        class="drawer-move"
+                                        :disabled="gi === drawerGroups.length - 1 || folderSaving"
+                                        aria-label="下移文件夹"
+                                        title="下移该文件夹分组"
+                                        @click.stop="moveFolder(group.folder, 1)"
+                                    >
+                                        下移
+                                    </button>
+                                </span>
+                            </div>
+                            <template v-if="!isFolded(group.folder)">
+                                <button
+                                    data-ui="HomeView:dedcb316a30b"
+                                    v-for="version in group.items"
+                                    :key="version.id"
+                                    class="drawer-item"
+                                    :class="{ active: version.id === selectedId }"
+                                    @click="pickFromDrawer(version.id)"
+                                    @contextmenu.prevent="
+                                        showFolderContextMenu(version.folder, version.id)
+                                    "
+                                >
+                                    <img
+                                        v-if="versionIconUrl(version)"
+                                        class="drawer-item-icon"
+                                        :src="versionIconUrl(version)"
+                                        alt=""
+                                    />
+                                    <UiGlyph
+                                        v-else
+                                        class="drawer-item-icon"
+                                        :name="menuVersionGlyph(version)"
+                                        :size="28"
+                                    />
+                                    <span class="drawer-item-copy">
+                                        <strong>{{ versionLabel(version) }}</strong>
+                                        <small>{{
+                                            [loaderText(version), version.mcVersion]
+                                                .filter(Boolean)
+                                                .join(' · ')
+                                        }}</small>
+                                    </span>
+                                    <UiGlyph
+                                        v-if="isFavorite(version.id, version.folder)"
+                                        class="drawer-item-fav"
+                                        name="star"
+                                        :size="13"
+                                        filled
+                                    />
+                                </button>
+                                <p
+                                    v-if="!group.items.length && !drawerSearch"
+                                    class="drawer-group-empty"
+                                >
+                                    该文件夹暂无实例
+                                </p>
+                            </template>
+                        </div>
+                        <div
+                            data-ui="HomeView:2de4cc34bb59"
+                            v-if="!drawerGroups.length"
+                            class="drawer-empty"
+                        >
+                            {{ drawerSearch ? '没有匹配的实例，换个关键词试试' : '暂无已安装实例' }}
+                        </div>
                     </div>
-                </template>
-            </div>
+                    <footer class="drawer-foot">
+                        <button class="btn btn-gold" @click="store.currentView = 'game'">
+                            管理版本
+                        </button>
+                    </footer>
+                </aside>
+            </Transition>
         </Teleport>
 
         <!-- 实例卡 ⋯ 菜单收编 AppMenu（UX「复用现有 UI」）：定位/翻转/点击外部/键盘/焦点归还托管。
@@ -2243,8 +2443,8 @@ onUnmounted(() => {
 .launch-combo:active {
     transform: translateY(0) scale(0.99);
 }
-.launch-main,
-.launch-arrow {
+/* launch 右侧小箭头已砍（用户拍板：版本切换只留 banner 大卡一处），combo 只剩 launch-main */
+.launch-main {
     position: relative;
     overflow: hidden;
     border: 0;
@@ -2289,21 +2489,8 @@ onUnmounted(() => {
     cursor: not-allowed;
     filter: saturate(0.75);
 }
-.launch-arrow {
-    width: 62px;
-    border-left: 1px solid rgba(255, 255, 255, 0.22);
-}
-.launch-arrow:hover,
 .launch-main:hover:not(:disabled) {
     filter: brightness(1.08);
-}
-.launch-arrow svg {
-    width: 22px;
-    height: 22px;
-    transition: transform 0.18s ease;
-}
-.launch-arrow svg.open {
-    transform: rotate(180deg);
 }
 
 .runtime-strip {
@@ -2873,62 +3060,265 @@ onUnmounted(() => {
     height: 12px;
 }
 
-.menu-overlay {
+/* ---------------- 版本切换抽屉（float-menu 下拉已否决删除）----------------
+ * 全高右滑面板：--z-drawer 层级、遮罩变暗、内容三层（搜索 / 分组列表 / 管理版本金钮）。
+ * 动效口径照 App.vue notice-panel 家族：transform translateX + --ease-out，reduced-motion 直切。 */
+.drawer-backdrop {
     position: fixed;
     inset: 0;
-        z-index: var(--z-menu);
+    z-index: var(--z-drawer);
+    background: var(--mask);
+    backdrop-filter: blur(4px);
 }
-.float-menu {
+.version-drawer {
     position: fixed;
-        z-index: var(--z-menu);
-    max-height: 280px;
-    overflow-y: auto;
-    padding: 6px;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--card) 94%, transparent);
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-drawer);
+    display: flex;
+    flex-direction: column;
+    width: min(420px, calc(100vw - 32px));
+    background: color-mix(in srgb, var(--card-solid, var(--card)) 96%, transparent);
+    backdrop-filter: blur(16px) saturate(85%);
+    -webkit-backdrop-filter: blur(16px) saturate(85%);
+    border-left: 1px solid var(--border);
     box-shadow: var(--shadow-lg);
-    backdrop-filter: blur(24px);
+    outline: none;
 }
-/* 实例卡 ⋯ 菜单已收编 AppMenu（定位/分组/键盘由组件托管），旧 .card-float-menu 定制样式删除 */
-.menu-item:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
+.drawer-head {
+    padding: var(--space-4) var(--space-4) var(--space-3);
+    border-bottom: 1px solid var(--border);
 }
-.menu-item {
+.drawer-head h3 {
+    margin: 0 0 var(--space-2);
+    font-size: var(--text-md);
+    font-weight: 700;
+}
+.drawer-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: var(--space-2) var(--space-2) var(--space-3);
+}
+.drawer-group + .drawer-group {
+    margin-top: var(--space-2);
+    padding-top: var(--space-2);
+    border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+/* 组头：折叠主钮（chevron 旋转指示）+ 当前标记 + 上移/下移（WCAG 单指针替代）；
+ * 整头 draggable（HTML5 dnd），drop 落 settings.folders 全量保存，两套排序并存 */
+.drawer-group-head {
     display: flex;
     align-items: center;
     gap: 8px;
     width: 100%;
     min-height: 34px;
-    padding: 0 10px;
+    margin-bottom: 4px;
+    padding: 2px 4px 2px 2px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    cursor: grab;
+}
+.drawer-group-head:active {
+    cursor: grabbing;
+}
+.drawer-group-head:hover .drawer-fold {
+    background: var(--hover);
+    color: var(--text);
+}
+.drawer-group-head.drag-over {
+    outline: 1px dashed var(--accent);
+    outline-offset: -1px;
+    background: var(--accent-soft);
+}
+.drawer-group-head.dragging {
+    opacity: 0.45;
+}
+.drawer-fold {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    min-height: 30px;
+    padding: 0 6px;
     border: 0;
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: var(--text-xs);
+    font-weight: 650;
+    text-align: left;
+    cursor: pointer;
+    transition:
+        background 0.15s ease,
+        color 0.15s ease;
+}
+.drawer-fold-chevron {
+    flex: none;
+    transition: transform 0.15s ease;
+}
+.drawer-fold-chevron.open {
+    transform: rotate(90deg);
+}
+.drawer-group-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.drawer-group-count {
+    flex: none;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--card-2);
+    color: var(--text-dim);
+    font-size: 10px;
+    font-weight: 700;
+}
+.drawer-group-now {
+    flex: none;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-2);
+    font-size: 10px;
+    font-weight: 700;
+}
+.drawer-group-movers {
+    display: flex;
+    flex: none;
+    gap: 2px;
+}
+.drawer-move {
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 5px;
+    cursor: pointer;
+}
+.drawer-move:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--text);
+}
+.drawer-move:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+.drawer-group-empty {
+    margin: 0;
+    padding: 4px 10px 8px 34px;
+    color: var(--text-dim);
+    font-size: var(--text-xs);
+}
+.drawer-item {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
+    min-height: 56px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
     background: transparent;
     color: var(--text);
     font-family: inherit;
-    font-size: 12px;
-    font-weight: 500;
     text-align: left;
     cursor: pointer;
+    transition:
+        background 0.15s ease,
+        border-color 0.15s ease;
 }
-.menu-item:hover,
-.menu-item.active {
+.drawer-item:hover {
+    background: var(--hover);
+}
+.drawer-item.active {
     background: var(--accent-soft);
-    color: var(--accent-2);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
 }
-.menu-item.danger {
-    color: var(--danger);
-}
-.menu-spacer {
-    width: 12px;
+.drawer-item-icon {
+    width: 28px;
+    height: 28px;
     flex: none;
+    object-fit: contain;
+    image-rendering: pixelated;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--card-2);
 }
-.menu-empty {
-    padding: 20px 8px;
+.drawer-item-copy {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
+}
+.drawer-item-copy strong {
+    overflow: hidden;
+    font-size: var(--text-sm);
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.drawer-item-copy small {
+    overflow: hidden;
     color: var(--text-dim);
-    font-size: 12px;
+    font-size: var(--text-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.drawer-item-fav {
+    flex: none;
+    color: #f5b301;
+}
+.drawer-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 96px;
+    padding: var(--space-4);
+    color: var(--text-dim);
+    font-size: var(--text-sm);
     text-align: center;
+}
+.drawer-foot {
+    display: flex;
+    justify-content: flex-end;
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--border);
+}
+.drawer-fade-enter-active,
+.drawer-fade-leave-active {
+    transition: opacity var(--motion-fast) ease;
+}
+.drawer-fade-enter-from,
+.drawer-fade-leave-to {
+    opacity: 0;
+}
+.drawer-slide-enter-active {
+    transition: transform var(--motion-enter) var(--ease-out);
+}
+.drawer-slide-leave-active {
+    transition: transform var(--motion-normal) var(--ease-out);
+}
+.drawer-slide-enter-from,
+.drawer-slide-leave-to {
+    transform: translateX(105%);
+}
+@media (prefers-reduced-motion: reduce) {
+    .drawer-fade-enter-active,
+    .drawer-fade-leave-active,
+    .drawer-slide-enter-active,
+    .drawer-slide-leave-active {
+        transition: none;
+    }
 }
 
 /* 日志弹窗外壳已收编 AppModal（遮罩/标题/按钮行走全局 .modal 体系），旧 .log-mask/.log-dialog 样式删除 */
@@ -2996,9 +3386,6 @@ onUnmounted(() => {
     .launch-main {
         padding: 0 16px;
         font-size: 17px;
-    }
-    .launch-arrow {
-        width: 50px;
     }
     .hero-settings {
         min-width: 126px;
@@ -3138,9 +3525,6 @@ onUnmounted(() => {
     font-size: 21px;
     padding: 0 24px;
 }
-.launch-arrow {
-    width: 48px;
-}
 .hero-actions {
     gap: 12px;
     flex-wrap: wrap;
@@ -3152,32 +3536,46 @@ onUnmounted(() => {
 .runtime-item {
     padding: 10px 12px;
 }
-/* 最近实例收纳：auto-fill 网格按容器宽度自适应列数（宽屏 1 行放下 4 张，960 宽 2×2），
- * 不再纵向堆 4 行把页面顶出视口（首页一屏化） */
+/* 最近实例收纳：auto-fill 网格按容器宽度自适应列数；flex:1 + align-content 把区块内
+ * 剩余高度均匀分给行间（用户实测修正：一屏化后底部不再留大空洞，任意卡数都撑满区块） */
+.instances-block {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface-content);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+}
+.instances-head {
+    margin-bottom: 10px;
+}
 .instance-grid {
+    flex: 1;
+    align-content: space-evenly;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 10px;
+    gap: 12px;
 }
 .home-dashboard .instance-card {
     display: grid;
     grid-template-columns: 36px minmax(0, 1fr) auto 36px 40px;
     gap: 12px;
     align-items: center;
-    min-height: 72px;
+    min-height: 84px;
     height: auto;
     padding: 12px;
-    border: 0;
-    border-bottom: 1px solid var(--border);
-    border-radius: 0;
+    /* 边界感（用户实测修正）：完整卡片框取代单条底边线——四边 border + 面底 + 圆角 */
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     box-shadow: none;
-    background: transparent;
+    background: var(--surface-content);
 }
 .instance-card.selected {
     background: var(--accent-soft);
 }
 .instance-card:hover {
     background: var(--hover);
+    border-color: var(--border-strong);
 }
 .instance-card .instance-icon {
     width: 36px;
@@ -3356,12 +3754,13 @@ onUnmounted(() => {
 .hero-version-card {
     display: flex;
     align-items: center;
-    gap: 13px;
+    gap: 10px;
     width: fit-content;
     max-width: 100%;
-    padding: 9px 16px 9px 9px;
+    /* 用户实测修正：大卡收一档——logo 34px、字号 --text-xl、内边距收紧，可点但不再喧宾夺主 */
+    padding: 6px 14px 6px 6px;
     border: 1px solid rgba(255, 255, 255, 0.16);
-    border-radius: 14px;
+    border-radius: 12px;
     background: rgba(9, 13, 14, 0.5);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
@@ -3389,12 +3788,12 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 44px;
-    height: 44px;
+    width: 30px;
+    height: 30px;
     flex: none;
     overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 10px;
+    border-radius: 8px;
     background: rgba(255, 255, 255, 0.08);
     color: rgba(255, 255, 255, 0.82);
 }
@@ -3404,19 +3803,32 @@ onUnmounted(() => {
     object-fit: contain;
     image-rendering: pixelated;
 }
-.hero-version-copy {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-}
+/* 一行式紧凑卡（用户实测修正）：图标 30px + 名字 --text-lg + tag 同行内联 + chevron 行尾，
+ * 整卡高度 ≤64px，名字超长走行内省略（完整名在 title） */
 .hero-version-card h1 {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
     margin: 0;
+    overflow: hidden;
+    font-size: var(--text-lg);
+    line-height: 1.3;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
-/* tag 行随卡片布局，不再吃基础样式的 16px 上边距（间距由 copy 的 gap 统一管） */
+.hero-version-card h1.long-name {
+    font-size: var(--text-md);
+}
 .hero-version-card .hero-edition {
-    margin-top: 0;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    margin: 0;
+    gap: 6px;
+    font-size: 12px;
+}
+.hero-version-card .hero-game-version {
+    font-size: 12px;
 }
 .hero-version-chevron {
     flex: none;
@@ -3458,12 +3870,12 @@ onUnmounted(() => {
         min-height: 0;
     }
     .hero-card {
-        height: 300px;
+        height: 330px;
         max-height: none;
         min-height: 0;
     }
     .hero-content {
-        padding: 20px 24px 16px;
+        padding: 24px 24px 18px;
     }
     .hero-content h1,
     .hero-content h1.long-name {
@@ -3487,10 +3899,9 @@ onUnmounted(() => {
         gap: 12px;
     }
     .home-side .skin-stage {
-        height: 190px;
+        height: 220px;
     }
-    /* 低频板块收纳：创作者卡与启动热力图让位（信息入口在对应功能区仍在） */
-    .home-creator,
+    /* 低频板块收纳：启动热力图让位（创作者卡保留，填充右栏避免下段空虚） */
     .home-heatmap {
         display: none;
     }
@@ -3509,7 +3920,8 @@ onUnmounted(() => {
     }
     .hero-content h1,
     .hero-content h1.long-name {
-        font-size: clamp(19px, 2.2vw, 25px);
+        /* 矮视口在已收窄的大卡上再降一档（基础档现为 --text-lg） */
+        font-size: var(--text-md);
     }
     /* 装饰性动画文案在矮 hero 里让位（196px 高度装不下第四行） */
     .hero-scene-copy {
@@ -3525,9 +3937,9 @@ onUnmounted(() => {
         width: auto;
     }
     .hero-version-icon {
-        width: 36px;
-        height: 36px;
-        border-radius: 8px;
+        width: 26px;
+        height: 26px;
+        border-radius: 7px;
     }
     .hero-version-card {
         gap: 10px;
@@ -3552,9 +3964,6 @@ onUnmounted(() => {
     .launch-main {
         font-size: 16px;
         padding: 0 18px;
-    }
-    .launch-arrow {
-        width: 42px;
     }
     .hero-settings,
     .hero-more {
@@ -3600,6 +4009,11 @@ onUnmounted(() => {
     }
     .home-side {
         gap: 10px;
+    }
+    /* 矮视口右栏只留 账号+皮肤 两张高频卡（900h 档保留的创作者卡在此让位） */
+    .home-creator,
+    .home-heatmap {
+        display: none;
     }
     .account-panel {
         min-height: 0;
