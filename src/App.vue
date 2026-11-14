@@ -1420,7 +1420,7 @@ function applyCustomVars(custom: CustomTheme, theme: ThemeName) {
     );
     st.setProperty(
         '--shell-surface',
-        `color-mix(in srgb, ${colors.bg} ${dark ? 30 : 42}%, transparent)`
+        `color-mix(in srgb, ${colors.bg} ${dark ? 55 : 62}%, transparent)`
     );
     st.setProperty('--glass-blur', '28px');
     // 图一布局是全部主题共享的固定骨架；旧 layout 字段只保留兼容，不再改变结构。
