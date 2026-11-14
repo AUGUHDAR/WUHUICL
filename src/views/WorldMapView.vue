@@ -13,6 +13,8 @@ import type { WorldMapDimensionId, WorldMapInfo, WorldMapTileResult } from '@sha
 import { managedImageUrl } from '../managedAssets';
 import ResourcePathChip from '../components/ResourcePathChip.vue';
 import SelectMenu from '../components/SelectMenu.vue';
+import EmptyState from '../components/EmptyState.vue';
+import UiGlyph from '../components/UiGlyph.vue';
 import { store } from '../store';
 import {
     list as listInstances,
@@ -512,7 +514,12 @@ function schedulePersist() {
     if (persistTimer !== undefined) window.clearTimeout(persistTimer);
     persistTimer = window.setTimeout(() => {
         persistTimer = undefined;
-        const state = loadPersisted() ?? { views: {} };
+        const state = loadPersisted() ?? {
+            instanceId: '',
+            world: '',
+            dimension: 'overworld',
+            views: {}
+        };
         state.instanceId = instanceId.value;
         state.world = worldPath.value;
         state.dimension = dimension.value;
@@ -613,20 +620,15 @@ const scaleLabel = computed(() => {
                 </p>
             </div>
             <div class="actions">
+                <!-- 刷新收进下方 context 工具行行尾（横向 K 同位：选择器 → 搜索 → 筛选 → 刷新行尾）；
+                     页头只留画布操作（重置视图）。UiGlyph refresh 图标由图标收编补齐 -->
                 <button
                     class="btn btn-ghost"
                     data-ui="worldmap:fit"
                     :disabled="!dimensionRegions.length"
                     @click="fitView()"
                 >
-                    重置视图</button
-                ><button
-                    class="btn btn-ghost"
-                    data-ui="worldmap:rescan"
-                    :disabled="infoLoading || !worldPath"
-                    @click="rescan"
-                >
-                    {{ infoLoading ? '扫描中…' : '↻ 重新扫描' }}
+                    重置视图
                 </button>
             </div>
         </header>
@@ -671,6 +673,19 @@ const scaleLabel = computed(() => {
                     </button>
                 </div>
             </div>
+            <!-- 槽位 4：刷新（唯一一处，行尾；横向 K 同位纪律）。本页无可搜索列表，搜索槽不适用 -->
+            <div class="wm-field wm-field-end">
+                <span>刷新</span>
+                <button
+                    class="btn btn-ghost"
+                    data-ui="worldmap:rescan"
+                    :disabled="infoLoading || !worldPath"
+                    @click="rescan"
+                >
+                    <UiGlyph name="refresh" :size="13" />
+                    {{ infoLoading ? '扫描中…' : '重新扫描' }}
+                </button>
+            </div>
         </div>
         <div class="worldmap-library" data-ui="worldmap:library">
             <ResourcePathChip v-if="info" label="存档位置" :path="info.worldPath" />
@@ -693,35 +708,47 @@ const scaleLabel = computed(() => {
                 @pointerleave="onPointerLeave"
             ></canvas>
 
+            <!-- 六种遮罩态 → EmptyState（横向 B 收编）：overlay 保留画布压暗职责，内容统一 EmptyState 排版 -->
             <div v-if="infoLoading && !info" class="wm-overlay">
-                <span class="wm-spinner" aria-hidden="true"></span>
-                <p>正在扫描存档…</p>
+                <EmptyState title="正在扫描存档…" description="第一次扫描要遍历 region 文件，大世界可能要几十秒。">
+                    <template #icon><span class="wm-spinner wm-overlay-spin"></span></template>
+                </EmptyState>
             </div>
 
             <div v-else-if="infoError" class="wm-overlay">
-                <p class="wm-overlay-title">无法读取这个存档</p>
-                <p class="muted">{{ infoError }}</p>
-                <button class="btn btn-ghost" @click="rescan">重试</button>
+                <EmptyState title="无法读取这个存档" :description="infoError">
+                    <template #action>
+                        <button class="btn btn-ghost" @click="rescan">重试</button>
+                    </template>
+                </EmptyState>
             </div>
 
             <div v-else-if="!instances.length" class="wm-overlay">
-                <p class="wm-overlay-title">还没有可用的游戏实例</p>
-                <p class="muted">先在「启动」页安装一个游戏版本，玩过一次生成存档后就能看地图。</p>
+                <EmptyState
+                    title="还没有可用的游戏实例"
+                    description="先在「启动」页安装一个游戏版本，玩过一次生成存档后就能看地图。"
+                />
             </div>
 
             <div v-else-if="!worlds.length" class="wm-overlay">
-                <p class="wm-overlay-title">这个实例还没有存档</p>
-                <p class="muted">启动一次游戏创建世界（或从实例中心导入存档）后，这里就会出现地图。</p>
+                <EmptyState
+                    title="这个实例还没有存档"
+                    description="启动一次游戏创建世界（或从实例中心导入存档）后，这里就会出现地图。"
+                />
             </div>
 
             <div v-else-if="info && !info.supported" class="wm-overlay">
-                <p class="wm-overlay-title">暂不支持该存档版本</p>
-                <p class="muted">{{ info.unsupportedReason ?? '该存档版本过旧，地图预览暂不支持。' }}</p>
+                <EmptyState
+                    title="暂不支持该存档版本"
+                    :description="info.unsupportedReason ?? '该存档版本过旧，地图预览暂不支持。'"
+                />
             </div>
 
             <div v-else-if="info && !dimensionRegions.length" class="wm-overlay">
-                <p class="wm-overlay-title">该维度还没有生成区块</p>
-                <p class="muted">进游戏到对应维度走过一次再来，或点右上角「重新扫描」。</p>
+                <EmptyState
+                    title="该维度还没有生成区块"
+                    description="进游戏到对应维度走过一次再来，或点上方「重新扫描」。"
+                />
             </div>
 
             <footer v-if="info?.supported" class="wm-status">
@@ -750,7 +777,8 @@ const scaleLabel = computed(() => {
 </template>
 
 <style scoped>
-/* 页面骨架与录像/截图页同构：grid 容器 + heading 左右布局 + 上下文行 + 工作区卡片 */
+/* 页面骨架与录像/截图页同构：grid 容器 + heading 左右布局 + 上下文行 + 工作区卡片。
+   世界地图是全屏画布页：实宽 1440px（横向 A）scoped 保留，待总管回写 UI_SYSTEM.md §4（或按"工具页全宽"另议） */
 .worldmap-page {
     max-width: 1440px;
     margin: 0 auto;
@@ -799,6 +827,11 @@ const scaleLabel = computed(() => {
 .wm-dims {
     display: flex;
     gap: 6px;
+    flex-wrap: wrap;
+}
+/* 槽位 4（刷新）行尾：与左侧字段同高度网格，右缘对齐工具行 */
+.wm-field-end {
+    margin-left: auto;
 }
 /* 激活态用成套底色语言（同实例中心 ic-tabs），不只靠一圈描边 */
 .wm-dim.active {
@@ -884,6 +917,13 @@ const scaleLabel = computed(() => {
 .wm-overlay .muted {
     max-width: 460px;
     margin: 0;
+}
+/* 遮罩内 EmptyState 图标区：加载 spinner 放大一格，与面板内加载态同规格 */
+.wm-overlay-spin {
+    width: 28px;
+    height: 28px;
+    border-width: 3px;
+    border-top-color: transparent;
 }
 .wm-status {
     position: absolute;

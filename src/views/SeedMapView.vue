@@ -540,7 +540,12 @@ const availableVersions = computed(() =>
         .map((profile) => profile.version),
 )
 const dimensions = computed(
-    () => selectedProfile.value?.dimensions ?? ['overworld', 'nether', 'end'],
+    () =>
+        (selectedProfile.value?.dimensions as SeedMapDimension[] | undefined) ?? [
+            'overworld',
+            'nether',
+            'end'
+        ],
 )
 const scale = computed(() => 4 ** workspace.zoom)
 // Native tiles are generated at discrete powers of four. Keep the current
@@ -2378,6 +2383,8 @@ function clampWorldCoordinate(value: number) {
 </script>
 
 <template>
+    <!-- lab 页面宽（横向 A 登记）：max-w-[110rem] = 实宽 1760px，走 lab tw 工具类保留；
+         待总管回写 UI_SYSTEM.md §4（画布优先工具页，宽于 .page--resource 档） -->
     <main
         class="seed-map-page mx-auto flex h-full min-h-0 w-full max-w-[110rem] flex-col gap-3 p-4"
     >
@@ -3154,7 +3161,7 @@ function clampWorldCoordinate(value: number) {
                         :dimension="workspace.dimension"
                         :enabled="workspace.highlightBiomeEnabled"
                         :highlighted-biomes="workspace.highlightedBiomes"
-                        :container="isFullscreen ? fullscreenContainer : undefined"
+                        :container="isFullscreen ? (fullscreenContainer ?? undefined) : undefined"
                         @update:dimension="workspace.dimension = $event"
                         @update:enabled="workspace.highlightBiomeEnabled = $event"
                         @update:highlighted-biomes="workspace.highlightedBiomes = $event"
@@ -3403,7 +3410,7 @@ function clampWorldCoordinate(value: number) {
     --seed-history-row-hover-bg: var(--surface-3);
     --seed-history-border: var(--surface-5);
     --seed-history-shadow: 0 18px 48px color-mix(in srgb, var(--surface-5) 55%, transparent);
-        z-index: var(--z-modal); !important;
+        z-index: var(--z-modal) !important;
 }
 
 :global(html.dark-mode .seed-map-history-popout),

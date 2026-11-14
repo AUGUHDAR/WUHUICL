@@ -1,6 +1,8 @@
-//! 杂项子系统集合（对应原版 core/ 的 keybindings / defaultGameOptions /
-//! defaultResourcePacks / exitHistory / mascots / plugins 文件级实现）。
-//! 这些通道全部是 userData 下的 JSON 存取，语义 1:1。
+//! 杂项子系统集合（对应原版 core/ 的 keybindings / exitHistory / mascots /
+//! plugins 文件级实现）。这些通道全部是 userData 下的 JSON 存取，语义 1:1。
+//! 游戏内配置 UI 已于 2026-11-14 砍除：keys:setDefault/reset、gameOptions:get/set、
+//! defaultPacks:* 通道随之删除；default_keys 读取与 sync_keys_to_game_dir 保留
+//! （launch 启动链仍用）；gameoptions.rs 机制静默保留，功能重做时一并处理。
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -74,16 +76,6 @@ fn default_keys(app: &tauri::AppHandle) -> Value {
     Value::Object(out)
 }
 
-fn persist_keys(app: &tauri::AppHandle, keys: &Value) {
-    let file = default_keys_file(app);
-    if let Some(dir) = file.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if let Ok(bytes) = serde_json::to_vec_pretty(keys) {
-        let _ = std::fs::write(file, bytes);
-    }
-}
-
 /// 对应原版 keybindings.ts mergeKeysIntoOptions + syncKeysToGameDir：
 /// 把默认键位写进实例 options.txt 的 key_* 项，其余行原样保留。返回是否有改动。
 pub fn sync_keys_to_game_dir(app: &tauri::AppHandle, game_dir: &str) -> bool {
@@ -118,30 +110,6 @@ pub fn sync_keys_to_game_dir(app: &tauri::AppHandle, game_dir: &str) -> bool {
 }
 
 // ---------------- 默认游戏选项（defaultGameOptions.ts） ----------------
-
-// ---------------- 默认资源包（defaultResourcePacks.ts） ----------------
-
-fn default_packs_file(app: &tauri::AppHandle) -> PathBuf {
-    crate::settings::user_data_dir(app).join("default-resource-packs.json")
-}
-
-fn load_packs(app: &tauri::AppHandle) -> Vec<Value> {
-    std::fs::read(default_packs_file(app))
-        .ok()
-        .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
-        .and_then(|v| v.as_array().cloned())
-        .unwrap_or_default()
-}
-
-fn save_packs(app: &tauri::AppHandle, list: &[Value]) {
-    let file = default_packs_file(app);
-    if let Some(dir) = file.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    if let Ok(bytes) = serde_json::to_vec_pretty(list) {
-        let _ = std::fs::write(file, bytes);
-    }
-}
 
 // ---------------- 玩偶计数（mascots.ts） ----------------
 
@@ -281,117 +249,6 @@ pub fn invoke(
     args: &[Value],
 ) -> Option<Result<Value, String>> {
     match channel {
-        // 默认按键
-        "keys:getDefault" => Some(Ok(default_keys(app))),
-        "keys:setDefault" => Some((|| {
-            let id = args.first().and_then(|v| v.as_str()).unwrap_or("");
-            let bind = args.get(1).and_then(|v| v.as_str()).unwrap_or("");
-            if !VANILLA_KEYBINDS.iter().any(|(k, _)| *k == id) {
-                return Err("未知的键位项".into());
-            }
-            if !BIND_RE_OK(bind) {
-                return Err("键位值格式无效".into());
-            }
-            let mut keys = default_keys(app);
-            if let Some(obj) = keys.as_object_mut() {
-                obj.insert(id.to_string(), json!(bind));
-            }
-            persist_keys(app, &keys);
-            Ok(keys)
-        })()),
-        "keys:reset" => Some((|| {
-            // default_keys() 是"原版默认 + 已存覆盖"的合并结果；重置必须清掉覆盖文件，
-            // 否则等于把当前值原样存回，用户看到"已恢复"实际没变。
-            let _ = std::fs::remove_file(default_keys_file(app));
-            Ok(default_keys(app))
-        })()),
-
-        // 默认游戏选项：形状与校验语义对齐原版 defaultGameOptions.ts
-        "gameOptions:get" => Some(Ok(crate::gameoptions::get(app))),
-        "gameOptions:set" => Some(crate::gameoptions::set(
-            app,
-            &args.first().cloned().unwrap_or(json!({})),
-        )),
-
-        // 默认资源包
-        "defaultPacks:get" => Some(Ok(Value::Array(load_packs(app)))),
-        "defaultPacks:import" => Some((|| {
-            let files = args
-                .first()
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default();
-            let mut list = load_packs(app);
-            let packs_root = crate::settings::user_data_dir(app).join("default-resource-packs");
-            let _ = std::fs::create_dir_all(&packs_root);
-            for f in files {
-                let Some(src) = f.as_str() else { continue };
-                let src_path = PathBuf::from(src);
-                let name = src_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy())
-                    .unwrap_or_default()
-                    .to_string();
-                let id = format!("pack-{}", &crate::accounts::uuid_v4()[..8]);
-                let dest = packs_root.join(&name);
-                std::fs::copy(&src_path, &dest).map_err(|e| e.to_string())?;
-                list.push(json!({
-                    "id": id, "name": name.trim_end_matches(".zip").to_string(),
-                    "file": dest.to_string_lossy(), "enabled": true,
-                    "time": chrono::Utc::now().timestamp_millis()
-                }));
-            }
-            save_packs(app, &list);
-            Ok(Value::Array(list))
-        })()),
-        "defaultPacks:pick" => Some((|| {
-            use tauri_plugin_dialog::DialogExt;
-            let picked = app
-                .dialog()
-                .file()
-                .add_filter("资源包", &["zip"])
-                .blocking_pick_files();
-            let files: Vec<Value> = picked
-                .map(|ps| ps.iter().map(|p| json!(p.to_string())).collect())
-                .unwrap_or_default();
-            import_packs_from(app, files)
-        })()),
-        "defaultPacks:remove" => Some((|| {
-            let id = args.first().and_then(|v| v.as_str()).unwrap_or("");
-            let mut list = load_packs(app);
-            if let Some(pos) = list.iter().position(|p| p["id"].as_str() == Some(id)) {
-                let item = list.remove(pos);
-                if let Some(file) = item["file"].as_str() {
-                    let _ = std::fs::remove_file(file);
-                }
-            }
-            save_packs(app, &list);
-            Ok(Value::Array(list))
-        })()),
-        "defaultPacks:move" => Some((|| {
-            let id = args.first().and_then(|v| v.as_str()).unwrap_or("");
-            let direction = args.get(1).and_then(|v| v.as_i64()).unwrap_or(0);
-            let mut list = load_packs(app);
-            if let Some(pos) = list.iter().position(|p| p["id"].as_str() == Some(id)) {
-                let new_pos = (pos as i64 + direction).clamp(0, list.len() as i64 - 1) as usize;
-                let item = list.remove(pos);
-                list.insert(new_pos, item);
-            }
-            save_packs(app, &list);
-            Ok(Value::Array(list))
-        })()),
-        "defaultPacks:setEnabled" => Some((|| {
-            let id = args.first().and_then(|v| v.as_str()).unwrap_or("");
-            let enabled = args.get(1).and_then(|v| v.as_bool()).unwrap_or(false);
-            let mut list = load_packs(app);
-            if let Some(item) = list.iter_mut().find(|p| p["id"].as_str() == Some(id)) {
-                item["enabled"] = json!(enabled);
-            }
-            save_packs(app, &list);
-            Ok(Value::Array(list))
-        })()),
-        "defaultPacks:apply" => Some(Err("默认资源包应用到实例尚未接入".into())),
-
         // 玩偶
         "mascots:state" => Some(Ok(mascot_state(app))),
         "mascots:batch" => Some((|| {
@@ -722,29 +579,4 @@ pub fn empty_self_working_set() -> bool {
 /// 供启动流程调用（「启动前整理内存」开关）：对应原版 launch.ts 里的 organizeMemory()
 pub fn run_memory_organize() -> Result<Value, String> {
     mem_organize::run()
-}
-
-fn import_packs_from(app: &tauri::AppHandle, files: Vec<Value>) -> Result<Value, String> {
-    let mut list = load_packs(app);
-    let packs_root = crate::settings::user_data_dir(app).join("default-resource-packs");
-    let _ = std::fs::create_dir_all(&packs_root);
-    for f in files {
-        let Some(src) = f.as_str() else { continue };
-        let src_path = PathBuf::from(src);
-        let name = src_path
-            .file_name()
-            .map(|n| n.to_string_lossy())
-            .unwrap_or_default()
-            .to_string();
-        let id = format!("pack-{}", &crate::accounts::uuid_v4()[..8]);
-        let dest = packs_root.join(&name);
-        std::fs::copy(&src_path, &dest).map_err(|e| e.to_string())?;
-        list.push(json!({
-            "id": id, "name": name.trim_end_matches(".zip").to_string(),
-            "file": dest.to_string_lossy(), "enabled": true,
-            "time": chrono::Utc::now().timestamp_millis()
-        }));
-    }
-    save_packs(app, &list);
-    Ok(Value::Array(list))
 }

@@ -36,7 +36,6 @@ export type ViewName =
     | 'projections'
     | 'seedmap'
     | 'worldmap'
-    | 'keys'
     | 'skins'
     | 'community'
     | 'servers'
@@ -78,7 +77,7 @@ export const store = reactive({
     selectedAccount: null as Account | null,
     installed: [] as InstalledVersion[],
     currentView: 'home' as ViewName,
-    settingsSection: '' as '' | 'java' | 'memory' | 'downloads',
+    settingsSection: '' as '' | 'java' | 'memory' | 'downloads' | 'installation',
     /** 顶栏搜索关键字（游戏版本页版本列表联动过滤） */
     searchKeyword: '',
     /** 资源管理（模组/资源包/光影包）当前选中的版本 id；空 = 跟随第一个已装版本 */

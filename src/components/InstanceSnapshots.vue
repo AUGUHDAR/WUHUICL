@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from '../store';
 import { errText } from '../api';
 import ConfirmModal from './ConfirmModal.vue';
+import EmptyState from './EmptyState.vue';
 import UiGlyph from './UiGlyph.vue';
 
 const props = defineProps<{
@@ -192,9 +193,13 @@ const totalBytes = computed(() => list.value.reduce((s, m) => s + (m.zipBytes ||
                 </div>
             </li>
         </ul>
-        <p v-else-if="!loading" class="snap-empty">
-            还没有快照。装大整合包、批量更新模组之前，建议先拍一份——出问题能一键退回。
-        </p>
+        <!-- 空态收编 EmptyState（UX「空状态指引」）：入口按钮已在卡头（拍摄快照），无需 #action -->
+        <EmptyState
+            v-else-if="!loading"
+            icon="clock"
+            title="还没有快照"
+            description="装大整合包、批量更新模组之前，建议先拍一份——出问题能一键退回。"
+        />
         <button
             v-if="list.length > 4"
             class="snap-more"
@@ -294,6 +299,18 @@ const totalBytes = computed(() => list.value.reduce((s, m) => s + (m.zipBytes ||
     gap: var(--space-3);
     padding: var(--space-3) 0;
     border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+    transition: background 0.15s ease;
+}
+/* 行 hover 统一规则【整组苏醒】（inventory L，参照 GameView .installed-row）：行背景 var(--hover)，
+ * 行内操作按钮整组提亮（背景 card-2 + 边框 border-strong + 文字提亮），不做位移。 */
+.snap-row:hover {
+    background: var(--hover);
+}
+.snap-row:hover :is(.snap-row-actions .btn):not(:disabled),
+.snap-row:focus-within :is(.snap-row-actions .btn):not(:disabled) {
+    background: var(--card-2);
+    border-color: var(--border-strong);
+    color: var(--text);
 }
 .snap-row:first-child {
     border-top: 0;
@@ -333,12 +350,6 @@ const totalBytes = computed(() => list.value.reduce((s, m) => s + (m.zipBytes ||
     display: flex;
     gap: var(--space-2);
     flex: none;
-}
-.snap-empty {
-    margin: 0;
-    font-size: var(--text-xs);
-    color: var(--text-dim);
-    line-height: 1.7;
 }
 .snap-more {
     justify-self: start;

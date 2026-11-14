@@ -51,10 +51,10 @@ const LOCKED_HINT = '此范围已聚合全部实例，无需选择实例；切�
 <style scoped>
 .rsf-field {
     display: grid;
-    gap: 6px;
+    gap: var(--space-2);
     flex: 0 1 440px;
     min-width: 0;
-    font-size: 12px;
+    font-size: var(--text-xs);
     color: var(--text-dim);
 }
 .rsf-field :deep(.select-menu-btn) {

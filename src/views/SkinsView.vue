@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import {
     applyOfflineSkin,
     changeCape,
@@ -16,6 +16,8 @@ import { store, toast } from '../store';
 import { renderCape, renderSkinFront } from '../skin-render';
 import SkinViewer3D from '../components/SkinViewer3D.vue';
 import SkinEditor from '../components/SkinEditor.vue';
+import TabPills from '../components/TabPills.vue';
+import EmptyState from '../components/EmptyState.vue';
 import type { SkinPreviewAnimation } from '../skinModel';
 import { resolveSkinPreview } from '../skinPreviewSelection';
 import { loadFallbackSkinDataUrl } from '../fallbackSkin';
@@ -85,43 +87,21 @@ const previewModes: { key: SkinPreviewAnimation; name: string; title: string }[]
     { key: 'crouch', name: '蹲下', title: '蹲下姿势' },
     { key: 'fly', name: '飞行', title: '鞘翅飞行姿势' }
 ];
-
-/** 行走/待机分段控件滑动块（与导航水滴/游戏 Tab 同款弹簧动效） */
-const animSeg = ref<HTMLElement | null>(null);
-const animSegBlob = reactive({ left: 0, width: 0, on: false });
-function updateAnimSegBlob() {
-    const root = animSeg.value;
-    if (!root) return;
-    const active = root.querySelector<HTMLElement>(`.seg-btn[data-seg="${previewAnim.value}"]`);
-    if (!active) return;
-    animSegBlob.left = active.offsetLeft;
-    animSegBlob.width = active.offsetWidth;
-    animSegBlob.on = true;
+/** 姿势切换 → TabPills（横向 C 收编）：原自绘 .seg 滑块（blob）删除，新旧逻辑不并存 */
+const previewModeItems = computed(() =>
+    previewModes.map((m) => ({ value: m.key as string, label: m.name }))
+);
+function setPreviewAnim(value: string) {
+    previewAnim.value = value as SkinPreviewAnimation;
 }
-watch(previewAnim, () => nextTick(updateAnimSegBlob));
-let animSegObserver: ResizeObserver | null = null;
-watch(
-    animSeg,
-    (element) => {
-        animSegObserver?.disconnect();
-        animSegBlob.on = false;
-        if (!element) return;
-        if (!animSegObserver) animSegObserver = new ResizeObserver(updateAnimSegBlob);
-        animSegObserver.observe(element);
-        void nextTick(updateAnimSegBlob);
-    },
-    { flush: 'post' }
-);
-watch(
-    () => store.settings?.theme,
-    () => nextTick(updateAnimSegBlob)
-);
-onUnmounted(() => animSegObserver?.disconnect());
-const animSegBlobStyle = computed(() => ({
-    left: animSegBlob.left + 'px',
-    width: animSegBlob.width + 'px',
-    opacity: animSegBlob.on ? 1 : 0
-}));
+/** 待上传模型选择 → TabPills（横向 C 收编） */
+const variantItems = [
+    { value: 'classic', label: '经典 Classic' },
+    { value: 'slim', label: '纤细 Slim' }
+];
+function setVariant(value: string) {
+    variant.value = value as SkinVariant;
+}
 
 // ---------------- 披风 ----------------
 const capeRenders = ref<Record<string, string>>({});
@@ -540,38 +520,41 @@ watch(
             </button>
         </div>
 
-        <!-- 非微软账号：整页引导 -->
-        <div
+        <!-- 非微软账号：整页引导 → EmptyState（横向 B 收编）；衣架 SVG 是页面专属插画，走 #icon 插槽保留 -->
+        <EmptyState
             data-ui="SkinsView:bd24ad0997f2"
             v-if="!canViewProfile && !historyList.length"
-            class="card empty need-ms"
+            class="card need-ms"
+            title="先登录一个账号"
+            description="账号皮肤与披风需要微软正版账号或外置 Yggdrasil 账号；本地历史皮肤可直接预览。"
         >
-            <svg
-                class="need-ms-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.7"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-            >
-                <path d="m9 4-6 3 2 5 3-1v9h8v-9l3 1 2-5-6-3a3 3 0 0 1-6 0Z" />
-            </svg>
-            <p data-ui="SkinsView:b00f59b6449e" class="need-ms-text">
-                账号皮肤与披风需要微软正版账号或外置 Yggdrasil 账号；本地历史皮肤可直接预览
-            </p>
-            <p v-if="historyError" role="alert" class="muted">
-                读取本地历史失败：{{ historyError
-                }}<button class="btn btn-ghost" @click="loadHistory">重试</button>
-            </p>
-            <button
-                data-ui="SkinsView:81397b7fad2a"
-                class="btn btn-gold"
-                @click="store.currentView = 'accounts'"
-            >
-                去登录
-            </button>
-        </div>
+            <template #icon>
+                <svg
+                    class="need-ms-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.7"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                >
+                    <path d="m9 4-6 3 2 5 3-1v9h8v-9l3 1 2-5-6-3a3 3 0 0 1-6 0Z" />
+                </svg>
+            </template>
+            <template #action>
+                <p v-if="historyError" role="alert" class="muted">
+                    读取本地历史失败：{{ historyError
+                    }}<button class="btn btn-ghost" @click="loadHistory">重试</button>
+                </p>
+                <button
+                    data-ui="SkinsView:81397b7fad2a"
+                    class="btn btn-gold"
+                    @click="store.currentView = 'accounts'"
+                >
+                    去登录
+                </button>
+            </template>
+        </EmptyState>
 
         <template v-if="canViewProfile || historyList.length">
             <!-- ============ 第一行：3D 预览 + 当前皮肤（40% / 60%，窄窗自动换行） ============ -->
@@ -586,59 +569,44 @@ watch(
             >
                 <!-- 左：3D 人偶预览 -->
                 <section data-ui="SkinsView:6a4cd6686688" class="card pane pane-preview">
+                    <!-- 标题独立一行不折行（用户实测：标题曾被姿势药丸组挤到竖排）；
+                         姿势工具组放头部下方独立一行（用户实测：药丸组原与标题重叠） -->
                     <header class="pane-head">
                         <h3 class="pane-title">3D 预览</h3>
-                        <div
-                            data-ui="SkinsView:bb4ca04a6667"
-                            v-if="previewReady"
-                            class="pane-tools preview-pose-tools"
-                        >
-                            <div
-                                data-ui="SkinsView:66970b2bfb5f"
-                                class="seg preview-pose-selector"
-                                ref="animSeg"
-                                role="group"
-                                aria-label="预览姿势"
-                            >
-                                <span
-                                    data-ui="SkinsView:aaed9003b2f3"
-                                    class="seg-blob"
-                                    :style="animSegBlobStyle"
-                                    aria-hidden="true"
-                                ></span>
-                                <button
-                                    v-for="mode in previewModes"
-                                    :key="mode.key"
-                                    class="seg-btn"
-                                    :data-seg="mode.key"
-                                    :class="{ active: previewAnim === mode.key }"
-                                    :aria-pressed="previewAnim === mode.key"
-                                    :title="mode.title"
-                                    @click="previewAnim = mode.key"
-                                >
-                                    {{ mode.name }}
-                                </button>
-                            </div>
-                            <button
-                                data-ui="SkinsView:1350e68d93c0"
-                                class="icon-btn"
-                                title="回正视角"
-                                @click="viewerRef?.resetView()"
-                            >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="1.7"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                >
-                                    <circle cx="12" cy="12" r="7.5" />
-                                    <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
-                                </svg>
-                            </button>
-                        </div>
                     </header>
+                    <div
+                        data-ui="SkinsView:bb4ca04a6667"
+                        v-if="previewReady"
+                        class="pane-tools preview-pose-tools"
+                    >
+                        <!-- 姿势切换 → TabPills（横向 C 收编）：紧凑药丸组，blob 滑块机制随收编移除 -->
+                        <TabPills
+                            data-ui="SkinsView:66970b2bfb5f"
+                            class="preview-pose-selector"
+                            :model-value="previewAnim"
+                            :items="previewModeItems"
+                            aria-label="预览姿势"
+                            @update:model-value="setPreviewAnim"
+                        />
+                        <button
+                            data-ui="SkinsView:1350e68d93c0"
+                            class="icon-btn"
+                            title="回正视角"
+                            @click="viewerRef?.resetView()"
+                        >
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="1.7"
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                            >
+                                <circle cx="12" cy="12" r="7.5" />
+                                <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" />
+                            </svg>
+                        </button>
+                    </div>
                     <div v-if="previewHistory" class="preview-selection" role="status">
                         <span
                             ><strong>{{ historyDisplayName(previewHistory) }}</strong> ·
@@ -748,23 +716,15 @@ watch(
                                     :title="pending.name"
                                     >{{ pending.name }}</span
                                 >
-                                <div data-ui="SkinsView:5351ef1f918a" class="seg">
-                                    <button
+                                <div data-ui="SkinsView:5351ef1f918a" class="pending-variant">
+                                    <!-- 模型选择 → TabPills（横向 C 收编），与姿势切换同一形态 -->
+                                    <TabPills
                                         data-ui="SkinsView:a9baa001dcb8"
-                                        class="seg-btn"
-                                        :class="{ active: variant === 'classic' }"
-                                        @click="variant = 'classic'"
-                                    >
-                                        经典 Classic
-                                    </button>
-                                    <button
-                                        data-ui="SkinsView:25ab876996cc"
-                                        class="seg-btn"
-                                        :class="{ active: variant === 'slim' }"
-                                        @click="variant = 'slim'"
-                                    >
-                                        纤细 Slim
-                                    </button>
+                                        :model-value="variant"
+                                        :items="variantItems"
+                                        aria-label="皮肤模型"
+                                        @update:model-value="setVariant"
+                                    />
                                 </div>
                             </div>
                             <button
@@ -874,20 +834,22 @@ watch(
                                 刷新材质
                             </button>
                         </header>
-                        <div
+                        <!-- 加载/空态 → EmptyState（横向 B 收编）：加载与空态同骨架、轻量不喧宾 -->
+                        <EmptyState
                             data-ui="SkinsView:0f570e391601"
                             v-if="loadingProfile"
-                            class="empty pane-empty"
+                            title="正在读取材质…"
+                            class="pane-empty"
                         >
-                            <span class="spin"></span>
-                        </div>
-                        <div
+                            <template #icon><span class="spin pane-empty-spin"></span></template>
+                        </EmptyState>
+                        <EmptyState
                             data-ui="SkinsView:23e5aa429fa5"
                             v-else-if="!capes.length"
-                            class="empty pane-empty"
-                        >
-                            <span>该账号暂无披风</span>
-                        </div>
+                            title="该账号暂无披风"
+                            description="披风由账号所属服务提供（正版或皮肤站），获取后这里会展示。"
+                            class="pane-empty"
+                        />
                         <div data-ui="SkinsView:b74774f82cbb" v-else class="cape-grid">
                             <button
                                 data-ui="SkinsView:cef45a945c20"
@@ -969,27 +931,34 @@ watch(
                             重试
                         </button>
                     </div>
-                    <div
+                    <EmptyState
                         data-ui="SkinsView:7cb3faa3d3a0"
                         v-else-if="loadingHistory && !historyList.length"
-                        class="empty pane-empty"
+                        title="正在读取历史皮肤…"
+                        class="pane-empty"
                     >
-                        <span class="spin"></span>
-                    </div>
-                    <div
+                        <template #icon><span class="spin pane-empty-spin"></span></template>
+                    </EmptyState>
+                    <EmptyState
                         data-ui="SkinsView:30798d037a0e"
                         v-else-if="!historyList.length"
-                        class="empty pane-empty"
-                    >
-                        <span>暂无历史皮肤，上传皮肤后会自动保存到这里，方便随时换回</span>
-                    </div>
-                    <div
+                        title="暂无历史皮肤"
+                        description="上传皮肤后会自动保存到这里，方便随时换回。"
+                        class="pane-empty"
+                    />
+                    <EmptyState
                         data-ui="SkinsView:cb559646d8cc"
                         v-else-if="!filteredHistory.length"
-                        class="empty pane-empty"
+                        title="没有匹配的历史皮肤"
+                        :description="`没有匹配「${historySearch}」的历史皮肤。`"
+                        class="pane-empty"
                     >
-                        <span>没有匹配「{{ historySearch }}」的历史皮肤</span>
-                    </div>
+                        <template #action>
+                            <button class="btn btn-ghost btn-sm" @click="historySearch = ''">
+                                清空搜索
+                            </button>
+                        </template>
+                    </EmptyState>
                     <div data-ui="SkinsView:c57cc36b5fe3" v-else class="history-grid">
                         <div
                             data-ui="SkinsView:2848a3535fdf"
@@ -1110,6 +1079,7 @@ watch(
     display: flex;
     flex-direction: column;
     gap: var(--sec-gap);
+    /* 实宽 1080px（横向 A）：scoped 保留实宽，待总管回写 UI_SYSTEM.md §4 页宽族 */
     max-width: 1080px;
     margin: 0 auto;
 }
@@ -1184,6 +1154,8 @@ watch(
     margin: 0;
     font-size: var(--text-sm);
     font-weight: 700;
+    /* 标题一行不折行：窄卡下标题曾被工具组挤压成竖排（用户实测点名） */
+    white-space: nowrap;
 }
 .pane-tools {
     display: flex;
@@ -1201,7 +1173,11 @@ watch(
     width: 16px;
     height: 16px;
 }
-.pane-empty {
+/* 预览姿势工具组：标题下方独立一行（用户实测：原与卡片标题重叠）；窄卡自动换行 */
+.preview-pose-tools {
+    flex-wrap: wrap;
+    margin-bottom: var(--space-2);
+}
     padding: var(--space-5);
     font-size: var(--text-xs);
     color: var(--text-dim);
@@ -1231,13 +1207,6 @@ watch(
     font-size: var(--text-xs);
     color: var(--text-dim);
     text-align: center;
-}
-.preview-pose-tools {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-}
-.preview-pose-selector .seg-btn {
-    padding: 0 10px;
 }
 .preview-selection {
     display: flex;
@@ -1336,57 +1305,7 @@ watch(
     max-width: 100%;
 }
 
-/* 模型分段选择 */
-.seg {
-    position: relative;
-    display: inline-flex;
-    align-items: stretch;
-    gap: 2px;
-    height: var(--ctl-h);
-    padding: 3px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--card-2);
-}
-/* 滑动指示块：弹簧动效跟随激活分段 */
-.seg-blob {
-    position: absolute;
-    top: 3px;
-    bottom: 3px;
-    border-radius: var(--radius-sm);
-    background: var(--accent-grad);
-    transition:
-        left 0.3s cubic-bezier(0.3, 1.2, 0.4, 1),
-        width 0.3s cubic-bezier(0.3, 1.2, 0.4, 1),
-        opacity 0.15s ease;
-    pointer-events: none;
-    z-index: 0;
-}
-.seg-btn {
-    position: relative;
-    z-index: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    padding: 0 var(--space-4);
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-dim);
-    font-size: var(--text-xs);
-    font-family: inherit;
-    cursor: pointer;
-    transition: color 0.2s ease;
-    white-space: nowrap;
-}
-.seg-btn:hover:not(.active) {
-    color: var(--text);
-}
-.seg-btn.active {
-    color: var(--on-accent);
-    font-weight: 600;
-}
+/* 姿势/模型分段已收编 TabPills（UI_SYSTEM §5），自绘 .seg/.seg-blob/.seg-btn 样式删除（新旧逻辑不并存） */
 
 .skin-actions {
     display: flex;
@@ -1444,9 +1363,10 @@ watch(
         background 0.18s ease,
         transform 0.12s ease;
 }
+/* 卡片自身 hover（横向 L）：去除位移；披风卡是自交互按钮，指向反馈允许边框提亮 */
 .cape-item:hover:not(:disabled) {
+    background: linear-gradient(var(--hover), var(--hover)), var(--card-2);
     border-color: var(--accent-deep);
-    transform: translateY(-2px);
 }
 .cape-item:disabled {
     opacity: 0.6;
@@ -1556,12 +1476,7 @@ watch(
     flex-wrap: wrap;
     gap: 6px;
 }
-.history-actions .btn {
-    flex: 1;
-    padding: 5px 8px;
-    font-size: 11px;
-    min-height: 28px;
-}
+/* 档位统一（横向 I）：历史行按钮就是全局 .btn-sm（32px），删除页内私缩几何覆写 */
 .history-img {
     height: 144px;
     image-rendering: pixelated;
@@ -1624,14 +1539,9 @@ watch(
     font-size: var(--text-xs);
 }
 
-/* ================= 非微软账号引导 ================= */
+/* ================= 非微软账号引导（EmptyState #icon 插槽承载衣架插画） ================= */
 .need-ms {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-4);
-    padding: var(--space-7) var(--card-pad);
+    /* EmptyState 自带排版，这里只保留插画规格 */
     text-align: center;
 }
 .need-ms-icon {
@@ -1640,14 +1550,21 @@ watch(
     color: var(--accent);
     opacity: 0.8;
 }
-.need-ms-text {
-    font-size: var(--text-md);
-}
 .need-ms .btn {
     min-height: var(--ctl-h);
     display: inline-flex;
     align-items: center;
     justify-content: center;
+}
+/* 面板内 EmptyState（加载/空态）：压低高度，适配 pane 内嵌场景 */
+.pane-empty {
+    min-height: 96px;
+    padding: var(--space-4) var(--space-3);
+}
+.pane-empty-spin {
+    width: 28px;
+    height: 28px;
+    border-width: 3px;
 }
 </style>
 <style scoped>

@@ -5,7 +5,8 @@
  * custom=自定义皮肤。上传的是 64×64 皮肤文件，前端渲染成方块头 PNG 后交后端
  * 落盘到受管 faces/ 目录（开屏窗口由主进程直接读取该文件）。
  */
-import { reactive, ref, watch, onUnmounted } from 'vue';
+import { computed, reactive, ref, watch, onUnmounted } from 'vue';
+import SelectMenu from './SelectMenu.vue';
 import { store } from '../store';
 import { updateSettings } from '../settingsUpdates';
 import { errText, getSkinAvatar, resetFaceImage, saveFaceImage } from '../api';
@@ -37,6 +38,19 @@ function fieldNames(slot: Slot) {
         : { source: 'logoFaceSource', path: 'logoFacePath' };
 }
 
+/** 来源下拉选项（SelectMenu）：未登录账号时给「当前账号皮肤」注明原因 */
+const sourceOptions = computed(() => [
+    { value: 'default', label: '默认形象' },
+    {
+        value: 'account',
+        label: '当前账号皮肤',
+        description: store.selectedAccount
+            ? '跟随当前登录账号的皮肤'
+            : '登录账号后可用（暂不可选）'
+    },
+    { value: 'custom', label: '自定义皮肤…' }
+]);
+
 async function patchSource(slot: Slot, source: FaceSource, path?: string) {
     const names = fieldNames(slot);
     busy[slot] = true;
@@ -57,6 +71,11 @@ async function patchSource(slot: Slot, source: FaceSource, path?: string) {
 
 /** 切换来源；切到 custom 且还没有自定义图时直接引导上传（上传成功才落 custom 档） */
 async function onSourceChange(slot: Slot, next: FaceSource) {
+    // SelectMenu 无选项级 disabled：未登录时拦截「当前账号皮肤」，显式告知原因与恢复方式
+    if (next === 'account' && !store.selectedAccount) {
+        error[slot] = '「当前账号皮肤」需先在账号页登录账号（皮肤站与正版账号都支持）。';
+        return;
+    }
     if (next === 'custom' && !pathOf(slot)) {
         pickUpload(slot);
         return;
@@ -186,34 +205,19 @@ watch(
                     <strong data-ui="BrandFaceCard:name">{{ s.title }}</strong>
                     <small data-ui="BrandFaceCard:desc" class="muted">{{ s.desc }}</small>
                     <div data-ui="BrandFaceCard:controls" class="face-controls">
-                        <select
+                        <!-- 原生 select → SelectMenu（UI_SYSTEM §5 弹层统一）。
+                             SelectMenu 暂不支持选项级 disabled：未登录时「当前账号皮肤」以
+                             description 说明原因（UX「联动禁用要显式」），选择行为在
+                             onSourceChange 内拦截并给出错误提示；已登记总管补 disabled 支持。 -->
+                        <SelectMenu
                             data-ui="BrandFaceCard:source"
-                            class="select"
-                            :value="sourceOf(s.key)"
+                            class="face-source-select"
+                            :model-value="sourceOf(s.key)"
+                            :options="sourceOptions"
                             :disabled="busy[s.key]"
                             :aria-label="s.title + '来源'"
-                            @change="
-                                onSourceChange(
-                                    s.key,
-                                    ($event.target as HTMLSelectElement)
-                                        .value as FaceSource
-                                )
-                            "
-                        >
-                            <option value="default">默认形象</option>
-                            <option
-                                value="account"
-                                :disabled="!store.selectedAccount"
-                                :title="
-                                    store.selectedAccount
-                                        ? '跟随当前登录账号的皮肤'
-                                        : '登录账号后可用'
-                                "
-                            >
-                                当前账号皮肤
-                            </option>
-                            <option value="custom">自定义皮肤…</option>
-                        </select>
+                            @update:model-value="onSourceChange(s.key, $event as FaceSource)"
+                        />
                         <button
                             v-if="sourceOf(s.key) === 'custom'"
                             data-ui="BrandFaceCard:reupload"
@@ -294,7 +298,7 @@ watch(
     flex-wrap: wrap;
     margin-top: var(--space-1);
 }
-.face-controls .select {
+.face-controls .face-source-select {
     width: 200px;
     max-width: 100%;
 }

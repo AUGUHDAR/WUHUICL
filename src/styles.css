@@ -568,11 +568,11 @@ input[type='number'] {
 
 /* ---------------- 卡片 / 标签 ---------------- */
 .card {
-  background: var(--card);
+  background: var(--surface-content);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--card-pad);
-  box-shadow: var(--shadow);
+  box-shadow: none;
   transition: border-color 0.18s ease, background 0.18s ease;
 }
 
@@ -711,8 +711,8 @@ input[type='number'] {
   align-items: center;
   justify-content: center;
   background: var(--mask);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(16px) saturate(85%);
+  -webkit-backdrop-filter: blur(16px) saturate(85%);
   animation: mask-in 0.2s ease;
 }
 
@@ -740,6 +740,11 @@ input[type='number'] {
   gap: var(--space-3);
   margin-top: var(--space-5);
 }
+/* AppModal 宽度档位（AppModal size prop：sm 420 / md 560 / lg 640 / xl 760） */
+.modal--sm { width: min(420px, calc(100vw - 48px)); }
+.modal--md { width: min(560px, calc(100vw - 48px)); }
+.modal--lg { width: min(640px, calc(100vw - 48px)); }
+.modal--xl { width: min(760px, calc(100vw - 48px)); }
 @keyframes mask-in {
   from {
     opacity: 0;
@@ -769,8 +774,8 @@ input[type='number'] {
   border-radius: var(--radius-md);
   padding: var(--space-2);
   box-shadow: var(--shadow-lg);
-  backdrop-filter: blur(24px) saturate(130%);
-  -webkit-backdrop-filter: blur(24px) saturate(130%);
+  backdrop-filter: blur(16px) saturate(85%);
+  -webkit-backdrop-filter: blur(16px) saturate(85%);
   animation: modal-in 0.16s ease;
 }
 .menu-item {

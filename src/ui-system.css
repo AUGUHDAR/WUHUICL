@@ -8,8 +8,6 @@
 /* ---------------- 排版与容器 ---------------- */
 .route-view { min-width: 0; }
 .group-title, .pane-title { font-size: var(--text-lg); line-height: 1.5; }
-.card { background-color: var(--surface-content); box-shadow: none; }
-.card .card { box-shadow: none; }
 :is(.card, .group, .pane, .settings-grid, .toolbar, .filter-bar) { min-width: 0; }
 :is(.toolbar, .row-actions, .actions, .page-actions) { flex-wrap: wrap; }
 :is(.input, .select, textarea) { max-width: 100%; }
@@ -22,7 +20,7 @@
 .connection-panel { background: var(--surface-content); box-shadow: none; }
 .connection-panel .connection-panel { background: transparent; box-shadow: none; }
 .connection-details { background: transparent; box-shadow: none; padding: 12px 0; border-radius: 0; border-width: 0 0 1px; }
-.modal, .select-menu-list, .instance-more-menu, .context-menu { background-color: var(--surface-raised); }
+.modal, .select-menu-list, .context-menu { background-color: var(--surface-raised); }
 .modal { max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; }
 .modal :is(input, select, textarea) { min-width: 0; max-width: 100%; }
 .modal-actions { flex-wrap: wrap; }
@@ -44,6 +42,19 @@
 /* ---------------- 状态条与列表行 ---------------- */
 .status-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 16px; border-radius: var(--radius-md); background: var(--accent-soft); margin-bottom: 12px; font-size: var(--text-sm); }
 .status-strip.error { background: var(--danger-soft); color: var(--text); }
+
+/* ---------------- 进度条（UI_SYSTEM §5：全站唯一形态；indeterminate = 未知时长） ---------------- */
+.progress-bar { position: relative; height: 6px; border-radius: 999px; background: var(--card-2); overflow: hidden; }
+.progress-bar-fill { height: 100%; border-radius: inherit; background: var(--accent-grad); transition: width 250ms ease; }
+.progress-bar.is-indeterminate .progress-bar-fill { width: 35%; animation: progress-indeterminate 1.2s ease-in-out infinite; }
+@keyframes progress-indeterminate {
+  0% { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar.is-indeterminate .progress-bar-fill { animation: none; }
+  .progress-bar-fill { transition: none; }
+}
 [inert] { opacity: .65; }
 :is(.server-list-item, .result-card, .recording-row, .installed-row, .fm-row) { transition: background var(--motion-fast), border-color var(--motion-fast); }
 :is(.result-card, .server-list-item):hover { transform: none; }
@@ -82,13 +93,13 @@ details:has(> summary.btn)::details-content { block-size: auto; overflow: visibl
 /* Display-based tabs retain their existing component state and fade in on every reveal.
    No exit delay: rapid navigation cannot queue clicks or leave invisible controls on top. */
 :is(.cfg-page > .card, .settings-body > *, .game-controls, .list-card, .installed-card,
- .folder-manager-actions, .notice-panel, .float-menu, .instance-more-menu, .menu, .context-menu,
+ .folder-manager-actions, .notice-panel, .float-menu, .menu, .context-menu,
  .modal-mask, .modal, .ic-mask, .ic-dialog-mask, .connection-panel, .settings-search-results, .options-entrances, .tab-body, .ic-content, .connection-result) {
   transition: opacity 200ms ease;
 }
 @starting-style {
   :is(.cfg-page > .card, .settings-body > *, .game-controls, .list-card, .installed-card,
-   .folder-manager-actions, .notice-panel, .float-menu, .instance-more-menu, .menu, .context-menu,
+   .folder-manager-actions, .notice-panel, .float-menu, .menu, .context-menu,
    .modal-mask, .modal, .ic-mask, .ic-dialog-mask, .connection-panel, .settings-search-results, .options-entrances, .tab-body, .ic-content, .connection-result) { opacity: 0; }
 }
 html[data-motion="reduced"] details::details-content { transition: none; }

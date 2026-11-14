@@ -55,6 +55,7 @@ const systemMotionHelp =
           : '若需要动画，请检查本机桌面的辅助功能或动画设置。';
 import HomeLayoutEditor from '../components/HomeLayoutEditor.vue';
 import SelectMenu from '../components/SelectMenu.vue';
+import EmptyState from '../components/EmptyState.vue';
 import UiGlyph from '../components/UiGlyph.vue';
 import {
     settingsCatalog,
@@ -557,6 +558,27 @@ onUnmounted(stopJavaProgress);
 const javaLabel = (j: { major: number; path: string; version: string; architecture?: string }) =>
     `Java ${j.major}（${j.version} · ${j.architecture ?? '未知架构'}）· ${j.path}`;
 
+/** Java 路径下拉选项（原生 select → SelectMenu，UI_SYSTEM §5）：首项固定「自动选择」 */
+const javaPathOptions = computed(() => [
+    { value: '', label: '自动选择（推荐）' },
+    ...javas.value.map((j) => ({ value: j.path, label: javaLabel(j) }))
+]);
+function onJavaPathChange(value: string) {
+    store.settings!.javaPath = value;
+    save({ javaPath: value });
+}
+
+/** 分辨率模式下拉选项（原生 select → SelectMenu，UI_SYSTEM §5） */
+const resolutionModeOptions = [
+    { value: 'windowed', label: '窗口化' },
+    { value: 'maximized', label: '最大化' },
+    { value: 'fullscreen', label: '全屏' }
+];
+function onResolutionModeChange(value: string) {
+    store.settings!.resolution.mode = value as Settings['resolution']['mode'];
+    saveResolution();
+}
+
 // ---------------- 内存分配（自动/手动） ----------------
 const MEM_MIN = 1024;
 /** 滑块步长 512MB（0.5GB，粗调节）；精细调节用数值输入框（0.25GB 精度） */
@@ -877,9 +899,15 @@ async function onRemovePlugin(p: PluginInfo) {
             tabindex="0"
             aria-label="设置内容"
         >
-            <div data-ui="SettingsView:a82a0d33446b" v-if="!store.settings" class="card empty">
-                <span data-ui="SettingsView:97a8ccc98948" class="spin"></span>
-                <span data-ui="SettingsView:65c5c2524d71">正在加载设置…</span>
+            <!-- 空态统一 EmptyState（UI_SYSTEM §5）：加载提示收敛，背景 UI 保留 card 容器 -->
+            <div
+                data-ui="SettingsView:a82a0d33446b"
+                v-if="!store.settings"
+                class="card settings-loading-card"
+            >
+                <EmptyState title="正在加载设置…" description="正在读取本机配置，稍候片刻。">
+                    <template #icon><span class="spin settings-loading-spin"></span></template>
+                </EmptyState>
             </div>
 
             <template v-else>
@@ -1503,18 +1531,14 @@ async function onRemovePlugin(p: PluginInfo) {
                                 >
                             </div>
                             <template v-else>
-                                <select
+                                <!-- 原生 select → SelectMenu（UI_SYSTEM §5 弹层统一；主题化列表 + 键盘导航） -->
+                                <SelectMenu
                                     data-ui="SettingsView:47dcfd6bb554"
-                                    v-model="store.settings.javaPath"
-                                    class="select"
+                                    :model-value="store.settings.javaPath"
+                                    :options="javaPathOptions"
                                     :disabled="store.settings.javaAuto"
-                                    @change="save({ javaPath: store.settings!.javaPath })"
-                                >
-                                    <option value="">自动选择（推荐）</option>
-                                    <option v-for="j in javas" :key="j.path" :value="j.path">
-                                        {{ javaLabel(j) }}
-                                    </option>
-                                </select>
+                                    @update:model-value="onJavaPathChange"
+                                />
                                 <p
                                     data-ui="SettingsView:a4338b6dbdab"
                                     v-if="javaError"
@@ -1737,16 +1761,14 @@ async function onRemovePlugin(p: PluginInfo) {
                             <span data-ui="SettingsView:90c57ea1d879" class="muted res-label"
                                 >模式</span
                             >
-                            <select
+                            <!-- 原生 select → SelectMenu（UI_SYSTEM §5 弹层统一） -->
+                            <SelectMenu
                                 data-ui="SettingsView:6e8bb36bb0de"
-                                v-model="store.settings.resolution.mode"
-                                class="select"
-                                @change="saveResolution"
-                            >
-                                <option value="windowed">窗口化</option>
-                                <option value="maximized">最大化</option>
-                                <option value="fullscreen">全屏</option>
-                            </select>
+                                class="resolution-mode-select"
+                                :model-value="store.settings.resolution.mode"
+                                :options="resolutionModeOptions"
+                                @update:model-value="onResolutionModeChange"
+                            />
                         </div>
                         <p
                             data-ui="SettingsView:2f107fd117d3"
@@ -2059,11 +2081,12 @@ async function onRemovePlugin(p: PluginInfo) {
                             </div>
                         </div>
                         <div class="cache-actions">
-                            <button class="btn btn-ghost" :disabled="cacheBusy" @click="loadCacheStats">
+                            <!-- 同卡同职能按钮统一 btn-sm（UI_SYSTEM §3/横向 I：行内「清理」已是 sm） -->
+                            <button class="btn btn-ghost btn-sm" :disabled="cacheBusy" @click="loadCacheStats">
                                 重新统计
                             </button>
                             <button
-                                class="btn btn-gold"
+                                class="btn btn-gold btn-sm"
                                 :disabled="cacheBusy || cacheTotal === 0"
                                 @click="clearCache('')"
                             >
@@ -2399,9 +2422,11 @@ async function onRemovePlugin(p: PluginInfo) {
     display: flex;
     flex-wrap: wrap;
 }
+/* 树形导航激活态与 scopes 对齐（横向 C：保留 nav 形态，只统一激活视觉）：
+   accent-soft 底 + accent-2 文字，hover 由全局 .btn-ghost:hover 承担 */
 .settings-categories [aria-current] {
     background: var(--accent-soft);
-    color: var(--accent);
+    color: var(--accent-2);
     border-color: transparent;
 }
 .settings-search-results {
@@ -2444,6 +2469,19 @@ async function onRemovePlugin(p: PluginInfo) {
     min-height: 38px;
     padding: 4px 0;
     border-bottom: 1px solid var(--border);
+}
+/* 行 hover 统一规则（GameView .installed-row「整组苏醒」定型）：行背景 var(--hover)，
+ * 行内操作按钮整组提亮（card-2 底 + border-strong + text 色），不做位移、不点亮 accent；
+ * accent 只在按钮自身 :hover 时出现。 */
+.cache-row:hover,
+.cache-row:focus-within {
+    background: var(--hover);
+}
+.cache-row:hover .btn:not(:disabled),
+.cache-row:focus-within .btn:not(:disabled) {
+    background: var(--card-2);
+    border-color: var(--border-strong);
+    color: var(--text);
 }
 .cache-row:last-child {
     border-bottom: 0;
@@ -2640,6 +2678,18 @@ async function onRemovePlugin(p: PluginInfo) {
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
 }
+/* 行 hover 统一规则（GameView .installed-row「整组苏醒」定型）：行背景 var(--hover)，
+ * 删除按钮与开关整组苏醒；accent 只在按钮自身 :hover 时出现 */
+.plugin-row:hover,
+.plugin-row:focus-within {
+    background: var(--hover);
+}
+.plugin-row:hover .btn:not(:disabled),
+.plugin-row:focus-within .btn:not(:disabled) {
+    background: var(--card-2);
+    border-color: var(--border-strong);
+    color: var(--text);
+}
 .plugin-info {
     flex: 1;
     min-width: 0;
@@ -2694,7 +2744,18 @@ async function onRemovePlugin(p: PluginInfo) {
     /* 定位卡片的聚焦指示画在卡片内沿：外描边会溢出到相邻卡片上 */
     outline-offset: -2px;
 }
-/* 页面骨架与宽度由全局 .page / .settings-page 提供（UI_SYSTEM.md §4） */
+/* 页面骨架：结构由本组件 scoped 接管；宽度保留实测值 1120px（待总管回写 UI_SYSTEM.md §4 页宽族）。
+   注意：全局 .page 未定义宽度，宽度修饰类（.page--form 等）不归本组件创建。 */
+.settings-loading-card {
+    /* 加载空态容器：EmptyState 自带内边距与排版，这里只挂卡片背景 */
+    padding: 0;
+}
+.settings-loading-spin {
+    /* 加载态放大主 .spin（全局 14px 偏小，空态图标区按 32px 视觉位） */
+    width: 28px;
+    height: 28px;
+    border-width: 3px;
+}
 
 /* 小卡片两两成行（顺序横向向下），窄窗口自动换行堆叠 */
 .settings-grid {
@@ -2792,6 +2853,11 @@ async function onRemovePlugin(p: PluginInfo) {
 .feature-row:last-child {
     border-bottom: none;
 }
+/* 开关行 hover（横向 F 补齐，「整组苏醒」规则）：行内只有开关无按钮组，
+ * 仅做整行 var(--hover) 背景，不点亮任何 accent */
+.feature-row:hover {
+    background: var(--hover);
+}
 .feature-name {
     font-size: var(--text-sm);
 }
@@ -2825,11 +2891,13 @@ async function onRemovePlugin(p: PluginInfo) {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+/* 进度条形态统一（横向 D）：与 .mem-slider 轨道同规格——4px 胶囊、令牌取色。
+   待总管收编全局 .progress-bar 后替换（不在此页自造全局类）。 */
 .java-scan-track {
-    height: 3px;
+    height: 4px;
     overflow: hidden;
     border-radius: 999px;
-    background: var(--border);
+    background: color-mix(in srgb, var(--text-dim) 26%, transparent);
 }
 .java-scan-track span {
     display: block;
@@ -2854,6 +2922,17 @@ async function onRemovePlugin(p: PluginInfo) {
     padding: var(--space-1) var(--space-3);
     border-top: 1px solid var(--border);
     font-size: var(--text-sm);
+}
+/* 行 hover（横向 F 补齐，「整组苏醒」规则）：行背景 var(--hover)，
+ * 「隐藏」按钮整组苏醒；按钮自身 :hover 仍是危险色（唯一指向反馈） */
+.java-item:hover,
+.java-item:focus-within {
+    background: var(--hover);
+}
+.java-item:hover .java-item-hide,
+.java-item:focus-within .java-item-hide {
+    background: var(--card-2);
+    color: var(--text);
 }
 .java-item-ver {
     font-weight: 600;
@@ -2909,10 +2988,6 @@ async function onRemovePlugin(p: PluginInfo) {
 .java-auto-desc {
     font-size: var(--text-xs);
     line-height: 1.6;
-}
-.select:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
 }
 
 /* 目录 */
@@ -2979,7 +3054,9 @@ async function onRemovePlugin(p: PluginInfo) {
     margin-bottom: var(--space-3);
     border-bottom: 1px solid var(--border);
 }
-/* 自定义内存滑块：拇指拖拽，轨道不响应点击（不抢鼠标） */
+/* 自定义内存滑块：拇指拖拽，轨道不响应点击（不抢鼠标）。
+   滑杆形态已全部走令牌（4px 胶囊轨道 + accent 填充）；交互逻辑不动。
+   待总管收编全局 .progress-bar（横向 D 三形态之一：slider）后统一替换。 */
 .mem-slider {
     position: relative;
     flex: 1;
@@ -3102,7 +3179,7 @@ async function onRemovePlugin(p: PluginInfo) {
     flex-shrink: 0;
     font-size: var(--text-md);
 }
-.resolution-mode .select {
+.resolution-mode .resolution-mode-select {
     min-width: 108px;
 }
 
@@ -3163,7 +3240,8 @@ async function onRemovePlugin(p: PluginInfo) {
     grid-template-rows: auto auto auto minmax(0, 1fr);
     gap: var(--space-3) !important;
     padding: 0 !important;
-    max-width: 1120px !important;
+    /* 实宽 1120px（横向 A）：删除 !important 硬编码，保留 scoped 实宽，待回写 UI_SYSTEM.md §4 */
+    max-width: 1120px;
     position: relative;
 }
 .settings-page > .page-head {

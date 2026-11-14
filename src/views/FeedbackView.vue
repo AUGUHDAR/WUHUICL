@@ -7,6 +7,8 @@ import { toast } from '../store';
 import { managedImageUrl } from '../managedAssets';
 import SelectMenu from '../components/SelectMenu.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import TabPills from '../components/TabPills.vue';
+import EmptyState from '../components/EmptyState.vue';
 import UiGlyph from '../components/UiGlyph.vue';
 import {
     fbAttachment,
@@ -394,6 +396,17 @@ const tkReceipt = ref<{ id: string; secret: string } | null>(null);
 
 const unreadTickets = computed(() => tickets.value.filter((t) => t.hasUnread && !t.deleted).length);
 
+/** 板块切换 → TabPills（横向 C 收编）。未读私信以 count 角标呈现
+ *  （TabPills 暂无红点 dot 变体，已登记总管建议扩展；count=未读数比纯红点信息量更高）。 */
+const fbTabItems = computed(() => [
+    { value: 'board' as Tab, label: '公开板' },
+    {
+        value: 'tickets' as Tab,
+        label: '匿名私信',
+        count: unreadTickets.value > 0 ? unreadTickets.value : undefined
+    }
+]);
+
 async function loadTickets() {
     try {
         tickets.value = await fbTicketsList();
@@ -726,14 +739,16 @@ async function openWeb(deep?: string | Event) {
                 <p class="muted">Bug、崩溃、功能建议直达开发者；不方便实名的可以走匿名私信。</p>
             </div>
             <div class="actions">
-                <div class="fb-tabs">
-                    <button class="fb-tab" :class="{ active: tab === 'board' }" @click="switchTab('board')">公开板</button>
-                    <button class="fb-tab" :class="{ active: tab === 'tickets' }" @click="switchTab('tickets')">
-                        匿名私信<span v-if="unreadTickets" class="fb-dot"></span>
-                    </button>
-                </div>
+                <!-- 板块切换 → TabPills（横向 C 收编）：每颗独立边框药丸，未读以 count 角标呈现 -->
+                <TabPills
+                    :model-value="tab"
+                    :items="fbTabItems"
+                    aria-label="反馈板块"
+                    @update:model-value="switchTab($event as Tab)"
+                />
                 <!-- 网页端入口：不少玩家不知道这套反馈其实也有网页版（手机/iPad 上更好用）。 -->
                 <button class="btn btn-ghost btn-sm" title="用系统浏览器打开反馈站网页版" @click="openWeb">
+                    <!-- UiGlyph globe 图标已由图标收编补齐（此前 name="globe" 渲染的是 cube 兜底图形） -->
                     <UiGlyph name="globe" :size="13" /> 网页端
                 </button>
                 <template v-if="loggedIn">
@@ -766,7 +781,7 @@ async function openWeb(deep?: string | Event) {
             <!-- 详情 -->
             <template v-if="detail">
                 <div class="fb-detailbar">
-                    <button class="btn btn-ghost btn-sm" @click="closeIssue">← 返回列表</button>
+                    <button class="btn btn-ghost btn-sm" @click="closeIssue"><UiGlyph name="arrow-left" :size="13" /> 返回列表</button>
                     <button v-if="detail.canDelete" class="btn btn-ghost btn-sm" @click="deleteIssue">
                         撤回这条反馈
                     </button>
@@ -830,17 +845,26 @@ async function openWeb(deep?: string | Event) {
                         <input v-model="keyword" class="input" placeholder="搜索标题与内容…" @keyup.enter="refilter" />
                         <button class="btn btn-ghost btn-sm" @click="refilter">搜索</button>
                         <button class="btn btn-sm" :class="mineOnly ? 'btn-gold' : 'btn-ghost'" :title="'包含你提交的反馈，以及你参与过评论的讨论'" @click="loggedIn ? ((mineOnly = !mineOnly), refilter()) : (showLoginHint = true)">只看我的</button>
-                        <button class="btn btn-gold btn-sm" @click="openSubmit">＋ 提交反馈</button>
+                        <button class="btn btn-gold btn-sm" @click="openSubmit"><UiGlyph name="plus" :size="13" /> 提交反馈</button>
                     </div>
                 </div>
 
                 <div v-if="listLoading" class="muted" style="padding: 24px; text-align: center">加载中…</div>
                 <template v-else>
-                    <div v-if="!issues.length" class="card empty">
-                        <p>{{ mineOnly ? '这里显示你提交的反馈，以及你参与过评论的讨论。还没有记录。' : filterKind || filterStatus || keyword ? '没有符合条件的反馈，换个筛选试试。' : '这里会展示玩家提交的反馈与建议，现在就可以发出第一条。' }}</p>
-                        <button v-if="mineOnly || filterKind || filterStatus || keyword" class="btn btn-ghost btn-sm" @click="mineOnly = false; filterKind = ''; filterStatus = ''; keyword = ''; refilter()">清空筛选</button>
-                        <button v-else class="btn btn-gold btn-sm" @click="openSubmit">＋ 提交反馈</button>
-                    </div>
+                    <!-- 空态 → EmptyState（横向 B 收编）：区分「无记录 / 无匹配」两种成因 + 对应出口 -->
+                    <EmptyState
+                        v-if="!issues.length"
+                        class="card fb-empty-card"
+                        :title="mineOnly ? '还没有你的反馈记录' : filterKind || filterStatus || keyword ? '没有符合条件的反馈' : '还没有玩家反馈'"
+                        :description="mineOnly ? '这里显示你提交的反馈，以及你参与过评论的讨论。' : filterKind || filterStatus || keyword ? '换个筛选或关键词试试。' : '这里会展示玩家提交的反馈与建议，现在就可以发出第一条。'"
+                    >
+                        <template v-if="mineOnly || filterKind || filterStatus || keyword" #action>
+                            <button class="btn btn-ghost btn-sm" @click="mineOnly = false; filterKind = ''; filterStatus = ''; keyword = ''; refilter()">清空筛选</button>
+                        </template>
+                        <template v-else #action>
+                            <button class="btn btn-gold btn-sm" @click="openSubmit"><UiGlyph name="plus" :size="13" /> 提交反馈</button>
+                        </template>
+                    </EmptyState>
                     <button v-for="it in issues" :key="it.num" class="card fb-row" @click="openIssue(it.num)">
                         <span class="fb-num">#{{ it.num }}</span>
                         <span class="fb-row-main">
@@ -880,7 +904,7 @@ async function openWeb(deep?: string | Event) {
 
             <template v-else-if="ticketDetail">
                 <div class="fb-detailbar">
-                    <button class="btn btn-ghost btn-sm" @click="ticketDetail = null">← 返回私信列表</button>
+                    <button class="btn btn-ghost btn-sm" @click="ticketDetail = null"><UiGlyph name="arrow-left" :size="13" /> 返回私信列表</button>
                     <button class="btn btn-ghost btn-sm" @click="deleteTicket(ticketDetail.id)">
                         删除本机记录
                     </button>
@@ -923,7 +947,7 @@ async function openWeb(deep?: string | Event) {
             <template v-else>
                 <div class="fb-detailbar">
                     <p class="muted" style="margin: 0; flex: 1">匿名私信不登录、不上公开板，直达管理员。适合敏感反馈（举报外挂/安全问题）。</p>
-                    <button class="btn btn-gold btn-sm" @click="showTicketNew = true; submitErr = ''">＋ 新建私信</button>
+                    <button class="btn btn-gold btn-sm" @click="showTicketNew = true; submitErr = ''"><UiGlyph name="plus" :size="13" /> 新建私信</button>
                 </div>
                 <div v-if="showTicketNew" class="card">
                     <h3>新建匿名私信</h3>
@@ -939,9 +963,13 @@ async function openWeb(deep?: string | Event) {
                         <button class="btn btn-gold btn-sm" :disabled="ticketBusy" @click="submitTicket">发送</button>
                     </div>
                 </div>
-                <div v-if="!tickets.filter((t) => !t.deleted).length && !showTicketNew" class="card empty">
-                    <p>这台设备还没有私信记录。不方便实名、或内容敏感时走这里。</p>
-                </div>
+                <!-- 空态 → EmptyState（横向 B 收编）：说明这块放什么 + 指引入口在页头 -->
+                <EmptyState
+                    v-if="!tickets.filter((t) => !t.deleted).length && !showTicketNew"
+                    class="card fb-empty-card"
+                    title="这台设备还没有私信记录"
+                    description="不方便实名、或内容敏感时走这里；点右上角「＋ 新建私信」开始。"
+                />
                 <!-- v-for 与 v-else-if 混写会让列表挂在空状态判断上，这里拆成独立分支 -->
                 <template v-else-if="!showTicketNew">
                     <button v-for="t in tickets.filter((x) => !x.deleted)" :key="t.id" class="card fb-row" @click="openTicket(t.id)">
@@ -1011,7 +1039,8 @@ async function openWeb(deep?: string | Event) {
 
                 <p v-if="accErr" class="fb-err">{{ accErr }}</p>
                 <div class="modal-actions" style="margin-top: 14px">
-                    <button class="btn btn-ghost btn-sm" @click="closeAccount">取消</button>
+                    <!-- data-modal-dismiss：modalFocus 据此让 ESC 关闭（UX「弹窗响应 ESC」） -->
+                    <button class="btn btn-ghost btn-sm" data-modal-dismiss @click="closeAccount">取消</button>
                     <button class="btn btn-gold btn-sm" :disabled="accBusy" @click="saveNick">保存</button>
                 </div>
             </div>
@@ -1053,13 +1082,15 @@ async function openWeb(deep?: string | Event) {
                             @dragleave="onAttDragLeave"
                             @drop="onAttDrop"
                         >
-                            ＋ 添加附件（可点选，也可把文件拖到这里）
+                            <UiGlyph name="plus" :size="12" /> 添加附件（可点选，也可把文件拖到这里）
                         </button>
                     </div>
                 </template>
                 <p v-if="submitErr" class="fb-err">{{ submitErr }}</p>
                 <div class="modal-actions">
                     <button class="btn btn-ghost btn-sm" @click="toPrivate">改发匿名私信</button>
+                    <!-- 补「取消」并标 data-modal-dismiss：此前无取消类按钮，ESC 无法关闭本弹层 -->
+                    <button class="btn btn-ghost btn-sm" data-modal-dismiss @click="showSubmit = false">取消</button>
                     <button class="btn btn-gold btn-sm" :disabled="submitBusy" @click="doSubmit">{{ submitBusy ? '提交中…' : '发布到公开板' }}</button>
                 </div>
             </div>
@@ -1085,8 +1116,10 @@ async function openWeb(deep?: string | Event) {
                         <code v-if="pairCode">{{ pairCode }}</code>
                         <span v-else class="muted">获取中…</span>
                     </div>
-                    <button v-if="loginBusy" class="btn btn-ghost" @click="showLoginHint = false; cancelLogin()">取消登录</button>
-                    <button v-else class="btn btn-ghost" @click="toPrivate">改为匿名私信</button>
+                    <button v-if="loginBusy" class="btn btn-ghost" data-modal-dismiss @click="showLoginHint = false; cancelLogin()">取消登录</button>
+                    <!-- 补「取消」并标 data-modal-dismiss：未发起时此前没有可被 ESC 识别的关闭按钮 -->
+                    <button v-else class="btn btn-ghost" data-modal-dismiss @click="showLoginHint = false">取消</button>
+                    <button class="btn btn-ghost" @click="toPrivate">改为匿名私信</button>
                 </div>
             </div>
         </div>
@@ -1109,7 +1142,7 @@ async function openWeb(deep?: string | Event) {
                 <h3>{{ attView.name }}</h3>
                 <img v-if="attView.text === undefined" :src="attView.url" style="max-width: 100%; border-radius: var(--radius-md)" />
                 <pre v-else class="fb-textview">{{ attView.text }}</pre>
-                <div class="modal-actions"><button class="btn btn-ghost btn-sm" @click="attView = null">关闭</button></div>
+                <div class="modal-actions"><button class="btn btn-ghost btn-sm" data-modal-dismiss @click="attView = null">关闭</button></div>
             </div>
         </div>
     </section>
@@ -1152,42 +1185,7 @@ async function openWeb(deep?: string | Event) {
     gap: 10px;
     flex-wrap: wrap;
 }
-.fb-tabs {
-    display: inline-flex;
-    gap: 4px;
-    padding: 4px;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-}
-.fb-tab {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    border-radius: 999px;
-    font-size: var(--text-sm);
-    color: var(--text-dim);
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    transition: background var(--motion-fast), color var(--motion-fast);
-}
-.fb-tab:hover {
-    color: var(--text);
-}
-.fb-tab.active {
-    background: var(--accent-soft);
-    color: var(--accent-2);
-    font-weight: 600;
-}
-.fb-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--danger);
-}
+/* 板块切换已收编 TabPills（UI_SYSTEM §5），自绘胶囊与红点样式删除（新旧逻辑不并存） */
 /* 配对码需要一眼看清、方便与网页上显示的码逐位核对 */
 .fb-paircode {
     display: inline-flex;
@@ -1367,6 +1365,10 @@ async function openWeb(deep?: string | Event) {
 .fb-filtercard {
     padding: var(--space-3) var(--card-pad);
 }
+/* EmptyState 挂 card 类做背景 UI：EmptyState 自带内边距，卡片 padding 归零避免双层 */
+.fb-empty-card {
+    padding: 0;
+}
 .fb-filters {
     display: flex;
     flex-wrap: wrap;
@@ -1391,11 +1393,15 @@ async function openWeb(deep?: string | Event) {
     cursor: pointer;
     width: 100%;
     padding: var(--space-3) var(--card-pad);
-    transition: border-color var(--motion-fast), transform var(--motion-fast);
+    transition: border-color var(--motion-fast), background var(--motion-fast);
 }
-.fb-row:hover {
-    border-color: var(--accent);
-    transform: translateY(-1px);
+/* 行 hover 统一规则（GameView .installed-row「整组苏醒」定型，横向 F）：
+   卡片行用 card 底同色叠加 var(--hover)，去掉位移与 accent 边框（行 hover 不点亮主操作）；
+   行内无按钮组，无苏醒对象 */
+.fb-row:hover,
+.fb-row:focus-within {
+    background-color: var(--surface-content);
+    background-image: linear-gradient(var(--hover), var(--hover));
 }
 .fb-row-main {
     flex: 1;

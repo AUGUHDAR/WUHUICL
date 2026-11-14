@@ -6,7 +6,7 @@ import AppMenu from '../components/AppMenu.vue';
 import AppModal from '../components/AppModal.vue';
 import type { AppMenuItem } from '../components/AppMenu.vue';
 import { catalogSession } from '../catalogCache';
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import {
     cleanupPartialInstall,
     errText,
@@ -55,6 +55,8 @@ import {
 } from '../store';
 import { instanceLaunchBusy } from '@shared/launchTracking';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import TabPills from '../components/TabPills.vue';
+import EmptyState from '../components/EmptyState.vue';
 import IconPickerModal from '../components/IconPickerModal.vue';
 import SelectMenu from '../components/SelectMenu.vue';
 import RecordingModPicker from '../components/RecordingModPicker.vue';
@@ -137,13 +139,6 @@ async function onCategoryAction(action: VersionCategoryAction): Promise<boolean>
         categoryBusy.value = false;
     }
 }
-async function assignCategory(v: InstalledVersion, event: Event) {
-    const field = event.target as HTMLSelectElement,
-        categoryId = field.value;
-    await onCategoryAction({ type: 'assign', target: { id: v.id, folder: v.folder }, categoryId });
-    // Retain the last confirmed value on IPC/write failure, with a visible error.
-    field.value = categoryOf(v);
-}
 let installedGeneration = 0;
 async function refreshAllInstalled() {
     const generation = ++installedGeneration;
@@ -203,41 +198,14 @@ watch(tab, (value) => {
     if (value === 'download') void load();
 });
 
-// ---------------- Tab 滑动指示块（版本下载 ⇄ 已安装 平滑滑动，与导航水滴同款弹簧动效） ----------------
-const gameTabs = ref<HTMLElement | null>(null);
-const tabBlob = reactive({ left: 0, width: 0, on: false });
-function updateTabBlob() {
-    const root = gameTabs.value;
-    if (!root) return;
-    const active = root.querySelector<HTMLElement>(`.game-tab[data-tab="${tab.value}"]`);
-    if (!active) return;
-    tabBlob.left = active.offsetLeft;
-    tabBlob.width = active.offsetWidth;
-    tabBlob.on = true;
+// ---------------- 页级 tab（TabPills 共享药丸，count 角标沿用「已安装（n）」语义） ----------------
+const gameTabItems = computed(() => [
+    { value: 'download', label: '版本下载' },
+    { value: 'installed', label: '已安装', count: allInstalled.value.length || undefined }
+]);
+function setGameTab(value: string) {
+    tab.value = value as 'download' | 'installed';
 }
-watch(tab, () => nextTick(updateTabBlob));
-// 滑块宽度自适应：已安装数量变化（已安装（14）宽度变）与容器尺寸变化都重算
-watch(
-    () => store.installed.length,
-    () => nextTick(updateTabBlob)
-);
-let tabBlobObserver: ResizeObserver | null = null;
-onMounted(() => {
-    nextTick(updateTabBlob);
-    // 字体/布局就绪后校准一次（首帧 offsetWidth 可能未稳定）
-    setTimeout(updateTabBlob, 200);
-    tabBlobObserver = new ResizeObserver(() => updateTabBlob());
-    if (gameTabs.value) tabBlobObserver.observe(gameTabs.value);
-});
-onUnmounted(() => {
-    window.removeEventListener('resize', updateTabBlob);
-    tabBlobObserver?.disconnect();
-});
-const tabBlobStyle = computed(() => ({
-    left: tabBlob.left + 'px',
-    width: tabBlob.width + 'px',
-    opacity: tabBlob.on ? 1 : 0
-}));
 
 async function load(refresh = false) {
     if (loading.value || disposed) return;
@@ -1138,6 +1106,15 @@ async function openJavaModal() {
     }
 }
 
+/** 原生 select 收编 SelectMenu（UI_SYSTEM.md §5）：选项文案沿用原 option 标签 */
+const javaOptions = computed(() => [
+    { value: '', label: '自动匹配（按版本需求选择，推荐）' },
+    ...javaModal.list.map((j) => ({
+        value: j.path,
+        label: `Java ${j.major}（${j.source === 'manual' ? '手动' : '自动'}）· ${j.path}`
+    }))
+]);
+
 async function onConfirmJava() {
     try {
         await setVersionJava(javaModal.id, javaModal.value, false, javaModal.folder);
@@ -1160,6 +1137,16 @@ const resolutionModal = reactive({
     error: '',
     busy: false
 });
+/** SelectMenu 选项；mode 是窄联合类型，经 setter 收敛后再写回 */
+const resolutionModeOptions = [
+    { value: 'inherit', label: '跟随全局' },
+    { value: 'windowed', label: '窗口化' },
+    { value: 'maximized', label: '最大化' },
+    { value: 'fullscreen', label: '全屏' }
+];
+function setResolutionMode(value: string) {
+    resolutionModal.mode = value as 'inherit' | GameWindowMode;
+}
 
 function openResolutionModal() {
     resolutionModal.folder = manageMenu.folder;
@@ -1306,7 +1293,7 @@ async function confirmIsolation() {
                 <p class="page-sub">浏览、安装与管理 Minecraft 版本</p>
             </div>
             <button
-                class="btn btn-ghost"
+                class="btn btn-gold"
                 data-ui="games:import-instances"
                 title="从 PCL2 / HMCL / Prism 导入已有实例"
                 @click="launcherImportOpen = true"
@@ -1315,25 +1302,13 @@ async function confirmIsolation() {
             </button>
         </header>
 
-        <div class="game-tabs" ref="gameTabs">
-            <span class="game-tabs-blob" :style="tabBlobStyle" aria-hidden="true"></span>
-            <button
-                class="game-tab"
-                data-tab="download"
-                :class="{ active: tab === 'download' }"
-                @click="tab = 'download'"
-            >
-                版本下载
-            </button>
-            <button
-                class="game-tab"
-                data-tab="installed"
-                :class="{ active: tab === 'installed' }"
-                @click="tab = 'installed'"
-            >
-                已安装<template v-if="allInstalled.length">（{{ allInstalled.length }}）</template>
-            </button>
-        </div>
+        <!-- 页级 tab 收编为共享 TabPills（UI_SYSTEM.md §5）：每颗独立边框药丸，滑动指示块一并移除 -->
+        <TabPills
+            :items="gameTabItems"
+            :model-value="tab"
+            aria-label="游戏版本视图"
+            @update:model-value="setGameTab"
+        />
 
         <!-- 安装目标与下方列表筛选独立。 -->
         <section
@@ -1380,7 +1355,7 @@ async function confirmIsolation() {
                     正在管理：{{ currentFolder?.name || '游戏文件夹' }} · {{ activeFolder }}
                 </p>
                 <button class="btn btn-ghost btn-sm" :disabled="folderBusy" @click="addGameFolder">
-                    + 更改到其他下载位置
+                    更改到其他下载位置
                 </button>
                 <button
                     class="btn btn-ghost btn-sm"
@@ -1489,25 +1464,7 @@ async function confirmIsolation() {
                     </button>
                 </div>
 
-                <button class="btn btn-ghost tool-refresh" :disabled="loading" @click="load(true)">
-                    <span v-if="loading" class="spin"></span>
-                    <svg
-                        v-else
-                        viewBox="0 0 24 24"
-                        width="14"
-                        height="14"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-                        <path d="M21 3v6h-6" />
-                    </svg>
-                    {{ loading ? '刷新中' : '刷新' }}
-                </button>
-
+                <!-- K 同位槽位：镜像源切换归入筛选区，刷新保持行尾唯一控制 -->
                 <button
                     class="tag mirror-toggle"
                     :class="store.settings?.mirror === 'bmclapi' ? 'tag-cyan' : ''"
@@ -1519,6 +1476,13 @@ async function confirmIsolation() {
                     @click="onToggleMirror"
                 >
                     {{ store.settings?.mirror === 'bmclapi' ? 'BMCLAPI 镜像' : '官方源' }}
+                </button>
+
+                <button class="btn btn-ghost tool-refresh" :disabled="loading" @click="load(true)">
+                    <span v-if="loading" class="spin"></span>
+                    <!-- 手绘刷新 SVG 收编 UiGlyph（inventory H） -->
+                    <UiGlyph v-else name="refresh" :size="14" />
+                    {{ loading ? '刷新中' : '刷新' }}
                 </button>
             </div>
         </div>
@@ -1573,15 +1537,25 @@ async function confirmIsolation() {
                 :rows="12"
                 label="正在获取版本列表…"
             />
-            <div v-else-if="loadError && !manifest.length" class="empty">
-                <span>加载失败：{{ loadError }}</span>
-                <button class="btn btn-ghost btn-sm" @click="load(true)">重试</button>
-            </div>
-            <div v-else-if="!filtered.length" class="empty">
-                <span>{{
-                    keyword || typeFilter !== 'all' ? '没有匹配的版本' : '版本列表为空'
-                }}</span>
-            </div>
+            <EmptyState
+                v-else-if="loadError && !manifest.length"
+                icon="warning"
+                title="版本列表加载失败"
+                :description="loadError"
+            >
+                <template #action>
+                    <button class="btn btn-ghost btn-sm" @click="load(true)">重试</button>
+                </template>
+            </EmptyState>
+            <EmptyState
+                v-else-if="!filtered.length"
+                :title="keyword || typeFilter !== 'all' ? '没有匹配的版本' : '版本列表为空'"
+                :description="
+                    keyword || typeFilter !== 'all'
+                        ? '换个关键词，或切换类型筛选后再试'
+                        : undefined
+                "
+            />
             <div v-else class="version-list">
                 <details
                     v-for="group in groups"
@@ -1786,11 +1760,11 @@ async function confirmIsolation() {
             <p v-if="categoryError && !categoryManagerOpen" class="error" role="alert">
                 {{ categoryError }}
             </p>
-            <div
+            <!-- 空态收编 EmptyState（UX「空状态指引」）：分状态文案进描述，引导按钮进 #action -->
+            <EmptyState
                 v-if="!sortedInstalled.length && !installingVersions.length"
-                class="empty installed-empty"
-            >
-                <span>{{
+                title="没有可显示的实例"
+                :description="
                     installedLoading
                         ? '正在读取已安装实例…'
                         : installedCategory === VERSION_CATEGORY_FAVORITES
@@ -1800,18 +1774,21 @@ async function confirmIsolation() {
                             : installedSearch
                               ? '没有匹配的实例，请调整搜索条件'
                               : '当前范围没有已安装版本'
-                }}</span>
-                <button
-                    v-if="installedCategory !== VERSION_CATEGORY_ALL"
-                    class="btn btn-ghost btn-sm"
-                    @click="installedCategory = VERSION_CATEGORY_ALL"
-                >
-                    查看全部版本
-                </button>
-                <button v-else class="btn btn-gold btn-sm" @click="tab = 'download'">
-                    去版本下载看看
-                </button>
-            </div>
+                "
+            >
+                <template #action>
+                    <button
+                        v-if="installedCategory !== VERSION_CATEGORY_ALL"
+                        class="btn btn-ghost btn-sm"
+                        @click="installedCategory = VERSION_CATEGORY_ALL"
+                    >
+                        查看全部版本
+                    </button>
+                    <button v-else class="btn btn-gold btn-sm" @click="setGameTab('download')">
+                        去版本下载看看
+                    </button>
+                </template>
+            </EmptyState>
             <div v-else class="installed-list">
                 <!-- 同一实例仅渲染一次；sortWithFavorite 已负责收藏置顶。 -->
 
@@ -1832,11 +1809,8 @@ async function confirmIsolation() {
                         :aria-pressed="isFavorite(v.id, v.folder)"
                         @click="toggleFavorite(v.id, v.folder)"
                     >
-                        <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor">
-                            <path
-                                d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01Z"
-                            />
-                        </svg>
+                        <!-- 手绘星形 SVG 收编 UiGlyph star（inventory H 重复手绘 SVG 组） -->
+                        <UiGlyph name="star" :size="15" filled />
                     </button>
                     <button
                         class="inst-icon"
@@ -1844,19 +1818,8 @@ async function confirmIsolation() {
                         @click="openIconPicker(v.id, v.folder)"
                     >
                         <img v-if="versionIconUrl(v)" :src="versionIconUrl(v)" alt="" />
-                        <svg
-                            v-else
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.7"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                        >
-                            <path d="M21 8 12 3 3 8v8l9 5 9-5Z" />
-                            <path d="m3 8 9 5 9-5" />
-                            <path d="M12 13v8" />
-                        </svg>
+                        <!-- 无图标占位的手绘立方体 SVG 收编 UiGlyph cube -->
+                        <UiGlyph v-else name="cube" :size="26" />
                     </button>
                     <div class="inst-names">
                         <button
@@ -1919,10 +1882,16 @@ async function confirmIsolation() {
                                 "
                                 @click="launchVersion(v)"
                             >
+                                <!-- 文本符号 ▶ 收编 UiGlyph play（inventory H；此前无 play 素材暂保留，现已有） -->
+                                <UiGlyph
+                                    v-if="!instanceLaunchBusy(store.launchStates, v.id, v.folder)"
+                                    name="play"
+                                    :size="13"
+                                />
                                 {{
                                     instanceLaunchBusy(store.launchStates, v.id, v.folder)
                                         ? '启动中…'
-                                        : '▶ 启动'
+                                        : '启动'
                                 }}
                             </button>
                             <button
@@ -1933,7 +1902,7 @@ async function confirmIsolation() {
                                 "
                                 @click="openManageMenu($event, v.id, v.folder)"
                             >
-                                ⋯
+                                <UiGlyph name="more" :size="16" />
                             </button>
                         </div>
                         <span class="muted played-text"
@@ -2020,12 +1989,12 @@ async function confirmIsolation() {
                 <div class="modal">
                     <h3 class="modal-title">窗口设置 · {{ resolutionModal.id }}</h3>
                     <p class="modal-label">实例设置优先于全局设置；选择“跟随全局”可删除覆盖。</p>
-                    <select v-model="resolutionModal.mode" class="select">
-                        <option value="inherit">跟随全局</option>
-                        <option value="windowed">窗口化</option>
-                        <option value="maximized">最大化</option>
-                        <option value="fullscreen">全屏</option>
-                    </select>
+                    <SelectMenu
+                        :model-value="resolutionModal.mode"
+                        :options="resolutionModeOptions"
+                        aria-label="窗口模式"
+                        @update:model-value="setResolutionMode"
+                    />
                     <div class="instance-resolution-size">
                         <label>
                             <span class="muted">宽</span>
@@ -2091,13 +2060,11 @@ async function confirmIsolation() {
                         <span class="spin"></span><span class="muted">读取 Java 列表…</span>
                     </div>
                     <template v-else>
-                        <select v-model="javaModal.value" class="select">
-                            <option value="">自动匹配（按版本需求选择，推荐）</option>
-                            <option v-for="j in javaModal.list" :key="j.path" :value="j.path">
-                                Java {{ j.major }}（{{ j.source === 'manual' ? '手动' : '自动' }}）·
-                                {{ j.path }}
-                            </option>
-                        </select>
+                        <SelectMenu
+                            v-model="javaModal.value"
+                            :options="javaOptions"
+                            aria-label="该版本使用的 Java"
+                        />
                     </template>
                     <div class="modal-actions">
                         <button class="btn btn-ghost" @click="javaModal.open = false">取消</button>
@@ -2331,20 +2298,16 @@ async function confirmIsolation() {
                                 <span class="muted">正在获取 {{ modal.loader }} 版本列表…</span>
                             </div>
                             <template v-else>
-                                <select
+                                <!-- 原生 select 收编 SelectMenu；data-ui 锚点随 $attrs 落在新按钮上（沿用旧锚点） -->
+                                <SelectMenu
                                     v-if="modal.loaderVersions.length"
                                     v-model="modal.loaderVersion"
-                                    class="select"
+                                    :options="
+                                        modal.loaderVersions.map((lv) => ({ value: lv, label: lv }))
+                                    "
+                                    aria-label="加载器版本"
                                     data-ui="install:loader-version"
-                                >
-                                    <option
-                                        v-for="lv in modal.loaderVersions"
-                                        :key="lv"
-                                        :value="lv"
-                                    >
-                                        {{ lv }}
-                                    </option>
-                                </select>
+                                />
                                 <p
                                     v-if="modal.loadLoadersError"
                                     class="loaders-error"
@@ -2374,20 +2337,19 @@ async function confirmIsolation() {
                                         <span class="muted">正在获取 Fabric API 版本…</span>
                                     </div>
                                     <template v-else>
-                                        <select
+                                        <SelectMenu
                                             v-if="modal.apiVersions.length"
                                             v-model="modal.apiVersion"
-                                            class="select"
-                                        >
-                                            <option
-                                                v-for="a in modal.apiVersions"
-                                                :key="a.version"
-                                                :value="a.version"
-                                            >
-                                                {{ a.version
-                                                }}{{ a.date ? `（${formatDate(a.date)}）` : '' }}
-                                            </option>
-                                        </select>
+                                            :options="
+                                                modal.apiVersions.map((a) => ({
+                                                    value: a.version,
+                                                    label: a.date
+                                                        ? `${a.version}（${formatDate(a.date)}）`
+                                                        : a.version
+                                                }))
+                                            "
+                                            aria-label="Fabric API 版本"
+                                        />
                                         <p v-if="modal.apiError" class="loaders-error">
                                             {{ modal.apiError }}
                                         </p>
@@ -2553,14 +2515,12 @@ async function confirmIsolation() {
     border-top: 1px solid var(--border);
     flex-shrink: 0;
 }
+/* footer 按钮不再放大到 42px：与本页其余弹窗 footer（窗口设置/重命名/隔离）同用全局 .btn 36px 档（按钮几何纪律 [I]） */
 .install-footer .btn {
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
-    min-height: 42px;
-    min-width: 116px;
-    border-radius: 12px;
 }
 .game-install-modal .loader-options {
     display: grid;
@@ -2582,8 +2542,7 @@ async function confirmIsolation() {
     font-size: 14px;
     margin: 20px 0 10px;
 }
-.game-install-modal .input,
-.game-install-modal .select {
+.game-install-modal .input {
     min-height: 42px;
     border-radius: 12px;
     width: 100%;
@@ -2838,7 +2797,7 @@ async function confirmIsolation() {
     }
 }
 
-/* 控制行：Tab 分段 + 工具（同一行，窄窗口自动换行） */
+/* 控制行：搜索/筛选/镜像源/刷新（K 同位槽位：刷新行尾唯一；窄窗口自动换行） */
 .game-controls {
     display: flex;
     flex-wrap: wrap;
@@ -2894,6 +2853,7 @@ async function confirmIsolation() {
     opacity: 0.75;
 }
 
+/* 版本类型筛选按钮组（非 tab，保留药丸形态）：等宽等距对齐 TabPills 药丸节奏（UI_SYSTEM.md §5） */
 .filter-capsules {
     display: flex;
     gap: var(--space-2);
@@ -2904,6 +2864,7 @@ async function confirmIsolation() {
     align-items: center;
     justify-content: center;
     height: var(--ctl-h);
+    min-width: 84px;
     padding: 0 var(--space-4);
     border-radius: 999px;
     border: 1px solid var(--border);
@@ -3103,9 +3064,6 @@ async function confirmIsolation() {
 }
 
 /* 已安装 */
-.installed-empty {
-    padding: var(--space-5);
-}
 .installed-list {
     display: flex;
     flex-direction: column;
@@ -3179,57 +3137,7 @@ async function confirmIsolation() {
     transform: scale(0.96);
 }
 
-/* 顶部 Tab 分段 */
-.game-tabs {
-    position: relative;
-    display: inline-flex;
-    gap: var(--space-1);
-    padding: var(--space-1);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--card-2);
-    flex-shrink: 0;
-}
-/* Indicator follows the active tab without spring overshoot. */
-.game-tabs-blob {
-    position: absolute;
-    top: var(--space-1);
-    bottom: var(--space-1);
-    border-radius: 999px;
-    background: var(--accent-grad);
-    box-shadow: 0 2px 8px var(--accent-soft);
-    transition:
-        left var(--motion-normal) var(--ease-out),
-        width var(--motion-normal) var(--ease-out),
-        opacity 0.15s ease;
-    pointer-events: none;
-    z-index: 0;
-}
-.game-tab {
-    position: relative;
-    z-index: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 var(--space-5);
-    height: var(--ctl-h);
-    border: none;
-    border-radius: 999px;
-    background: transparent;
-    color: var(--text-dim);
-    font-size: var(--text-sm);
-    font-weight: 600;
-    font-family: inherit;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: color 0.2s ease;
-}
-.game-tab:hover {
-    color: var(--text);
-}
-.game-tab.active {
-    color: var(--on-accent);
-}
+/* 顶部 tab 已收编为共享 TabPills（UI_SYSTEM.md §5），手写分段容器与滑动指示块样式删除 */
 
 /* 安装中/失败行 */
 .installing-block {
@@ -3511,25 +3419,6 @@ async function confirmIsolation() {
 .page-sub {
     margin-bottom: 0;
 }
-.game-tabs {
-    align-self: flex-start;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: var(--hover);
-}
-.game-tabs-blob {
-    border-radius: var(--radius-sm);
-    background: var(--accent-soft);
-    box-shadow: inset 0 -2px var(--accent);
-}
-.game-tab {
-    height: 36px;
-    padding: 0 20px;
-    border-radius: var(--radius-sm);
-}
-.game-tab.active {
-    color: var(--text);
-}
 .folder-manager {
     padding: 12px 16px;
     gap: 8px;
@@ -3674,24 +3563,23 @@ async function confirmIsolation() {
 .instance-more {
     min-width: 32px;
     padding: 0 8px;
-    font-size: 20px;
 }
 .installed-launch {
     min-width: 78px;
 }
-/* 行 hover 统一规则（UX「交互反馈·悬浮反馈」）：整行 hover 时
- * - 次操作（管理/⋯/重试）边框与文字提亮；
- * - 主操作（启动）点亮为 accent 渐变（后一条规则优先级更高）；
- * - 各按钮自身 hover 仍有 .btn-ghost 反馈，双层反馈叠加。
- * 选择器兼容两种结构：容器 .row-actions > .btn，以及失败行直接挂在按钮上的 .row-actions。 */
+/* 行 hover 统一规则（2026-11-14 用户拍板修正）：行 hover = 操作区**整组苏醒**——
+ * 三颗按钮一起明显提亮（背景 card-2 + 边框 border-strong + 文字变亮），不做位移；
+ * 「只有启动亮」的孤立反馈已废除：主操作的 accent 点亮只发生在
+ * 指向启动按钮本身时（下方 :hover 规则），行 hover 不再单独点亮启动。
+ * 选择器兼容两种结构：容器 .row-actions > .btn，以及失败行直接挂按钮的 .row-actions。 */
 .installed-row:hover :is(.row-actions .btn, button.row-actions):not(:disabled),
 .installed-row:focus-within :is(.row-actions .btn, button.row-actions):not(:disabled) {
+    background: var(--card-2);
     border-color: var(--border-strong);
     color: var(--text);
 }
-.installed-row:hover :is(.row-actions .btn, button.row-actions).installed-launch:not(:disabled),
-.installed-row:focus-within
-    :is(.row-actions .btn, button.row-actions).installed-launch:not(:disabled) {
+.installed-row
+    :is(.row-actions .btn, button.row-actions).installed-launch:hover:not(:disabled) {
     color: var(--on-accent);
     background: var(--accent-grad);
     border-color: transparent;

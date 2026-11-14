@@ -5,7 +5,6 @@
 import { refreshSkinAfter } from './skinRevision';
 import { IPC, IPC_EVENT } from '@shared/types';
 import type {
-    DefaultResourcePack,
     Account,
     CommunityFile,
     CommunityKind,
@@ -438,31 +437,6 @@ export const setPluginEnabled = (id: string, enabled: boolean) =>
 export const removePlugin = (id: string) =>
     invoke<import('@shared/types').PluginInfo[]>(IPC.pluginsRemove, id);
 export const openPluginsDir = () => invoke<void>(IPC.pluginsOpenDir);
-
-// ---------------- 默认按键 ----------------
-export const getDefaultKeys = () => invoke<Record<string, string>>(IPC.keysGetDefault);
-export const getDefaultGameOptions = () =>
-    invoke<import('@shared/gameOptions').DefaultGameOptions>(IPC.gameOptionsGet);
-export const setDefaultGameOptions = (change: {
-    enabled?: boolean;
-    id?: string;
-    value?: import('@shared/gameOptions').GameOptionValue | null;
-}) => invoke<import('@shared/gameOptions').DefaultGameOptions>(IPC.gameOptionsSet, change);
-export const setDefaultKey = (id: string, bind: string) =>
-    invoke<Record<string, string>>(IPC.keysSetDefault, id, bind);
-export const resetDefaultKeys = () => invoke<Record<string, string>>(IPC.keysReset);
-export const getDefaultResourcePacks = () => invoke<DefaultResourcePack[]>(IPC.defaultPacksGet);
-export const importDefaultResourcePacks = (files: string[]) =>
-    invoke<DefaultResourcePack[]>(IPC.defaultPacksImport, files);
-export const pickDefaultResourcePacks = () => invoke<DefaultResourcePack[]>(IPC.defaultPacksPick);
-export const removeDefaultResourcePack = (id: string) =>
-    invoke<DefaultResourcePack[]>(IPC.defaultPacksRemove, id);
-export const moveDefaultResourcePack = (id: string, direction: number) =>
-    invoke<DefaultResourcePack[]>(IPC.defaultPacksMove, id, direction);
-export const setDefaultResourcePackEnabled = (id: string, enabled: boolean) =>
-    invoke<DefaultResourcePack[]>(IPC.defaultPacksSetEnabled, id, enabled);
-export const reapplyDefaultResourcePacks = (folder: string, id: string) =>
-    invoke<{ count: number; shared: boolean }>(IPC.defaultPacksApply, folder, id);
 
 // ---------------- 启动器自更新与版本回退 ----------------
 export const checkUpdate = (force = false) =>

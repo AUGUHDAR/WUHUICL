@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { openInstanceCenter } from '../instanceCenter';
 import { appearancePreview } from '../visualDesign';
+import BrandMicrosoft from '../components/BrandMicrosoft.vue';
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { activeCarouselKeys, carouselDuration } from '@shared/appearancePolicy';
 import { useMotion } from '../motion';
@@ -41,7 +42,11 @@ import {
 } from '../store';
 import Avatar from '../components/Avatar.vue';
 import { skinSiteIconUrl } from '../skinSiteIcons';
+import AppMenu, { type AppMenuItem } from '../components/AppMenu.vue';
+import AppModal from '../components/AppModal.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import EmptyState from '../components/EmptyState.vue';
+import UiGlyph from '../components/UiGlyph.vue';
 import HeroSceneCanvas from '../components/HeroSceneCanvas.vue';
 import type { HeroSceneEntry } from '../heroScenes';
 import SkinViewer3D from '../components/SkinViewer3D.vue';
@@ -647,6 +652,8 @@ function toggleVersionMenu() {
         versionMenu.left = Math.max(8, Math.min(window.innerWidth - 250, bounds.right - 230));
     }
     versionMenu.open = !versionMenu.open;
+    // 打开后把焦点移入浮层容器，↑↓/ESC 立即可用（键盘契约对齐 AppMenu）
+    if (versionMenu.open) void nextTick(() => versionMenuEl.value?.focus({ preventScroll: true }));
 }
 
 function chooseVersion(id: string) {
@@ -654,16 +661,107 @@ function chooseVersion(id: string) {
     versionMenu.open = false;
 }
 
-const cardMenu = reactive({ id: '', top: 0, left: 0 });
+/** 实例选择浮层键盘支持（与 AppMenu/SelectMenu 同一套纪律）：↑↓/Home/End 移动、Enter 选中、ESC/Tab 关闭并归还焦点 */
+const versionMenuEl = ref<HTMLElement | null>(null);
+function onVersionMenuKey(event: KeyboardEvent) {
+    const items = [
+        ...(versionMenuEl.value?.querySelectorAll<HTMLButtonElement>(
+            '.menu-item:not(:disabled)'
+        ) || [])
+    ];
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        versionMenu.open = false;
+        versionMenuButton.value?.focus({ preventScroll: true });
+        return;
+    }
+    if (event.key === 'Tab') {
+        versionMenu.open = false;
+        return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    if (!items.length) return;
+    const index = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next =
+        event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? items.length - 1
+              : index < 0
+                ? event.key === 'ArrowDown'
+                  ? 0
+                  : items.length - 1
+                : Math.max(0, Math.min(items.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
+    items[next].focus();
+}
+
+// ---------------- 实例卡 ⋯ 菜单（AppMenu：去重 + 分组；启动实例与卡片 play 按钮重复，删除） ----------------
+const cardMenu = reactive({ id: '', anchor: null as HTMLElement | null });
 const cardMenuVersion = computed(() =>
     store.installed.find((version) => version.id === cardMenu.id)
 );
 
 function openCardMenu(event: MouseEvent, id: string) {
-    const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    cardMenu.id = cardMenu.id === id ? '' : id;
-    cardMenu.top = Math.max(8, Math.min(window.innerHeight - 272, bounds.bottom + 6));
-    cardMenu.left = Math.max(8, Math.min(window.innerWidth - 244, bounds.right - 232));
+    // 再点同一颗 ⋯ 收起；定位/翻转/点击外部关闭交给 AppMenu
+    if (cardMenu.id === id) {
+        cardMenu.id = '';
+        cardMenu.anchor = null;
+        return;
+    }
+    cardMenu.anchor = event.currentTarget as HTMLElement;
+    cardMenu.id = id;
+}
+
+/** 分组：实例管理 → 启动与排障 → 危险区（对齐 GameView 实例 ⋯ 菜单的三段式） */
+const cardMenuItems = computed<AppMenuItem[]>(() => {
+    const v = cardMenuVersion.value;
+    if (!v) return [];
+    return [
+        { id: 'manage', label: '管理实例', group: '' },
+        {
+            id: 'favorite',
+            label: isFavorite(v.id, v.folder) ? '取消收藏' : '收藏实例',
+            group: ''
+        },
+        { id: 'folder', label: '打开文件夹', group: '' },
+        {
+            id: 'cmdworld',
+            label: '启动并创建命令世界',
+            group: '启动与排障',
+            disabled: running.value || launching.value || waitingWindow.value || restartBusy.value,
+            disabledReason: '有实例正在启动或运行，结束后再试'
+        },
+        {
+            id: 'restart',
+            label: '快速重启游戏',
+            group: '启动与排障',
+            disabled: !running.value || restartBusy.value,
+            disabledReason: running.value ? undefined : '游戏未在运行，无需重启'
+        },
+        { id: 'script', label: '导出启动脚本（.bat）', group: '启动与排障' },
+        { id: 'remove', label: '删除实例', group: '危险区', danger: true }
+    ];
+});
+
+function onCardMenuSelect(id: string) {
+    const v = cardMenuVersion.value;
+    if (!v) return;
+    if (id === 'manage') openInstanceCenter(v);
+    else if (id === 'favorite') toggleFavorite(v.id, v.folder);
+    else if (id === 'folder') {
+        void openVersionFolder(v.id);
+        return; // openVersionFolder / requestRemove 内部已收起菜单
+    } else if (id === 'cmdworld') void startVersion(v.id, true);
+    else if (id === 'restart') void quickRestart(v);
+    else if (id === 'script') void exportScript();
+    else if (id === 'remove') {
+        requestRemove(v);
+        return;
+    }
+    cardMenu.id = '';
+    cardMenu.anchor = null;
 }
 
 async function openVersionFolder(id: string) {
@@ -856,9 +954,13 @@ onUnmounted(() => {
                     class="launch-progress"
                     :style="{ width: percent + '%' }"
                 ></span>
-                <svg data-ui="HomeView:m013icon" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                    <path d="M8 5.5v13l11-6.5-11-6.5Z" />
-                </svg>
+                <!-- 手绘播放三角 SVG 收编 UiGlyph play（inventory H） -->
+                <UiGlyph
+                    data-ui="HomeView:m013icon"
+                    name="play"
+                    :size="20"
+                    filled
+                />
                 <span data-ui="HomeView:m014text">{{
                     currentVersion ? launchText : '选择实例启动'
                 }}</span>
@@ -1001,11 +1103,8 @@ onUnmounted(() => {
                                 title="更多实例操作"
                                 @click="currentVersion && openCardMenu($event, currentVersion.id)"
                             >
-                                <svg viewBox="0 0 24 24" fill="currentColor">
-                                    <circle cx="5" cy="12" r="1.8" />
-                                    <circle cx="12" cy="12" r="1.8" />
-                                    <circle cx="19" cy="12" r="1.8" />
-                                </svg>
+                                <!-- 手绘三点 SVG 收编 UiGlyph more（inventory H） -->
+                                <UiGlyph name="more" :size="19" />
                             </button>
                         </div>
 
@@ -1030,9 +1129,8 @@ onUnmounted(() => {
                                     :style="{ width: percent + '%' }"
                                 ></span>
                                 <span data-ui="HomeView:57cbf5d7ee2f" class="launch-content">
-                                    <svg viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M8 5.5v13l11-6.5Z" />
-                                    </svg>
+                                    <!-- 手绘播放三角 SVG 收编 UiGlyph play（inventory H） -->
+                                    <UiGlyph name="play" :size="22" filled />
                                     <span>{{ launchText }}</span>
                                 </span>
                             </button>
@@ -1097,16 +1195,8 @@ onUnmounted(() => {
                     <span
                         ><small>运行环境</small><strong>{{ javaText }}</strong></span
                     >
-                    <svg
-                        class="runtime-chevron"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                    >
-                        <path d="m9 6 6 6-6 6" />
-                    </svg>
+                    <!-- 手绘箭头 SVG 收编 UiGlyph chevron-right（inventory H 重复手绘 SVG 组） -->
+                    <UiGlyph class="runtime-chevron" name="chevron-right" :size="14" />
                 </button>
                 <button
                     data-ui="HomeView:ac285743c8c3"
@@ -1130,16 +1220,8 @@ onUnmounted(() => {
                     <span
                         ><small>内存分配</small><strong>{{ memoryText }}</strong></span
                     >
-                    <svg
-                        class="runtime-chevron"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                    >
-                        <path d="m9 6 6 6-6 6" />
-                    </svg>
+                    <!-- 手绘箭头 SVG 收编 UiGlyph chevron-right（inventory H 重复手绘 SVG 组） -->
+                    <UiGlyph class="runtime-chevron" name="chevron-right" :size="14" />
                 </button>
                 <button
                     data-ui="HomeView:3e2f60ad69a5"
@@ -1161,16 +1243,8 @@ onUnmounted(() => {
                     <span
                         ><small>运行状态</small><strong><i></i>{{ heroStatus.text }}</strong></span
                     >
-                    <svg
-                        class="runtime-chevron"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                    >
-                        <path d="m9 6 6 6-6 6" />
-                    </svg>
+                    <!-- 手绘箭头 SVG 收编 UiGlyph chevron-right（inventory H 重复手绘 SVG 组） -->
+                    <UiGlyph class="runtime-chevron" name="chevron-right" :size="14" />
                 </button>
             </section>
 
@@ -1247,11 +1321,8 @@ onUnmounted(() => {
                             title="更多"
                             @click.stop="openCardMenu($event, version.id)"
                         >
-                            <svg viewBox="0 0 24 24" fill="currentColor">
-                                <circle cx="5" cy="12" r="1.7" />
-                                <circle cx="12" cy="12" r="1.7" />
-                                <circle cx="19" cy="12" r="1.7" />
-                            </svg>
+                            <!-- 手绘三点 SVG 收编 UiGlyph more（inventory H） -->
+                            <UiGlyph name="more" :size="15" />
                         </button>
                         <span
                             data-ui="HomeView:ba095d8dcc15"
@@ -1266,20 +1337,26 @@ onUnmounted(() => {
                             :title="`启动 ${version.id}`"
                             @click.stop="startVersion(version.id)"
                         >
-                            <svg viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M8 5.5v13l11-6.5Z" />
-                            </svg>
+                            <!-- 手绘播放三角 SVG 收编 UiGlyph play（inventory H） -->
+                            <UiGlyph name="play" :size="15" filled />
                         </button>
                     </article>
                 </div>
-                <button
-                    data-ui="HomeView:c485ad83d7d3"
+                <!-- 空态收编 EmptyState（UX「空状态指引」）：原整块按钮改为说明 + 明确入口按钮；
+                     data-ui 锚点随元素迁移（旧 c485ad83d7d3 在空态按钮上，新锚点落容器） -->
+                <EmptyState
                     v-else
-                    class="empty-instances"
-                    @click="store.currentView = 'game'"
+                    data-ui="HomeView:c485ad83d7d3"
+                    icon="cube"
+                    title="还没有游戏实例"
+                    description="去版本管理下载或导入一个实例，这里就会显示最近游玩"
                 >
-                    尚未安装游戏实例，点击前往版本管理
-                </button>
+                    <template #action>
+                        <button class="btn btn-gold btn-sm" @click="store.currentView = 'game'">
+                            前往版本管理
+                        </button>
+                    </template>
+                </EmptyState>
             </section>
         </div>
 
@@ -1303,11 +1380,7 @@ onUnmounted(() => {
                             title="账户管理"
                             @click="store.currentView = 'accounts'"
                         >
-                            <svg viewBox="0 0 24 24" fill="currentColor">
-                                <circle cx="5" cy="12" r="1.8" />
-                                <circle cx="12" cy="12" r="1.8" />
-                                <circle cx="19" cy="12" r="1.8" />
-                            </svg>
+                            <UiGlyph name="more" :size="17" />
                         </button>
                     </div>
                     <button class="account-provider" @click="store.currentView = 'accounts'">
@@ -1315,16 +1388,9 @@ onUnmounted(() => {
                             data-ui="HomeView:8bfe0faab45b"
                             class="provider-mark"
                             :class="store.selectedAccount.type"
-                            ><svg
+                            ><BrandMicrosoft
                                 v-if="store.selectedAccount.type === 'microsoft'"
-                                viewBox="0 0 22 22"
-                                aria-label="Microsoft"
-                            >
-                                <path fill="#f25022" d="M0 0h10v10H0z" />
-                                <path fill="#7fba00" d="M12 0h10v10H12z" />
-                                <path fill="#00a4ef" d="M0 12h10v10H0z" />
-                                <path fill="#ffb900" d="M12 12h10v10H12z" /></svg
-                            ><img
+                            /><img
                                 v-else-if="providerIcon"
                                 :src="providerIcon"
                                 class="provider-logo"
@@ -1334,15 +1400,7 @@ onUnmounted(() => {
                             }}</template></span
                         >
                         <span>{{ accountTypeLabel }}</span>
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                        >
-                            <path d="m9 6 6 6-6 6" />
-                        </svg>
+                        <UiGlyph name="chevron-right" :size="15" />
                     </button>
                 </template>
                 <template v-else>
@@ -1431,15 +1489,7 @@ onUnmounted(() => {
                     @click="store.currentView = store.selectedAccount ? 'skins' : 'accounts'"
                 >
                     拖动可旋转 · 行走动画
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                    >
-                        <path d="m9 6 6 6-6 6" />
-                    </svg>
+                    <UiGlyph name="chevron-right" :size="12" />
                 </button>
             </section>
             <CreatorCard class="home-creator" />
@@ -1453,22 +1503,33 @@ onUnmounted(() => {
                 class="menu-overlay"
                 @click="versionMenu.open = false"
             ></div>
+            <!-- 版本/文件夹选择器（「选择器」而非动作菜单：两层列表 + active 标记 + 行右键管理，
+                 不套 AppMenu——AppMenu 契约是纯动作列表；保留 float-menu 形态，
+                 键盘契约对齐 AppMenu/SelectMenu：↑↓/Home/End 移动、Enter 选中、ESC/Tab 关闭归还焦点） -->
             <div
                 data-ui="HomeView:d4dfd8dd87c8"
                 v-if="versionMenu.open"
+                ref="versionMenuEl"
                 class="float-menu"
+                tabindex="-1"
                 :style="{
                     top: versionMenu.top + 'px',
                     left: versionMenu.left + 'px',
                     width: versionMenu.width + 'px'
                 }"
+                @keydown="onVersionMenuKey"
             >
                 <button
                     data-ui="HomeView:9fae1e3ba335"
                     class="menu-item"
                     @click="folderListOpen = !folderListOpen"
                 >
-                    {{ folderListOpen ? '‹ 返回版本选择' : '文件夹列表 ›' }}
+                    <template v-if="folderListOpen"
+                        ><UiGlyph name="chevron-left" :size="12" /> 返回版本选择</template
+                    >
+                    <template v-else
+                        >文件夹列表 <UiGlyph name="chevron-right" :size="12"
+                    /></template>
                 </button>
                 <template v-if="folderListOpen">
                     <button
@@ -1502,17 +1563,13 @@ onUnmounted(() => {
                         @click="chooseVersion(version.id)"
                         @contextmenu.prevent="showFolderContextMenu(version.folder, version.id)"
                     >
-                        <svg
+                        <!-- 手绘星形 SVG 收编 UiGlyph star（inventory H） -->
+                        <UiGlyph
                             v-if="isFavorite(version.id, version.folder)"
-                            viewBox="0 0 24 24"
-                            width="12"
-                            height="12"
-                            fill="currentColor"
-                        >
-                            <path
-                                d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01Z"
-                            />
-                        </svg>
+                            name="star"
+                            :size="12"
+                            filled
+                        />
                         <span data-ui="HomeView:f77a89b73779" v-else class="menu-spacer"></span>
                         {{ versionLabel(version) }}
                     </button>
@@ -1527,171 +1584,68 @@ onUnmounted(() => {
             </div>
         </Teleport>
 
-        <Teleport to="body">
-            <div
-                data-ui="HomeView:4f4a9fb8dc2a"
-                v-if="cardMenu.id"
-                class="menu-overlay"
-                @click="cardMenu.id = ''"
-            ></div>
-            <div
-                data-ui="HomeView:3c3ff2f77e4f"
-                v-if="cardMenu.id && cardMenuVersion"
-                class="float-menu card-float-menu"
-                :style="{ top: cardMenu.top + 'px', left: cardMenu.left + 'px' }"
-            >
-                <button
-                    data-ui="HomeView:3e8d19a019ab"
-                    class="menu-item"
-                    @click="
-                        openInstanceCenter(cardMenuVersion);
-                        cardMenu.id = '';
-                    "
-                >
-                    管理实例
-                </button>
-                <button
-                    data-ui="HomeView:a0dd508b6e16"
-                    class="menu-item"
-                    @click="
-                        startVersion(cardMenuVersion.id);
-                        cardMenu.id = '';
-                    "
-                >
-                    启动实例
-                </button>
-                <button
-                    data-ui="HomeView:cc765cc95569"
-                    class="menu-item"
-                    title="新建允许命令的创造模式测试世界并自动进入（Minecraft 1.20+）"
-                    :disabled="running || launching || waitingWindow || restartBusy"
-                    @click="
-                        startVersion(cardMenuVersion.id, true);
-                        cardMenu.id = '';
-                    "
-                >
-                    启动并创建命令世界
-                </button>
-                <button
-                    data-ui="HomeView:98ec7f1bfdb4"
-                    class="menu-item"
-                    :disabled="!running || restartBusy"
-                    @click="quickRestart(cardMenuVersion)"
-                >
-                    快速重启游戏
-                </button>
-                <button
-                    class="menu-item"
-                    title="导出最近一次启动的完整命令为 .bat，可直接排障；先启动过一次才可用"
-                    @click="exportScript(); cardMenu.id = '';"
-                >
-                    导出启动脚本（.bat）
-                </button>
-                <button
-                    data-ui="HomeView:a83bf9067bf3"
-                    class="menu-item"
-                    @click="
-                        toggleFavorite(cardMenuVersion.id, cardMenuVersion.folder);
-                        cardMenu.id = '';
-                    "
-                >
-                    {{
-                        isFavorite(cardMenuVersion.id, cardMenuVersion.folder)
-                            ? '取消收藏'
-                            : '收藏实例'
-                    }}
-                </button>
-                <button
-                    data-ui="HomeView:471f5e20fd6f"
-                    class="menu-item"
-                    @click="openVersionFolder(cardMenuVersion.id)"
-                >
-                    打开文件夹
-                </button>
-                <button
-                    data-ui="HomeView:31cc199f9344"
-                    class="menu-item danger"
-                    @click="requestRemove(cardMenuVersion)"
-                >
-                    删除实例
-                </button>
-            </div>
-        </Teleport>
+        <!-- 实例卡 ⋯ 菜单收编 AppMenu（UX「复用现有 UI」）：定位/翻转/点击外部/键盘/焦点归还托管。
+             去重：「启动实例」与卡片 play 按钮重复 → 删除（任务书拍板）；
+             分组：实例管理 → 启动与排障 → 危险区（删除实例 danger）。 -->
+        <AppMenu
+            :open="!!cardMenu.id"
+            :anchor="cardMenu.anchor"
+            :items="cardMenuItems"
+            :groups="['', '启动与排障', '危险区']"
+            align="end"
+            :min-width="230"
+            aria-label="实例操作"
+            @close="
+                cardMenu.id = '';
+                cardMenu.anchor = null;
+            "
+            @select="onCardMenuSelect"
+        />
 
-        <Teleport to="body">
-            <div
-                data-ui="HomeView:923206ea2c37"
-                v-if="logOpen"
-                class="log-mask"
-                @pointerdown.self="logOpen = false"
-            >
-                <section
-                    data-ui="HomeView:21a3dfa129bb"
-                    class="log-dialog"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-label="游戏日志"
-                >
-                    <header data-ui="HomeView:e10df8fdf6ce">
-                        <div>
-                            <h3>启动日志</h3>
-                            <span>{{ store.logs.length }} 行 · {{ heroStatus.text }}</span>
-                        </div>
-                        <button
-                            data-ui="HomeView:8c1728a36b47"
-                            class="log-close"
-                            title="关闭"
-                            @click="logOpen = false"
-                        >
-                            ×
-                        </button>
-                    </header>
-                    <div data-ui="HomeView:1921d3d812a6" v-if="launchFailed" class="log-failure">
-                        <span>检测到启动失败或异常退出</span>
-                        <span style="display: flex; gap: 8px">
-                            <button
-                                data-ui="HomeView:4e02813325fa"
-                                :disabled="exportingLogs"
-                                @click="exportFailureLogs"
-                            >
-                                {{ exportingLogs ? '导出中…' : '导出错误日志' }}
-                            </button>
-                            <button
-                                class="btn btn-ghost"
-                                :disabled="sharingLogs"
-                                title="脱敏后上传 mclo.gs 并复制链接，方便发给别人帮你看"
-                                @click="shareLogs"
-                            >
-                                {{ sharingLogs ? '上传中…' : '分享到 mclo.gs' }}
-                            </button>
-                        </span>
-                    </div>
-                    <div data-ui="HomeView:d816343842fa" ref="logBody" class="log-body">
-                        <p
-                            data-ui="HomeView:9e34f7306c51"
-                            v-if="!store.logs.length"
-                            class="log-empty"
-                        >
-                            暂无启动日志
-                        </p>
-                        <pre
-                            data-ui="HomeView:b8671047aacf"
-                            v-else
-                        ><span data-ui="HomeView:d2bfb16eae17" v-for="(line, index) in store.logs" :key="index">{{ line }}</span></pre>
-                    </div>
-                    <footer data-ui="HomeView:113536fd4ef0">
-                        <button
-                            data-ui="HomeView:287dd6a53ff1"
-                            class="btn btn-ghost btn-sm"
-                            :disabled="!store.logs.length"
-                            @click="store.logs = []"
-                        >
-                            清空日志
-                        </button>
-                    </footer>
-                </section>
+        <!-- 启动日志弹窗收编 AppModal：遮罩/标题/焦点陷阱/ESC 由全局体系托管（修复旧弹窗无 ESC）；
+             业务内容（失败条 / 日志体 / 清空按钮）原样保留。宽屏档位依赖全局 .modal--xl（见报告）。 -->
+        <AppModal :open="logOpen" title="启动日志" size="xl" @close="logOpen = false">
+            <p class="log-subtitle">{{ store.logs.length }} 行 · {{ heroStatus.text }}</p>
+            <div data-ui="HomeView:1921d3d812a6" v-if="launchFailed" class="log-failure">
+                <span>检测到启动失败或异常退出</span>
+                <span style="display: flex; gap: 8px">
+                    <button
+                        data-ui="HomeView:4e02813325fa"
+                        :disabled="exportingLogs"
+                        @click="exportFailureLogs"
+                    >
+                        {{ exportingLogs ? '导出中…' : '导出错误日志' }}
+                    </button>
+                    <button
+                        class="btn btn-ghost"
+                        :disabled="sharingLogs"
+                        title="脱敏后上传 mclo.gs 并复制链接，方便发给别人帮你看"
+                        @click="shareLogs"
+                    >
+                        {{ sharingLogs ? '上传中…' : '分享到 mclo.gs' }}
+                    </button>
+                </span>
             </div>
-        </Teleport>
+            <div data-ui="HomeView:d816343842fa" ref="logBody" class="log-body">
+                <p data-ui="HomeView:9e34f7306c51" v-if="!store.logs.length" class="log-empty">
+                    暂无启动日志
+                </p>
+                <pre
+                    data-ui="HomeView:b8671047aacf"
+                    v-else
+                ><span data-ui="HomeView:d2bfb16eae17" v-for="(line, index) in store.logs" :key="index">{{ line }}</span></pre>
+            </div>
+            <template #actions>
+                <button
+                    data-ui="HomeView:287dd6a53ff1"
+                    class="btn btn-ghost btn-sm"
+                    :disabled="!store.logs.length"
+                    @click="store.logs = []"
+                >
+                    清空日志
+                </button>
+            </template>
+        </AppModal>
 
         <ConfirmModal
             :open="removeModal.open"
@@ -1702,220 +1656,203 @@ onUnmounted(() => {
             @confirm="confirmRemove"
         />
     </div>
-    <Teleport to="body">
-        <div
-            data-ui="HomeView:5da5c508a315"
-            v-if="javaPicker"
-            class="modal-mask"
-            @pointerdown.self="!javaSaving && (javaPicker = null)"
-            @keydown.esc="!javaSaving && (javaPicker = null)"
-        >
-            <section
-                data-ui="HomeView:d9cf38660e47"
-                class="modal java-picker"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="java-picker-title"
+    <!-- Java 选择器收编 AppModal：遮罩点击/ESC 关闭（保存中 busy 不关）、焦点陷阱由 modalFocus 托管；
+         radio 选择业务原样保留。旧宽 580px 待全局 .modal--lg 档位（见报告）。 -->
+    <AppModal
+        :open="!!javaPicker"
+        title="选择 Java 运行环境"
+        size="lg"
+        :busy="javaSaving"
+        @close="javaPicker = null"
+    >
+        <template v-if="javaPicker">
+            <p data-ui="HomeView:96c5153e7b82" class="java-picker-description">
+                {{ javaPicker.name }} · 仅修改此实例，不影响其他实例
+            </p>
+            <label class="java-option"
+                ><input
+                    data-ui="HomeView:e530b03f8660"
+                    v-model="javaPicker.choice"
+                    type="radio"
+                    value="@auto"
+                    name="home-java"
+                /><span
+                    ><strong>自动选择</strong
+                    ><small>按游戏的真实版本要求匹配 Java，必要时自动下载</small></span
+                ></label
             >
-                <h3 data-ui="HomeView:5e6790a8da51" id="java-picker-title" class="modal-title">
-                    选择 Java 运行环境
-                </h3>
-                <p data-ui="HomeView:96c5153e7b82" class="java-picker-description">
-                    {{ javaPicker.name }} · 仅修改此实例，不影响其他实例
-                </p>
-                <label class="java-option"
+            <label class="java-option"
+                ><input
+                    data-ui="HomeView:a0b100241102"
+                    v-model="javaPicker.choice"
+                    type="radio"
+                    value="@inherit"
+                    name="home-java"
+                /><span
+                    ><strong>跟随全局设置</strong
+                    ><small>{{
+                        store.settings?.javaAuto
+                            ? '当前全局：自动选择'
+                            : '当前全局：' + (store.settings?.javaPath || '匹配本地 Java')
+                    }}</small></span
+                ></label
+            >
+            <div data-ui="HomeView:2b732ea02a21" class="java-list">
+                <label
+                    data-ui="HomeView:484d96932255"
+                    v-for="java in javas"
+                    :key="java.path"
+                    class="java-option"
                     ><input
-                        data-ui="HomeView:e530b03f8660"
+                        data-ui="HomeView:3b272633f5d0"
                         v-model="javaPicker.choice"
                         type="radio"
-                        value="@auto"
+                        :value="java.path"
                         name="home-java"
                     /><span
-                        ><strong>自动选择</strong
-                        ><small>按游戏的真实版本要求匹配 Java，必要时自动下载</small></span
-                    ></label
-                >
-                <label class="java-option"
-                    ><input
-                        data-ui="HomeView:a0b100241102"
-                        v-model="javaPicker.choice"
-                        type="radio"
-                        value="@inherit"
-                        name="home-java"
-                    /><span
-                        ><strong>跟随全局设置</strong
-                        ><small>{{
-                            store.settings?.javaAuto
-                                ? '当前全局：自动选择'
-                                : '当前全局：' + (store.settings?.javaPath || '匹配本地 Java')
+                        ><strong
+                            >Java {{ java.version }} ·
+                            {{ java.architecture || (java.is64Bit ? '64-bit' : '32-bit') }}</strong
+                        ><small data-ui="HomeView:012aa6cd6faf" :title="java.path">{{
+                            java.path
                         }}</small></span
                     ></label
                 >
-                <div data-ui="HomeView:2b732ea02a21" class="java-list">
-                    <label
-                        data-ui="HomeView:484d96932255"
-                        v-for="java in javas"
-                        :key="java.path"
-                        class="java-option"
-                        ><input
-                            data-ui="HomeView:3b272633f5d0"
-                            v-model="javaPicker.choice"
-                            type="radio"
-                            :value="java.path"
-                            name="home-java"
-                        /><span
-                            ><strong
-                                >Java {{ java.version }} ·
-                                {{
-                                    java.architecture || (java.is64Bit ? '64-bit' : '32-bit')
-                                }}</strong
-                            ><small data-ui="HomeView:012aa6cd6faf" :title="java.path">{{
-                                java.path
-                            }}</small></span
-                        ></label
-                    >
-                    <p
-                        data-ui="HomeView:cf5a93492c1f"
-                        v-if="!javas.length"
-                        class="java-picker-description"
-                    >
-                        {{
-                            javaChecked
-                                ? '未发现本地 Java，可使用自动选择，或在设置中添加 Java。'
-                                : '正在扫描本地 Java…'
-                        }}
-                    </p>
-                    <p
-                        data-ui="HomeView:c23c056bc1bd"
-                        v-if="
-                            javaPicker.choice &&
-                            !javaPicker.choice.startsWith('@') &&
-                            !javas.some((java) => java.path === javaPicker?.choice)
-                        "
-                        class="java-picker-description"
-                    >
-                        当前指定：{{ javaPicker.choice }}
-                    </p>
-                </div>
-                <div data-ui="HomeView:e1c395584dc9" class="modal-actions">
-                    <button
-                        data-ui="HomeView:765c5489bdca"
-                        class="btn btn-ghost"
-                        :disabled="javaSaving"
-                        @click="
-                            javaPicker = null;
-                            openSettings('java');
-                        "
-                    >
-                        管理 Java
-                    </button>
-                    <button
-                        data-ui="HomeView:6248b7b5543e"
-                        class="btn btn-ghost"
-                        :disabled="javaSaving"
-                        @click="javaPicker = null"
-                    >
-                        取消
-                    </button>
-                    <button
-                        data-ui="HomeView:853a319d45b3"
-                        class="btn btn-gold"
-                        :disabled="javaSaving"
-                        @click="saveJavaChoice"
-                    >
-                        {{ javaSaving ? '保存中…' : '保存选择' }}
-                    </button>
-                </div>
-            </section>
-        </div>
-    </Teleport>
-    <Teleport to="body"
-        ><div
-            v-if="relaunchConfirm"
-            class="modal-mask"
-            style="z-index: var(--z-modal)"
-        >
-            <section class="modal" role="dialog" aria-modal="true" aria-label="再次启动确认">
-                <h3>已有游戏正在运行</h3>
-                <p>
-                    当前已有一个正在运行的游戏实例。再次启动会开启一个全新实例，
-                    两个实例同时写同一存档时可能产生冲突。
-                </p>
-                <p style="color: var(--danger)">
-                    如果两边进的是同一个世界，请先确认另一个实例已保存退出。
-                </p>
-                <div style="display: flex; gap: 12px; justify-content: flex-end">
-                    <button class="btn btn-ghost" @click="relaunchConfirm = null">
-                        取消</button
-                    ><button
-                        class="btn btn-gold"
-                        @click="
-                            startVersion(
-                                relaunchConfirm.id,
-                                relaunchConfirm.createCommandWorld,
-                                true
-                            );
-                            relaunchConfirm = null;
-                        "
-                    >
-                        仍要再启动一个
-                    </button>
-                </div>
-            </section>
-        </div></Teleport
-    >
-    <Teleport to="body"
-        ><div
-            data-ui="HomeView:9d63fadc1ed6"
-            v-if="restartConfirm"
-            class="modal-mask"
-            style="z-index: var(--z-modal)"
-        >
-            <section
-                data-ui="HomeView:b6df5ebbb9a2"
-                class="modal"
-                role="dialog"
-                aria-modal="true"
-                aria-label="正常退出超时"
-            >
-                <h3>正常退出等待超时</h3>
-                <p data-ui="HomeView:2925c2d17b9d">
-                    Minecraft 可能仍在保存世界。建议在游戏内保存退出，然后重试。
-                </p>
-                <p data-ui="HomeView:37b32c3aeef4" style="color: var(--danger)">
-                    强制结束可能丢失进度或损坏存档；只有你确认后才会执行。
-                </p>
-                <div
-                    data-ui="HomeView:6801f8598bb3"
-                    style="display: flex; gap: 12px; justify-content: flex-end"
+                <p
+                    data-ui="HomeView:cf5a93492c1f"
+                    v-if="!javas.length"
+                    class="java-picker-description"
                 >
-                    <button
-                        data-ui="HomeView:1ab5dde2249d"
-                        class="btn btn-ghost"
-                        :disabled="restartBusy"
-                        @click="cancelRestartPrompt"
-                    >
-                        取消重启，继续等待</button
-                    ><button
-                        data-ui="HomeView:df15de437ca0"
-                        class="btn btn-danger"
-                        :disabled="restartBusy"
-                        @click="
-                            quickRestart(
-                                {
-                                    id: restartConfirm.id,
-                                    folder: restartConfirm.folder
-                                } as InstalledVersion,
-                                restartConfirm.token
-                            )
-                        "
-                    >
-                        确认强制结束并重启
-                    </button>
-                </div>
-            </section>
-        </div></Teleport
+                    {{
+                        javaChecked
+                            ? '未发现本地 Java，可使用自动选择，或在设置中添加 Java。'
+                            : '正在扫描本地 Java…'
+                    }}
+                </p>
+                <p
+                    data-ui="HomeView:c23c056bc1bd"
+                    v-if="
+                        javaPicker.choice &&
+                        !javaPicker.choice.startsWith('@') &&
+                        !javas.some((java) => java.path === javaPicker?.choice)
+                    "
+                    class="java-picker-description"
+                >
+                    当前指定：{{ javaPicker.choice }}
+                </p>
+            </div>
+        </template>
+        <template #actions>
+            <button
+                data-ui="HomeView:765c5489bdca"
+                class="btn btn-ghost"
+                :disabled="javaSaving"
+                @click="
+                    javaPicker = null;
+                    openSettings('java');
+                "
+            >
+                管理 Java
+            </button>
+            <button
+                data-ui="HomeView:6248b7b5543e"
+                class="btn btn-ghost"
+                :disabled="javaSaving"
+                @click="javaPicker = null"
+            >
+                取消
+            </button>
+            <button
+                data-ui="HomeView:853a319d45b3"
+                class="btn btn-gold"
+                :disabled="javaSaving"
+                @click="saveJavaChoice"
+            >
+                {{ javaSaving ? '保存中…' : '保存选择' }}
+            </button>
+        </template>
+    </AppModal>
+    <!-- 再次启动确认收编 AppModal：内联 style 按钮行 → #actions（.modal-actions）；ESC/焦点托管；
+         点遮罩不关闭（与旧行为一致，避免误触绕过警告） -->
+    <AppModal
+        :open="!!relaunchConfirm"
+        title="已有游戏正在运行"
+        :dismissable="false"
+        @close="relaunchConfirm = null"
     >
+        <template v-if="relaunchConfirm">
+            <p>
+                当前已有一个正在运行的游戏实例。再次启动会开启一个全新实例，
+                两个实例同时写同一存档时可能产生冲突。
+            </p>
+            <p style="color: var(--danger)">
+                如果两边进的是同一个世界，请先确认另一个实例已保存退出。
+            </p>
+        </template>
+        <template #actions>
+            <template v-if="relaunchConfirm">
+                <button class="btn btn-ghost" @click="relaunchConfirm = null">取消</button
+                ><button
+                    class="btn btn-gold"
+                    @click="
+                        startVersion(
+                            relaunchConfirm.id,
+                            relaunchConfirm.createCommandWorld,
+                            true
+                        );
+                        relaunchConfirm = null;
+                    "
+                >
+                    仍要再启动一个
+                </button>
+            </template>
+        </template>
+    </AppModal>
+    <!-- 强制重启确认收编 AppModal：修复旧弹窗 ESC 无响应（旧按钮文案非「取消」，
+         modalFocus 匹配不到 dismiss 按钮；AppModal 的 app:modal-esc 兜底可关） -->
+    <AppModal
+        :open="!!restartConfirm"
+        title="正常退出等待超时"
+        :busy="restartBusy"
+        :dismissable="false"
+        @close="cancelRestartPrompt"
+    >
+        <template v-if="restartConfirm">
+            <p data-ui="HomeView:2925c2d17b9d">
+                Minecraft 可能仍在保存世界。建议在游戏内保存退出，然后重试。
+            </p>
+            <p data-ui="HomeView:37b32c3aeef4" style="color: var(--danger)">
+                强制结束可能丢失进度或损坏存档；只有你确认后才会执行。
+            </p>
+        </template>
+        <template #actions>
+            <template v-if="restartConfirm">
+                <button
+                    data-ui="HomeView:1ab5dde2249d"
+                    class="btn btn-ghost"
+                    :disabled="restartBusy"
+                    @click="cancelRestartPrompt"
+                >
+                    取消重启，继续等待</button
+                ><button
+                    data-ui="HomeView:df15de437ca0"
+                    class="btn btn-danger"
+                    :disabled="restartBusy"
+                    @click="
+                        quickRestart(
+                            {
+                                id: restartConfirm.id,
+                                folder: restartConfirm.folder
+                            } as InstalledVersion,
+                            restartConfirm.token
+                        )
+                    "
+                >
+                    确认强制结束并重启
+                </button>
+            </template>
+        </template>
+    </AppModal>
 </template>
 
 <style scoped>
@@ -1938,15 +1875,7 @@ onUnmounted(() => {
     align-self: start;
 }
 
-.java-picker {
-    width: min(580px, calc(100vw - 40px));
-}
-.java-picker .modal-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
-    margin-top: 22px;
-}
+/* Java 选择器外壳已收编 AppModal（宽度档位走全局 .modal--*），旧宽度定制删除 */
 .java-picker-description {
     color: var(--text-dim);
     font-size: 12px;
@@ -2529,11 +2458,10 @@ onUnmounted(() => {
     border-radius: 14px;
     background: color-mix(in srgb, var(--card) 82%, transparent);
     cursor: pointer;
+    /* hover 只动底色/边框（L 行 hover 规则：不做位移）；入场动画保留 */
     transition:
         border-color 0.18s ease,
-        background 0.18s ease,
-        transform 0.18s ease,
-        box-shadow 0.22s ease;
+        background 0.18s ease;
     animation: card-in var(--motion-enter) var(--ease-out) backwards;
 }
 @keyframes card-in {
@@ -2544,11 +2472,11 @@ onUnmounted(() => {
         opacity: 1;
     }
 }
+/* 卡片 hover 对齐统一规则：背景 + 边框提亮，不做位移、不加阴影（页内卡片无阴影，UI_SYSTEM §2）；
+ * 主操作（play）的 accent 点亮只发生在指向按钮本身 :hover（.instance-play:hover 既有规则），行 hover 不点亮。 */
 .instance-card:hover {
     border-color: var(--border-strong);
     background: var(--card-2);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow);
 }
 .instance-card.selected {
     border-color: var(--accent-2);
@@ -2644,15 +2572,7 @@ onUnmounted(() => {
     width: 15px;
     height: 15px;
 }
-.empty-instances {
-    width: 100%;
-    min-height: 110px;
-    border: 1px dashed var(--border-strong);
-    border-radius: 13px;
-    background: var(--card);
-    color: var(--text-dim);
-    cursor: pointer;
-}
+/* 实例空态已收编 EmptyState，旧虚线按钮样式删除 */
 
 .home-side {
     display: flex;
@@ -2934,15 +2854,7 @@ onUnmounted(() => {
     box-shadow: var(--shadow-lg);
     backdrop-filter: blur(24px);
 }
-.card-float-menu {
-    width: 232px;
-    max-height: 340px;
-    background: var(--card-solid, #192225);
-}
-.card-float-menu .menu-item {
-    min-height: 40px;
-    font-size: 13px;
-}
+/* 实例卡 ⋯ 菜单已收编 AppMenu（定位/分组/键盘由组件托管），旧 .card-float-menu 定制样式删除 */
 .menu-item:disabled {
     opacity: 0.45;
     cursor: not-allowed;
@@ -2983,60 +2895,11 @@ onUnmounted(() => {
     text-align: center;
 }
 
-.log-mask {
-    position: fixed;
-        z-index: var(--z-modal);
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-    background: var(--mask);
-    backdrop-filter: blur(5px);
-}
-.log-dialog {
-    display: flex;
-    width: min(760px, calc(100vw - 64px));
-    max-height: min(620px, calc(100vh - 80px));
-    flex-direction: column;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    background: color-mix(in srgb, var(--card) 94%, transparent);
-    box-shadow: var(--shadow-lg);
-}
-.log-dialog header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 18px;
-    border-bottom: 1px solid var(--border);
-}
-.log-dialog header div {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-}
-.log-dialog h3 {
-    font-size: 16px;
-}
-.log-dialog header span {
+/* 日志弹窗外壳已收编 AppModal（遮罩/标题/按钮行走全局 .modal 体系），旧 .log-mask/.log-dialog 样式删除 */
+.log-subtitle {
+    margin: -6px 0 0;
     color: var(--text-dim);
     font-size: 11px;
-}
-.log-close {
-    width: 32px;
-    height: 32px;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--text-dim);
-    font-size: 20px;
-    cursor: pointer;
-}
-.log-close:hover {
-    background: var(--hover);
-    color: var(--text);
 }
 .log-failure {
     display: flex;
@@ -3058,7 +2921,8 @@ onUnmounted(() => {
 }
 .log-body {
     min-height: 220px;
-    flex: 1;
+    /* AppModal 外壳下给日志区内部滚动上限，按钮行不随日志滚走 */
+    max-height: min(460px, 58vh);
     overflow: auto;
     padding: 14px 18px;
     background: color-mix(in srgb, var(--bg) 42%, transparent);
@@ -3079,12 +2943,6 @@ onUnmounted(() => {
     padding: 70px 0;
     color: var(--text-dim);
     text-align: center;
-}
-.log-dialog footer {
-    display: flex;
-    justify-content: flex-end;
-    padding: 11px 16px;
-    border-top: 1px solid var(--border);
 }
 
 @media (max-width: 1180px) {

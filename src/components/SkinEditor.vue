@@ -3,6 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import SkinViewer3D from './SkinViewer3D.vue';
 import SkinColorPalette from './SkinColorPalette.vue';
 import UiGlyph from './UiGlyph.vue';
+import SelectMenu from './SelectMenu.vue';
+import EmptyState from './EmptyState.vue';
 import { loadImage, migrateLegacySkin } from '../skin-render';
 import { makeBaseOpaque, paintSkinPixel, type SkinFace } from '@shared/skinPixels';
 import {
@@ -34,6 +36,15 @@ const viewer = ref<InstanceType<typeof SkinViewer3D>>(),
     fileInput = ref<HTMLInputElement>();
 const variant = ref(props.variant || 'classic'),
     layer = ref<'inner' | 'outer'>('inner');
+/** 模型/图层下拉选项（原生 select → SelectMenu，横向 G 收编） */
+const editorVariantOptions = [
+    { value: 'classic', label: '经典 Classic' },
+    { value: 'slim', label: '纤细 Slim' }
+];
+const editorLayerOptions = [
+    { value: 'inner', label: '基础层（不透明）' },
+    { value: 'outer', label: '外层（可透明）' }
+];
 const palettePreferences = ref(normalizeSkinPalettePreferences(store.settings?.skinEditorPalette));
 const color = computed({
     get: () => palettePreferences.value.color,
@@ -664,20 +675,21 @@ onBeforeUnmount(() => {
                                     <UiGlyph name="expand" />
                                 </button>
                                 <div class="preview-zoom">
+                                    <!-- +/− 缩放文本按钮 → UiGlyph（横向 H 收编，紧凑工具钮保持 32px icon-btn 规格） -->
                                     <button
                                         class="icon-btn"
                                         aria-label="放大皮肤预览"
                                         :disabled="blocked"
                                         @click="viewer?.zoomBy(1.2)"
                                     >
-                                        +</button
+                                        <UiGlyph name="plus" :size="15" /></button
                                     ><button
                                         class="icon-btn"
                                         aria-label="缩小皮肤预览"
                                         :disabled="blocked"
                                         @click="viewer?.zoomBy(1 / 1.2)"
                                     >
-                                        −
+                                        <UiGlyph name="minus" :size="15" />
                                     </button>
                                 </div>
                             </div>
@@ -733,13 +745,13 @@ onBeforeUnmount(() => {
                                     {{ part.name }}
                                 </button>
                             </div>
-                            <p
+                            <!-- 部位全隐藏提示 → EmptyState（横向 B 收编，轻量：无图标无按钮，指引文案保留） -->
+                            <EmptyState
                                 v-if="hiddenParts.length === parts.length"
-                                class="muted editor-empty-parts"
-                                role="status"
-                            >
-                                所有部位已隐藏，点击部位或“全部显示”恢复。
-                            </p>
+                                class="editor-empty-parts"
+                                title="所有部位已隐藏"
+                                description="点击部位或「全部显示」恢复。"
+                            />
                         </div>
                     </div>
                     <aside aria-label="绘制工具与颜色">
@@ -762,17 +774,24 @@ onBeforeUnmount(() => {
                             </button>
                         </div>
                         <div class="editor-options">
-                            <label
-                                >模型<select v-model="variant" aria-label="皮肤模型">
-                                    <option value="classic">经典 Classic</option>
-                                    <option value="slim">纤细 Slim</option>
-                                </select></label
-                            ><label
-                                >图层<select v-model="layer" aria-label="皮肤图层">
-                                    <option value="inner">基础层（不透明）</option>
-                                    <option value="outer">外层（可透明）</option>
-                                </select></label
-                            >
+                            <!-- 原生 select → SelectMenu（横向 G 收编）：label 换 div+span，
+                                 避免 label 包按钮造成点击歧义 -->
+                            <div class="editor-option">
+                                <span>模型</span>
+                                <SelectMenu
+                                    v-model="variant"
+                                    :options="editorVariantOptions"
+                                    aria-label="皮肤模型"
+                                />
+                            </div>
+                            <div class="editor-option">
+                                <span>图层</span>
+                                <SelectMenu
+                                    v-model="layer"
+                                    :options="editorLayerOptions"
+                                    aria-label="皮肤图层"
+                                />
+                            </div>
                         </div>
                         <SkinColorPalette
                             v-model:color="color"
@@ -1145,7 +1164,8 @@ onBeforeUnmount(() => {
     margin: 0 0 16px;
     padding: 4px 10px;
 }
-.editor-options label {
+/* 下拉行（原 label>select 改 div+span+SelectMenu）：排版保持「名称左、控件右」 */
+.editor-options .editor-option {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1153,14 +1173,11 @@ onBeforeUnmount(() => {
     font-size: 13px;
     font-weight: 600;
 }
-.editor-options select {
-    color: var(--text);
-    background: var(--card-2);
-    padding: 9px 12px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
+.editor-options .editor-option > span {
+    flex-shrink: 0;
+}
+.editor-options .editor-option .select-menu-btn {
     width: 65%;
-    font: inherit;
     font-weight: 400;
 }
 .file-input {
@@ -1217,9 +1234,11 @@ onBeforeUnmount(() => {
     border-color: var(--accent);
     color: var(--text);
 }
+/* 部位全隐藏轻空态：压低 EmptyState 高度适配编辑器侧栏 */
 .editor-empty-parts {
     margin: 8px 0 0;
-    font-size: 12px;
+    padding: var(--space-3);
+    min-height: 0;
 }
 .editor-show-all {
     font-size: 11px;

@@ -26,6 +26,9 @@ import {
     exportCurseforge
 } from '../api';
 import SelectMenu from './SelectMenu.vue';
+import TabPills from './TabPills.vue';
+import EmptyState from './EmptyState.vue';
+import AppModal from './AppModal.vue';
 const previousFocus = document.activeElement as HTMLElement | null;
 const target = structuredClone({ ...instanceCenter.target! });
 const tab = ref(instanceCenter.tab),
@@ -52,18 +55,32 @@ const form = ref<'' | 'clone' | 'restore' | 'import' | 'disable' | 'dependencies
     includeShots = ref(false),
     restore = ref<BackupManifest>(),
     overwrite = ref(false);
+/** 操作确认弹窗标题（原 ic-dialog header 内嵌三元式提取，随 AppModal title 传入） */
+const formTitle = computed(
+    () =>
+        form.value === 'clone'
+            ? '复制实例'
+            : form.value === 'restore'
+              ? '恢复备份'
+              : form.value === 'disable'
+                ? '确认停用模组'
+                : form.value === 'dependencies'
+                  ? '安装必要前置'
+                  : '导入存档'
+);
 const dependencies = ref<ModChangePlan>();
 const selectedMods = ref<string[]>([]);
 const worldInput = ref(''),
     worldInfo = ref<WorldImportInfo>(),
     candidate = ref(''),
     mismatch = ref(false);
-const sections = [
-    ['overview', '概览'],
-    ['worlds', '存档'],
-    ['screenshots', '截图'],
-    ['backups', '备份'],
-    ['diagnostics', '诊断']
+/** 五段功能 tab：直接作为 TabPills 的 items（UI_SYSTEM.md §5，形态基线抽自旧 .ic-tabs） */
+const sections: Array<{ value: string; label: string }> = [
+    { value: 'overview', label: '概览' },
+    { value: 'worlds', label: '存档' },
+    { value: 'screenshots', label: '截图' },
+    { value: 'backups', label: '备份' },
+    { value: 'diagnostics', label: '诊断' }
 ];
 const folders = computed(() =>
     (store.settings?.folders || []).map((f) => ({ value: f.path, label: f.name }))
@@ -267,7 +284,8 @@ function key(e: KeyboardEvent) {
     if (e.key === 'Tab') {
         const root =
             document.querySelector('.ic-lightbox') ||
-            document.querySelector('.ic-dialog') ||
+            // 操作确认弹窗已收编 AppModal（Teleport 到 body，面板是全局 .modal）
+            document.querySelector('.modal') ||
             document.querySelector('.ic');
         const elements = [
             ...(root?.querySelectorAll<HTMLElement>(
@@ -407,16 +425,14 @@ onUnmounted(() => {
                         <UiGlyph name="close" />
                     </button>
                 </header>
-                <nav class="ic-tabs" aria-label="实例功能">
-                    <button
-                        v-for="[value, label] in sections"
-                        :key="value"
-                        :class="{ active: tab === value }"
-                        @click="chooseTab(value)"
-                    >
-                        {{ label }}
-                    </button>
-                </nav>
+                <!-- 五段 tab 收编共享 TabPills（UI_SYSTEM.md §5）：形态基线本就抽自这里的药丸，删除手写实现 -->
+                <TabPills
+                    class="ic-tabs"
+                    :items="sections"
+                    :model-value="tab"
+                    aria-label="实例功能"
+                    @update:model-value="chooseTab"
+                />
                 <div :key="tab" class="ic-content">
                     <p v-if="error" class="ic-error" role="alert">
                         {{ error }}
@@ -427,7 +443,7 @@ onUnmounted(() => {
                     <p v-if="overview?.running" class="ic-hint">
                         此目录的游戏正在运行。请退出游戏后再复制、备份或恢复。
                     </p>
-                    <p v-if="loading" class="ic-empty">正在读取实例…</p>
+                    <EmptyState v-if="loading" title="正在读取实例…" />
                     <template v-else-if="tab === 'overview'">
                         <div class="ic-summary" data-ui="instance-center:overview">
                             <div>
@@ -552,7 +568,8 @@ onUnmounted(() => {
                         </div>
                         <div v-for="w in filtered" :key="w.id" class="ic-row">
                             <img v-if="w.icon" :src="w.icon" alt="" />
-                            <div v-else class="ic-world-icon">▧</div>
+                            <!-- 文本符号 ▧ 换 UiGlyph（图标纪律：真实矢量优先） -->
+                            <div v-else class="ic-world-icon"><UiGlyph name="image" :size="26" /></div>
                             <div class="ic-grow">
                                 <strong>{{ w.name }}</strong
                                 ><small
@@ -592,7 +609,13 @@ onUnmounted(() => {
                                 </button>
                             </div>
                         </div>
-                        <p v-if="!filtered.length" class="ic-empty">暂无匹配的存档</p>
+                        <!-- 空态收编 EmptyState（UX「空状态指引」）：搜索场景给一句自救提示 -->
+                        <EmptyState
+                            v-if="!filtered.length"
+                            icon="cube"
+                            title="暂无匹配的存档"
+                            :description="search ? '换个搜索关键词，或清空搜索查看全部' : undefined"
+                        />
                         <button class="btn btn-ghost" @click="chooseTab('backups')">
                             查看备份与恢复 →
                         </button>
@@ -610,9 +633,12 @@ onUnmounted(() => {
                                 }}</span>
                             </button>
                         </div>
-                        <p v-if="!shots.length" class="ic-empty">
-                            游戏中按截图键拍摄后，会显示在这里
-                        </p>
+                        <EmptyState
+                            v-if="!shots.length"
+                            icon="image"
+                            title="还没有截图"
+                            description="游戏中按截图键拍摄后，会显示在这里"
+                        />
                         <div class="ic-tools">
                             <button
                                 class="btn btn-sm"
@@ -672,9 +698,12 @@ onUnmounted(() => {
                                 恢复…
                             </button>
                         </div>
-                        <p v-if="!backups.length" class="ic-empty">
-                            还没有备份，创建第一份备份以保护游戏进度
-                        </p>
+                        <EmptyState
+                            v-if="!backups.length"
+                            icon="clock"
+                            title="还没有备份"
+                            description="用上方「备份实例」创建第一份备份，保护游戏进度"
+                        />
                         <!--
                             快照与上面的整实例备份是两件事，同一标签页分区共存：
                             备份 = 整个实例（含存档/配置），全量、偏慢；
@@ -913,26 +942,17 @@ onUnmounted(() => {
                         任务正在执行。进度及取消入口位于下载中心，关闭本页面不会取消任务。
                     </p>
                 </div>
-                <div v-if="form" class="ic-dialog-mask">
-                    <section class="ic-dialog" role="dialog" aria-label="实例操作确认">
-                        <header>
-                            <h3>
-                                {{
-                                    form === 'clone'
-                                        ? '复制实例'
-                                        : form === 'restore'
-                                          ? '恢复备份'
-                                          : form === 'disable'
-                                            ? '确认停用模组'
-                                            : form === 'dependencies'
-                                              ? '安装必要前置'
-                                              : '导入存档'
-                                }}
-                            </h3>
-                            <button class="btn btn-sm" aria-label="关闭操作确认" @click="form = ''">
-                                <UiGlyph name="close" />
-                            </button>
-                        </header>
+                <!-- 操作确认弹窗收编 AppModal（UI_SYSTEM.md §5 弹层基类）：焦点陷阱/aria 由 modalFocus.ts 托管；
+                     业务内容与分区原样保留（.ic-dialog-body）；点遮罩不关闭（dismissable=false，防误触丢输入），
+                     ESC 仍由本组件 key() 抢先处理（form → lightbox → close 的既有次序）。 -->
+                <AppModal
+                    :open="!!form"
+                    :title="formTitle"
+                    size="md"
+                    :dismissable="false"
+                    @close="form = ''"
+                >
+                    <div class="ic-dialog-body">
                         <template v-if="form === 'disable'"
                             ><p>
                                 仅停用你勾选的文件。先创建自动保护记录，可在“备份”中恢复。请结合日志核对需要保留的版本。
@@ -1007,59 +1027,55 @@ onUnmounted(() => {
                             ></template
                         >
                         <p v-if="error" class="ic-error">{{ error }}</p>
-                        <footer>
-                            <button class="btn btn-ghost" @click="form = ''">取消</button
-                            ><button
-                                class="btn btn-gold"
-                                :disabled="
-                                    busy ||
-                                    (form === 'disable'
-                                        ? !selectedMods.length
-                                        : form === 'dependencies'
-                                          ? !dependencies
-                                          : !name.trim())
-                                "
-                                @click="
-                                    perform(() =>
-                                        form === 'dependencies'
-                                            ? invoke(
-                                                  'center:dependencyApply',
-                                                  dependencies?.id,
-                                                  true
-                                              )
-                                            : form === 'disable'
-                                              ? disableSelected()
-                                              : form === 'clone'
-                                                ? op({
-                                                      kind: 'clone',
-                                                      name,
-                                                      destinationFolder: destination,
-                                                      saves: includeSaves,
-                                                      screenshots: includeShots
-                                                  })
-                                                : form === 'restore'
-                                                  ? op({
-                                                        kind: 'restore',
-                                                        name,
-                                                        destinationFolder: destination,
-                                                        backupId: restore?.id,
-                                                        overwrite
-                                                    })
-                                                  : importWorld(worldInput, {
-                                                        candidateId: candidate,
-                                                        worldName: name,
-                                                        targetFolder: target.folder,
-                                                        targetVersionId: target.id,
-                                                        allowVersionMismatch: mismatch
-                                                    })
-                                    )
-                                "
-                            >
-                                {{ busy ? '正在处理…' : '确认执行' }}
-                            </button>
-                        </footer>
-                    </section>
-                </div>
+                    </div>
+                    <template #actions>
+                        <button class="btn btn-ghost" @click="form = ''">取消</button
+                        ><button
+                            class="btn btn-gold"
+                            :disabled="
+                                busy ||
+                                (form === 'disable'
+                                    ? !selectedMods.length
+                                    : form === 'dependencies'
+                                      ? !dependencies
+                                      : !name.trim())
+                            "
+                            @click="
+                                perform(() =>
+                                    form === 'dependencies'
+                                        ? invoke('center:dependencyApply', dependencies?.id, true)
+                                        : form === 'disable'
+                                          ? disableSelected()
+                                          : form === 'clone'
+                                            ? op({
+                                                  kind: 'clone',
+                                                  name,
+                                                  destinationFolder: destination,
+                                                  saves: includeSaves,
+                                                  screenshots: includeShots
+                                              })
+                                            : form === 'restore'
+                                              ? op({
+                                                    kind: 'restore',
+                                                    name,
+                                                    destinationFolder: destination,
+                                                    backupId: restore?.id,
+                                                    overwrite
+                                                })
+                                              : importWorld(worldInput, {
+                                                    candidateId: candidate,
+                                                    worldName: name,
+                                                    targetFolder: target.folder,
+                                                    targetVersionId: target.id,
+                                                    allowVersionMismatch: mismatch
+                                                })
+                                )
+                            "
+                        >
+                            {{ busy ? '正在处理…' : '确认执行' }}
+                        </button>
+                    </template>
+                </AppModal>
             </section>
         </div>
         <div v-if="image" class="ic-lightbox" role="dialog" aria-label="查看截图">
@@ -1131,35 +1147,11 @@ onUnmounted(() => {
     margin: 0;
 }
 .ic-tabs {
-    /* 每个 tab 各自是一颗有边框的按钮（按钮体系里的 ghost 药丸），不做整体包裹容器 */
-    display: flex;
-    gap: var(--space-2);
+    /* 五段 tab 已收编共享 TabPills（UI_SYSTEM.md §5）：这里只保留容器槽位样式（药丸形态由 TabPills 提供） */
     padding: 0 30px 16px;
     border-bottom: 1px solid var(--border);
     overflow: auto;
     flex-shrink: 0;
-}
-.ic-tabs button {
-    background: var(--card-2);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    padding: 8px 20px;
-    white-space: nowrap;
-    border-radius: 999px;
-    font-size: var(--text-sm);
-    font: inherit;
-    cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
-.ic-tabs button:hover:not(:disabled) {
-    color: var(--text);
-    border-color: var(--border-strong);
-}
-.ic-tabs button.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--on-accent);
-    font-weight: 600;
 }
 .ic-content {
     padding: 24px 30px;
@@ -1249,6 +1241,19 @@ onUnmounted(() => {
     gap: 16px;
     padding: 18px 0;
     border-bottom: 1px solid var(--border);
+    transition: background 0.15s ease;
+}
+/* 行 hover 统一规则【整组苏醒】（inventory L，参照 GameView .installed-row）：行背景 var(--hover)，
+ * 行内操作按钮整组提亮（背景 card-2 + 边框 border-strong + 文字提亮），不做位移；
+ * 本组件行内按钮没有 accent 主操作，无「行 hover 点亮主操作」分支。 */
+.ic-row:hover {
+    background: var(--hover);
+}
+.ic-row:hover :is(.ic-actions .btn):not(:disabled),
+.ic-row:focus-within :is(.ic-actions .btn):not(:disabled) {
+    background: var(--card-2);
+    border-color: var(--border-strong);
+    color: var(--text);
 }
 .ic-row img,
 .ic-world-icon {
@@ -1302,6 +1307,14 @@ onUnmounted(() => {
     background: var(--card);
     color: var(--text);
     cursor: pointer;
+    transition:
+        border-color 0.15s ease,
+        background 0.15s ease;
+}
+/* 截图卡片补 hover（inventory F 零 hover 清单）：边框/底色提亮，不做位移 */
+.ic-shot:hover {
+    border-color: var(--border-strong);
+    background: var(--hover);
 }
 .ic-shot img {
     width: 100%;
@@ -1314,10 +1327,6 @@ onUnmounted(() => {
     font-size: 12px;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-.ic-empty {
-    text-align: center;
-    padding: 56px 12px;
 }
 .ic-error {
     color: var(--danger) !important;
@@ -1345,49 +1354,33 @@ onUnmounted(() => {
     background: var(--accent-soft);
     margin: 0 !important;
 }
-.ic-dialog-mask {
-    position: absolute;
-    inset: 0;
-    background: #0008;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    z-index: 2;
-}
-.ic-dialog {
-    background: var(--card-solid, #192225);
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    padding: 24px;
-    width: min(560px, 100%);
-    max-height: 100%;
-    overflow: auto;
-}
-.ic-dialog header,
-.ic-dialog footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-.ic-dialog footer {
-    justify-content: flex-end;
-    margin-top: 20px;
-}
-.ic-dialog label {
+/* 操作确认弹窗收编 AppModal 后，外壳（遮罩/标题/按钮行）走全局 .modal 体系；
+ * 这里只保留弹窗内部表单分区的样式（slot 内容仍持有本组件 scoped 属性，Teleport 后仍命中）。 */
+.ic-dialog-body label {
     display: block;
     margin: 18px 0;
 }
-.ic-dialog label .input {
+.ic-dialog-body label .input {
     display: block;
     width: 100%;
     margin-top: 8px;
     box-sizing: border-box;
 }
-.ic-dialog .ic-check {
+.ic-dialog-body .ic-check {
     display: flex;
     align-items: center;
     gap: 10px;
+}
+/* 停用清单 <pre> 原先吃 `.ic pre`（面板内选择器）；弹窗已 Teleport 到 body，补一条同款 */
+.ic-dialog-body pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 180px;
+    overflow: auto;
+    background: var(--bg);
+    padding: 14px;
+    border-radius: 10px;
+    font-size: 12px;
 }
 .ic-lightbox {
     position: fixed;
@@ -1427,9 +1420,6 @@ onUnmounted(() => {
     }
     .ic-tabs {
         padding: 0 14px 14px;
-    }
-    .ic-tabs button {
-        padding: 7px 14px;
     }
     .ic-row,
     .ic-summary {

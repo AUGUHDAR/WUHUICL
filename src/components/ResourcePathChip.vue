@@ -51,15 +51,15 @@ async function copyPath() {
 <style scoped>
 .rp-chip {
     display: inline-flex;
-    gap: 8px;
+    gap: var(--space-2);
     align-items: center;
     max-width: 100%;
     background: var(--accent-soft);
     color: var(--text);
     border: 0;
-    padding: 6px 12px;
-    border-radius: 10px;
-    font-size: 12px;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-md);
+    font-size: var(--text-xs);
     line-height: 1.6;
     cursor: copy;
     text-align: left;

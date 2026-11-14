@@ -137,7 +137,6 @@ function closeMascots() {
 }
 const PacksView = defineAsyncComponent(() => import('./views/PacksView.vue'));
 const ShadersView = defineAsyncComponent(() => import('./views/ShadersView.vue'));
-const KeysView = defineAsyncComponent(() => import('./views/KeysView.vue'));
 const SkinsView = defineAsyncComponent(() => import('./views/SkinsView.vue'));
 const CommunityView = defineAsyncComponent(() => import('./views/CommunityView.vue'));
 const ServersView = defineAsyncComponent(() => import('./views/ServersView.vue'));
@@ -197,7 +196,6 @@ const viewMap: Record<ViewName, Component> = {
     seedmap: SeedMapView,
     worldmap: WorldMapView,
     shaders: ShadersView,
-    keys: KeysView,
     skins: SkinsView,
     community: CommunityView,
     servers: ServersView,
@@ -249,12 +247,6 @@ const navItems: Array<{ key: ViewName; label: string; icon: string; group: NavGr
         icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><path d="M2 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 4 5"/></svg>'
     },
     {
-        key: 'keys',
-        label: '游戏内配置',
-        group: 'system',
-        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>'
-    },
-    {
         key: 'feedback',
         label: '反馈与建议',
         group: 'system',
@@ -290,8 +282,8 @@ const navEntries = computed<Array<{ group: NavGroup; entries: NavEntry[] }>>(() 
 const isFeatureOff = (key: string): boolean =>
     (store.settings?.disabledFeatures ?? []).includes(key);
 
-/** Android：联机（VoxLink 引擎仅 Windows）与游戏内配置（依赖游戏进程）在移动端不可用，导航整组隐藏 */
-const MOBILE_HIDDEN_NAV: readonly string[] = isAndroid ? ['friends', 'keys'] : [];
+/** Android：联机（VoxLink 引擎仅 Windows）在移动端不可用，导航整组隐藏 */
+const MOBILE_HIDDEN_NAV: readonly string[] = isAndroid ? ['friends'] : [];
 
 /** 过滤禁用功能后的主导航 */
 const visibleNavItems = computed(() =>
@@ -646,7 +638,7 @@ const looksLikeYggdrasilProvider = (value: string): boolean => {
 };
 
 const resourceDropPage = () =>
-    ['keys', 'mods', 'packs', 'shaders', 'projections', 'screenshots'].includes(store.currentView);
+    ['mods', 'packs', 'shaders', 'projections', 'screenshots'].includes(store.currentView);
 function onDragEnter(e: DragEvent) {
     if (store.editMode) {
         e.preventDefault();
@@ -1955,16 +1947,7 @@ onUnmounted(() => {
                         title="返回上一个页面"
                         @click="goBack"
                     >
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.7"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                        >
-                            <path d="m15 18-6-6 6-6" />
-                        </svg>
+                        <UiGlyph name="chevron-left" :size="16" />
                     </button>
                     <div class="topbar-spacer"><CreatorMotto :disabled="store.editMode" /></div>
 
@@ -1975,18 +1958,7 @@ onUnmounted(() => {
                             class="top-btn dl-toggle"
                             @click="dlOpen = !dlOpen"
                         >
-                            <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            >
-                                <path d="M12 3v11" />
-                                <path d="m7 10 5 5 5-5" />
-                                <path d="M4 21h16" />
-                            </svg>
+                            <UiGlyph name="download" :size="16" />
                             下载
                             <span
                                 data-ui="App:1585a95f110a"
@@ -2001,18 +1973,7 @@ onUnmounted(() => {
                             class="top-btn"
                             @click="onImportClick"
                         >
-                            <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            >
-                                <path d="M12 15V4" />
-                                <path d="m7 8 5-5 5 5" />
-                                <path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
-                            </svg>
+                            <UiGlyph name="upload" :size="16" />
                             导入
                         </button>
                         <button
@@ -2022,18 +1983,7 @@ onUnmounted(() => {
                             title="下载中心"
                             @click="dlOpen = !dlOpen"
                         >
-                            <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            >
-                                <path d="M12 3v11" />
-                                <path d="m7 10 5 5 5-5" />
-                                <path d="M4 21h16" />
-                            </svg>
+                            <UiGlyph name="download" :size="16" />
                             <span data-ui="App:34ac91e6ba07" class="dl-badge compact">{{
                                 activeTaskCount
                             }}</span>
@@ -2045,18 +1995,7 @@ onUnmounted(() => {
                             :title="'新版本 v' + store.availableUpdate.version + ' 可用'"
                             @click="openAvailableUpdate"
                         >
-                            <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            >
-                                <path d="M12 3v11" />
-                                <path d="m7 10 5 5 5-5" />
-                                <path d="M4 21h16" />
-                            </svg>
+                            <UiGlyph name="download" :size="16" />
                             <span data-ui="App:update-available-dot" class="upd-avail-dot"></span>
                         </button>
                         <button
@@ -2066,18 +2005,7 @@ onUnmounted(() => {
                             title="更新日志"
                             @click="notesOpen = !notesOpen"
                         >
-                            <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            >
-                                <path d="M3 12a9 9 0 1 0 9-9" />
-                                <path d="M3 4v5h5" />
-                                <path d="M12 7v5l3.5 2" />
-                            </svg>
+                            <UiGlyph name="clock" :size="16" />
                         </button>
                         <button
                             data-ui="App:b3baec2490ab"
@@ -2085,17 +2013,7 @@ onUnmounted(() => {
                             title="通知"
                             @click="toggleNotices"
                         >
-                            <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="2"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                            >
-                                <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-                                <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-                            </svg>
+                            <UiGlyph name="bell" :size="16" />
                             <span
                                 data-ui="App:9fb26325a181"
                                 v-if="store.noticesUnread"
@@ -3590,8 +3508,8 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     background: color-mix(in srgb, var(--card-solid, var(--card)) 94%, transparent);
-    backdrop-filter: blur(24px) saturate(130%);
-    -webkit-backdrop-filter: blur(24px) saturate(130%);
+    backdrop-filter: blur(16px) saturate(85%);
+    -webkit-backdrop-filter: blur(16px) saturate(85%);
     -webkit-app-region: no-drag;
     isolation: isolate;
     border: 1px solid var(--border);
@@ -3648,6 +3566,10 @@ onUnmounted(() => {
 .dl-item {
     padding: var(--space-4) var(--space-5);
     border-bottom: 1px solid var(--border);
+    transition: background var(--motion-fast) ease;
+}
+.dl-item:hover {
+    background: var(--hover);
 }
 .dl-item-head {
     display: flex;
@@ -3851,6 +3773,12 @@ onUnmounted(() => {
     padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--border);
     font-size: var(--text-sm);
+    cursor: pointer;
+    transition: background var(--motion-fast) ease;
+}
+/* 通知行可点（查看原因）；行 hover 统一规则：仅背景提亮，无位移 */
+.notice-item:hover {
+    background: var(--hover);
 }
 .notice-item:last-child {
     border-bottom: none;
@@ -3947,8 +3875,8 @@ onUnmounted(() => {
     align-items: center;
     justify-content: center;
     background: color-mix(in srgb, var(--accent) 16%, transparent);
-    backdrop-filter: blur(24px) saturate(130%);
-    -webkit-backdrop-filter: blur(24px) saturate(130%);
+    backdrop-filter: blur(16px) saturate(85%);
+    -webkit-backdrop-filter: blur(16px) saturate(85%);
     pointer-events: none; /* 遮罩不拦截拖拽事件，避免 dragleave 闪烁 */
 }
 .drop-box {

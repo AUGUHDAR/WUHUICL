@@ -960,19 +960,6 @@ export const IPC = {
     modsMigrationApply: 'mods:migrationApply',
     modsCheckUpdates: 'mods:checkUpdates', // (versionId: string, folder?: string, force?: boolean) => ModUpdateReport  按 sha1 反查 Modrinth 可更新项（结果缓存 6 小时）
     modsApplyUpdates: 'mods:applyUpdates', // (versionId: string, items: ModUpdateTarget[]) => { fileName, ok, error? }[]
-    // 默认按键（启动时同步进实例 options.txt）
-    keysGetDefault: 'keys:getDefault', // () => Record<string, string>
-    gameOptionsGet: 'gameOptions:get',
-    gameOptionsSet: 'gameOptions:set',
-    keysSetDefault: 'keys:setDefault', // (id: string, bind: string) => Record<string, string>
-    keysReset: 'keys:reset', // () => Record<string, string>  全部恢复 MC 原版默认
-    defaultPacksGet: 'defaultPacks:get',
-    defaultPacksImport: 'defaultPacks:import',
-    defaultPacksPick: 'defaultPacks:pick',
-    defaultPacksRemove: 'defaultPacks:remove',
-    defaultPacksMove: 'defaultPacks:move',
-    defaultPacksSetEnabled: 'defaultPacks:setEnabled',
-    defaultPacksApply: 'defaultPacks:apply',
     // 桥接 MOD 实时配置面板（游戏目录 .kamucl-bridge.json 发现 + token 校验，仅本机）
     bridgeStatus: 'bridge:status', // (versionId: string) => BridgeStatus
     bridgeManifest: 'bridge:manifest', // (versionId: string) => { protocol, params: BridgeParam[] }
@@ -1129,13 +1116,6 @@ export interface CommunityModProject extends CommunityProjectReference {
     followers?: number;
     updatedAt?: string;
     webpage?: string;
-}
-
-export interface DefaultResourcePack {
-    id: string;
-    name: string;
-    size: number;
-    enabled: boolean;
 }
 
 export interface CommunitySearchPage {

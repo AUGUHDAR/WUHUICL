@@ -2,6 +2,7 @@
 /** 图一固定布局下的个性化背景与启动卡图片管理。 */
 import { builtInLaunchImages } from '../launchImages';
 import ConfirmModal from './ConfirmModal.vue';
+import TabPills from './TabPills.vue';
 import { computed, nextTick, ref, onMounted, onUnmounted } from 'vue';
 import { reorderGallery } from '@shared/galleryOrder';
 import {
@@ -98,6 +99,8 @@ const bgModes = [
     { value: 'color', label: '纯色' },
     { value: 'image', label: '图片' }
 ] as const;
+/** 背景模式三选 → TabPills（横向 C 收编） */
+const bgModeItems = bgModes.map((m) => ({ value: m.value, label: m.label }));
 const fitModes: Array<{ value: ImageFit; label: string }> = [
     { value: 'fill', label: '填充' },
     { value: 'fit', label: '适应' },
@@ -280,6 +283,8 @@ const switchModes = [
     { value: 'order', label: '按顺序' },
     { value: 'random', label: '随机' }
 ] as const;
+/** 切换策略三选 → TabPills（横向 C 收编） */
+const switchModeItems = switchModes.map((m) => ({ value: m.value, label: m.label }));
 
 async function resetBg() {
     try {
@@ -354,18 +359,15 @@ function setLaunchFit(fit: ImageFit) {
                 macOS 已开启“降低透明度”，系统会将毛玻璃显示为实色。可在“系统设置 → 辅助功能 →
                 显示”中关闭此选项，恢复桌面毛玻璃。
             </p>
-            <div data-ui="HomeLayoutEditor:05b5e9438975" class="bg-modes">
-                <button
-                    data-ui="HomeLayoutEditor:ab1c088a4afb"
-                    v-for="m in bgModes"
-                    :key="m.value"
-                    class="capsule"
-                    :class="{ active: store.settings?.background.mode === m.value }"
-                    @click="setBg({ mode: m.value })"
-                >
-                    {{ m.label }}
-                </button>
-            </div>
+            <!-- 背景模式三选 → TabPills（横向 C 收编）：自绘胶囊退役，data-ui 挂 TabPills 根 -->
+            <TabPills
+                data-ui="HomeLayoutEditor:05b5e9438975"
+                class="bg-modes"
+                :model-value="store.settings?.background.mode ?? 'none'"
+                :items="bgModeItems"
+                aria-label="背景模式"
+                @update:model-value="setBg({ mode: $event as typeof bgModes[number]['value'] })"
+            />
 
             <template v-if="store.settings?.background.mode === 'color'">
                 <div class="bg-row">
@@ -455,27 +457,18 @@ function setLaunchFit(fit: ImageFit) {
                 </ol>
                 <div v-if="bgImageList.length > 1" class="bg-row">
                     <span class="muted bg-label">自动切换</span>
-                    <div class="fit-options">
-                        <button
-                            data-ui="HomeLayoutEditor:8f06ad84f746"
-                            v-for="m in switchModes"
-                            :key="m.value"
-                            class="capsule"
-                            :class="{
-                                active: (store.settings.background.switchMode ?? 'off') === m.value
-                            }"
-                            :title="
-                                m.value === 'off'
-                                    ? '固定显示第一张'
-                                    : m.value === 'order'
-                                      ? '每次上线切换到下一张，运行中按间隔轮换'
-                                      : '每次上线随机一张，运行中按间隔随机'
-                            "
-                            @click="setBg({ switchMode: m.value })"
-                        >
-                            {{ m.label }}
-                        </button>
-                    </div>
+                    <!-- 切换策略三选 → TabPills（横向 C 收编）：原 per-pill title 说明随收编取消，
+                         固定/按顺序/随机 标签自解释；TabPills 暂不支持逐项 title（已登记总管） -->
+                    <TabPills
+                        data-ui="HomeLayoutEditor:8f06ad84f746"
+                        class="fit-options"
+                        :model-value="store.settings.background.switchMode ?? 'off'"
+                        :items="switchModeItems"
+                        aria-label="自动切换策略"
+                        @update:model-value="
+                            setBg({ switchMode: $event as typeof switchModes[number]['value'] })
+                        "
+                    />
                 </div>
                 <div
                     v-if="

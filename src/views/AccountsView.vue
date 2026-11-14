@@ -23,6 +23,10 @@ import {
 import { refreshAccounts, store, toast } from '../store';
 import Avatar from '../components/Avatar.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import TabPills from '../components/TabPills.vue';
+import SelectMenu from '../components/SelectMenu.vue';
+import EmptyState from '../components/EmptyState.vue';
+import UiGlyph from '../components/UiGlyph.vue';
 import { skinSiteIconUrl } from '../skinSiteIcons';
 const credentialNotice = ref('');
 const credentialsPersistent = ref<boolean | null>(null);
@@ -41,6 +45,12 @@ import type {
 } from '@shared/types';
 
 const accountMode = ref<'microsoft' | 'offline' | 'yggdrasil'>('microsoft');
+/** 添加方式三选一 → TabPills（UI_SYSTEM §5；原自绘 .account-type-tabs 整体胶囊删除） */
+const accountModeItems = [
+    { value: 'microsoft', label: 'Microsoft 正版登录' },
+    { value: 'offline', label: '离线登录' },
+    { value: 'yggdrasil', label: '外置 Yggdrasil 登录' }
+];
 
 // ---------------- 添加离线账号 ----------------
 const newName = ref('');
@@ -154,6 +164,14 @@ async function loadProviders() {
 }
 
 const identifierInput = ref<HTMLInputElement | null>(null);
+/** 提供商下拉选项（SelectMenu，横向 G 收编） */
+const providerOptions = computed(() =>
+    providers.value.map((p) => ({
+        value: p.id,
+        label: p.name,
+        description: p.insecure ? 'HTTP 不安全' : p.apiRoot
+    }))
+);
 const selectedProvider = computed(
     () => providers.value.find((p) => p.id === yggLogin.providerId) ?? null
 );
@@ -490,17 +508,8 @@ async function onRemove(acc: Account) {
         <!-- 返回 + 标题 -->
         <div class="acc-top">
             <button class="back-btn" @click="store.currentView = 'home'">
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                >
-                    <path d="M19 12H5" />
-                    <path d="m12 19-7-7 7-7" />
-                </svg>
+                <!-- 手绘返回箭头 → UiGlyph（横向 H 收编；重复手绘 SVG 收敛到统一矢量语言） -->
+                <UiGlyph name="arrow-left" :size="15" />
                 返回首页
             </button>
             <div class="page-head">
@@ -513,26 +522,8 @@ async function onRemove(acc: Account) {
         <!-- 添加账号 -->
         <div class="card">
             <h3 class="section-title">添加账号</h3>
-            <div class="account-type-tabs" role="tablist" aria-label="账号类型">
-                <button
-                    :class="{ active: accountMode === 'microsoft' }"
-                    @click="accountMode = 'microsoft'"
-                >
-                    Microsoft 正版登录
-                </button>
-                <button
-                    :class="{ active: accountMode === 'offline' }"
-                    @click="accountMode = 'offline'"
-                >
-                    离线登录
-                </button>
-                <button
-                    :class="{ active: accountMode === 'yggdrasil' }"
-                    @click="accountMode = 'yggdrasil'"
-                >
-                    外置 Yggdrasil 登录
-                </button>
-            </div>
+            <!-- 三种登录方式切换 → TabPills（横向 C 收编；每颗独立边框药丸，窄窗自动换行） -->
+            <TabPills v-model="accountMode" :items="accountModeItems" aria-label="账号类型" />
 
             <div v-if="accountMode === 'microsoft'" class="account-mode-panel">
                 <p class="muted mode-description">
@@ -591,7 +582,7 @@ async function onRemove(acc: Account) {
                         </button>
                         <button
                             class="btn btn-ghost btn-sm"
-                            :style="providerAddOpen ? { boxShadow: 'inset 0 0 0 1px var(--accent)' } : undefined"
+                            :class="{ open: providerAddOpen }"
                             @click="toggleAddProvider"
                         >
                             添加提供商
@@ -646,19 +637,16 @@ async function onRemove(acc: Account) {
                 </div>
 
                 <div class="ygg-login-grid">
-                    <label>
+                    <!-- 原生 select → SelectMenu（横向 G 收编；label 换 div：label 包按钮会让点击行为歧义） -->
+                    <div class="ygg-field">
                         <span>提供商</span>
-                        <select v-model="yggLogin.providerId" class="select">
-                            <option value="" disabled>请选择提供商</option>
-                            <option
-                                v-for="provider in providers"
-                                :key="provider.id"
-                                :value="provider.id"
-                            >
-                                {{ provider.name }}
-                            </option>
-                        </select>
-                    </label>
+                        <SelectMenu
+                            v-model="yggLogin.providerId"
+                            :options="providerOptions"
+                            :disabled="!providers.length"
+                            placeholder="请选择提供商"
+                        />
+                    </div>
                     <label>
                         <span>账号或邮箱</span>
                         <input
@@ -715,9 +703,13 @@ async function onRemove(acc: Account) {
         <!-- 账号列表 -->
         <div class="card">
             <h3 class="section-title">我的账号（{{ store.accounts.length }}）</h3>
-            <div v-if="!store.accounts.length" class="empty list-empty">
-                <span>还没有账号，先添加一个离线账号或登录微软账号吧</span>
-            </div>
+            <!-- 空态 → EmptyState（横向 B 收编；说明这里放什么 + 指引怎么填） -->
+            <EmptyState
+                v-if="!store.accounts.length"
+                title="还没有账号"
+                description="先在上方添加一个离线账号，或登录微软正版账号吧。"
+                class="list-empty"
+            />
             <div v-else class="account-list">
                 <div
                     v-for="acc in store.accounts"
@@ -967,41 +959,7 @@ async function onRemove(acc: Account) {
     line-height: 1.5;
 }
 
-.account-type-tabs {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-1);
-    padding: var(--space-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--card-2);
-}
-.account-type-tabs button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: var(--ctl-h);
-    padding: 0 var(--space-2);
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-dim);
-    font: inherit;
-    font-size: var(--text-xs);
-    cursor: pointer;
-    white-space: nowrap;
-    transition:
-        background 0.15s ease,
-        color 0.15s ease;
-}
-.account-type-tabs button:hover {
-    color: var(--text);
-}
-.account-type-tabs button.active {
-    color: var(--on-accent);
-    background: var(--accent-grad);
-    font-weight: 600;
-}
+/* 账号方式切换已收编 TabPills（UI_SYSTEM §5），自绘胶囊样式删除（新旧逻辑不并存） */
 .account-mode-panel {
     margin-top: var(--space-4);
 }
@@ -1063,6 +1021,10 @@ async function onRemove(acc: Account) {
     justify-content: flex-end;
     gap: var(--space-2);
 }
+/* 「添加提供商」展开态：内描边指示（原内联 style hack 收进类，样式单一来源） */
+.provider-head-actions .btn.open {
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
 .provider-add-row {
     display: flex;
     gap: var(--space-2);
@@ -1084,6 +1046,17 @@ async function onRemove(acc: Account) {
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--card-2);
+}
+/* 行 hover 统一规则（GameView .installed-row「整组苏醒」定型，横向 F 补齐）：
+   行已有 card-2 底，hover 用同色叠加避免盖掉底色；删除按钮整组苏醒
+   （btn-danger 保留危险配色，仅边框提亮，避免行 hover 抹掉状态语义） */
+.provider-item:hover,
+.provider-item:focus-within {
+    background: linear-gradient(var(--hover), var(--hover)), var(--card-2);
+}
+.provider-item:hover .btn-danger:not(:disabled),
+.provider-item:focus-within .btn-danger:not(:disabled) {
+    border-color: var(--border-strong);
 }
 .provider-item strong {
     margin-right: var(--space-2);
@@ -1119,8 +1092,13 @@ async function onRemove(acc: Account) {
     color: var(--text-dim);
     font-size: var(--text-xs);
 }
-.ygg-login-grid label:first-child {
+/* 提供商字段（原 label>select 结构改 div+SelectMenu）：独占整行，字段排版与 label 一致 */
+.ygg-login-grid .ygg-field {
     grid-column: 1 / -1;
+    display: grid;
+    gap: var(--space-2);
+    color: var(--text-dim);
+    font-size: var(--text-xs);
 }
 .ygg-login-btn {
     align-self: end;
@@ -1180,8 +1158,22 @@ async function onRemove(acc: Account) {
         border-color 0.18s ease,
         background 0.18s ease;
 }
-.account-row:hover {
-    border-color: var(--accent-deep);
+/* 行 hover 统一规则（GameView .installed-row「整组苏醒」定型）：行背景 var(--hover) 同色叠加，
+ * 不做位移；「验证会话」按钮整组苏醒，删除按钮（danger）仅边框提亮保留状态语义；
+ * 选中态（accent-soft + accent 边）优先级更高，hover 不覆盖选中底色 */
+.account-row:hover:not(.selected),
+.account-row:focus-within:not(.selected) {
+    background: linear-gradient(var(--hover), var(--hover)), var(--card-2);
+}
+.account-row:hover .btn-ghost:not(:disabled),
+.account-row:focus-within .btn-ghost:not(:disabled) {
+    background: var(--card-2);
+    border-color: var(--border-strong);
+    color: var(--text);
+}
+.account-row:hover .btn-danger:not(:disabled),
+.account-row:focus-within .btn-danger:not(:disabled) {
+    border-color: var(--border-strong);
 }
 .account-row.selected {
     border-color: var(--accent);
@@ -1350,11 +1342,10 @@ async function onRemove(acc: Account) {
 }
 
 @media (max-width: 680px) {
-    .account-type-tabs,
     .ygg-login-grid {
         grid-template-columns: 1fr;
     }
-    .ygg-login-grid label:first-child {
+    .ygg-login-grid .ygg-field {
         grid-column: auto;
     }
     .add-row {

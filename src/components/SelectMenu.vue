@@ -9,7 +9,14 @@ defineOptions({ inheritAttrs: false });
 
 const props = defineProps<{
     modelValue: string;
-    options: Array<{ value: string; label: string; description?: string }>;
+    options: Array<{
+        value: string;
+        label: string;
+        description?: string;
+        /** 选项级禁用：置灰 + title 说明原因（UX「联动禁用要显式」） */
+        disabled?: boolean;
+        disabledReason?: string;
+    }>;
     disabled?: boolean;
     placeholder?: string;
     /** 浮层最大高度（超出滚动） */
@@ -107,18 +114,21 @@ function onKeydown(e: KeyboardEvent) {
     if (['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) {
         e.preventDefault();
         e.stopImmediatePropagation();
+        // 禁用项不参与键盘焦点（UX「联动禁用要显式」：置灰项由 title 说明原因）
+        const enabled = (i: number) => !props.options[i]?.disabled;
+        const move = (from: number, delta: number) => {
+            for (let i = 1; i <= props.options.length; i += 1) {
+                const next = Math.max(0, Math.min(props.options.length - 1, from + delta * i));
+                if (enabled(next)) return next;
+            }
+            return from;
+        };
         active.value =
             e.key === 'Home'
-                ? 0
+                ? move(-1, 1)
                 : e.key === 'End'
-                  ? props.options.length - 1
-                  : Math.max(
-                        0,
-                        Math.min(
-                            props.options.length - 1,
-                            active.value + (e.key === 'ArrowDown' ? 1 : -1)
-                        )
-                    );
+                  ? move(props.options.length, -1)
+                  : move(active.value, e.key === 'ArrowDown' ? 1 : -1);
         void nextTick(() =>
             menuEl.value
                 ?.querySelector<HTMLElement>('[data-focused=true]')
@@ -132,6 +142,8 @@ function onKeydown(e: KeyboardEvent) {
     }
 }
 function choose(value: string) {
+    const opt = props.options.find((o) => o.value === value);
+    if (opt?.disabled) return;
     emit('update:modelValue', value);
     emit('change', value);
     close();
@@ -196,10 +208,15 @@ onBeforeUnmount(close);
                     :key="o.value"
                     type="button"
                     class="select-menu-option"
-                    :class="{ active: o.value === props.modelValue }"
+                    :class="{ active: o.value === props.modelValue, disabled: o.disabled }"
                     role="option"
                     :aria-selected="o.value === props.modelValue"
-                    :title="[o.label, o.description].filter(Boolean).join('\n')"
+                    :aria-disabled="o.disabled || undefined"
+                    :title="
+                        o.disabled
+                            ? o.disabledReason || '此选项当前不可用'
+                            : [o.label, o.description].filter(Boolean).join('\n')
+                    "
                     @click="choose(o.value)"
                 >
                     <span data-ui="SelectMenu:cd6bf191d88f" class="select-menu-option-label"
@@ -290,8 +307,8 @@ onBeforeUnmount(close);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--card-solid, var(--card)) 96%, transparent);
-    backdrop-filter: blur(24px) saturate(130%);
-    -webkit-backdrop-filter: blur(24px) saturate(130%);
+    backdrop-filter: blur(16px) saturate(85%);
+    -webkit-backdrop-filter: blur(16px) saturate(85%);
     box-shadow: var(--shadow);
     overflow-y: auto;
     overscroll-behavior: contain;
@@ -327,6 +344,14 @@ onBeforeUnmount(close);
     background: var(--accent-soft);
     color: color-mix(in srgb, var(--text) 86%, var(--accent));
     font-weight: 600;
+}
+.select-menu-option.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.select-menu-option.disabled:hover,
+.select-menu-option.disabled[data-focused='true'] {
+    background: transparent;
 }
 .select-menu-option-label {
     flex: 1;

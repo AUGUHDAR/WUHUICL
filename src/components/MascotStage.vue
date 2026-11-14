@@ -23,6 +23,7 @@ import {
 } from '@shared/mascots';
 import { KamuInteraction } from '@shared/kamuInteraction';
 import { useMotion } from '../motion';
+import ConfirmModal from './ConfirmModal.vue';
 import { errText } from '../api';
 import { toast } from '../store';
 import { PreviewPlayer } from '../skinModel';
@@ -901,20 +902,7 @@ defineExpose({ flush, closeStage });
                 @click="soundChanged({ muted: !sound.muted })"
             >
                 {{ sound.muted ? '开启音效' : '静音音效' }}</button
-            ><template v-if="confirmReset"
-                ><span>仅清空 AUGUHDAR 累计次数？</span>
-                <div>
-                    <button class="btn btn-sm btn-ghost" @click="confirmReset = false">取消</button
-                    ><button
-                        class="btn btn-sm btn-ghost"
-                        :disabled="busy || closing"
-                        @click="resetCounts"
-                    >
-                        确认清空
-                    </button>
-                </div></template
             ><button
-                v-else
                 class="btn btn-sm btn-ghost"
                 :disabled="busy || closing"
                 @click="confirmReset = true"
@@ -931,6 +919,16 @@ defineExpose({ flush, closeStage });
             </button>
             <p v-if="persistError" role="status">{{ persistError }}</p>
         </div>
+        <!-- 清空次数二次确认 → ConfirmModal（UI_SYSTEM §5：破坏性操作走确认模态，浮层内不再内嵌切换按钮组） -->
+        <ConfirmModal
+            :open="confirmReset"
+            title="重置 AUGUHDAR 次数"
+            message="确定要清空 AUGUHDAR 的累计拍打次数吗？此操作不可撤销。"
+            confirm-text="清空次数"
+            :busy="busy || closing"
+            @confirm="resetCounts"
+            @cancel="confirmReset = false"
+        />
     </section>
 </template>
 <style scoped>
@@ -1036,11 +1034,6 @@ defineExpose({ flush, closeStage });
 }
 .sound-panel b {
     min-width: 30px;
-}
-.sound-panel > div {
-    display: flex;
-    justify-content: flex-end;
-    gap: 4px;
 }
 .sound-panel p {
     margin: 0;

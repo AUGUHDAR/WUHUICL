@@ -28,9 +28,9 @@ defineEmits<{ (e: 'update:page', v: number): void }>();
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 12px;
+    gap: var(--space-3);
     flex-wrap: wrap;
-    padding: 8px 0;
-    font-size: 13px;
+    padding: var(--space-2) 0;
+    font-size: var(--text-sm);
 }
 </style>

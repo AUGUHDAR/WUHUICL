@@ -317,17 +317,19 @@ const sizeText = computed(() => {
 .upd-skip:hover {
     color: var(--text);
 }
+/* 进度条形态统一（横向 D）：与 SettingsView .mem-slider/.java-scan-track 同规格——
+   4px 胶囊轨道 + 令牌取色；待总管收编全局 .progress-bar 后替换 */
 .upd-progress {
-    height: 8px;
-    border-radius: 99px;
-    background: var(--hover);
+    height: 4px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-dim) 26%, transparent);
     overflow: hidden;
     margin: 14px 0;
 }
 .upd-progress-bar {
     height: 100%;
-    border-radius: 99px;
-    background: var(--accent-grad);
+    border-radius: inherit;
+    background: var(--accent);
     transition: width var(--motion-normal) var(--ease-out);
 }
 .upd-download-status {
