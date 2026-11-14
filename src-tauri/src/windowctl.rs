@@ -19,6 +19,13 @@ pub fn command(
         return Ok(());
     };
     match channel {
+        // 三大金刚键之一（App.vue 顶栏 win('minimize') 发 window:minimize）。
+        // 2026-11-14 曾被死通道清单误删（前端走字面量模板 `window:${action}`，
+        // grep 常量名查不到调用）——window:* 家族以本 match 为准，勿按清单删。
+        "window:minimize" => {
+            #[cfg(desktop)]
+            let _ = win.minimize();
+        }
         "window:maximize" => {
             // 原版 toggleMaximize：最大化↔还原
             #[cfg(desktop)]
