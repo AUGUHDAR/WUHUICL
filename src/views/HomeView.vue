@@ -2805,18 +2805,15 @@ onUnmounted(() => {
     flex-direction: column;
     gap: 12px;
 }
-/* 创作者降格（用户实测修正 #2）：去掉卡片框——background/border/radius/padding 全去，
- * 变右栏流内纯文本块（标题「创作者」+外链箭头同行、正文 B 站/QQ/issues 紧跟；
- * 组件内部结构不动，只在外层剥壳）。与上方账号+皮肤粘连卡组之间用 --card-gap
- * 区块间距分隔（860h 一屏档 flex gap 12px，合计 ≈ --sec-gap 的呼吸感）。
- * .home-side 前缀压过 CreatorCard 自身的卡片壳（无论注入顺序）。 */
+/* 创作者卡恢复卡片框（用户实测否决上轮无框降格：小字散铺在灰底上更丑）：
+ * 卡片壳（surface-content 底 + --border + --radius-lg + --card-pad）由组件自带，
+ * 这里只对齐族内密度——padding 16px / 去阴影，同 account-panel/skin-panel 档。
+ * 悬浮零形态变化：组件旧 creator-reveal 的 0fr→1fr 悬浮展开已删除（它会撑高
+ * .home-side → dashboard 行高被撑大 → instances-block(flex:1) 重新分高，
+ * 「最近游戏」整块被下拉）；本规则也不再做任何 hover 高度/阴影/边框变化。 */
 .home-side .home-creator {
-    margin-top: var(--card-gap);
-    background: none;
-    border: 0;
-    border-radius: 0;
+    padding: var(--space-4);
     box-shadow: none;
-    padding: 0;
 }
 .account-panel,
 .skin-panel {
@@ -3564,17 +3561,17 @@ onUnmounted(() => {
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     gap: 12px;
 }
-/* 最近游戏行卡（用户实测修正 #1）：grid → flex 行布局。
- * 名字列 flex:1 + min-width:0——名字单行省略（全名留 title），副文整行省略号（不再半截截断）；
- * ⋯ 升到与 play 同一视觉档（等高 32px、同圆角，ghost/accent 成对）；
- * 名字列→操作区 gap 用 --space-2 收紧；隐藏的「上次游玩」不再残留塌缩列 + 双 gap 的空白。 */
+/* 最近游戏行卡（用户实测修正：信息量回收）：flex 行布局，非文字元素全面压缩——
+ * 图标 28px、⋯ 与 play 各 28px 同档、gap --space-1（--space-1~2 档），
+ * 名字列拿回全部剩余宽度：常规 8-10 字实例名完整显示，13 字以上才省略
+ * （全名留 title）；副文同宽整行省略号（不截半截）。 */
 .home-dashboard .instance-card {
     display: flex;
     align-items: center;
-    gap: var(--space-2);
+    gap: var(--space-1);
     min-height: 84px;
     height: auto;
-    padding: var(--space-3);
+    padding: var(--space-3) var(--space-2);
     /* 边界感（用户实测修正）：完整卡片框取代单条底边线——四边 border + 面底 + 圆角 */
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -3590,12 +3587,14 @@ onUnmounted(() => {
 }
 .instance-card .instance-icon {
     flex: none;
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
 }
 .instance-card .instance-copy {
     flex: 1;
     min-width: 0;
+    /* 图标与文字之间补回 4px（卡 gap 是 --space-1）：视觉 8px；去掉基卡的 7px 右内距，宽度全给文字 */
+    padding-left: var(--space-1);
     padding-right: 0;
     gap: var(--space-1);
 }
@@ -3622,8 +3621,8 @@ onUnmounted(() => {
     flex: none;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border: 1px solid var(--border);
     border-radius: 8px;
     background: transparent;
@@ -3636,8 +3635,8 @@ onUnmounted(() => {
 }
 .instance-play {
     flex: none;
-    width: 36px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
 }
 .instances-block {
     background: var(--surface-content);
@@ -3714,13 +3713,9 @@ onUnmounted(() => {
         grid-column: 1;
         grid-row: auto;
     }
-    /* 窄宽档：行卡已是 flex 行——收图标、隐「上次游玩」给名字列让位 */
+    /* 窄宽档：行卡已是 flex 行——隐「上次游玩」给名字列让位（图标 28px 已是基础档） */
     .home-dashboard .instance-card {
-        padding: var(--space-2) var(--space-3);
-    }
-    .home-dashboard .instance-card .instance-icon {
-        width: 28px;
-        height: 28px;
+        padding: var(--space-2);
     }
     .home-dashboard .instance-card .instance-last {
         display: none;
@@ -4012,12 +4007,8 @@ onUnmounted(() => {
     }
     .home-dashboard .instance-card {
         min-height: 52px;
-        padding: 6px 10px;
-        gap: 8px;
-    }
-    .home-dashboard .instance-card .instance-icon {
-        width: 28px;
-        height: 28px;
+        padding: var(--space-2);
+        gap: var(--space-1);
     }
     .instance-grid {
         gap: 8px;
