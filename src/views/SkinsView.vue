@@ -1178,14 +1178,6 @@ watch(
     flex-wrap: wrap;
     margin-bottom: var(--space-2);
 }
-    padding: var(--space-5);
-    font-size: var(--text-xs);
-    color: var(--text-dim);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 120px;
-}
 
 /* ================= 3D 预览 ================= */
 .preview-3d {
