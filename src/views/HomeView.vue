@@ -21,6 +21,9 @@ import {
     setVersionJava,
     openDir,
     removeVersion,
+    renameVersion,
+    selectDir,
+    setDownloadFolder,
     showFolderContextMenu
 } from '../api';
 import {
@@ -34,6 +37,7 @@ import {
     openSettings,
     progressMono,
     refreshInstalled,
+    renameLastPlayed,
     sortWithFavorite,
     store,
     toast,
@@ -770,6 +774,136 @@ watch(
     () => store.installed.map((v) => v.folder || '').join('|'),
     () => migrateAllFoldedLegacy()
 );
+
+/** ---------------- 抽屉实例行轻量操作（悬浮三小钮） ----------------
+ *  重命名/删除走已有后端通道（versions:rename / versions:remove，删除走 ConfirmModal 二次确认）；
+ *  「移动到其他文件夹」无专用后端通道（versions:* 无 move；folders:setActive 只切活动根），
+ *  该钮降级为「去版本管理页」——目标行操作的完整形态由总管接线 versions:move 后回补。 */
+const drawerRowMenu = ref<{ id: string; folder: string } | null>(null);
+const drawerRename = reactive({
+    open: false,
+    id: '',
+    folder: '',
+    name: '',
+    busy: false,
+    error: ''
+});
+const drawerRemove = reactive({ open: false, id: '', folder: '', busy: false });
+/** 记录悬浮操作来源行：操作完成后把焦点归还该行（键盘路径不迷路） */
+const drawerActionRow = ref<string>('');
+
+function openDrawerRename(version: InstalledVersion) {
+    drawerActionRow.value = version.id;
+    drawerRename.id = version.id;
+    drawerRename.folder = version.folder;
+    drawerRename.name = version.id;
+    drawerRename.error = '';
+    drawerRename.open = true;
+}
+
+async function confirmDrawerRename() {
+    if (drawerRename.busy) return;
+    const oldId = drawerRename.id;
+    const newId = drawerRename.name.trim();
+    if (!newId || newId === oldId) {
+        drawerRename.open = false;
+        return;
+    }
+    drawerRename.busy = true;
+    drawerRename.error = '';
+    try {
+        await renameVersion(oldId, newId, drawerRename.folder);
+        renameLastPlayed(oldId, newId);
+        await refreshInstalled();
+        if (selectedId.value === oldId) selectedId.value = newId;
+        drawerRename.open = false;
+        toast('实例已重命名', 'success');
+    } catch (e) {
+        drawerRename.error = errText(e);
+    } finally {
+        drawerRename.busy = false;
+    }
+}
+
+function openDrawerRemove(version: InstalledVersion) {
+    drawerActionRow.value = version.id;
+    drawerRemove.id = version.id;
+    drawerRemove.folder = version.folder;
+    drawerRemove.open = true;
+}
+
+async function confirmDrawerRemove() {
+    if (drawerRemove.busy) return;
+    drawerRemove.busy = true;
+    try {
+        await removeVersion(drawerRemove.id, drawerRemove.folder);
+        await refreshInstalled();
+        if (selectedId.value === drawerRemove.id) {
+            const next = sortWithFavorite(activeInstalled.value)[0];
+            selectedId.value = next?.id ?? '';
+        }
+        drawerRemove.open = false;
+        toast(`已删除 ${drawerRemove.id}`, 'success');
+    } catch (error) {
+        toast('删除失败：' + errText(error), 'error');
+    } finally {
+        drawerRemove.busy = false;
+    }
+}
+
+/** 「移动」降级入口：无 versions:move 通道，带意图跳版本管理页 */
+function gotoVersionManagerForMove(version: InstalledVersion) {
+    drawerRowMenu.value = null;
+    versionDrawer.open = false;
+    versionMenuButton.value?.focus({ preventScroll: true });
+    store.currentView = 'game';
+    toast(`移动实例需在版本管理页操作（${version.id}）`, 'info');
+}
+/** 悬浮操作行点击后的焦点归还（对齐 pickFromDrawer 纪律） */
+function refocusDrawerRow() {
+    void nextTick(() => {
+        const root = versionMenuEl.value;
+        if (!root) return;
+        if (drawerActionRow.value) {
+            const row = root.querySelector<HTMLButtonElement>(
+                `.drawer-item[data-version-id="${CSS.escape(drawerActionRow.value)}"]`
+            );
+            if (row) {
+                row.focus({ preventScroll: true });
+                return;
+            }
+        }
+        drawerSearchEl.value?.focus({ preventScroll: true });
+    });
+}
+
+/** ---------------- 抽屉「添加版本文件夹」次级钮 ----------------
+ *  通道现状：selectDir（app:selectDir 选目录）+ setDownloadFolder（folders:setDownload
+ *  登记/切换默认下载根）+ refreshInstalled 重扫——与 GameView addGameFolder 同一套，
+ *  无需新后端。加文件夹后抽屉分组自动多一组（settings.folders 驱动）。 */
+const drawerFolderBusy = ref(false);
+async function addVersionFolderFromDrawer() {
+    if (drawerFolderBusy.value) return;
+    try {
+        const selected = await selectDir();
+        if (!selected) return; // 用户取消
+        drawerFolderBusy.value = true;
+        const folders = await setDownloadFolder(selected);
+        if (store.settings)
+            store.settings = {
+                ...store.settings,
+                folders,
+                activeFolder: store.settings.activeFolder
+            };
+        store.settings = await getSettings();
+        await refreshInstalled();
+        toast('已添加游戏文件夹，实例分组已刷新', 'success');
+    } catch (error) {
+        toast('添加游戏文件夹失败：' + errText(error), 'error');
+    } finally {
+        drawerFolderBusy.value = false;
+    }
+}
 const isFolded = (folder: string, hasItems = true) => {
     const mem = foldedFolders.value;
     if (mem.has(`f:${folder}`) || mem.has(folder)) return true; // 手动折叠（含旧格式）
@@ -1883,6 +2017,7 @@ onUnmounted(() => {
                                     :key="version.id"
                                     class="drawer-item"
                                     :class="{ active: version.id === selectedId }"
+                                    :data-version-id="version.id"
                                     @click="pickFromDrawer(version.id)"
                                     @contextmenu.prevent="
                                         showFolderContextMenu(version.folder, version.id)
@@ -1915,6 +2050,43 @@ onUnmounted(() => {
                                         :size="13"
                                         filled
                                     />
+                                    <!-- 悬浮轻量操作（行内三小钮）：重命名 / 移动 / 删除。
+                                         注意按钮是 .drawer-item 的子元素，click.stop 防止冒泡选中实例；
+                                         .drawer-row-act 挂 hover-reveal（CSS），触屏无 hover 由 contextmenu 长按兜底。 -->
+                                    <span
+                                        class="drawer-row-acts"
+                                        :class="{ open: drawerRowMenu?.id === version.id }"
+                                        @click.stop
+                                        @pointerdown.stop
+                                    >
+                                        <button
+                                            type="button"
+                                            class="drawer-row-act"
+                                            title="重命名实例"
+                                            aria-label="重命名实例"
+                                            @click.stop="openDrawerRename(version)"
+                                        >
+                                            <UiGlyph name="brush" :size="13" />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="drawer-row-act"
+                                            title="移动实例（在版本管理页操作）"
+                                            aria-label="移动实例"
+                                            @click.stop="gotoVersionManagerForMove(version)"
+                                        >
+                                            <UiGlyph name="folder" :size="13" />
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="drawer-row-act danger"
+                                            title="删除实例"
+                                            aria-label="删除实例"
+                                            @click.stop="openDrawerRemove(version)"
+                                        >
+                                            <UiGlyph name="trash" :size="13" />
+                                        </button>
+                                    </span>
                                 </button>
                                 <p
                                     v-if="!group.items.length && !drawerSearch"
@@ -1933,6 +2105,17 @@ onUnmounted(() => {
                         </div>
                     </div>
                     <footer class="drawer-foot">
+                        <!-- 添加版本文件夹（次级钮）：SelectMenu 不适合这个形态，直接 btn-ghost。
+                             与「管理版本」金钮同行两端：金钮去版本管理页，ghost 钮就地登记新文件夹。 -->
+                        <button
+                            class="btn btn-ghost btn-sm drawer-foot-add"
+                            :disabled="drawerFolderBusy"
+                            title="选择一个目录并登记为游戏文件夹（识别其中的实例）"
+                            @click="addVersionFolderFromDrawer"
+                        >
+                            <UiGlyph name="plus" :size="14" />
+                            {{ drawerFolderBusy ? '添加中…' : '添加版本文件夹' }}
+                        </button>
                         <button class="btn btn-gold" @click="store.currentView = 'game'">
                             管理版本
                         </button>
@@ -2012,6 +2195,46 @@ onUnmounted(() => {
             @cancel="removeModal.open = false"
             @confirm="confirmRemove"
         />
+
+        <!-- 抽屉行删除确认（轻量管理区）：复用 ConfirmModal，语义与上面实例卡删除一致 -->
+        <ConfirmModal
+            :open="drawerRemove.open"
+            title="删除版本"
+            :message="`确定要删除版本「${drawerRemove.id}」吗？该版本目录将移入系统回收站（共享依赖与资源保留）。`"
+            :busy="drawerRemove.busy"
+            @cancel="drawerRemove.open = false"
+            @confirm="confirmDrawerRemove"
+        />
+
+        <!-- 抽屉行重命名：AppModal 承载（游戏版本页同款语义：改名会同步 versions/<名>/ 目录名） -->
+        <AppModal
+            :open="drawerRename.open"
+            title="重命名实例"
+            :busy="drawerRename.busy"
+            @close="drawerRename.open = false"
+        >
+            <p class="java-picker-description">
+                新名称将作为实例文件夹名 versions/&lt;名&gt;/（共享依赖与存档保留）。
+            </p>
+            <input
+                v-model="drawerRename.name"
+                class="input drawer-rename-input"
+                type="text"
+                aria-label="新实例名"
+                @keydown.enter.prevent="confirmDrawerRename"
+            />
+            <p v-if="drawerRename.error" class="confirm-error" role="alert">
+                {{ drawerRename.error }}
+            </p>
+            <template #actions>
+                <button class="btn btn-ghost" :disabled="drawerRename.busy" @click="drawerRename.open = false">
+                    取消
+                </button>
+                <button class="btn btn-gold" :disabled="drawerRename.busy || !drawerRename.name.trim()" @click="confirmDrawerRename">
+                    {{ drawerRename.busy ? '保存中…' : '保存' }}
+                </button>
+            </template>
+        </AppModal>
     </div>
     <!-- Java 选择器收编 AppModal：遮罩点击/ESC 关闭（保存中 busy 不关）、焦点陷阱由 modalFocus 托管；
          radio 选择业务原样保留。旧宽 580px 待全局 .modal--lg 档位（见报告）。 -->
@@ -3203,9 +3426,15 @@ onUnmounted(() => {
     display: flex;
     flex-direction: column;
     width: min(420px, calc(100vw - 32px));
-    /* 性能（用户实测）：420px 全高玻璃面板的 backdrop-filter 逐帧重采样，滑入期间 GPU 占满；
-     * 改实底卡面色（不透明），玻璃质感让位流畅度 */
-    background: var(--card-solid, var(--card));
+    /* 玻璃家族观感回归（用户实测：全站浮层都是玻璃就抽屉不透明「怪怪的」）——
+     * 与 SelectMenu 浮层 / notice-panel 同族：card-solid 系半透 + blur(16px) saturate(85%)。
+     * 上轮性能修复保留：掉帧大头在遮罩层（全屏逐帧重采样），遮罩仍是纯色 var(--mask) 不加 blur；
+     * 面板自身只重采样 420px 窄条，且滑入动画只走 transform（不重排），配 will-change 限层。 */
+    background: color-mix(in srgb, var(--card-solid, var(--card)) 94%, transparent);
+    backdrop-filter: blur(16px) saturate(85%);
+    -webkit-backdrop-filter: blur(16px) saturate(85%);
+    /* 合成层提示：滑入/滑出期间 backdrop 重采样集中在独立层，减少主线程布局回渗 */
+    will-change: transform;
     border-left: 1px solid var(--border);
     box-shadow: var(--shadow-lg);
     outline: none;
@@ -3422,11 +3651,79 @@ onUnmounted(() => {
     font-size: var(--text-sm);
     text-align: center;
 }
+/* 悬浮轻量操作（行内三小钮）：hover 浮现，行内按钮不抢实例选中点击。
+ * 三小钮 24px 同档，间隙 --space-1；danger 钮 hover 点红。触屏无 hover：
+ * 长按 contextmenu 兜底（原生右键菜单通道仍在），钮本身也可被 Tab 聚焦。 */
+.drawer-row-acts {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--space-1);
+    width: 0;
+    overflow: hidden;
+    opacity: 0;
+    border-radius: var(--radius-sm);
+    /* 收起时给层叠提示让位：图标/收藏先隐藏，让宽度给名字 */
+    transition:
+        width 0.16s var(--ease-out),
+        opacity 0.16s ease;
+}
+.drawer-item:hover .drawer-row-acts,
+.drawer-item:focus-visible .drawer-row-acts,
+.drawer-row-acts.open {
+    width: 3 * 24px + 2 * var(--space-1);
+    opacity: 1;
+}
+/* 收起态兜底：宽 0 + overflow hidden 已裁掉，但防止聚焦顺序里残留描边 */
+.drawer-row-act {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--card-solid, var(--card)) 82%, transparent);
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.drawer-row-act:hover {
+    border-color: var(--border-strong);
+    background: var(--hover);
+    color: var(--text);
+}
+.drawer-row-act.danger:hover {
+    border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+    background: var(--danger-soft);
+    color: var(--danger);
+}
 .drawer-foot {
     display: flex;
     justify-content: flex-end;
+    gap: var(--space-2);
     padding: var(--space-3) var(--space-4);
     border-top: 1px solid var(--border);
+}
+/* 添加文件夹次级钮：占位左端、金钮右端（space-between 由 ghost flex:1 收口） */
+.drawer-foot .drawer-foot-add {
+    margin-right: auto;
+}
+.drawer-foot .drawer-foot-add svg {
+    width: 14px;
+    height: 14px;
+}
+/* 抽屉行重命名弹窗输入与报错（AppModal 全局壳内，scoped 直配类名） */
+.drawer-rename-input {
+    width: 100%;
+    margin-top: 4px;
+}
+.confirm-error {
+    margin: 10px 0 0;
+    color: var(--danger);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
 }
 .drawer-fade-enter-active,
 .drawer-fade-leave-active {
@@ -3957,11 +4254,14 @@ onUnmounted(() => {
     image-rendering: pixelated;
 }
 /* 一行式紧凑卡（用户实测修正）：图标 30px + 名字 --text-lg + tag 同行内联 + chevron 行尾，
- * 整卡高度 ≤64px，名字超长走行内省略（完整名在 title） */
+ * 整卡高度 ≤64px，名字超长走行内省略（完整名在 title）。
+ * 用户追加实测（Cobblemon 长名）：名字挤掉右侧 MC 版本数字与 loader tag——
+ * 名字 flex:1 + min-width:0 单行省略让位，版本数字/tag 收 flex-shrink:0 永不被挤；
+ * 超长时先省略名字，其余元素（图标/版本/tag/chevron）完整保留。 */
 .hero-version-card h1 {
     display: block;
+    flex: 1 1 auto;
     min-width: 0;
-    max-width: 100%;
     margin: 0;
     overflow: hidden;
     font-size: var(--text-lg);
@@ -3974,11 +4274,16 @@ onUnmounted(() => {
 }
 .hero-version-card .hero-edition {
     display: inline-flex;
+    /* 版本数字 + loader tag 一行里永不被长名挤掉（用户追加实测 #3） */
     flex: none;
+    flex-shrink: 0;
+    max-width: 55%;
+    overflow: hidden;
     align-items: center;
     margin: 0;
     gap: 6px;
     font-size: 12px;
+    white-space: nowrap;
 }
 .hero-version-card .hero-game-version {
     font-size: 12px;

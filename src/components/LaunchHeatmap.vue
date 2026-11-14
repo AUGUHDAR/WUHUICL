@@ -270,15 +270,18 @@ function shiftModal(direction: number) {
 </template>
 
 <style scoped>
+/* 卡内三层（标题行 / 统计行 / 月历）用 --space 令牌分层呼吸（用户实测「挤」）：
+ * 层间 --space-3（12px）为主节距，月历组内月标 → 格子 --space-2（8px）；
+ * 与右栏 account/skin/creator 卡的 padding 档（--space-4 16px）同源对齐。 */
 .heatmap-card {
     display: grid;
-    gap: 10px;
+    gap: var(--space-3);
 }
 .heatmap-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: var(--space-2);
 }
 .heatmap-head h3 {
     margin: 0;
@@ -286,6 +289,7 @@ function shiftModal(direction: number) {
 .heatmap-summary {
     margin: 0;
     font-size: 12.5px;
+    line-height: 1.5;
     color: var(--text-dim);
 }
 .heatmap-summary strong {
@@ -293,19 +297,29 @@ function shiftModal(direction: number) {
 }
 .heatmap-grid-button {
     display: grid;
-    gap: 4px;
-    padding: 0;
+    gap: var(--space-2);
+    padding: var(--space-1);
+    margin: calc(var(--space-1) * -1);
     border: 0;
+    border-radius: var(--radius-sm);
     background: transparent;
     cursor: pointer;
     text-align: left;
+    transition: background 0.15s ease;
+}
+.heatmap-grid-button:hover {
+    background: var(--hover);
+}
+.heatmap-grid-button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 .heatmap-months {
     display: grid;
     grid-template-columns: repeat(16, 1fr);
     font-size: 10.5px;
+    line-height: 1.4;
     color: var(--text-dim);
-    line-height: 1;
 }
 .modal-months {
     grid-template-columns: repeat(53, 1fr);
@@ -358,6 +372,7 @@ function shiftModal(direction: number) {
     margin: 0;
     min-height: 1.2em;
     font-size: 12px;
+    line-height: 1.5;
     color: var(--text-dim);
 }
 .heatmap-modal {
@@ -367,17 +382,18 @@ function shiftModal(direction: number) {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--space-3);
 }
 .heatmap-modal-nav {
     display: flex;
-    gap: 8px;
+    gap: var(--space-2);
 }
 .heatmap-stats {
     display: flex;
-    gap: 18px;
+    gap: var(--space-4);
     flex-wrap: wrap;
     font-size: 13px;
+    line-height: 1.5;
     color: var(--text-dim);
 }
 .heatmap-stats strong {
@@ -386,13 +402,13 @@ function shiftModal(direction: number) {
 .heatmap-modal-scroll {
     overflow-x: auto;
     display: grid;
-    gap: 4px;
-    padding-bottom: 4px;
+    gap: var(--space-2);
+    padding-bottom: var(--space-1);
 }
 .heatmap-legend {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-1);
     font-size: 11.5px;
     color: var(--text-dim);
 }
@@ -402,6 +418,6 @@ function shiftModal(direction: number) {
     flex: none;
 }
 .heatmap-legend-note {
-    margin-left: 8px;
+    margin-left: var(--space-2);
 }
 </style>
