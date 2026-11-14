@@ -2450,7 +2450,7 @@ function confirmDownload() {
     top: calc(100% + 6px);
     left: 0;
     right: 0;
-    z-index: 40;
+        z-index: var(--z-menu);
     display: flex;
     flex-direction: column;
     padding: 6px;

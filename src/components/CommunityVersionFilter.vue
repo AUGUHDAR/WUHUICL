@@ -200,7 +200,7 @@ onBeforeUnmount(close);
 }
 .community-version-popup {
     position: fixed;
-    z-index: 11000;
+        z-index: var(--z-select);
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: 6px;

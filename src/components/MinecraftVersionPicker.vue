@@ -259,7 +259,7 @@ onBeforeUnmount(close);
 }
 .version-picker-popup {
     position: fixed;
-    z-index: 12000;
+        z-index: var(--z-select);
     display: flex;
     flex-direction: column;
     border: 1px solid var(--border-strong);

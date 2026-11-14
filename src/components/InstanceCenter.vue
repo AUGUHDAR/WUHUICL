@@ -1093,7 +1093,7 @@ onUnmounted(() => {
 .ic-mask {
     position: fixed;
     inset: 0;
-    z-index: 9500;
+        z-index: var(--z-modal);
     background: #0009;
     backdrop-filter: blur(8px);
     padding: 28px;
@@ -1392,7 +1392,7 @@ onUnmounted(() => {
 .ic-lightbox {
     position: fixed;
     inset: 0;
-    z-index: 10000;
+        z-index: var(--z-modal);
     background: #101418fa;
     color: white;
     display: flex;

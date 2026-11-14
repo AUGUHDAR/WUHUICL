@@ -759,11 +759,11 @@ onUnmounted(stopCapture);
     visibility: hidden;
 }
 .cfg-capture-mask {
-    z-index: 9000;
+        z-index: var(--z-modal);
 }
 .cfg-clear {
     position: relative;
-    z-index: 9001;
+        z-index: 1;
     width: 30px;
     height: 30px;
     border: 1px solid var(--border);
@@ -775,7 +775,7 @@ onUnmounted(stopCapture);
 }
 .cfg-bind.capturing {
     position: relative;
-    z-index: 9001;
+        z-index: 1;
 }
 
 .cfg-page .cfg-sections {

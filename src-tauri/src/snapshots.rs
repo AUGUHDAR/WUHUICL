@@ -44,15 +44,6 @@ fn instance_dir(app: &tauri::AppHandle, folder: &str, id: &str) -> PathBuf {
     snapshots_root(app).join(instance_key(folder, id))
 }
 
-fn kind_text(kind: &str) -> &'static str {
-    match kind {
-        "mods" => "模组",
-        "resourcepacks" => "资源包",
-        "shaderpacks" => "光影包",
-        _ => "资源",
-    }
-}
-
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

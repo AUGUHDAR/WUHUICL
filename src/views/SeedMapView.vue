@@ -3403,7 +3403,7 @@ function clampWorldCoordinate(value: number) {
     --seed-history-row-hover-bg: var(--surface-3);
     --seed-history-border: var(--surface-5);
     --seed-history-shadow: 0 18px 48px color-mix(in srgb, var(--surface-5) 55%, transparent);
-    z-index: 10050 !important;
+        z-index: var(--z-modal); !important;
 }
 
 :global(html.dark-mode .seed-map-history-popout),

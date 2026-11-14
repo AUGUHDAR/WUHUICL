@@ -90,7 +90,7 @@ async function act(retry: boolean) {
     position: fixed;
     bottom: 14px;
     right: 18px;
-    z-index: 100;
+        z-index: var(--z-drawer);
     background: var(--card);
     border: 1px solid var(--border);
 }

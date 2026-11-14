@@ -18,7 +18,7 @@ const canInstall = computed(
 </script>
 <template>
     <Teleport to="body"
-        ><div class="modal-mask" style="z-index: 10020" @pointerdown.self="emit('close')">
+        ><div class="modal-mask" style="z-index: var(--z-modal)" @pointerdown.self="emit('close')">
             <section
                 class="modal community-confirm"
                 role="dialog"

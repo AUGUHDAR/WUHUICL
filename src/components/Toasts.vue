@@ -31,7 +31,7 @@ import { store, dismissToast } from '../store';
     position: fixed;
     top: 76px;
     right: var(--space-5);
-    z-index: 200;
+        z-index: var(--z-toast);
     display: flex;
     flex-direction: column;
     gap: var(--space-2);

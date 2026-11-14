@@ -98,6 +98,11 @@ export function installModalFocus() {
             if (cancel) {
                 event.preventDefault();
                 cancel.click();
+            } else {
+                // 兜底：动作区是自定义按钮组、没有「取消/关闭」类按钮的弹窗
+                // （UX「回车与 ESC 最好有响应」——AppModal 监听此事件关闭）
+                event.preventDefault();
+                dialog.dispatchEvent(new CustomEvent('app:modal-esc'));
             }
         }
     });

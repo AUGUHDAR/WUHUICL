@@ -70,7 +70,7 @@ onUnmounted(() => {
 .update-dialog-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 9500;
+        z-index: var(--z-modal);
     display: grid;
     place-items: center;
     padding: 24px;

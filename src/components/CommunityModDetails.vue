@@ -56,7 +56,7 @@ function download() {
     <Teleport to="body"
         ><div
             class="modal-mask"
-            style="z-index: 10030"
+            style="z-index: var(--z-modal)"
             @pointerdown.self="emit('close')"
             @keydown.esc.prevent="emit('close')"
         >

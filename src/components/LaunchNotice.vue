@@ -53,7 +53,7 @@ onUnmounted(dismiss);
     top: 100px;
     left: 50%;
     transform: translateX(-50%);
-    z-index: 12000;
+        z-index: var(--z-toast);
     display: flex;
     gap: var(--space-4);
     align-items: center;

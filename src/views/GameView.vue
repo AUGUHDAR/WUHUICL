@@ -2,6 +2,9 @@
 import { formatReleaseTime } from '@shared/releaseTime';
 import { openInstanceCenter } from '../instanceCenter';
 import ContentSkeleton from '../components/ContentSkeleton.vue';
+import AppMenu from '../components/AppMenu.vue';
+import AppModal from '../components/AppModal.vue';
+import type { AppMenuItem } from '../components/AppMenu.vue';
 import { catalogSession } from '../catalogCache';
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import {
@@ -879,8 +882,12 @@ function closeIsolationModal() {
     isolationModal.error = '';
 }
 
-// ---------------- 管理快捷菜单 ----------------
-const manageMenu = reactive({ id: '', folder: '', top: 0, left: 0 });
+// ---------------- 管理快捷菜单（AppMenu：只放情境补充动作，重复入口已收敛进实例中心） ----------------
+const manageMenu = reactive({
+    id: '',
+    folder: '',
+    anchor: null as HTMLElement | null
+});
 const menuVersion = computed(() =>
     allInstalled.value.find((v) => v.id === manageMenu.id && v.folder === manageMenu.folder)
 );
@@ -888,23 +895,96 @@ const loaderLabel = (v: InstalledVersion) =>
     v.loader
         ? `${({ fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt' } as Record<string, string>)[v.loader] || v.loader} ${v.loaderVersion || ''}`.trim()
         : '原版';
-let menuTrigger: HTMLElement | null = null;
+
+function openManageMenu(e: MouseEvent, id: string, folder: string) {
+    if (manageMenu.id === id && manageMenu.folder === folder) {
+        manageMenu.id = '';
+        return;
+    }
+    manageMenu.anchor = e.currentTarget as HTMLElement;
+    manageMenu.id = id;
+    manageMenu.folder = folder;
+}
 function closeManageMenu() {
     manageMenu.id = '';
-    menuTrigger?.focus();
+    manageMenu.folder = '';
+    manageMenu.anchor = null;
 }
-function trapMenuFocus(event: KeyboardEvent) {
-    if (event.key !== 'Tab') return;
-    const items = [
-        ...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>(
-            'button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]'
-        )
+
+/** ⋯ 菜单条目：打开文件夹 + 个性化（重命名/图标/卡图/分类）+ 危险区（清理残留/删除）。
+ *  设置详情、资源跳转、Java/窗口/隔离与实例中心重复，一律只留实例中心入口（拍板：菜单去重保轻）。 */
+const manageMenuItems = computed<AppMenuItem[]>(() => {
+    const v = menuVersion.value;
+    if (!v) return [];
+    const items: AppMenuItem[] = [
+        { id: 'folder', label: '打开实例文件夹', group: '' },
+        { id: 'rename', label: '重命名', group: '个性化' },
+        { id: 'icon', label: '更换图标', group: '个性化' },
+        { id: 'thumbnail', label: '启动卡图片', group: '个性化' },
+        { id: 'category', label: '所属分类…', group: '个性化' }
     ];
-    const edge = event.shiftKey ? items[0] : items[items.length - 1];
-    if (document.activeElement === edge) {
-        event.preventDefault();
-        (event.shiftKey ? items[items.length - 1] : items[0])?.focus();
+    if (v.failed)
+        items.push({ id: 'cleanup', label: '清理安装残留', group: '危险区', danger: true });
+    items.push({ id: 'remove', label: '删除实例', group: '危险区', danger: true });
+    return items;
+});
+
+function onManageMenuSelect(id: string) {
+    const v = menuVersion.value;
+    if (!v) return;
+    if (id === 'folder') {
+        openVersionFolder(v);
+        closeManageMenu();
+    } else if (id === 'rename') {
+        openRenameFor(v.id, v.folder);
+        closeManageMenu();
+    } else if (id === 'icon') {
+        openIconPicker(v.id, v.folder);
+        closeManageMenu();
+    } else if (id === 'thumbnail') {
+        openThumbnailPicker(v.id, v.folder);
+        closeManageMenu();
+    } else if (id === 'category') {
+        categoryModal.target = v;
+        categoryModal.select = categoryOf(v);
+        categoryModal.error = '';
+        categoryModal.open = true;
+        closeManageMenu();
+    } else if (id === 'cleanup') {
+        onCleanup(v.id, v.folder);
+        closeManageMenu();
+    } else if (id === 'remove') {
+        removeModal.target = v;
+        removeModal.open = true;
+        closeManageMenu();
     }
+}
+
+// ---------------- 所属分类（⋯菜单从内联 select 收敛为弹窗：菜单保持纯动作列表） ----------------
+const categoryModal = reactive({
+    open: false,
+    target: null as InstalledVersion | null,
+    select: '',
+    busy: false,
+    error: ''
+});
+const categoryModalOptions = computed(() => [
+    { value: '', label: '未分类' },
+    ...categories.value.map((c) => ({ value: c.id, label: c.name }))
+]);
+async function saveCategoryModal() {
+    const v = categoryModal.target;
+    if (!v || categoryModal.busy) return;
+    categoryModal.busy = true;
+    categoryModal.error = '';
+    const ok = await onCategoryAction({
+        type: 'assign',
+        target: { id: v.id, folder: v.folder },
+        categoryId: categoryModal.select
+    });
+    categoryModal.busy = false;
+    if (ok) categoryModal.open = false;
+    else categoryModal.error = categoryError.value || '保存分类失败，请重试';
 }
 
 /** 下载源切换（镜像 ⇄ 官方），持久化并刷新版本清单 */
@@ -994,29 +1074,6 @@ const categoryFilters = computed(() => [
 const favoriteInstalled = computed(() =>
     store.installed.filter((v) => isFavorite(v.id, v.folder) && !v.incomplete && !v.failed)
 );
-
-function openManageMenu(e: MouseEvent, id: string, folder: string) {
-    if (manageMenu.id === id && manageMenu.folder === folder) {
-        manageMenu.id = '';
-        return;
-    }
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    menuTrigger = e.currentTarget as HTMLElement;
-    manageMenu.top = Math.max(8, Math.min(r.bottom + 6, window.innerHeight - 520));
-    manageMenu.left = Math.max(8, r.right - 290);
-    manageMenu.id = id;
-    manageMenu.folder = folder;
-    void nextTick(() => document.querySelector<HTMLElement>('.instance-more-menu button')?.focus());
-}
-
-/** 跳转资源管理对应子页，并把上下文版本切到该版本 */
-async function goManage(view: 'mods' | 'packs' | 'shaders') {
-    const { id, folder } = manageMenu;
-    await selectInstance(id, folder);
-    store.resourceVersionId = id;
-    manageMenu.id = '';
-    store.currentView = view;
-}
 
 // ---------------- 实例重命名 ----------------
 const renameModal = reactive({ open: false, id: '', folder: '', name: '', error: '', busy: false });
@@ -1152,11 +1209,6 @@ async function onConfirmResolution() {
     } finally {
         resolutionModal.busy = false;
     }
-}
-
-function openRename() {
-    openRenameFor(manageMenu.id);
-    manageMenu.id = '';
 }
 
 /** 点击版本名直接进入改名 */
@@ -1892,247 +1944,61 @@ async function confirmIsolation() {
             </div>
         </div>
 
-        <!-- 管理快捷菜单（模组/资源包/光影包） -->
-        <Teleport to="body">
-            <div v-if="manageMenu.id" class="menu-overlay" @click="manageMenu.id = ''"></div>
-            <div
-                v-if="manageMenu.id"
-                class="float-menu instance-more-menu"
-                role="dialog"
-                aria-modal="true"
-                aria-label="实例更多操作"
-                @keydown.esc.stop="closeManageMenu"
-                @keydown="trapMenuFocus"
-                :style="{
-                    top: manageMenu.top + 'px',
-                    left: manageMenu.left + 'px',
-                    maxHeight: `calc(100vh - ${manageMenu.top + 12}px)`
-                }"
-            >
+        <!-- 实例 ⋯ 菜单（AppMenu：轻量补充动作；设置/资源跳转/Java/窗口/隔离只在实例中心） -->
+        <AppMenu
+            :open="!!manageMenu.id"
+            :anchor="manageMenu.anchor"
+            :items="manageMenuItems"
+            :groups="['', '个性化', '危险区']"
+            align="end"
+            aria-label="实例更多操作"
+            @close="closeManageMenu"
+            @select="onManageMenuSelect"
+        >
+            <template #header>
                 <div v-if="menuVersion" class="instance-technical" tabindex="0">
                     <strong>{{ displayVersionName(menuVersion) }}</strong
                     ><span>实例 ID：{{ menuVersion.id }}</span
                     ><span>绑定目录：{{ menuVersion.folder }}</span
                     ><span>游戏目录：{{ menuVersion.gameDirectory || menuVersion.folder }}</span>
                 </div>
+            </template>
+        </AppMenu>
+
+        <!-- 所属分类（⋯菜单从内联 select 收敛为弹窗，菜单保持纯动作列表） -->
+        <AppModal
+            :open="categoryModal.open"
+            title="所属分类"
+            :busy="categoryModal.busy"
+            @close="categoryModal.open = false"
+        >
+            <p v-if="categoryModal.target" class="muted modal-hint">
+                为「{{ displayVersionName(categoryModal.target) }}」选择分类；需要增删分组时用筛选栏的「管理分类」。
+            </p>
+            <SelectMenu
+                v-model="categoryModal.select"
+                :options="categoryModalOptions"
+                aria-label="所属分类"
+            />
+            <p v-if="categoryModal.error" class="error" role="alert">{{ categoryModal.error }}</p>
+            <template #actions>
                 <button
-                    v-if="menuVersion"
-                    class="menu-item"
-                    @click="
-                        openVersionFolder(menuVersion);
-                        closeManageMenu();
-                    "
+                    class="btn btn-ghost"
+                    data-modal-dismiss
+                    :disabled="categoryModal.busy"
+                    @click="categoryModal.open = false"
                 >
-                    打开实例文件夹
+                    取消
                 </button>
                 <button
-                    v-if="menuVersion"
-                    class="menu-item"
-                    @click="
-                        openInstanceCenter(menuVersion);
-                        closeManageMenu();
-                    "
+                    class="btn btn-gold"
+                    :disabled="categoryModal.busy"
+                    @click="saveCategoryModal"
                 >
-                    实例设置与详情
+                    {{ categoryModal.busy ? '保存中…' : '保存分类' }}
                 </button>
-                <label v-if="menuVersion" class="instance-category-field"
-                    >所属分类<select
-                        class="select"
-                        data-ui="games:instance-category"
-                        :aria-label="displayVersionName(menuVersion) + '的所属分类'"
-                        :value="categoryOf(menuVersion)"
-                        :disabled="categoryBusy"
-                        @change="assignCategory(menuVersion, $event)"
-                    >
-                        <option value="">未分类</option>
-                        <option
-                            v-for="category in categories"
-                            :key="category.id"
-                            :value="category.id"
-                        >
-                            {{ category.name }}
-                        </option>
-                    </select></label
-                >
-                <p v-if="categoryError" class="error instance-category-error" role="alert">
-                    {{ categoryError }}
-                </p>
-                <label
-                    v-if="
-                        menuVersion &&
-                        !menuVersion.modpackName &&
-                        !menuVersion.incomplete &&
-                        !menuVersion.failed
-                    "
-                    class="menu-item"
-                    ><input
-                        type="checkbox"
-                        :checked="!!menuVersion.isolated"
-                        :disabled="isoBusy === menuVersion.id"
-                        @change="onToggleIsolation(menuVersion, $event)"
-                    />实例隔离</label
-                >
-                <button class="menu-item" @click="goManage('mods')">
-                    <svg
-                        viewBox="0 0 24 24"
-                        width="13"
-                        height="13"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <path d="M21 8 12 3 3 8v8l9 5 9-5Z" />
-                        <path d="m3 8 9 5 9-5" />
-                        <path d="M12 13v8" />
-                    </svg>
-                    模组
-                </button>
-                <button class="menu-item" @click="goManage('packs')">
-                    <svg
-                        viewBox="0 0 24 24"
-                        width="13"
-                        height="13"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <path
-                            d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"
-                        />
-                    </svg>
-                    资源包
-                </button>
-                <button class="menu-item" @click="goManage('shaders')">
-                    <svg
-                        viewBox="0 0 24 24"
-                        width="13"
-                        height="13"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <circle cx="12" cy="12" r="4" />
-                        <path
-                            d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
-                        />
-                    </svg>
-                    光影包
-                </button>
-                <button class="menu-item" @click="openRename">
-                    <svg
-                        viewBox="0 0 24 24"
-                        width="13"
-                        height="13"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
-                        <path d="m15 5 4 4" />
-                    </svg>
-                    重命名
-                </button>
-                <button class="menu-item" @click="openIconPicker(manageMenu.id)">
-                    <svg
-                        viewBox="0 0 24 24"
-                        width="13"
-                        height="13"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <rect x="3" y="3" width="18" height="18" rx="2" />
-                        <circle cx="9" cy="9" r="2" />
-                        <path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
-                    </svg>
-                    更换图标
-                </button>
-                <button class="menu-item" @click="openThumbnailPicker(manageMenu.id)">
-                    <svg
-                        viewBox="0 0 24 24"
-                        width="13"
-                        height="13"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <rect x="3" y="4" width="18" height="16" rx="2" />
-                        <path d="m3 16 5-5 4 4 3-3 6 6" />
-                        <circle cx="16.5" cy="8.5" r="1.5" />
-                    </svg>
-                    启动卡图片
-                </button>
-                <button class="menu-item" @click="openJavaModal">
-                    <svg
-                        viewBox="0 0 24 24"
-                        width="13"
-                        height="13"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <path
-                            d="M18 8h1a3 3 0 0 1 0 6h-1M3 8h15v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"
-                        />
-                        <path d="M7 12h6M7 15h4" />
-                    </svg>
-                    指定 Java
-                </button>
-                <button class="menu-item" @click="openResolutionModal">
-                    <svg
-                        viewBox="0 0 24 24"
-                        width="13"
-                        height="13"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <rect x="3" y="4" width="18" height="14" rx="2" />
-                        <path d="M8 21h8M12 18v3" />
-                    </svg>
-                    窗口设置
-                </button>
-                <div class="menu-danger-zone" v-if="menuVersion">
-                    <button
-                        v-if="menuVersion.failed"
-                        class="menu-item error"
-                        @click="
-                            onCleanup(menuVersion.id, menuVersion.folder);
-                            closeManageMenu();
-                        "
-                    >
-                        清理安装残留
-                    </button>
-                    <button
-                        v-else
-                        class="menu-item error"
-                        @click="
-                            removeModal.target = menuVersion;
-                            removeModal.open = true;
-                            closeManageMenu();
-                        "
-                    >
-                        删除实例
-                    </button>
-                </div>
-            </div>
-        </Teleport>
+            </template>
+        </AppModal>
 
         <VersionCategoriesPanel
             :open="categoryManagerOpen"
@@ -2623,17 +2489,6 @@ async function confirmIsolation() {
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--accent);
-}
-.instance-category-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 10px 12px;
-    font-size: 13px;
-}
-.instance-category-field select {
-    width: 100%;
-    min-width: 0;
 }
 .instance-category-error {
     padding: 0 12px;
@@ -3824,26 +3679,29 @@ async function confirmIsolation() {
 .installed-launch {
     min-width: 78px;
 }
-.installed-row:hover .installed-launch:not(:disabled),
-.installed-row:focus-within .installed-launch:not(:disabled) {
+/* 行 hover 统一规则（UX「交互反馈·悬浮反馈」）：整行 hover 时
+ * - 次操作（管理/⋯/重试）边框与文字提亮；
+ * - 主操作（启动）点亮为 accent 渐变（后一条规则优先级更高）；
+ * - 各按钮自身 hover 仍有 .btn-ghost 反馈，双层反馈叠加。
+ * 选择器兼容两种结构：容器 .row-actions > .btn，以及失败行直接挂在按钮上的 .row-actions。 */
+.installed-row:hover :is(.row-actions .btn, button.row-actions):not(:disabled),
+.installed-row:focus-within :is(.row-actions .btn, button.row-actions):not(:disabled) {
+    border-color: var(--border-strong);
+    color: var(--text);
+}
+.installed-row:hover :is(.row-actions .btn, button.row-actions).installed-launch:not(:disabled),
+.installed-row:focus-within
+    :is(.row-actions .btn, button.row-actions).installed-launch:not(:disabled) {
     color: var(--on-accent);
     background: var(--accent-grad);
     border-color: transparent;
 }
-.page button:focus-visible,
-.instance-more-menu :is(button, input):focus-visible {
+.page button:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 3px;
 }
 .fav-btn.on {
     color: var(--accent);
-}
-.instance-more-menu {
-    width: 290px;
-    max-width: calc(100vw - 16px);
-    max-height: calc(100vh - 24px);
-    overflow-y: auto;
-    background: var(--card-solid, var(--card));
 }
 .instance-technical {
     display: flex;
@@ -3857,14 +3715,6 @@ async function confirmIsolation() {
 }
 .instance-technical strong {
     color: var(--text);
-}
-.menu-danger-zone {
-    border-top: 1px solid var(--border);
-    margin-top: 6px;
-    padding-top: 6px;
-}
-.menu-danger-zone .menu-item {
-    color: var(--danger);
 }
 @media (max-width: 1100px) {
     .folder-select-wrap {

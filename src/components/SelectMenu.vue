@@ -282,7 +282,7 @@ onBeforeUnmount(close);
 .select-menu-float {
     -webkit-app-region: no-drag;
     position: fixed;
-    z-index: 11000;
+        z-index: var(--z-select);
     display: flex;
     flex-direction: column;
     gap: var(--space-1);

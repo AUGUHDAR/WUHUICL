@@ -622,7 +622,7 @@ const { snap, browse, zoom, scale, viewport, logical, box, insertion, guideX, gu
 .design-workspace {
     position: fixed;
     inset: 0;
-    z-index: 100000;
+        z-index: var(--z-workbench);
     display: grid;
     grid-template-columns: 230px minmax(0, 1fr) 310px;
     grid-template-rows: 66px minmax(0, 1fr);

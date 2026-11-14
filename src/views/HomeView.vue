@@ -1833,7 +1833,7 @@ onUnmounted(() => {
         ><div
             v-if="relaunchConfirm"
             class="modal-mask"
-            style="z-index: 10031"
+            style="z-index: var(--z-modal)"
         >
             <section class="modal" role="dialog" aria-modal="true" aria-label="再次启动确认">
                 <h3>已有游戏正在运行</h3>
@@ -1869,7 +1869,7 @@ onUnmounted(() => {
             data-ui="HomeView:9d63fadc1ed6"
             v-if="restartConfirm"
             class="modal-mask"
-            style="z-index: 10030"
+            style="z-index: var(--z-modal)"
         >
             <section
                 data-ui="HomeView:b6df5ebbb9a2"
@@ -2920,11 +2920,11 @@ onUnmounted(() => {
 .menu-overlay {
     position: fixed;
     inset: 0;
-    z-index: 8000;
+        z-index: var(--z-menu);
 }
 .float-menu {
     position: fixed;
-    z-index: 8001;
+        z-index: var(--z-menu);
     max-height: 280px;
     overflow-y: auto;
     padding: 6px;
@@ -2985,7 +2985,7 @@ onUnmounted(() => {
 
 .log-mask {
     position: fixed;
-    z-index: 9100;
+        z-index: var(--z-modal);
     inset: 0;
     display: flex;
     align-items: center;

@@ -1277,7 +1277,7 @@ onBeforeUnmount(() => {
     display: none;
 }
 .skin-confirm-mask {
-    z-index: 10001;
+        z-index: var(--z-modal);
 }
 .editor-confirm {
     width: min(460px, calc(100vw - 32px));

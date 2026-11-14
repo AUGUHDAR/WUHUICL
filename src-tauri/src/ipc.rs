@@ -314,7 +314,10 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         "accounts:selected" => Ok(accounts::selected(app)),
 
         // ---------------- 版本 ----------------
-        "versions:installed" => Ok(json!({ "versions": [], "checkedAt": 0, "stale": true })),
+        "versions:installed" => {
+            let all = args.first().and_then(|v| v.as_bool()).unwrap_or(false);
+            Ok(versions::list_installed(&settings::get(app), all))
+        }
 
         // ---------------- 窗口 ----------------
         "window:visibility" => Ok(windowctl::visibility(app)),

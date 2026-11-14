@@ -120,7 +120,7 @@ async function cancelDownload() {
 </script>
 <template>
     <Teleport to="body"
-        ><div class="modal-mask" style="z-index: 10020" @pointerdown.self="!busy && emit('close')">
+        ><div class="modal-mask" style="z-index: var(--z-modal)" @pointerdown.self="!busy && emit('close')">
             <section
                 class="modal modinstall-modal"
                 role="dialog"

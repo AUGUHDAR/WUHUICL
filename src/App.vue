@@ -3040,7 +3040,7 @@ onUnmounted(() => {
     }
 }
 .cfg-mismatch-mask {
-    z-index: 9600;
+        z-index: var(--z-modal);
     display: grid;
     place-items: center;
 }
@@ -3548,7 +3548,7 @@ onUnmounted(() => {
 .notice-mask {
     position: fixed;
     inset: 0;
-    z-index: 9000;
+        z-index: var(--z-drawer);
 }
 .notes-panel {
     width: 380px;
@@ -3586,7 +3586,7 @@ onUnmounted(() => {
     right: 92px;
     width: 360px;
     max-height: 520px;
-    z-index: 9001;
+        z-index: var(--z-drawer);
     display: flex;
     flex-direction: column;
     background: color-mix(in srgb, var(--card-solid, var(--card)) 94%, transparent);
@@ -3942,7 +3942,7 @@ onUnmounted(() => {
 .drop-mask {
     position: fixed;
     inset: 0;
-    z-index: 9999;
+        z-index: var(--z-modal);
     display: flex;
     align-items: center;
     justify-content: center;

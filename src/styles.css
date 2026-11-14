@@ -109,6 +109,13 @@ html[data-platform="android"] .modal {
   --motion-normal: 180ms;
   --motion-enter: 220ms;
   --ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+  /* 弹层层级（全站唯一定义处；层级语义见 UI_SYSTEM.md §5） */
+  --z-menu: 1100;
+  --z-drawer: 1200;
+  --z-modal: 1300;
+  --z-select: 1400;
+  --z-toast: 1500;
+  --z-workbench: 1600;
   --ctl-h: 36px;
   --row-h: 42px;
   --card-pad: 20px;
@@ -699,7 +706,7 @@ input[type='number'] {
 .modal-mask {
   position: fixed;
   inset: 0;
-  z-index: 10000;
+    z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -749,11 +756,11 @@ input[type='number'] {
 .menu-overlay {
   position: fixed;
   inset: 0;
-  z-index: 90;
+    z-index: var(--z-menu);
 }
 .float-menu {
   position: fixed;
-  z-index: 95;
+    z-index: var(--z-menu);
   min-width: 150px;
   max-height: 300px;
   overflow-y: auto;
@@ -814,6 +821,19 @@ input[type='number'] {
   font-size: var(--text-sm);
   color: var(--text-dim);
   text-align: center;
+}
+/* 菜单分组（AppMenu）：组间分隔线 + 组标题小字（NN/g「organizing commands」） */
+.menu-sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--border);
+}
+.menu-group-label {
+  display: block;
+  padding: 6px 12px 2px;
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  user-select: none;
 }
 
 /* Page changes: a brief exit, then a small entrance, without spring overshoot. */
@@ -889,7 +909,7 @@ input[type='number'] {
   top: 14px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 200;
+    z-index: var(--z-toast);
   display: flex;
   align-items: center;
   gap: var(--space-2);

@@ -980,7 +980,7 @@ onUnmounted(() => {
 .shot-lightbox {
     position: fixed;
     inset: 0;
-    z-index: 10000;
+    z-index: var(--z-modal);
     background: #101418fa;
     color: white;
     display: flex;

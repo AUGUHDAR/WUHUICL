@@ -1007,7 +1007,7 @@ defineExpose({ flush, closeStage });
     position: absolute;
     left: 0;
     top: calc(100% + 4px);
-    z-index: 9100;
+        z-index: var(--z-menu);
     width: 230px;
     padding: 14px;
     border: 1px solid var(--border);
