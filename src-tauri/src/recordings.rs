@@ -710,35 +710,6 @@ fn copy_recording_core(
     Err("同名录像过多，请整理目标目录".into())
 }
 
-pub fn copy_recording(
-    app: &tauri::AppHandle,
-    source: &Path,
-    destination: &Path,
-    task_id: &str,
-) -> Result<PathBuf, String> {
-    let rec = tasks::get_task(task_id);
-    let size = std::fs::symlink_metadata(source)
-        .map(|m| m.len())
-        .unwrap_or(0);
-    let title = rec.as_ref().map(|t| t.title.clone()).unwrap_or_default();
-    let name = source
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let mut on_bytes = move |bytes: u64| {
-        let progress = if size > 0 {
-            (bytes as f64 / size as f64).min(1.0)
-        } else {
-            1.0
-        };
-        tasks::emit_progress(
-            app,
-            json!({ "taskId": task_id, "taskTitle": title, "stage": "world", "progress": progress, "text": name }),
-        );
-    };
-    copy_recording_core(source, destination, rec.as_deref(), &mut on_bytes)
-}
-
 // ---------------- recordingsIpc.ts scan() ----------------
 
 fn visit_source(

@@ -13,7 +13,7 @@ use std::ptr;
 #[cfg(windows)]
 use windows::core::{implement, BOOL, HRESULT};
 #[cfg(windows)]
-use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, POINT, S_OK};
+use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, S_OK};
 #[cfg(windows)]
 use windows::Win32::System::Com::{
     IDataObject, IDataObject_Impl, IEnumFORMATETC, IEnumFORMATETC_Impl, DVASPECT_CONTENT,
@@ -31,7 +31,6 @@ use windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS;
 #[cfg(windows)]
 use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
 #[cfg(windows)]
-use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow};
 
 #[cfg(windows)]
 const DRAGDROP_S_DROP: HRESULT = HRESULT(0x0004_0100);
@@ -378,22 +377,6 @@ unsafe fn do_drag_drop_raw(
         effects,
         effect,
     )
-}
-
-#[cfg(windows)]
-#[allow(dead_code)]
-fn cursor_point() -> POINT {
-    let mut p = POINT::default();
-    unsafe {
-        let _ = GetCursorPos(&mut p);
-    }
-    p
-}
-
-#[cfg(windows)]
-#[allow(dead_code)]
-pub fn foreground_hwnd() -> isize {
-    unsafe { GetForegroundWindow().0 as isize }
 }
 
 /// 非 Windows：WebView 自带 HTML5 drag-start 已能拖出文件（wry 支持），

@@ -48,10 +48,6 @@ fn game_dir_migrate(app: &AppHandle, args: &[Value]) -> Result<Value, String> {
     Ok(Value::Null)
 }
 
-fn emit(app: &AppHandle, event: Value) {
-    crate::tasks::emit_progress(app, event);
-}
-
 // ---------------- 统计（gamedir.ts dirStats） ----------------
 
 struct DirStats {
@@ -220,10 +216,4 @@ fn copy_walk(
         }
     }
     Ok(())
-}
-
-/// 当前数据量概览 GB（前端确认弹窗展示用；对应当前 currentDataSizeGB）
-#[allow(dead_code)]
-pub fn current_data_size_gb(app: &AppHandle) -> f64 {
-    dir_stats(Path::new(&installer::game_dir(app))).bytes as f64 / GB as f64
 }

@@ -11,7 +11,6 @@
 //! - 单例：重复调用只把已有窗口带到前台并换页，不堆一串窗口。
 
 use serde_json::{json, Value};
-use std::sync::Mutex;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// 允许内联打开的站点（子域一并放行）
@@ -28,8 +27,6 @@ const ALLOWED_HOSTS: &[&str] = &[
 ];
 
 const WINDOW_LABEL: &str = "inline-web";
-
-static LAST_URL: Mutex<Option<String>> = Mutex::new(None);
 
 fn host_allowed(url: &tauri::Url) -> bool {
     if url.scheme() != "https" {
@@ -50,7 +47,6 @@ pub fn open(app: &tauri::AppHandle, url: &str, title: &str) -> Result<Value, Str
     if !host_allowed(&parsed) {
         return Err("这个站点不支持在启动器内浏览，请用系统浏览器打开".into());
     }
-    *LAST_URL.lock().unwrap() = Some(url.to_string());
 
     // 已有窗口：换页并聚焦，不新开
     if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
@@ -75,19 +71,10 @@ pub fn open(app: &tauri::AppHandle, url: &str, title: &str) -> Result<Value, Str
     Ok(json!({ "ok": true, "reused": false }))
 }
 
-pub fn close(app: &tauri::AppHandle) -> Value {
-    if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
-        let _ = win.close();
-    }
-    json!({ "ok": true })
-}
-
 pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {
     let s = |i: usize| args.get(i).and_then(|v| v.as_str()).unwrap_or("").to_string();
     match channel {
         "inlineWeb:open" => Some(open(app, &s(0), &s(1))),
-        "inlineWeb:close" => Some(Ok(close(app))),
-        "inlineWeb:lastUrl" => Some(Ok(json!(LAST_URL.lock().unwrap().clone()))),
         _ => None,
     }
 }

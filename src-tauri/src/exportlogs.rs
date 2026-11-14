@@ -5,7 +5,6 @@
 
 use crate::installer;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
@@ -837,19 +836,4 @@ fn write_diagnostic_archive(
         return Err(format!("写入诊断包失败：{}", e));
     }
     Ok(())
-}
-
-#[allow(dead_code)]
-fn sha256_file(path: &Path) -> Result<String, String> {
-    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 256 * 1024];
-    loop {
-        let n = file.read(&mut buf).map_err(|e| e.to_string())?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(hex::encode(hasher.finalize()))
 }

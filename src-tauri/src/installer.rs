@@ -4853,8 +4853,6 @@ pub fn invoke(
                 .map(|ok| json!(ok)),
         ),
         "versions:setJava" => Some(versions_set_java(app, args)),
-        "versions:setMemory" => Some(versions_set_memory(app, args)),
-        "versions:setJvmArgs" => Some(versions_set_jvm_args(app, args)),
         "versions:setResolution" => Some(versions_set_resolution(app, args)),
         "versions:setIcon" => Some(
             arg_str(args, 0)
@@ -5049,52 +5047,6 @@ fn versions_set_java(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, St
         j["_javaAuto"] = json!(true);
     } else if let Some(obj) = j.as_object_mut() {
         obj.remove("_javaAuto");
-    }
-    write_version_json(&jp, &j)?;
-    Ok(j)
-}
-
-/// 实例级内存（写入 `_memoryMB`；null/0 清除，回落到全局设置）。
-/// 崩溃自愈的「加内存」修复要能只调这一个实例，而全局内存是所有实例共用的。
-fn versions_set_memory(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
-    let id = arg_str(args, 0)
-        .ok_or_else(|| "缺少参数".to_string())?
-        .to_string();
-    let folder = arg_str(args, 2)
-        .filter(|f| !f.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| folder_of_version(app, &id));
-    let jp = version_json_path_in(&folder, &id);
-    let mut j = read_version_json(app, &folder, &id)?;
-    let mb = args.get(1).and_then(|v| v.as_i64()).unwrap_or(0);
-    if mb > 0 {
-        // 下限 512MB、上限 32768MB：与全局口径一致，避免写出荒唐值
-        j["_memoryMB"] = json!(mb.clamp(512, 32768));
-    } else if let Some(obj) = j.as_object_mut() {
-        obj.remove("_memoryMB");
-    }
-    write_version_json(&jp, &j)?;
-    Ok(j)
-}
-
-/// 实例级 JVM 参数（写入 `_jvmArgs` 字符串；空串清除，回落到全局设置）。
-fn versions_set_jvm_args(app: &tauri::AppHandle, args: &[Value]) -> Result<Value, String> {
-    let id = arg_str(args, 0)
-        .ok_or_else(|| "缺少参数".to_string())?
-        .to_string();
-    let folder = arg_str(args, 2)
-        .filter(|f| !f.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| folder_of_version(app, &id));
-    let jp = version_json_path_in(&folder, &id);
-    let mut j = read_version_json(app, &folder, &id)?;
-    let text = arg_str(args, 1).unwrap_or("").trim().to_string();
-    if text.is_empty() {
-        if let Some(obj) = j.as_object_mut() {
-            obj.remove("_jvmArgs");
-        }
-    } else {
-        j["_jvmArgs"] = json!(text);
     }
     write_version_json(&jp, &j)?;
     Ok(j)

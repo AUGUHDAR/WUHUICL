@@ -1376,11 +1376,6 @@ pub fn running_version_ids() -> HashSet<String> {
     f.map(|f| f().into_iter().collect()).unwrap_or_default()
 }
 
-fn list_all_installed(app: &tauri::AppHandle) -> Vec<Value> {
-    let settings = crate::settings::get(app);
-    versions_list_installed(&settings, true)
-}
-
 fn versions_list_installed(settings: &Value, all: bool) -> Vec<Value> {
     // 对应原版 versions.listAllInstalled（复用 crate::versions 的扫描）
     crate::versions::list_installed(settings, all).as_array().cloned().unwrap_or_default()

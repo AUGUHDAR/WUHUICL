@@ -827,9 +827,7 @@ export const IPC = {
     pluginsInstall: 'plugins:install', // () => PluginInfo[]  弹框选择 .js/文件夹后安装
     pluginsSetEnabled: 'plugins:setEnabled', // (id: string, enabled: boolean) => PluginInfo[]
     pluginsRemove: 'plugins:remove', // (id: string) => PluginInfo[]
-    pluginsReadCode: 'plugins:readCode', // (id: string) => string  仅启用插件可读
     pluginsOpenDir: 'plugins:openDir', // () => void  打开插件目录
-    appSelectImage: 'app:selectImage', // () => string | null  选择图片文件（png/jpg/webp）
     appSelectFiles: 'app:selectFiles', // (filter: string[], 形如 ['模组|*.jar']) => string[]  多选文件，取消返回 []
     appearanceImportBackground: 'appearance:importBackground', // () => Settings | null  导入受管背景并保存
     appearanceImportBackgroundMulti: 'appearance:importBackgroundMulti', // () => Settings | null  多选导入背景图（自动切换用）
@@ -837,7 +835,6 @@ export const IPC = {
     appearanceSaveFaceImage: 'appearance:saveFaceImage', // (dataUrl, slot: 'splash'|'logo') => string  保存渲染好的方块头
     appearanceResetFaceImage: 'appearance:resetFaceImage', // (slot) => null  删除自定义头图文件
     appearanceImportLaunchThumbnail: 'appearance:importLaunchThumbnail', // () => Settings | null
-    appearanceResetLaunchThumbnail: 'appearance:resetLaunchThumbnail', // () => Settings
     heroFrame: 'hero:frame', // (HeroFrameRequest) => HeroFrameResponse  首页启动卡像素动画单帧渲染
 
     // 账号
@@ -869,7 +866,6 @@ export const IPC = {
 
     // 游戏文件夹管理
     foldersList: 'folders:list', // () => { folders: GameFolder[]; active: string }
-    foldersAdd: 'folders:add', // (path: string) => { folders, folder, structure }，解析真实路径并去重
     foldersRemove: 'folders:remove', // (path: string) => GameFolder[]，只解除登记、绝不删除磁盘文件
     foldersRename: 'folders:rename', // (path: string, displayName: string) => GameFolder[]
     foldersSetDefault: 'folders:setDefault', // (path: string) => GameFolder[]
@@ -878,12 +874,6 @@ export const IPC = {
     foldersScan: 'folders:scan', // (path: string) => FolderScanResult
     foldersOpen: 'folders:open', // (path: string) => void
     foldersContextMenu: 'folders:contextMenu',
-    directOverview: 'direct:overview',
-    directHost: 'direct:host',
-    directStop: 'direct:stop',
-    directState: 'direct:state',
-    directResolve: 'direct:resolve',
-    directPrepareJoin: 'direct:prepareJoin',
 
     // 联机 · VoxLink（Go 引擎源码级移植，主进程内运行）
     voxlinkStart: 'voxlink:start', // ({mode:'host'|'join', code?, roomName?, isPublic?}) => VoxLinkState
@@ -932,12 +922,8 @@ export const IPC = {
     // 游戏
     gameLaunch: 'game:launch', // (versionId: string, serverAddress?: string) => void  带 serverAddress 时用 --quickPlayMultiplayer 直接进服
     launchExportLogs: 'launch:exportLogs', // (versionId: string) => string | null  弹保存对话框导出启动失败日志包（取消 = null）
-    gameKill: 'game:kill', // () => void
     gameRestart: 'game:restart',
     gameRestartCancel: 'game:restartCancel',
-
-    // 游戏目录迁移
-    gameDirMigrate: 'gameDir:migrate', // (newDir: string, migrate: boolean) => void  异步：进度走 event:progress（stage=migrate），结束走 event:gameDirDone
 
     // 服务器（SLP 协议 ping）
     serversList: 'servers:list', // () => ServerEntry[]
@@ -968,7 +954,6 @@ export const IPC = {
     modsPrepare: 'mods:prepare',
     modsCommit: 'mods:commit',
     modsDiscard: 'mods:discard',
-    modsInstall: 'mods:install', // (files: string[], targetVersionId: string) => ModInstallResult[]  装入目标版本 mods 目录（遵循版本隔离）
     modsDuplicates: 'mods:duplicates', // (versionId: string) => ModDuplicateGroup[]  单版本查重
     modsCrossDuplicates: 'mods:crossDuplicates', // (versionIds: string[]) => ModCrossDuplicate[]  跨版本查重
     modsMigrationPlan: 'mods:migrationPlan',

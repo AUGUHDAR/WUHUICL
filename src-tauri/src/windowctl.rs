@@ -19,10 +19,6 @@ pub fn command(
         return Ok(());
     };
     match channel {
-        "window:minimize" => {
-            #[cfg(desktop)]
-            let _ = win.minimize();
-        }
         "window:maximize" => {
             // 原版 toggleMaximize：最大化↔还原
             #[cfg(desktop)]

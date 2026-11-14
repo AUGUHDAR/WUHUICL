@@ -341,16 +341,6 @@ pub fn delete(app: &tauri::AppHandle, folder: &str, id: &str, snapshot_id: &str)
     Ok(json!({ "ok": true }))
 }
 
-/// 大批量变更前的自动快照判定：给前端一个统一阈值口径，
-/// 避免「什么时候该备份」这类判断散落在各处。
-pub fn should_auto_snapshot(mod_count: usize) -> bool {
-    mod_count >= 30
-}
-
-pub fn kind_label(kind: &str) -> &'static str {
-    kind_text(kind)
-}
-
 // ---------------- 通道分发 ----------------
 
 pub fn invoke(app: &tauri::AppHandle, channel: &str, args: &[Value]) -> Option<Result<Value, String>> {

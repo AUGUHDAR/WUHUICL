@@ -53,18 +53,6 @@ export interface ToastItem {
 }
 
 const LAST_PLAYED_KEY = 'kamucl.lastPlayed';
-const BANNER_ALIGN_KEY = 'kamucl.bannerAlign';
-
-export type BannerAlign = 'start' | 'center';
-
-/** 从 localStorage 读取 Banner 文字对齐方式 */
-function loadBannerAlign(): BannerAlign {
-    try {
-        return localStorage.getItem(BANNER_ALIGN_KEY) === 'center' ? 'center' : 'start';
-    } catch {
-        return 'start';
-    }
-}
 
 /** 从 localStorage 读取「版本 id -> 最后启动时间戳」映射 */
 function loadLastPlayed(): Record<string, number> {
@@ -104,8 +92,6 @@ export const store = reactive({
     installProgress: {} as Record<string, ProgressEvent>,
     /** 最近一次安装失败的版本 id 集合（已安装页显示重试入口） */
     failedInstalls: new Set<string>(),
-    /** 首页 Banner 文字对齐（localStorage 持久化） */
-    bannerAlign: loadBannerAlign(),
     /** 游戏启动状态（未启动过为 null） */
     launchState: null as LaunchState | null,
     launchStates: {} as Record<string, LaunchState>,
@@ -472,16 +458,6 @@ export function renameLastPlayed(oldId: string, newId: string) {
     delete store.lastPlayed[oldId];
     try {
         localStorage.setItem(LAST_PLAYED_KEY, JSON.stringify(store.lastPlayed));
-    } catch {
-        /* 持久化失败不影响功能 */
-    }
-}
-
-/** 设置 Banner 文字对齐方式（靠左下 / 居中），并持久化 */
-export function setBannerAlign(a: BannerAlign) {
-    store.bannerAlign = a;
-    try {
-        localStorage.setItem(BANNER_ALIGN_KEY, a);
     } catch {
         /* 持久化失败不影响功能 */
     }

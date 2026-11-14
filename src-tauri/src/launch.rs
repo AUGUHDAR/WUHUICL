@@ -1744,19 +1744,6 @@ fn crash_description(path: &Path) -> Option<String> {
         .map(|l| l.trim_start()["Description: ".len()..].trim().to_string())
 }
 
-/// 兼容旧调用：最新新报告的 Description
-fn describe_new_crash(game_dir: &str, before: &CrashSnapshot) -> Option<String> {
-    let path = newest_new_crash(game_dir, before)?;
-    let desc = crash_description(&path)?;
-    Some(format!(
-        "{}（崩溃报告 {}）",
-        desc,
-        path.file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default()
-    ))
-}
-
 // ---------------- 会话操作 ----------------
 
 fn reserve_session(inv: &Invocation) -> String {

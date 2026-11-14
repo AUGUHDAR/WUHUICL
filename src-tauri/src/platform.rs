@@ -50,15 +50,6 @@ pub fn desktop_game_supported() -> bool {
 
 // ---------------- 路径 / JVM 约定 ----------------
 
-/// java 可执行文件名
-pub fn java_exe() -> &'static str {
-    if cfg!(windows) {
-        "java.exe"
-    } else {
-        "java"
-    }
-}
-
 /// classpath 分隔符：Windows `;`，其余 `:`
 pub fn classpath_separator() -> &'static str {
     if cfg!(windows) {

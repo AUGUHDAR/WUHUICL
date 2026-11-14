@@ -54,14 +54,6 @@ pub fn invoke(
             &pick(&first, &[("code", "code")]),
             ONE_SHOT,
         ),
-        "vlcli:roomMods" => one_shot(
-            app,
-            "room mods",
-            &pick(&first, &[("code", "code")]),
-            ONE_SHOT,
-        ),
-        "vlcli:relayStatus" => one_shot(app, "relay status", "{}", ONE_SHOT),
-        "vlcli:relayList" => one_shot(app, "relay list", "{}", ONE_SHOT),
         "vlcli:netPorts" => one_shot(app, "net ports", "{}", ONE_SHOT),
         "vlcli:settingsGet" => one_shot(app, "settings get", "{}", ONE_SHOT),
         "vlcli:settingsSave" => one_shot(

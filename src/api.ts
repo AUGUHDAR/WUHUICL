@@ -30,7 +30,6 @@ import type {
     ModDuplicateGroup,
     ModInfo,
     ModInstallPlan,
-    ModInstallResult,
     ModpackInfo,
     ImportProbeResult,
     ModpackInstallRequest,
@@ -100,20 +99,16 @@ export const getSystemInfo = () => invoke<SystemInfo>(IPC.appSystemInfo);
 export const saveSettings = (patch: Partial<Settings>) =>
     invoke<Settings>(IPC.settingsSet, JSON.parse(JSON.stringify(patch)) as Partial<Settings>);
 export const selectDir = () => invoke<string | null>(IPC.appSelectDir);
-export const selectImage = () => invoke<string | null>(IPC.appSelectImage);
 export const importBackground = () => invoke<Settings | null>(IPC.appearanceImportBackground);
 export const importBackgroundMulti = () =>
     invoke<Settings | null>(IPC.appearanceImportBackgroundMulti);
 export const resetBackground = () => invoke<Settings>(IPC.appearanceResetBackground);
 export const importLaunchThumbnail = () =>
     invoke<Settings | null>(IPC.appearanceImportLaunchThumbnail);
-export const resetLaunchThumbnail = () => invoke<Settings>(IPC.appearanceResetLaunchThumbnail);
 /** 首页启动卡像素动画：单帧渲染（场景注册表与时钟在 src/heroScenes.ts） */
 export const heroFrame = (request: HeroFrameRequest) =>
     invoke<HeroFrameResponse>(IPC.heroFrame, request);
 /** 游戏目录迁移（异步）；结束经 onGameDirDone 回调 */
-export const migrateGameDir = (newDir: string, migrate: boolean) =>
-    invoke<void>(IPC.gameDirMigrate, newDir, migrate);
 export const onGameDirDone = (cb: (r: { ok: boolean; error?: string; gameDir?: string }) => void) =>
     subscribe<{ ok: boolean; error?: string; gameDir?: string }>(IPC_EVENT.gameDirDone, cb);
 /** 选择整合包文件（.mrpack/.zip），取消返回 null */
@@ -236,11 +231,6 @@ export const cleanupPartialInstall = (id: string, folder?: string) =>
 
 // ---------------- 游戏文件夹管理 ----------------
 export const listFolders = () => invoke<{ folders: GameFolder[]; active: string }>(IPC.foldersList);
-export const addFolder = (path: string) =>
-    invoke<{ folders: GameFolder[]; folder: GameFolder; structure: FolderScanResult['structure'] }>(
-        IPC.foldersAdd,
-        path
-    );
 export const removeFolder = (path: string) => invoke<GameFolder[]>(IPC.foldersRemove, path);
 export const renameFolder = (path: string, displayName: string) =>
     invoke<GameFolder[]>(IPC.foldersRename, path, displayName);
@@ -372,24 +362,6 @@ export const saveFaceImage = (dataUrl: string, slot: 'splash' | 'logo') =>
 export const resetFaceImage = (slot: 'splash' | 'logo') =>
     invoke<null>(IPC.appearanceResetFaceImage, slot);
 
-export const getDirectOverview = () =>
-    invoke<import('@shared/directConnect').DirectOverview>(IPC.directOverview);
-export const getDirectState = () =>
-    invoke<import('@shared/directConnect').DirectHostState>(IPC.directState);
-export const startDirectHost = (request: import('@shared/directConnect').DirectHostRequest) =>
-    invoke<import('@shared/directConnect').DirectHostState>(IPC.directHost, request);
-export const stopDirectHost = () =>
-    invoke<import('@shared/directConnect').DirectHostState>(IPC.directStop);
-export const resolveDirectInvitation = (text: string) =>
-    invoke<import('@shared/directConnect').DirectJoinResult>(IPC.directResolve, text);
-export const prepareDirectJoin = (text: string, versionId: string, folder: string) =>
-    invoke<{ versionId: string; folder: string; address: string; directJoin: boolean }>(
-        IPC.directPrepareJoin,
-        text,
-        versionId,
-        folder
-    );
-
 // ---------------- 游戏 ----------------
 export const launchGame = (
     id: string,
@@ -405,8 +377,6 @@ export const restartGame = (id: string, folder: string, forceToken?: string) =>
         forceToken
     );
 export const cancelGameRestart = () => invoke<void>(IPC.gameRestartCancel);
-export const killGame = (forceToken?: string) =>
-    invoke<{ requiresForce: boolean; forceToken?: string }>(IPC.gameKill, forceToken);
 
 // ---------------- 服务器 ----------------
 export const favoriteServer = (id: string, favorite: boolean) =>
@@ -437,8 +407,6 @@ export const commitModInstall = (id: string, includeDependencies: boolean, opera
     invoke<string>(IPC.modsCommit, id, includeDependencies, operationId);
 export const discardModInstall = (id: string) => invoke<void>(IPC.modsDiscard, id);
 export const parseMods = (paths: string[]) => invoke<ModInfo[]>(IPC.modsParse, paths);
-export const installMods = (files: string[], targetVersionId: string, folder?: string) =>
-    invoke<ModInstallResult[]>(IPC.modsInstall, files, targetVersionId, folder);
 export const findModDuplicates = (versionId: string, folder?: string) =>
     invoke<ModDuplicateGroup[]>(IPC.modsDuplicates, versionId, folder);
 export const getModIcons = (versionId: string, names: string[], folder?: string, kind = 'mods') =>
@@ -469,7 +437,6 @@ export const setPluginEnabled = (id: string, enabled: boolean) =>
     invoke<import('@shared/types').PluginInfo[]>(IPC.pluginsSetEnabled, id, enabled);
 export const removePlugin = (id: string) =>
     invoke<import('@shared/types').PluginInfo[]>(IPC.pluginsRemove, id);
-export const readPluginCode = (id: string) => invoke<string>(IPC.pluginsReadCode, id);
 export const openPluginsDir = () => invoke<void>(IPC.pluginsOpenDir);
 
 // ---------------- 默认按键 ----------------

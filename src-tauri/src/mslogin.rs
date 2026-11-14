@@ -1947,25 +1947,6 @@ pub fn refresh_yggdrasil(app: &AppHandle, account: &Value) -> Result<Value, Stri
     Ok(merged)
 }
 
-/// yggdrasil.ts invalidateAccount（删除 yggdrasil 账号时远端失效）
-pub fn invalidate_yggdrasil(app: &AppHandle, account: &Value) {
-    if account["type"].as_str() != Some("yggdrasil") {
-        return;
-    }
-    let Ok(provider) = find_provider(app, account["providerId"].as_str().unwrap_or("")) else {
-        return;
-    };
-    let access_token = account["accessToken"].as_str().unwrap_or("");
-    let client_token = account["clientToken"].as_str().unwrap_or("");
-    if access_token.is_empty() || client_token.is_empty() {
-        return;
-    }
-    let _ = post_ygg(
-        &endpoint_url(provider["authServer"].as_str().unwrap_or(""), "invalidate"),
-        &json!({ "accessToken": access_token, "clientToken": client_token }),
-    );
-}
-
 // ---------------- authlib-injector 运行时（yggdrasil.ts downloadInjector 等） ----------------
 
 fn sha256_file(path: &PathBuf) -> Result<String, String> {

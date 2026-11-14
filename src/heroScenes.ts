@@ -6,10 +6,6 @@
 import { heroFrame as invokeHeroFrame } from './api';
 import type { HeroFrameRequest, HeroFrameResponse } from '@shared/types';
 
-/** 每场景停留时长（场景秒；上游 DWELL_SECONDS，设置 launchThumbnail.animation.dwellSeconds 可调）。 */
-export const HERO_DWELL_SECONDS = 9.5;
-/** 场景间"区块加载"过渡时长（上游 TRANSITION_SECONDS）。 */
-export const HERO_TRANSITION_SECONDS = 1.2;
 /** 帧节拍：25ms ≈ 40fps。场景本体按连续时钟渲染，节拍只限制 IPC 频率。 */
 export const HERO_TICK_MS = 25;
 /** 目标 texel 尺寸（逻辑像素）与网格列数护栏（上游 hero_carousel.rs）。 */

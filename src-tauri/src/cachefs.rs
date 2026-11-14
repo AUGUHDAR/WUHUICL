@@ -345,29 +345,6 @@ pub fn fingerprint_put(
     }
 }
 
-/// 删掉某个路径的所有指纹（文件被替换/删除后调用，防止缓存漂移）。
-pub fn fingerprint_forget(app: &tauri::AppHandle, path: &Path) {
-    let mut entries = fingerprint_load(app);
-    let prefix = format!("{}-", fingerprint_hash(path));
-    let stale: Vec<String> = entries
-        .keys()
-        .filter(|k| k.starts_with(&prefix))
-        .cloned()
-        .collect();
-    if stale.is_empty() {
-        return;
-    }
-    for key in stale {
-        entries.remove(&key);
-    }
-    let payload = json!({ "version": 1, "entries": entries.clone() });
-    if let Ok(text) = serde_json::to_string(&payload) {
-        if std::fs::write(fingerprint_path(app), text).is_ok() {
-            fingerprint_remember(app, entries);
-        }
-    }
-}
-
 // ---------------- IPC ----------------
 
 pub fn invoke(

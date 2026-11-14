@@ -7,7 +7,7 @@
 //! 为真实现；未移植通道显式返回「未实现的通道」错误，便于移植期发现缺口。
 
 use crate::{
-    accounts, appearance, bridge, cachefs, catalog, centercmd, community, direct, exportlogs, feedback, frp,
+    accounts, appearance, bridge, cachefs, catalog, centercmd, community, exportlogs, feedback, frp,
     gamedir, gamefolders, gate, hero_scenes, inlineweb, installer, javaman, launch, misc, modpacks, mods,
     mslogin, projections, recordings, schematic_preview, screenshots, seed_map, selfupdate,
     servers, settings, skins, snapshots, sysinfo, tasks, terracotta, versions, vlcli, voxlink,
@@ -214,9 +214,6 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
     if let Some(r) = bridge::invoke(app, channel, args) {
         return r;
     }
-    if let Some(r) = direct::invoke(app, channel, args) {
-        return r;
-    }
     if let Some(r) = terracotta::invoke(app, channel, args) {
         return r;
     }
@@ -301,69 +298,6 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
                 .map(|a| a.iter().filter_map(|f| f.as_str()).collect::<Vec<&str>>())
                 .unwrap_or_else(|| vec!["全部文件|*"]),
         )),
-
-        // ---------------- 游戏文件夹 ----------------
-        "folders:list" => Ok(json!({
-            "folders": settings::get(app)["folders"],
-            "active": settings::get(app)["activeFolder"]
-        })),
-        "folders:add" => {
-            let path = args.first().and_then(|v| v.as_str()).ok_or("缺少 path")?;
-            folders_add(app, path)
-        }
-        "folders:remove" => {
-            let path = args.first().and_then(|v| v.as_str()).ok_or("缺少 path")?;
-            folders_mutate(app, |folders| {
-                folders.retain(|f| f["path"].as_str() != Some(path));
-            })
-        }
-        "folders:rename" => {
-            let (path, name) = two_strings(args)?;
-            folders_mutate(app, |folders| {
-                for f in folders.iter_mut() {
-                    if f["path"].as_str() == Some(path.as_str()) {
-                        f["name"] = json!(name);
-                    }
-                }
-            })
-        }
-        "folders:setDefault" => {
-            let path = args.first().and_then(|v| v.as_str()).ok_or("缺少 path")?;
-            folders_mutate(app, |folders| {
-                for f in folders.iter_mut() {
-                    f["isDefault"] = json!(f["path"].as_str() == Some(path));
-                }
-            })
-        }
-        "folders:setActive" => {
-            let path = args.first().and_then(|v| v.as_str()).ok_or("缺少 path")?;
-            settings::save(app, json!({ "activeFolder": path }))?;
-            Ok(json!(path))
-        }
-        "folders:scan" => {
-            let path = args.first().and_then(|v| v.as_str()).ok_or("缺少 path")?;
-            let start = std::time::Instant::now();
-            let list = versions::scan_folder_public(path, true);
-            let status = if list.is_empty() { "warning" } else { "ready" };
-            Ok(json!({
-                "folder": { "path": path, "name": std::path::Path::new(path)
-                    .file_name().map(|n| n.to_string_lossy()).unwrap_or_default(), "isDefault": false },
-                "structure": if list.is_empty() { "empty" } else { "minecraft" },
-                "status": status,
-                "versions": list,
-                "errors": [],
-                "scannedAt": chrono::Utc::now().to_rfc3339(),
-                "durationMs": start.elapsed().as_millis() as u64
-            }))
-        }
-        "folders:open" => {
-            let path = args.first().and_then(|v| v.as_str()).ok_or("缺少 path")?;
-            crate::platform::open_path(path)?;
-            Ok(Value::Null)
-        }
-        "folders:contextMenu" => Ok(Value::Null), // 原生右键菜单：子系统阶段接
-
-        // ---------------- 账号 ----------------
         "accounts:list" => Ok(accounts::list(app)),
         "accounts:addOffline" => {
             let name = args.first().and_then(|v| v.as_str()).ok_or("缺少用户名")?;
@@ -378,77 +312,9 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
             Ok(accounts::select(app, id))
         }
         "accounts:selected" => Ok(accounts::selected(app)),
-        "accounts:msBegin" => Err("微软登录链未移植".into()),
-        "accounts:msCancel" => Ok(Value::Null),
-        "accounts:yggProviders" => Ok(json!([])),
-        "accounts:refresh" => Err("令牌刷新未移植".into()),
-        "accounts:yggRuntime" => Err("authlib-injector 运行时未移植".into()),
-        "accounts:yggProbe"
-        | "accounts:yggLogin"
-        | "accounts:yggSaveProvider"
-        | "accounts:yggRemoveProvider"
-        | "accounts:yggSelectProfile" => Err("外置登录未移植".into()),
 
         // ---------------- 版本 ----------------
-        "versions:installed" => {
-            let all = args.first().and_then(|v| v.as_bool()).unwrap_or(false);
-            Ok(versions::list_installed(&settings::get(app), all))
-        }
-        "versions:catalog" => Ok(json!({ "versions": [], "checkedAt": 0, "stale": true })),
-        "versions:manifest" => Ok(json!([])),
-        "versions:install" => Err("版本安装器未移植".into()),
-        "versions:remove"
-        | "versions:rename"
-        | "versions:cleanup"
-        | "versions:setJava"
-        | "versions:setResolution"
-        | "versions:setIsolation"
-        | "versions:isolationPlan"
-        | "versions:setIcon"
-        | "versions:uploadIcon"
-        | "versions:uploadThumbnail"
-        | "versions:setThumbnailFit"
-        | "versions:resetThumbnail"
-        | "versions:categoriesUpdate" => Err("版本管理未移植".into()),
-        "loaders:list" | "loaders:fabricApi" => Err("加载器清单未移植".into()),
-
-        // ---------------- Java ----------------
-        "java:list" => Ok(json!([])),
-        "java:refresh" => Ok(json!([])),
-        "java:cancelScan" => Ok(json!(true)),
-        "java:addCustom" | "java:pickAdd" | "java:hide" => Err("Java 管理未移植".into()),
-
-        // ---------------- 退出历史 ----------------
-        "exitHistory:list" | "exitHistory:ack" | "exitHistory:clear" => Ok(json!([])),
-
-        // ---------------- 自更新 ----------------
-        "update:check" => Ok(json!({ "ok": true, "hasUpdate": false })),
-        "update:getState" | "update:getPending" => Ok(Value::Null),
-        "update:getConfigStatus" => {
-            let s = settings::get(app);
-            Ok(json!({
-                "configVersion": s["configVersion"].as_i64().unwrap_or(1),
-                "current": 1,
-                "mismatch": (if s["configVersion"].as_i64().unwrap_or(1) > 1 { Value::from("newer") } else { Value::Null })
-            }))
-        }
-        "update:listReleases" => Ok(json!([])),
-        "update:skip"
-        | "update:apply"
-        | "update:applyPending"
-        | "update:restoreBackup"
-        | "update:resetSettings"
-        | "update:applyLocal"
-        | "update:start" => Err("自更新未移植".into()),
-        "update:pickLocalFile" => Ok(Value::Null),
-
-        // ---------------- 皮肤 ----------------
-        "skin:avatar" => Ok(Value::Null),
-        "skin:profile" => Ok(json!({ "username": "", "skins": [], "capes": [] })),
-        "skin:history" => Ok(json!([])),
-        "skin:upload" | "skin:cape" | "skin:historyDelete" | "skin:historyRename"
-        | "skin:uploadHistory" | "skin:offlineApply" | "skin:offlineReset" | "skin:editorSave"
-        | "skin:editorUpload" => Err("皮肤服务未移植".into()),
+        "versions:installed" => Ok(json!({ "versions": [], "checkedAt": 0, "stale": true })),
 
         // ---------------- 窗口 ----------------
         "window:visibility" => Ok(windowctl::visibility(app)),
@@ -588,122 +454,6 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
             let target = mods::select_mod_target(&list, id, folder)?;
             import_resource_files(&files, &target, kind)
         }
-
-        // ---------------- 游戏 ----------------
-        "game:launch" | "game:restart" | "game:kill" | "game:restartCancel" => {
-            Err("游戏启动引擎未移植".into())
-        }
-        "launch:exportLogs" => Ok(Value::Null),
-
-        // ---------------- 服务器 / 整合包 / 世界 / 社区 / 模组 ----------------
-        "servers:list" => Ok(json!([])),
-        "servers:ping" => Err("服务器查询未移植".into()),
-        "servers:add"
-        | "servers:remove"
-        | "servers:edit"
-        | "servers:favorite"
-        | "servers:bind"
-        | "servers:syncFromDat"
-        | "servers:prepareLaunch" => Err("服务器管理未移植".into()),
-        "modpack:probe"
-        | "modpack:install"
-        | "modpack:supplyFiles"
-        | "modpack:openFile"
-        | "import:probe" => Err("整合包未移植".into()),
-        "world:probe" | "world:import" => Err("世界导入未移植".into()),
-        "community:search" | "community:suggest" | "community:project" | "community:files" | "community:download" => {
-            Err("社区资源未移植".into())
-        }
-        "mods:parse"
-        | "mods:install"
-        | "mods:duplicates"
-        | "mods:crossDuplicates"
-        | "mods:icons"
-        | "mods:targets"
-        | "mods:prepare"
-        | "mods:commit"
-        | "mods:discard"
-        | "mods:checkUpdates"
-        | "mods:applyUpdates"
-        | "mods:favorites"
-        | "mods:favorite"
-        | "mods:favoriteRemove"
-        | "mods:favoriteLink"
-        | "mods:favoriteVersions"
-        | "mods:favoriteVersionsCancel"
-        | "mods:favoriteLocal"
-        | "mods:catalog"
-        | "mods:setEnabled"
-        | "mods:setLocked"
-        | "mods:versionChoices"
-        | "mods:versionPlan"
-        | "mods:versionApply"
-        | "mods:versionDiscard"
-        | "mods:migrationPlan"
-        | "mods:migrationApply"
-        | "mods:supplementalList"
-        | "mods:supplementalKeep"
-        | "mods:supplementalRetry" => Err("模组管理未移植".into()),
-
-        // ---------------- 插件 / 默认配置 / 玩偶 / 实例中心 / 外观 ----------------
-        "plugins:list" => Ok(json!([])),
-        "plugins:install" | "plugins:setEnabled" | "plugins:remove" | "plugins:readCode"
-        | "plugins:openDir" => Err("插件系统未移植".into()),
-        "keys:getDefault" => Ok(json!({})),
-        "keys:setDefault" | "keys:reset" => Err("默认按键未移植".into()),
-        "gameOptions:get" => Ok(json!({ "enabled": false, "id": null, "value": null })),
-        "gameOptions:set" => Err("默认游戏选项未移植".into()),
-        "defaultPacks:get" => Ok(json!([])),
-        "defaultPacks:import"
-        | "defaultPacks:pick"
-        | "defaultPacks:remove"
-        | "defaultPacks:move"
-        | "defaultPacks:setEnabled"
-        | "defaultPacks:apply" => Err("默认资源包未移植".into()),
-        "mascots:state" => {
-            Ok(json!({ "counts": {}, "order": [], "sound": { "muted": false, "volume": 0.5 } }))
-        }
-        "mascots:batch" | "mascots:slap" | "mascots:sound" | "mascots:reset" => {
-            Err("玩偶状态未移植".into())
-        }
-        "center:overview"
-        | "center:worlds"
-        | "center:screenshots"
-        | "center:backups"
-        | "center:diagnose"
-        | "center:operation"
-        | "center:file"
-        | "center:dependencyPlan"
-        | "center:dependencyApply" => Err("实例中心未移植".into()),
-        "appearance:resetTheme"
-        | "appearance:exportTheme"
-        | "appearance:importTheme"
-        | "appearance:draftRead"
-        | "appearance:draftSave"
-        | "appearance:draftDiscard"
-        | "appearance:draftApply"
-        | "appearance:importBackground"
-        | "appearance:importBackgroundMulti"
-        | "appearance:resetBackground"
-        | "appearance:importLaunchThumbnail"
-        | "appearance:resetLaunchThumbnail" => Err("外观系统未移植".into()),
-        "memory:organize" => Ok(json!({ "freedMB": 0, "processed": 0 })),
-
-        // ---------------- 联机：direct / tc / frp / voxlink 已各自接管，无占位分支 ----------------
-        "voxlink:tickets:pick"
-        | "voxlink:tickets:release"
-        | "voxlink:tickets:list"
-        | "voxlink:tickets:cancel"
-        | "voxlink:tickets:poll"
-        | "voxlink:tickets:detail"
-        | "voxlink:tickets:submit"
-        | "voxlink:tickets:reply"
-        | "voxlink:tickets:retract"
-        | "voxlink:tickets:delete"
-        | "voxlink:mods:bypass"
-        | "voxlink:mods:cancel"
-        | "voxlink:mods:check"
-        | "voxlink:mods:download" => Err("工单系统未移植".into()),
 
         // 投影 / 录像 / 桥接已由各模块 invoke 接管，不再有占位分支
         _ => Err(format!("未实现的通道：{}", channel)),
@@ -1046,45 +796,6 @@ fn copy_tree(src: &std::path::Path, dest: &std::path::Path) -> Result<(), String
         }
     }
     Ok(())
-}
-
-fn folders_mutate(app: &AppHandle, f: impl FnOnce(&mut Vec<Value>)) -> Result<Value, String> {
-    let mut s = settings::get(app);
-    {
-        let folders = s["folders"].as_array_mut().ok_or("设置损坏")?;
-        f(folders);
-    }
-    let out = s["folders"].clone();
-    settings::save(app, s)?;
-    Ok(out)
-}
-
-fn folders_add(app: &AppHandle, path: &str) -> Result<Value, String> {
-    let canonical = installer::strip_device_prefix(
-        &std::fs::canonicalize(path).map_err(|_| "目录不存在".to_string())?,
-    )
-    .to_string_lossy()
-    .to_string();
-    let name = std::path::Path::new(&canonical)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| canonical.clone());
-    let mut s = settings::get(app);
-    {
-        let folders = s["folders"].as_array_mut().ok_or("设置损坏")?;
-        if folders
-            .iter()
-            .any(|f| f["path"].as_str() == Some(canonical.as_str()))
-        {
-            return Err("该目录已登记".into());
-        }
-        folders.push(json!({ "path": canonical, "name": name, "isDefault": false }));
-    }
-    let folder = s["folders"].as_array().unwrap().last().cloned().unwrap();
-    let folders_json = s["folders"].clone();
-    let structure = versions::scan_folder_public(&canonical, true);
-    settings::save(app, s)?;
-    Ok(json!({ "folders": folders_json, "folder": folder, "structure": structure }))
 }
 
 /// 游戏目录解析：'' = 活动文件夹根；mods/resourcepacks/shaderpacks/saves/config 等相对安全；

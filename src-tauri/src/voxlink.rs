@@ -3,7 +3,7 @@
 //! 引擎本体（会话/WebSocket、RUDP、打洞、TURN、modsync、工单）未移植，涉及真联网与 P2P
 //! 的通道只保留原版「网络之前」的校验，校验通过后返回未移植错误，不伪造成功。
 //! 通道：voxlink:status / voxlink:settings / voxlink:lobby / voxlink:stop /
-//! voxlink:tryDirect / voxlink:usePlayerRelay / voxlink:useTurnRelay / voxlink:start；
+//! voxlink:tryDirect / voxlink:usePlayerRelay / voxlink:start；
 //! 事件：voxlink:event {type,data}（与原版 index.ts push() 同形状）。
 
 use serde_json::{json, Value};
@@ -310,10 +310,6 @@ fn use_player_relay() -> Value {
     json!({ "ok": false, "err": "请先加入房间" })
 }
 
-fn use_turn_relay() -> Result<Value, String> {
-    Err("请先加入房间".to_string())
-}
-
 // 引擎未移植：无会话时原版 leaveRoom 恒为 {left:false}，stop 仍按原版 push 一份快照
 fn stop(app: &AppHandle) -> Value {
     REQUEST_PENDING.store(false, Ordering::SeqCst);
@@ -559,7 +555,6 @@ pub fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Option<Result<V
         "voxlink:stop" => Some(Ok(stop(app))),
         "voxlink:tryDirect" => Some(Ok(try_direct())),
         "voxlink:usePlayerRelay" => Some(Ok(use_player_relay())),
-        "voxlink:useTurnRelay" => Some(use_turn_relay()),
         "voxlink:start" => Some(voxlink_start(&args.first().cloned().unwrap_or(json!({})))),
         _ => None,
     }

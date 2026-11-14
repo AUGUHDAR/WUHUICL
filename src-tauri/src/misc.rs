@@ -416,25 +416,6 @@ pub fn invoke(
             save_mascots(app, &state);
             Ok(state)
         })()),
-        "mascots:slap" => Some((|| {
-            let id = args
-                .first()
-                .and_then(|v| v.as_str())
-                .unwrap_or("kamu")
-                .to_string();
-            let mut state = mascot_state(app);
-            let counts = state["counts"].as_object_mut().ok_or("玩偶状态损坏")?;
-            *counts.entry(id).or_insert(json!(0)) = json!(
-                counts
-                    .values()
-                    .filter_map(|v| v.as_i64())
-                    .sum::<i64>()
-                    .max(0)
-                    + 1
-            );
-            save_mascots(app, &state);
-            Ok(state)
-        })()),
         "mascots:sound" => Some((|| {
             let mut state = mascot_state(app);
             let v = args.first().cloned().unwrap_or(json!({}));

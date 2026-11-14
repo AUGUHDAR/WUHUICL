@@ -87,7 +87,6 @@ pub mod community;
 pub mod community_wiki;
 pub mod crashanalyzer;
 pub mod crashfix;
-pub mod direct;
 pub mod download;
 pub mod dragout;
 pub mod exportlogs;
