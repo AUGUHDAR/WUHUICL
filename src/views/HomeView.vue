@@ -1452,6 +1452,14 @@ onUnmounted(() => {
                                 >{{ displayVersionSub(version) }}</span
                             >
                         </div>
+                        <!-- 实测修正 #1：DOM 序 = 视觉序（copy → 上次游玩 → ⋯ → play），
+                             flex 行内自然排布，焦点/读屏顺序与视觉一致 -->
+                        <span
+                            data-ui="HomeView:ba095d8dcc15"
+                            v-if="store.lastPlayed[version.id]"
+                            class="instance-last"
+                            >上次游玩：{{ fmtLastPlayed(store.lastPlayed[version.id]) }}</span
+                        >
                         <button
                             data-ui="HomeView:b5167161777c"
                             class="instance-more"
@@ -1461,12 +1469,6 @@ onUnmounted(() => {
                             <!-- 手绘三点 SVG 收编 UiGlyph more（inventory H） -->
                             <UiGlyph name="more" :size="15" />
                         </button>
-                        <span
-                            data-ui="HomeView:ba095d8dcc15"
-                            v-if="store.lastPlayed[version.id]"
-                            class="instance-last"
-                            >上次游玩：{{ fmtLastPlayed(store.lastPlayed[version.id]) }}</span
-                        >
                         <button
                             data-ui="HomeView:1a638472fc2a"
                             class="instance-play"
@@ -2803,12 +2805,18 @@ onUnmounted(() => {
     flex-direction: column;
     gap: 12px;
 }
-.home-creator {
-    margin-top: 0;
-    border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
-    box-shadow:
-        inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent),
-        var(--shadow);
+/* 创作者降格（用户实测修正 #2）：去掉卡片框——background/border/radius/padding 全去，
+ * 变右栏流内纯文本块（标题「创作者」+外链箭头同行、正文 B 站/QQ/issues 紧跟；
+ * 组件内部结构不动，只在外层剥壳）。与上方账号+皮肤粘连卡组之间用 --card-gap
+ * 区块间距分隔（860h 一屏档 flex gap 12px，合计 ≈ --sec-gap 的呼吸感）。
+ * .home-side 前缀压过 CreatorCard 自身的卡片壳（无论注入顺序）。 */
+.home-side .home-creator {
+    margin-top: var(--card-gap);
+    background: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
 }
 .account-panel,
 .skin-panel {
@@ -3556,14 +3564,17 @@ onUnmounted(() => {
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     gap: 12px;
 }
+/* 最近游戏行卡（用户实测修正 #1）：grid → flex 行布局。
+ * 名字列 flex:1 + min-width:0——名字单行省略（全名留 title），副文整行省略号（不再半截截断）；
+ * ⋯ 升到与 play 同一视觉档（等高 32px、同圆角，ghost/accent 成对）；
+ * 名字列→操作区 gap 用 --space-2 收紧；隐藏的「上次游玩」不再残留塌缩列 + 双 gap 的空白。 */
 .home-dashboard .instance-card {
-    display: grid;
-    grid-template-columns: 36px minmax(0, 1fr) auto 36px 40px;
-    gap: 12px;
+    display: flex;
     align-items: center;
+    gap: var(--space-2);
     min-height: 84px;
     height: auto;
-    padding: 12px;
+    padding: var(--space-3);
     /* 边界感（用户实测修正）：完整卡片框取代单条底边线——四边 border + 面底 + 圆角 */
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -3578,43 +3589,55 @@ onUnmounted(() => {
     border-color: var(--border-strong);
 }
 .instance-card .instance-icon {
-    width: 36px;
-    height: 36px;
+    flex: none;
+    width: 32px;
+    height: 32px;
 }
 .instance-card .instance-copy {
+    flex: 1;
     min-width: 0;
+    padding-right: 0;
+    gap: var(--space-1);
 }
 .instance-copy strong {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+    display: block;
     overflow: hidden;
-    word-break: normal;
-}
-.instance-copy span {
     white-space: nowrap;
     text-overflow: ellipsis;
-    overflow: hidden;
+    word-break: normal;
 }
 .instance-more,
 .instance-last,
 .instance-play {
     position: static;
     margin: 0;
-    grid-row: 1;
 }
 .instance-last {
-    grid-column: 3;
-    font-size: 12px;
+    flex: none;
+    font-size: var(--text-xs);
     white-space: nowrap;
 }
 .instance-more {
-    grid-column: 4;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-dim);
+}
+.instance-more:hover {
+    border-color: var(--border-strong);
+    background: var(--hover);
+    color: var(--text);
 }
 .instance-play {
-    grid-column: 5;
-    width: 40px;
-    height: 34px;
+    flex: none;
+    width: 36px;
+    height: 32px;
 }
 .instances-block {
     background: var(--surface-content);
@@ -3646,10 +3669,6 @@ onUnmounted(() => {
 }
 .home-side {
     gap: 16px;
-}
-.home-creator {
-    box-shadow: none;
-    margin-top: 0;
 }
 .hero-shade {
     background: linear-gradient(
@@ -3695,20 +3714,16 @@ onUnmounted(() => {
         grid-column: 1;
         grid-row: auto;
     }
+    /* 窄宽档：行卡已是 flex 行——收图标、隐「上次游玩」给名字列让位 */
     .home-dashboard .instance-card {
-        grid-template-columns: 28px minmax(0, 1fr) 32px 36px;
-        gap: 8px;
+        padding: var(--space-2) var(--space-3);
     }
-    .instance-last {
-        grid-row: 2;
-        grid-column: 2;
-        font-size: 12px;
+    .home-dashboard .instance-card .instance-icon {
+        width: 28px;
+        height: 28px;
     }
-    .instance-more {
-        grid-column: 3;
-    }
-    .instance-play {
-        grid-column: 4;
+    .home-dashboard .instance-card .instance-last {
+        display: none;
     }
     .hero-content {
         padding: 16px;

@@ -756,7 +756,10 @@ const fmtDate = (ts: number) => {
 };
 
 /** PCL 口径四分类 tab（TabPills 共享药丸）。
- *  「可更新」这颗只在真有更新时才出现，且完全隐藏——不是置灰、不是 0（PCL 同款判定）。 */
+ *  空分类隐藏（2026-11-14 实测修正，PCL 同款）：「已启用/已禁用/更新」任一 count===0 整颗隐藏，
+ *  「全部」常驻。完全隐藏——不是置灰、不是 0。
+ *  「可更新」例外：检测进行中可更新数未知，先不隐藏（否则刚进页面必闪现闪失）；
+ *  检测完成后 count===0 才隐藏。困死由下方 modTabs watch 兜底：所在分类被隐藏就退回「全部」。 */
 const jarCount = computed(
     () => entries.value.filter((e) => !e.isDir && /\.jar$/i.test(e.name)).length
 );
@@ -764,19 +767,19 @@ const disabledCount = computed(() => entries.value.filter(isDisabledMod).length)
 const modTabs = computed(() => {
     // PCL 的排列：全部 → 可更新 → 启用 → 禁用（可更新紧跟「全部」，因为它是最常点的第二颗）
     const tabs: TabPillItem[] = [{ value: 'all', label: '全部', count: jarCount.value + disabledCount.value }];
-    // 正在筛选时可更新项暂时为 0（例如刚更新完清零）也要留着这颗，否则用户会被困住
-    if (updatableCount.value > 0 || (updatesTab.value && !updatePanel.checking))
+    if (updatePanel.checking || updatableCount.value > 0)
         tabs.push({
             value: 'updates',
             label: '可更新',
-            count: updatableCount.value,
+            // 检测中数量未知：不显示角标，避免「可更新 0」的假信号；检测完成才出数
+            count: updatePanel.checking ? undefined : updatableCount.value,
             disabled: scope.value === 'folder',
             disabledReason: '更新检测只针对当前实例，请先切回「当前实例」'
         });
-    tabs.push(
-        { value: 'enabled', label: '已启用', count: jarCount.value },
-        { value: 'disabled', label: '已禁用', count: disabledCount.value }
-    );
+    if (jarCount.value > 0)
+        tabs.push({ value: 'enabled', label: '已启用', count: jarCount.value });
+    if (disabledCount.value > 0)
+        tabs.push({ value: 'disabled', label: '已禁用', count: disabledCount.value });
     return tabs;
 });
 function setTab(v: string) {
@@ -841,9 +844,13 @@ watch(
     },
     { immediate: true }
 );
-// 「可更新」筛选只在有东西可更新时存在；数量归零就自动退回「全部」，避免卡在一个不存在的分类里
-watch(updatableCount, (n) => {
-    if (n === 0 && updatesTab.value && !updatePanel.checking) setTab('all');
+// 空分类被隐藏后不能困在里面：当前分类不在可见 tab 里就退回「全部」。
+// 覆盖三条路径——更新数归零（原 watch(updatableCount) 的口径，含更新成功清零）、
+// 已启用/已禁用计数变 0（批量禁用/删除后）、以及聚合范围下切走（report 被清）。
+// 列表加载中不判定（entries 未到、计数必为 0 的假信号），等真实计数落地再收口。
+watch(modTabs, (tabs) => {
+    if (loading.value) return;
+    if (!tabs.some((t) => t.value === modFilter.value)) setTab('all');
 });
 // 文件变动（导入/删除/更新成功）后结论就旧了：清掉缓存标记，重新查一遍
 watch(
@@ -1548,29 +1555,35 @@ function openChangelog(e: Row) {
                                         ?.removeAttribute('open')
                                 "
                             >
+                                <!-- 可解释性（2026-11-14 实测修正）：两项低频操作加常显小字副文，
+                                     不靠 hover title（触屏与扫视都读得到；同 SelectMenu description 范式） -->
                                 <button
                                     data-ui="FileManager:40ebd7f85d68"
-                                    class="btn btn-ghost btn-sm"
+                                    class="btn btn-ghost btn-sm fm-more-item"
                                     :disabled="batchBusy"
                                     :aria-label="
                                         (catalogOf(e)?.locked ? '解除锁定 ' : '锁定 ') + e.name
                                     "
-                                    :title="
-                                        catalogOf(e)?.locked
-                                            ? '已锁定：不参与批量更新，点击解除'
-                                            : '锁定此模组版本'
-                                    "
                                     @click="toggleLock(e)"
                                 >
-                                    {{ catalogOf(e)?.locked ? '解锁' : '锁定' }}</button
+                                    <span class="fm-more-label">{{
+                                        catalogOf(e)?.locked ? '解锁' : '锁定'
+                                    }}</span>
+                                    <small class="fm-more-sub">{{
+                                        catalogOf(e)?.locked
+                                            ? '已锁定 · 点此解除并恢复更新'
+                                            : '锁定后不会被更新替换'
+                                    }}</small>
+                                </button
                                 ><button
                                     data-ui="FileManager:fd277c185a8b"
-                                    class="btn btn-ghost btn-sm"
+                                    class="btn btn-ghost btn-sm fm-more-item"
                                     :disabled="batchBusy"
                                     :aria-label="'切换版本 ' + e.name"
                                     @click="switchFile = e.name"
                                 >
-                                    切换版本
+                                    <span class="fm-more-label">切换版本</span>
+                                    <small class="fm-more-sub">在线换成此模组的其他版本</small>
                                 </button>
                             </div>
                         </details>
@@ -1658,11 +1671,33 @@ function openChangelog(e: Row) {
     display: grid;
     gap: var(--space-2);
     padding: var(--space-2);
-    min-width: 150px;
+    min-width: 190px;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--surface-solid);
     box-shadow: var(--shadow);
+}
+/* ⋯ 菜单项两行（2026-11-14 可解释性修正）：主 label + 小字副文；副文用 --text-dim 弱化，
+   主 label 保持按钮字号。覆写 .btn 的单行居中约定（仅菜单内两行项生效）。 */
+.file-more-actions .fm-more-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-height: 0;
+    padding: var(--space-2) var(--space-3);
+    text-align: left;
+    white-space: normal;
+}
+.file-more-actions .fm-more-label {
+    font-size: var(--text-sm);
+    line-height: 1.4;
+}
+.file-more-actions .fm-more-sub {
+    font-size: 11px;
+    line-height: 1.4;
+    font-weight: 400;
+    color: var(--text-dim);
 }
 /* 行内操作区（M：⋯ 折叠 + 行内删除同组；启动停开关在左侧独立列） */
 .fm-ops {
@@ -2097,10 +2132,19 @@ function openChangelog(e: Row) {
     font-size: 12px;
     color: var(--text-dim);
     border-bottom: 1px solid var(--border);
+    /* 行水平呼吸（2026-11-14 实测修正：checkbox 贴左缘/删除钮贴右缘）：表头与行同补，
+       保证列模板对齐不被 padding 打偏；「操作」表头右对齐到行尾操作列的右缘。 */
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+}
+.fm-table-head > span:last-child {
+    text-align: right;
 }
 .fm-row {
     min-height: 72px;
-    padding: 12px 0;
+    /* 左 --space-4 右 --space-4：checkbox 列与行首、操作列与行尾各留呼吸；
+       hover/选中底色铺满整行，贴边的 checkbox 随之一并松开 */
+    padding: var(--space-3) var(--space-4);
     flex-wrap: nowrap;
 }
 /* 同级相邻行分隔（UX：边界感；比边框弱一档） */
@@ -2201,6 +2245,9 @@ function openChangelog(e: Row) {
     .fm-table-head,
     .fm-row {
         gap: 8px;
+        /* 窄窗降一档水平呼吸：列模板已收窄（大小列隐藏），保住名称列不被挤 */
+        padding-left: var(--space-3);
+        padding-right: var(--space-3);
     }
     .fm-file-icon {
         width: 28px;

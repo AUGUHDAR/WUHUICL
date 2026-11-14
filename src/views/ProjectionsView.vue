@@ -938,7 +938,8 @@ onUnmounted(() => {
     grid-template-columns: minmax(190px, 1.5fr) 130px 130px 130px;
 }
 .recording-controls {
-    padding: 8px 0;
+    /* 与下方行同水平呼吸（--space-4）：选择钮/移入回收站不再贴工作区左右缘 */
+    padding: var(--space-2) var(--space-4);
     gap: 8px;
     border-bottom: 1px solid var(--border);
 }
@@ -946,7 +947,9 @@ onUnmounted(() => {
     gap: 8px;
 }
 .recording-row {
-    padding: 12px 0;
+    /* 行水平呼吸（2026-11-14 实测修正：checkbox 贴左缘/定位钮贴右缘）：hover/选中底色铺满整行，
+       左 --space-4 右 --space-4 让行首 checkbox 与行尾按钮各留一档呼吸 */
+    padding: var(--space-3) var(--space-4);
     min-height: 72px;
 }
 /* 行 hover 统一规则（inventory L，2026-11-14 修正版；对照 GameView .installed-row）：

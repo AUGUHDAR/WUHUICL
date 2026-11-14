@@ -865,7 +865,9 @@ onUnmounted(() => {
     width: 100%;
 }
 .screenshot-controls {
-    padding: 8px 0;
+    /* 与其他页行同水平呼吸（2026-11-14 实测修正）：选择钮/移入回收站不再贴工作区左右缘
+       （截图页为卡片网格，无行内 checkbox/删除，贴缘的是这条操作条） */
+    padding: var(--space-2) var(--space-4);
     gap: 8px;
     border-bottom: 1px solid var(--border);
 }
