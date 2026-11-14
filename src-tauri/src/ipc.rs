@@ -8,7 +8,7 @@
 
 use crate::{
     accounts, appearance, bridge, cachefs, catalog, centercmd, community, exportlogs, feedback, frp,
-    gamedir, gamefolders, gate, hero_scenes, inlineweb, installer, javaman, launch, misc, modpacks, mods,
+    gamedir, gamefolders, gate, hero_scenes, installer, javaman, launch, misc, modpacks, mods,
     mslogin, projections, recordings, schematic_preview, screenshots, seed_map, selfupdate,
     servers, settings, skins, snapshots, sysinfo, tasks, terracotta, versions, vlcli, voxlink,
     windowctl, world_map, worlds,
@@ -206,9 +206,6 @@ fn invoke(app: &AppHandle, channel: &str, args: &[Value]) -> Result<Value, Strin
         return r;
     }
     if let Some(r) = snapshots::invoke(app, channel, args) {
-        return r;
-    }
-    if let Some(r) = inlineweb::invoke(app, channel, args) {
         return r;
     }
     if let Some(r) = bridge::invoke(app, channel, args) {

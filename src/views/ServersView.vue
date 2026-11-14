@@ -1173,7 +1173,7 @@ async function copyAddress(s: ServerEntry) {
     }
 }
 .servers-page {
-    gap: 16px;
+    gap: var(--card-gap);
 }
 .servers-page .connection-header {
     margin: 0;
@@ -1277,7 +1277,7 @@ async function copyAddress(s: ServerEntry) {
 }
 
 .servers-page .server-workspace {
-    gap: 16px;
+    gap: var(--card-gap);
 }
 .servers-page .server-list {
     padding: 8px;
@@ -1314,7 +1314,7 @@ async function copyAddress(s: ServerEntry) {
     font-size: 12px;
 }
 .servers-page .server-detail .connection-panel-body {
-    gap: 16px;
+    gap: var(--card-gap);
     padding: 20px;
 }
 .servers-page .server-detail-title h3 {

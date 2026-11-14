@@ -614,14 +614,23 @@ watch(
 // ---------------- 最近游戏与菜单 ----------------
 // 收藏优先 + 最近游玩排序；启动某实例后 recordLastPlayed 更新使其自然提前。
 // 选中实例不再直接置顶——只有启动过才排到第一个。
+// 首页一屏化：矮视口（≤700px 高）只收纳 2 个、中档（≤900px 高）收纳 3 个最近实例，
+// 分别对齐 960×620 / 1360×860 的一屏预算（3 张恰好一行收纳网格）。
 const wideRecent = ref(window.innerWidth >= 1500);
-const updateRecentWidth = () => {
+const midViewport = ref(window.innerHeight <= 900);
+const shortViewport = ref(window.innerHeight <= 700);
+const updateViewportTier = () => {
     wideRecent.value = window.innerWidth >= 1500;
+    midViewport.value = window.innerHeight <= 900;
+    shortViewport.value = window.innerHeight <= 700;
 };
-onMounted(() => window.addEventListener('resize', updateRecentWidth));
-onUnmounted(() => window.removeEventListener('resize', updateRecentWidth));
+onMounted(() => window.addEventListener('resize', updateViewportTier));
+onUnmounted(() => window.removeEventListener('resize', updateViewportTier));
 const recent = computed(() =>
-    sortWithFavorite(activeInstalled.value).slice(0, wideRecent.value ? 8 : 4)
+    sortWithFavorite(activeInstalled.value).slice(
+        0,
+        shortViewport.value ? 2 : midViewport.value ? 3 : wideRecent.value ? 8 : 4
+    )
 );
 const sortedInstalled = computed(() => sortWithFavorite(store.installed));
 
@@ -643,13 +652,23 @@ async function chooseGameFolder(folder: string) {
         folderSwitchBusy.value = false;
     }
 }
+/** 版本菜单触发元素：一级入口是 hero 大实例卡，launch 右侧小箭头是次入口；
+ *  菜单锚随触发元素走（多数决弹性锚点：PCL 左列 + HMCL 版本卡混合模型的落点）。 */
 const versionMenuButton = ref<HTMLElement | null>(null);
 
-function toggleVersionMenu() {
-    if (!versionMenu.open && versionMenuButton.value) {
-        const bounds = versionMenuButton.value.getBoundingClientRect();
-        versionMenu.top = Math.min(window.innerHeight - 300, bounds.bottom + 8);
-        versionMenu.left = Math.max(8, Math.min(window.innerWidth - 250, bounds.right - 230));
+function toggleVersionMenu(event?: MouseEvent) {
+    if (!versionMenu.open) {
+        const trigger =
+            (event?.currentTarget as HTMLElement | undefined) ?? versionMenuButton.value;
+        if (trigger) {
+            const bounds = trigger.getBoundingClientRect();
+            // 触发元素在左半屏（一级大卡）→ 菜单左对齐展开；右半屏（小箭头）→ 右对齐
+            const alignRight = bounds.left + bounds.width / 2 > window.innerWidth / 2;
+            versionMenu.top = Math.min(window.innerHeight - 300, bounds.bottom + 8);
+            versionMenu.left = alignRight
+                ? Math.max(8, Math.min(window.innerWidth - 238, bounds.right - 230))
+                : Math.max(8, Math.min(bounds.left, window.innerWidth - 238));
+        }
     }
     versionMenu.open = !versionMenu.open;
     // 打开后把焦点移入浮层容器，↑↓/ESC 立即可用（键盘契约对齐 AppMenu）
@@ -881,10 +900,8 @@ onUnmounted(() => {
                     class="m-corner-btn"
                     @click="openVersionSettings"
                 >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="3" />
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06-.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06-.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
-                    </svg>
+                    <!-- 手绘齿轮 SVG 收编 UiGlyph gear -->
+                    <UiGlyph name="gear" :size="16" />
                     版本设置
                 </button>
             </div>
@@ -1014,52 +1031,91 @@ onUnmounted(() => {
                     class="hero-shade"
                 ></div>
 
-                <div data-ui="HomeView:2e850cf13849" class="hero-content" data-edit="bannerText">
-                    <span data-ui="HomeView:13616e708e66" class="hero-kicker">当前版本</span>
-                    <div data-ui="HomeView:027bc7e292dc" class="hero-metadata-slot">
-                        <Transition name="instance-switch" mode="out-in">
-                            <div
-                                data-ui="HomeView:e8ce122328e6"
-                                :key="
-                                    JSON.stringify([
-                                        currentVersion?.folder,
-                                        selectedId,
-                                        heroName,
-                                        heroVersion,
-                                        currentVersion?.loader,
-                                        currentVersion?.loaderVersion
-                                    ])
-                                "
-                                class="hero-metadata"
-                            >
-                                <h1
-                                    data-ui="HomeView:d209b16cd00e"
-                                    :title="heroName"
-                                    :class="{ 'long-name': heroName.length > 16 }"
+                    <div data-ui="HomeView:2e850cf13849" class="hero-content" data-edit="bannerText">
+                        <span data-ui="HomeView:13616e708e66" class="hero-kicker">当前版本</span>
+                        <div data-ui="HomeView:027bc7e292dc" class="hero-metadata-slot">
+                            <Transition name="instance-switch" mode="out-in">
+                                <div
+                                    data-ui="HomeView:e8ce122328e6"
+                                    :key="
+                                        JSON.stringify([
+                                            currentVersion?.folder,
+                                            selectedId,
+                                            heroName,
+                                            heroVersion,
+                                            currentVersion?.loader,
+                                            currentVersion?.loaderVersion
+                                        ])
+                                    "
+                                    class="hero-metadata"
                                 >
-                                    {{ heroName }}
-                                </h1>
-                                <div data-ui="HomeView:273ef3354188" class="hero-edition">
-                                    <span
-                                        data-ui="HomeView:cbc929d650f0"
-                                        v-if="currentVersion && !heroName.includes(heroVersion)"
-                                        class="hero-game-version"
-                                        :title="`Minecraft ${heroVersion}`"
-                                        >{{ heroVersion }}</span
+                                    <!-- 版本管理一级化（用户拍板）：大号当前实例卡 = 图标 + 实例名 + 加载器/MC tag
+                                         + chevron-down，点击展开已键盘化的 version-menu；参照 HMCL 版本卡模型。
+                                         原锚点（h1/edition/tag）随元素保留，不删除。 -->
+                                    <div
+                                        ref="versionMenuButton"
+                                        class="hero-version-card"
+                                        role="button"
+                                        tabindex="0"
+                                        :aria-expanded="versionMenu.open"
+                                        aria-haspopup="menu"
+                                        aria-label="切换游戏实例"
+                                        @click="toggleVersionMenu($event)"
+                                        @keydown.enter.prevent="toggleVersionMenu()"
+                                        @keydown.space.prevent="toggleVersionMenu()"
                                     >
-                                    <span
-                                        data-ui="HomeView:323afa8d269b"
-                                        v-if="
-                                            currentVersion &&
-                                            !heroName.includes(loaderText(currentVersion))
-                                        "
-                                        class="loader-badge"
-                                        >{{ loaderText(currentVersion) }}</span
-                                    >
+                                        <span class="hero-version-icon">
+                                            <img
+                                                v-if="
+                                                    currentVersion && versionIconUrl(currentVersion)
+                                                "
+                                                :src="versionIconUrl(currentVersion)"
+                                                alt=""
+                                            />
+                                            <UiGlyph v-else name="cube" :size="24" />
+                                        </span>
+                                        <span class="hero-version-copy">
+                                            <h1
+                                                data-ui="HomeView:d209b16cd00e"
+                                                :title="heroName"
+                                                :class="{ 'long-name': heroName.length > 16 }"
+                                            >
+                                                {{ heroName }}
+                                            </h1>
+                                            <span
+                                                data-ui="HomeView:273ef3354188"
+                                                class="hero-edition"
+                                            >
+                                                <span
+                                                    data-ui="HomeView:cbc929d650f0"
+                                                    v-if="
+                                                        currentVersion &&
+                                                        !heroName.includes(heroVersion)
+                                                    "
+                                                    class="hero-game-version"
+                                                    :title="`Minecraft ${heroVersion}`"
+                                                    >{{ heroVersion }}</span
+                                                >
+                                                <span
+                                                    data-ui="HomeView:323afa8d269b"
+                                                    v-if="
+                                                        currentVersion &&
+                                                        !heroName.includes(loaderText(currentVersion))
+                                                    "
+                                                    class="loader-badge"
+                                                    >{{ loaderText(currentVersion) }}</span
+                                                >
+                                            </span>
+                                        </span>
+                                        <UiGlyph
+                                            class="hero-version-chevron"
+                                            name="chevron-down"
+                                            :size="20"
+                                        />
+                                    </div>
                                 </div>
-                            </div>
-                        </Transition>
-                    </div>
+                            </Transition>
+                        </div>
 
                     <!-- 像素动画场景文案块（色点 + 眉标 + 标题 + 注），随场景切换淡入 -->
                     <Transition v-if="showHeroAnimation && heroSceneInfo" name="hero-scene-copy" mode="out-in">
@@ -1081,19 +1137,8 @@ onUnmounted(() => {
                                 :disabled="!currentVersion"
                                 @click="openVersionSettings"
                             >
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="1.7"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                >
-                                    <circle cx="12" cy="12" r="3" />
-                                    <path
-                                        d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1.4 1.68V21h-4v-.08A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15 1.7 1.7 0 0 0 3 13.6H3v-4h.08A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6 1.7 1.7 0 0 0 10.4 3H14a1.7 1.7 0 0 0 1.4 1.6 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9 1.7 1.7 0 0 0 21 10.4V14a1.7 1.7 0 0 0-1.6 1Z"
-                                    />
-                                </svg>
+                                <!-- 手绘齿轮 SVG 收编 UiGlyph gear（inventory H；素材已补） -->
+                                <UiGlyph name="gear" :size="18" />
                                 版本设置
                             </button>
                             <button
@@ -1136,22 +1181,16 @@ onUnmounted(() => {
                             </button>
                             <button
                                 data-ui="HomeView:5ca10c2a5c92"
-                                ref="versionMenuButton"
                                 class="launch-arrow"
                                 title="选择游戏实例"
-                                @click="toggleVersionMenu"
+                                @click="toggleVersionMenu($event)"
                             >
-                                <svg
+                                <!-- 手绘箭头 SVG 收编 UiGlyph chevron-down（素材已补）；展开态旋转保留 -->
+                                <UiGlyph
                                     :class="{ open: versionMenu.open }"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="1.7"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                >
-                                    <path d="m6 9 6 6 6-6" />
-                                </svg>
+                                    name="chevron-down"
+                                    :size="22"
+                                />
                             </button>
                         </div>
                     </div>
@@ -1251,23 +1290,15 @@ onUnmounted(() => {
             <section data-ui="HomeView:d4eaa1c0d798" class="instances-block">
                 <div data-ui="HomeView:07c360f67ff2" class="instances-head">
                     <h2 data-ui="HomeView:ab67b2084be9">最近游戏</h2>
+                    <!-- 版本管理一级化（用户拍板）：管理入口升为显眼 accent 药丸 + grid 图标，直达游戏版本页 -->
                     <button
                         data-ui="HomeView:1f3a4e95599d"
                         class="manage-instances"
+                        title="打开游戏版本页：下载、导入与管理全部实例"
                         @click="store.currentView = 'game'"
                     >
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.7"
-                        >
-                            <rect x="3" y="3" width="7" height="7" rx="1" />
-                            <rect x="14" y="3" width="7" height="7" rx="1" />
-                            <rect x="3" y="14" width="7" height="7" rx="1" />
-                            <rect x="14" y="14" width="7" height="7" rx="1" />
-                        </svg>
-                        管理实例
+                        <UiGlyph name="grid" :size="15" />
+                        管理版本
                     </button>
                 </div>
 
@@ -1926,7 +1957,8 @@ onUnmounted(() => {
     max-width: 1160px;
     margin: 0 auto;
     min-width: 0;
-    min-height: calc(100vh - 132px);
+    /* 首页一屏化：不再用 min-height 硬撑视口高度（矮视口会被它顶出滚动），高度交给内容自适应 */
+    min-height: 0;
 }
 .home-main {
     display: flex;
@@ -2415,24 +2447,28 @@ onUnmounted(() => {
     background: var(--accent-grad);
     flex: none;
 }
+/* 版本管理一级化：管理入口升为 accent 药丸（页内次级主入口，不与启动键的金档打架） */
 .manage-instances {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    min-height: 34px;
-    padding: 0 12px;
-    border: 1px solid var(--border);
-    border-radius: 9px;
-    background: var(--card-2);
-    color: var(--text-dim);
+    min-height: 36px;
+    padding: 0 14px;
+    border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent-2);
     font-family: inherit;
-    font-size: 12px;
-    font-weight: 550;
+    font-size: 13px;
+    font-weight: 650;
     cursor: pointer;
+    transition:
+        border-color 0.15s ease,
+        background 0.15s ease;
 }
 .manage-instances:hover {
-    color: var(--text);
-    border-color: var(--border-strong);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 22%, var(--card-2));
 }
 .manage-instances svg {
     width: 15px;
@@ -2982,9 +3018,6 @@ onUnmounted(() => {
     .runtime-chevron {
         display: none;
     }
-    .instance-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
 }
 
 @media (max-width: 1010px) {
@@ -3059,23 +3092,7 @@ onUnmounted(() => {
     }
 }
 
-@media (max-height: 760px) {
-    .home-dashboard {
-        min-height: 660px;
-    }
-    .hero-card {
-        height: 340px;
-    }
-    .hero-content {
-        padding-top: 30px;
-    }
-    .skin-stage {
-        height: 230px;
-    }
-    .skin-panel {
-        min-height: 322px;
-    }
-}
+/* 旧 max-height:760px 压缩档已废弃（其 min-height:660px 恰是矮视口滚动的元凶），由文末「首页一屏化」高度分档接管 */
 
 .home-dashboard {
     grid-template-columns: minmax(0, 1fr) minmax(250px, 290px);
@@ -3135,10 +3152,12 @@ onUnmounted(() => {
 .runtime-item {
     padding: 10px 12px;
 }
+/* 最近实例收纳：auto-fill 网格按容器宽度自适应列数（宽屏 1 行放下 4 张，960 宽 2×2），
+ * 不再纵向堆 4 行把页面顶出视口（首页一屏化） */
 .instance-grid {
-    display: flex !important;
-    flex-direction: column;
-    gap: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 10px;
 }
 .home-dashboard .instance-card {
     display: grid;
@@ -3242,7 +3261,9 @@ onUnmounted(() => {
         rgba(0, 0, 0, 0.68)
     );
 }
-@media (max-width: 1100px) {
+/* 单列堆叠断点下移到 860px：861-1100px 宽（含 960 目标视口）保持双栏，
+ * 右栏只留 账号+皮肤 两张高频卡，横向空间换一屏高度 */
+@media (max-width: 860px) {
     .home-dashboard {
         grid-template-columns: minmax(0, 1fr);
     }
@@ -3327,6 +3348,273 @@ onUnmounted(() => {
 }
 .hero-card .hero-image {
     object-position: center 42%;
+}
+
+/* ---------------- 版本管理一级化：hero 大号当前实例卡 ----------------
+ * 图标 + 实例名 + 加载器/MC tag + chevron-down；点击/回车/空格展开 version-menu。
+ * 置于内容栈最前 = 视觉动线第一落点（HMCL 版本卡模型；launch 右侧小箭头降为次入口）。 */
+.hero-version-card {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    width: fit-content;
+    max-width: 100%;
+    padding: 9px 16px 9px 9px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 14px;
+    background: rgba(9, 13, 14, 0.5);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    color: inherit;
+    text-align: left;
+    font-family: inherit;
+    cursor: pointer;
+    transition:
+        border-color 0.18s ease,
+        background 0.18s ease;
+}
+/* 行 hover 统一规则：底色/边框提亮 + chevron 点亮，不做位移 */
+.hero-version-card:hover {
+    border-color: color-mix(in srgb, var(--accent) 55%, rgba(255, 255, 255, 0.32));
+    background: rgba(15, 24, 25, 0.62);
+}
+.hero-version-card:hover .hero-version-chevron {
+    color: #fff;
+}
+.hero-version-card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+.hero-version-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    flex: none;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.82);
+}
+.hero-version-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    image-rendering: pixelated;
+}
+.hero-version-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+}
+.hero-version-card h1 {
+    margin: 0;
+}
+/* tag 行随卡片布局，不再吃基础样式的 16px 上边距（间距由 copy 的 gap 统一管） */
+.hero-version-card .hero-edition {
+    margin-top: 0;
+}
+.hero-version-chevron {
+    flex: none;
+    color: rgba(255, 255, 255, 0.75);
+    transition: transform 0.18s ease;
+}
+.hero-version-card[aria-expanded='true'] .hero-version-chevron {
+    transform: rotate(180deg);
+}
+/* 无横幅浅底变体：卡片转实底深字，随既有 .no-banner 家族 */
+.no-banner .hero-version-card {
+    background: var(--card-2);
+    border-color: var(--border);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+.no-banner .hero-version-card:hover {
+    border-color: var(--border-strong);
+    background: var(--hover);
+}
+.no-banner .hero-version-icon {
+    border-color: var(--border);
+    background: var(--card);
+    color: var(--text-dim);
+}
+.no-banner .hero-version-chevron {
+    color: var(--text-dim);
+}
+.no-banner .hero-version-card:hover .hero-version-chevron {
+    color: var(--text);
+}
+
+/* ---------------- 首页一屏化（2026-11-14 用户拍板）----------------
+ * 1360×860 与 960×620 零滚动（desktop 分支；Android 台有自己的一屏布局不受限）。
+ * 手段：hero 高度分档 + 实例网格 auto-fill 收纳 + 低频板块（创作者/热力图）矮视口不渲染。
+ * 视口预算：chrome(顶栏+logo 160) + content padding(48/32) 之后，860h≈652px、620h≈428px。 */
+@media (max-height: 900px) {
+    .home-dashboard {
+        min-height: 0;
+    }
+    .hero-card {
+        height: 300px;
+        max-height: none;
+        min-height: 0;
+    }
+    .hero-content {
+        padding: 20px 24px 16px;
+    }
+    .hero-content h1,
+    .hero-content h1.long-name {
+        font-size: clamp(22px, 2.4vw, 30px);
+    }
+    .launch-combo {
+        height: 62px;
+    }
+    .runtime-strip {
+        min-height: 56px;
+    }
+    .instances-block {
+        padding: 12px;
+        margin-top: 0;
+    }
+    /* 紧凑行卡片在收纳网格里隐藏「上次游玩」（信息 GameView 行内也有，低频让位一屏） */
+    .home-dashboard .instance-card .instance-last {
+        display: none;
+    }
+    .home-side {
+        gap: 12px;
+    }
+    .home-side .skin-stage {
+        height: 190px;
+    }
+    /* 低频板块收纳：创作者卡与启动热力图让位（信息入口在对应功能区仍在） */
+    .home-creator,
+    .home-heatmap {
+        display: none;
+    }
+}
+@media (max-height: 700px) {
+    .hero-card {
+        height: 196px;
+    }
+    .hero-content {
+        padding: 14px 20px 12px;
+    }
+    .hero-kicker {
+        min-height: 0;
+        padding: 3px 10px;
+        font-size: 12px;
+    }
+    .hero-content h1,
+    .hero-content h1.long-name {
+        font-size: clamp(19px, 2.2vw, 25px);
+    }
+    /* 装饰性动画文案在矮 hero 里让位（196px 高度装不下第四行） */
+    .hero-scene-copy {
+        display: none;
+    }
+    /* 1080px 断点的两行堆叠在矮视口放不下：恢复单行，主操作与次操作并排 */
+    .hero-actions {
+        flex-wrap: nowrap;
+        align-items: flex-end;
+        gap: 10px;
+    }
+    .hero-secondary-actions {
+        width: auto;
+    }
+    .hero-version-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+    }
+    .hero-version-card {
+        gap: 10px;
+        padding: 6px 12px 6px 6px;
+    }
+    .hero-edition {
+        margin-top: 0;
+        gap: 8px;
+        font-size: 13px;
+    }
+    .launch-combo,
+    .launch-main {
+        min-height: 0;
+    }
+    .launch-combo {
+        height: 52px;
+        min-width: 0;
+        /* 抵消 1080px 断点的 width:100%——矮视口单行布局里主次操作并排 */
+        width: auto;
+        flex: 1;
+    }
+    .launch-main {
+        font-size: 16px;
+        padding: 0 18px;
+    }
+    .launch-arrow {
+        width: 42px;
+    }
+    .hero-settings,
+    .hero-more {
+        height: 40px;
+    }
+    .hero-settings {
+        min-width: 0;
+    }
+    .home-main {
+        gap: 10px;
+    }
+    .runtime-strip {
+        min-height: 48px;
+        padding: 6px;
+    }
+    .runtime-item {
+        padding: 6px 10px;
+    }
+    .runtime-item > svg:first-child {
+        width: 20px;
+        height: 20px;
+    }
+    .instances-block {
+        padding: 10px;
+    }
+    .instances-head {
+        margin-bottom: 6px;
+    }
+    .instances-head h2 {
+        font-size: 15px;
+    }
+    .home-dashboard .instance-card {
+        min-height: 52px;
+        padding: 6px 10px;
+        gap: 8px;
+    }
+    .home-dashboard .instance-card .instance-icon {
+        width: 28px;
+        height: 28px;
+    }
+    .instance-grid {
+        gap: 8px;
+    }
+    .home-side {
+        gap: 10px;
+    }
+    .account-panel {
+        min-height: 0;
+        padding: 12px;
+    }
+    .account-provider {
+        min-height: 40px;
+        margin-top: 10px;
+    }
+    .skin-panel {
+        padding: 12px;
+    }
+    .home-side .skin-stage {
+        height: 140px;
+    }
 }
 
 /* ---------------- Android 主页（按手绘布景落地） ----------------

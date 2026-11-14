@@ -98,7 +98,6 @@ pub mod gameoptions;
 pub mod gate;
 pub mod hero_scenes;
 pub mod importlauncher;
-pub mod inlineweb;
 pub mod installer;
 pub mod ipc;
 pub mod javaman;

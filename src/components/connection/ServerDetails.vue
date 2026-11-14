@@ -211,7 +211,10 @@ const boundOptions = computed(() => [
                 :aria-expanded="moreOpen"
                 aria-haspopup="menu"
                 aria-label="更多服务器操作"
-                @click="moreOpen = !moreOpen; moreAnchor = $event.currentTarget"
+                @click="
+                    moreOpen = !moreOpen;
+                    moreAnchor = ($event.currentTarget as HTMLElement);
+                "
             >
                 <UiGlyph name="more" :size="14" />
             </button>

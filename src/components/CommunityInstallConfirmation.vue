@@ -99,6 +99,7 @@ const canInstall = computed(
         v-if="detail"
         :reference="detail"
         :allow-download="false"
+        variant="modal"
         @close="detail = null"
     />
 </template>

@@ -146,15 +146,16 @@ async function cancelDownload() {
                         }}</strong>
                     </div>
                     <div
-                        class="mod-progress-track"
+                        class="progress-bar mod-progress-track"
                         role="progressbar"
                         aria-label="MOD 下载与安装进度"
                         :aria-valuenow="progressPercent"
                         aria-valuemin="0"
                         aria-valuemax="100"
-                        :class="{ indeterminate: progressPercent == null }"
+                        :class="{ 'is-indeterminate': progressPercent == null }"
                     >
                         <div
+                            class="progress-bar-fill"
                             :style="
                                 progressPercent == null
                                     ? undefined
@@ -248,6 +249,7 @@ async function cancelDownload() {
         v-if="detail"
         :reference="detail"
         :allow-download="false"
+        variant="modal"
         @close="detail = null"
     />
 </template>
@@ -297,21 +299,10 @@ async function cancelDownload() {
     flex: none;
     font-variant-numeric: tabular-nums;
 }
+/* 进度条基础形态走全局 .progress-bar；此处只留差异：外边距与底色 */
 .mod-progress-track {
-    height: 6px;
     margin: var(--space-3) 0;
-    overflow: hidden;
-    border-radius: 999px;
     background: var(--border);
-}
-.mod-progress-track > div {
-    height: 100%;
-    border-radius: inherit;
-    background: var(--accent);
-}
-.mod-progress-track.indeterminate > div {
-    width: 35%;
-    animation: mod-download 1.4s ease-in-out infinite;
 }
 .mod-progress-detail {
     display: flex;
@@ -320,21 +311,6 @@ async function cancelDownload() {
     color: var(--text-dim);
     font-size: var(--text-xs);
     line-height: 1.5;
-}
-@keyframes mod-download {
-    from {
-        transform: translateX(-100%);
-    }
-    to {
-        transform: translateX(290%);
-    }
-}
-@media (prefers-reduced-motion: reduce) {
-    .mod-progress-track.indeterminate > div {
-        animation: none;
-        width: 100%;
-        opacity: 0.55;
-    }
 }
 .dependency-row {
     display: flex;

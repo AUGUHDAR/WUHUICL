@@ -364,7 +364,7 @@ function pick(key: ConnectPage) {
 .pick-list {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 16px;
+    gap: var(--card-gap);
 }
 .pick-card {
     padding: 20px;

@@ -151,12 +151,19 @@ let offEvent: (() => void) | undefined;
 
 function onEvent(payload: { type: string; data: unknown }): void {
     if (payload.type === 'status') {
+        const data = (payload.data ?? {}) as Partial<TcStatus>;
         status.value = {
-            toolVersion: status.value?.toolVersion,
-            binaryPath: status.value?.binaryPath,
-            binaryReady: status.value?.binaryReady ?? false,
-            running: status.value?.running ?? false,
-            ...(payload.data as TcStatus)
+            toolVersion: data.toolVersion ?? status.value?.toolVersion,
+            binaryPath: data.binaryPath ?? status.value?.binaryPath,
+            binaryReady: data.binaryReady ?? status.value?.binaryReady ?? false,
+            running: data.running ?? status.value?.running ?? false,
+            phase: data.phase ?? 'idle',
+            room: data.room,
+            url: data.url,
+            stateRaw: data.stateRaw,
+            error: data.error,
+            downloaded: data.downloaded,
+            total: data.total
         };
         return;
     }
@@ -174,7 +181,7 @@ function onEvent(payload: { type: string; data: unknown }): void {
 
 async function refresh(): Promise<void> {
     try {
-        status.value = await window.kamucl.invoke('tc:status');
+        status.value = (await window.kamucl.invoke('tc:status')) as TcStatus;
         if (status.value?.error) error.value = status.value.error;
         const role = terracottaRole(status.value);
         if (role !== 'none') mode.value = role === 'host' ? 'host' : 'join';
@@ -208,11 +215,11 @@ async function start(): Promise<void> {
     busy.value = true;
     error.value = '';
     try {
-        const result = await window.kamucl.invoke<TcStatus>('tc:start', {
+        const result = (await window.kamucl.invoke('tc:start', {
             mode: mode.value,
             code: roomCode.value.trim().toUpperCase(),
             playerName: playerName.value || undefined
-        });
+        })) as TcStatus;
         status.value = result;
         tab.value = 'session';
     } catch (e) {
@@ -247,7 +254,9 @@ async function copy(value?: string | null): Promise<void> {
 }
 
 onMounted(async () => {
-    offEvent = window.kamucl.on('tc:event', onEvent);
+    offEvent = window.kamucl.on('tc:event', (raw: unknown) =>
+        onEvent(raw as { type: string; data: unknown })
+    );
     await refresh();
     if (!toolReady.value) tab.value = 'tool';
 });
@@ -544,8 +553,8 @@ onUnmounted(() => {
                             ></div>
                         </div>
                         <p class="connection-muted">
-                            {{ ((status.downloaded || 0) / 1048576).toFixed(1) }} MB{{
-                                status.total ? ' / ' + (status.total / 1048576).toFixed(1) + ' MB' : ''
+                            {{ ((status?.downloaded || 0) / 1048576).toFixed(1) }} MB{{
+                                status?.total ? ' / ' + (status.total / 1048576).toFixed(1) + ' MB' : ''
                             }}
                             · 下载完成后自动校验并解压
                         </p>
@@ -579,7 +588,7 @@ onUnmounted(() => {
                         title="陶瓦工具"
                         :subtitle="`官方工具已安装并通过完整性校验${status?.toolVersion ? ' · ' + status.toolVersion : ''}。`"
                     >
-                        <p class="mono tc-binary-path">{{ status.binaryPath }}</p>
+                        <p class="mono tc-binary-path">{{ status?.binaryPath }}</p>
                         <p class="connection-muted">
                             极端情况下校验失败时，删除后回到这里重新下载即可。
                         </p>

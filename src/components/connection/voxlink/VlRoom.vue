@@ -11,7 +11,14 @@ const tick = ref(Date.now());
 const timer = window.setInterval(() => (tick.value = Date.now()), 1000);
 onBeforeUnmount(() => window.clearInterval(timer));
 
-const roomCode = computed(() => String(vl.room?.code || vl.room?.room?.code || ''));
+const roomCode = computed(
+    () =>
+        String(
+            vl.room?.code ||
+                (vl.room?.room as Record<string, unknown> | undefined)?.code ||
+                ''
+        )
+);
 const roomName = computed(() => String(vl.room?.name || '未命名房间'));
 const isHost = computed(() => vl.state === 'hosting' || Boolean(vl.room?.isHost));
 const address = computed(() => (vl.connection?.status === 'success' ? vl.connection.address || '' : ''));

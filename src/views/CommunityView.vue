@@ -38,6 +38,7 @@ import {
     usableCommunityInstance,
     type CommunityVersionSource
 } from '../communityVersionSelection';
+const previousSession = readCommunitySession();
 const currentInstance = selectedInstance;
 const allTargets = ref<InstalledVersion[]>([]);
 const downloadQueue = useCommunityDownloadQueue();
@@ -301,8 +302,8 @@ const categoryOptions: Array<{ value: string; label: string }> = [
 // ---------------- 搜索与列表 ----------------
 const results = ref<CommunityResult[]>(previousSession?.results ?? []);
 const loading = ref(false);
-/** 结果切换淡入标记（无感刷新：旧结果在位，新结果轻淡入） */
-const swapAnim = ref('');
+/** 结果切换淡入标记（无感刷新：旧结果在位，新结果轻淡入）；'' = 关闭，true = 淡入中 */
+const swapAnim = ref<boolean | ''>('');
 const loadingMore = ref(false);
 const searched = ref(previousSession?.searched ?? false); // 是否已发起过搜索（区分初始空态）
 const loadError = ref(previousSession?.error ?? '');
@@ -1960,7 +1961,7 @@ function confirmDownload() {
 }
 .result-list {
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
-    gap: 16px;
+    gap: var(--card-gap);
 }
 /* 无感刷新：条件变化重搜时旧结果保留在位，新结果就位后整列轻淡入（不闪白不跳动） */
 .result-list.swap-in {
