@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref } from 'vue';
 import ConnectionStatus from '../components/connection/ConnectionStatus.vue';
+import UiGlyph from '../components/UiGlyph.vue';
 import '../components/connection/connection.css';
 
 const FrpPanel = defineAsyncComponent(() => import('../components/connection/FrpPanel.vue'));
@@ -124,8 +125,8 @@ function pick(key: ConnectPage) {
                                     data-ui="FriendConnectView:3ff11405f5c7"
                                     class="pick-go"
                                     aria-hidden="true"
-                                    >→</span
-                                >
+                                    ><UiGlyph name="arrow-right" :size="18"
+                                /></span>
                             </button>
                         </div>
                     </template>
@@ -151,7 +152,7 @@ function pick(key: ConnectPage) {
                                         class="btn btn-ghost"
                                         @click="page = 'choose'"
                                     >
-                                        ← 更换方式
+                                        <UiGlyph name="arrow-left" :size="14" /> 更换方式
                                     </button>
                                 </div>
                             </header>
@@ -263,10 +264,10 @@ function pick(key: ConnectPage) {
         transform: translateY(0);
     }
 }
+/* 行 hover 统一规则（L 节）：背景 var(--hover) + 边框 border-strong 提亮，无位移无阴影 */
 .pick-card:hover {
-    transform: none;
-    border-color: color-mix(in srgb, var(--accent) 55%, var(--border-strong));
-    box-shadow: 0 14px 34px color-mix(in srgb, var(--accent) 15%, transparent);
+    background: var(--hover);
+    border-color: var(--border-strong);
 }
 .pick-card:active {
     transform: none;

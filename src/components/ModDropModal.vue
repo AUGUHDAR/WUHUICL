@@ -554,6 +554,14 @@ summary {
     border-color: var(--danger-border);
     background: var(--danger-soft);
 }
+/* 行 hover 统一规则（inventory F：此前零 hover）：可交互行 hover = 背景 var(--hover)，无位移；
+   选中态（active）与失败态（failed）保留各自成套底色，不被 hover 覆盖 */
+.ver-option:hover:not(.active) {
+    background: var(--hover);
+}
+.mod-row:hover:not(.failed) {
+    background: var(--hover);
+}
 .mod-icon {
     width: 34px;
     height: 34px;

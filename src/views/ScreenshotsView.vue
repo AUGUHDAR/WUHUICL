@@ -14,6 +14,8 @@ import ResourceScopeFields from '../components/ResourceScopeFields.vue';
 import ResourcePathChip from '../components/ResourcePathChip.vue';
 import ResourcePagination from '../components/ResourcePagination.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import EmptyState from '../components/EmptyState.vue';
+import UiGlyph from '../components/UiGlyph.vue';
 import { useSweepSelect } from '../composables/sweepSelect';
 const PAGE_SIZE = 24;
 const data = ref<ScreenshotCatalog>({ entries: [], warnings: [], folderRoot: '', instances: [] });
@@ -408,7 +410,10 @@ onUnmounted(() => {
                     :disabled="busy || loading"
                     @click="refresh(false, true)"
                 >
-                    {{ loading ? '读取中…' : '↻ 刷新' }}
+                    <!-- 文本符号 ↻ 收编 UiGlyph refresh（inventory H；GameView 同款范式） -->
+                    <span v-if="loading" class="spin"></span>
+                    <UiGlyph v-else name="refresh" :size="14" />
+                    {{ loading ? '读取中' : '刷新' }}
                 </button>
             </div>
         </header>
@@ -571,33 +576,37 @@ onUnmounted(() => {
                     </div>
                 </div>
             </div>
-            <div
+            <!-- 空态收编 EmptyState（inventory B）：双分支文案拆 title/description，两颗引导按钮进 #action -->
+            <EmptyState
                 data-ui="ScreenshotsView:9196e415ffb9"
                 v-else-if="!rows.length && !error"
-                class="card empty"
-            >
-                <span>{{
+                icon="image"
+                :title="data.entries.length ? '没有匹配的截图' : '暂无截图'"
+                :description="
                     data.entries.length
-                        ? '没有匹配的截图，请调整搜索或筛选。'
-                        : '暂无截图。游戏内按截图键（默认 F2）拍摄后会保存在实例的 screenshots 文件夹，回到这里刷新即可；也可以把图片文件拖进来，导入为当前实例的截图。'
-                }}</span
-                ><button
-                    data-ui="ScreenshotsView:c0ed13df1c01"
-                    v-if="data.entries.length"
-                    class="btn btn-ghost"
-                    @click="query = ''"
-                >
-                    清除筛选</button
-                ><button
-                    data-ui="ScreenshotsView:b6f4c2a11d93"
-                    v-else
-                    class="btn btn-gold"
-                    :disabled="busy"
-                    @click="importPick"
-                >
-                    导入截图…
-                </button>
-            </div>
+                        ? '请调整搜索或筛选条件。'
+                        : '游戏内按截图键（默认 F2）拍摄后会保存在实例的 screenshots 文件夹，回到这里刷新即可；也可以把图片文件拖进来，导入为当前实例的截图。'
+                "
+            >
+                <template #action>
+                    <button
+                        data-ui="ScreenshotsView:c0ed13df1c01"
+                        v-if="data.entries.length"
+                        class="btn btn-ghost"
+                        @click="query = ''"
+                    >
+                        清除筛选</button
+                    ><button
+                        data-ui="ScreenshotsView:b6f4c2a11d93"
+                        v-else
+                        class="btn btn-gold"
+                        :disabled="busy"
+                        @click="importPick"
+                    >
+                        导入截图…
+                    </button>
+                </template>
+            </EmptyState>
             <div
                 v-else-if="rows.length"
                 :inert="loading || !!error"
@@ -618,7 +627,8 @@ onUnmounted(() => {
                     @click="toggleSelect(entry.id)"
                     @keydown.enter.prevent="toggleSelect(entry.id)"
                 >
-                    <span class="shot-check" aria-hidden="true">✓</span>
+                    <!-- 文本符号 ✓ 收编 UiGlyph check（inventory H；选中角标） -->
+                    <span class="shot-check" aria-hidden="true"><UiGlyph name="check" :size="12" /></span>
                     <div
                         data-ui="ScreenshotsView:3867dfbdf0e7"
                         class="shot-thumb"
@@ -891,15 +901,15 @@ onUnmounted(() => {
     top: 10px;
     left: 10px;
     z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 20px;
     height: 20px;
     border-radius: 50%;
     border: 1px solid var(--border);
     background: var(--card);
     color: transparent;
-    font-size: 12px;
-    line-height: 18px;
-    text-align: center;
     pointer-events: none;
 }
 .shot-card.selected .shot-check {
@@ -959,9 +969,9 @@ onUnmounted(() => {
 .pagination {
     justify-content: center;
 }
-.empty {
-    text-align: center;
-    padding: 40px;
+/* 空态（EmptyState 组件）在工作区内保持无卡片外观、高度与原占位一致 */
+.screenshot-workspace > .empty-state {
+    min-height: 220px;
 }
 .failed {
     color: var(--danger, #e76b75);

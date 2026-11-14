@@ -363,13 +363,18 @@ onMounted(() => {
     align-items: center;
     gap: var(--space-2);
     min-height: 32px;
-    padding: var(--space-1) var(--space-2);
+    /* 呼吸间距（用户点名勾选框贴边）：单选框与容器边距对齐 --space-3，与 ModDropModal ver-option 同口径 */
+    padding: var(--space-1) var(--space-3);
     border-radius: var(--radius-sm);
     cursor: pointer;
     font-size: var(--text-xs);
 }
 .dup-file.keep {
     background: var(--accent-soft);
+}
+/* 可点选行 hover 统一规则（inventory F 同源）：背景 var(--hover)，无位移；保留态不被覆盖 */
+.dup-file:hover:not(.keep) {
+    background: var(--hover);
 }
 .dup-file input {
     accent-color: var(--accent);

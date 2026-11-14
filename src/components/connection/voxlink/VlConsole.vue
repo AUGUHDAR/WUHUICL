@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** VoxLink 联机控制台：进页零阻塞（就绪直接用，没就绪显示后台获取进度），六个分区。 */
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue';
+import TabPills from '../../TabPills.vue';
 import { useVoxlink, vl, section, type VlSection } from './useVoxlink';
 import './voxlink.css';
 
@@ -31,6 +32,14 @@ const panels: Record<VlSection, unknown> = {
 
 const currentPanel = computed(() => panels[section.value]);
 const inRoom = computed(() => vl.alive && vl.state !== 'idle');
+/* 分区导航（TabPills 收编）：房间进行中显示红点 */
+const navItems = computed(() =>
+    NAV.map((item) => ({
+        value: item.key,
+        label: item.label,
+        dot: item.key === 'room' && inRoom.value
+    }))
+);
 const { ensure } = useVoxlink();
 
 const retrying = ref(false);
@@ -92,17 +101,8 @@ onMounted(() => {
         </div>
 
         <template v-else>
-            <nav class="vl-nav" aria-label="联机分区">
-                <button
-                    v-for="item in NAV"
-                    :key="item.key"
-                    class="vl-nav-item"
-                    :class="{ active: section === item.key }"
-                    @click="section = item.key"
-                >
-                    {{ item.label }}<span v-if="item.key === 'room' && inRoom" class="dot"></span>
-                </button>
-            </nav>
+            <!-- 分区导航（TabPills 收编：与全站分段单选同形态） -->
+            <TabPills v-model="section" :items="navItems" aria-label="联机分区" />
 
             <div class="vl-body" :key="section">
                 <component :is="currentPanel" />

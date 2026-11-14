@@ -2,6 +2,8 @@
 import { terracottaRole } from '@shared/uiPresentation';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import UiGlyph from '../UiGlyph.vue';
+import TabPills from '../TabPills.vue';
+import EmptyState from '../EmptyState.vue';
 import ConnectionPanel from './ConnectionPanel.vue';
 import ConnectionStatus from './ConnectionStatus.vue';
 import { toast } from '../../store';
@@ -38,6 +40,21 @@ const logs = ref<Array<{ ts: string; text: string }>>([]);
 const mode = ref<'host' | 'join'>('host');
 const roomCode = ref('');
 const playerName = ref('');
+
+/* 分区 tab（TabPills 收编）：会话进行中显示红点 */
+const tabItems = computed(() =>
+    NAV.map((item) => ({
+        value: item.key,
+        label: item.label,
+        dot: item.key === 'session' && inSession.value
+    }))
+);
+/* 下载进度（全局 .progress-bar 收编，替代原生 <progress>） */
+const downloadPercent = computed(() => {
+    const s = status.value;
+    if (!s || !s.total) return null;
+    return Math.min(100, Math.round(((s.downloaded || 0) / s.total) * 100));
+});
 
 /** 官方房间码格式：U/ 前缀 + 四段各 4 位（burningtnt/Terracotta） */
 const ROOM_CODE_RE = /^U\/[A-Z0-9]{4}(-[A-Z0-9]{4}){3}$/;
@@ -241,19 +258,13 @@ onUnmounted(() => {
 
 <template>
     <div data-ui="TerracottaPanel:8b1e2f3973ef" class="tc-console">
-        <!-- 分区导航（VoxLink 同款胶囊） -->
-        <nav class="connect-tabs" aria-label="陶瓦分区" data-ui="tc:nav">
-            <button
-                v-for="item in NAV"
-                :key="item.key"
-                class="connect-tab"
-                :class="{ active: tab === item.key }"
-                :data-ui="'tc:tab:' + item.key"
-                @click="tab = item.key"
-            >
-                {{ item.label }}<span v-if="item.key === 'session' && inSession" class="dot"></span>
-            </button>
-        </nav>
+        <!-- 分区导航（TabPills 收编：与全站分段单选同形态） -->
+        <TabPills
+            v-model="tab"
+            :items="tabItems"
+            aria-label="陶瓦分区"
+            data-ui="tc:nav"
+        />
 
         <p data-ui="TerracottaPanel:1861deb0662b" v-if="error" class="connection-error" role="alert">
             {{ error }}
@@ -492,14 +503,20 @@ onUnmounted(() => {
                         </button>
                     </div>
                 </ConnectionPanel>
-                <div v-else class="tc-empty" data-ui="tc:session-empty">
-                    <h3>现在没有进行中的会话</h3>
-                    <p>去创建一个房间把房号发给朋友，或者加入朋友的房间。</p>
-                    <div class="connection-actions tc-empty-actions">
-                        <button class="btn btn-gold" @click="tab = 'create'">去创建房间</button>
-                        <button class="btn btn-ghost" @click="tab = 'join'">去加入房间</button>
-                    </div>
-                </div>
+                <!-- 空态（EmptyState 收编：说明 + 双入口，UX「空状态指引」） -->
+                <EmptyState
+                    v-else
+                    data-ui="tc:session-empty"
+                    title="现在没有进行中的会话"
+                    description="去创建一个房间把房号发给朋友，或者加入朋友的房间。"
+                >
+                    <template #action>
+                        <div class="connection-actions tc-empty-actions">
+                            <button class="btn btn-gold" @click="tab = 'create'">去创建房间</button>
+                            <button class="btn btn-ghost" @click="tab = 'join'">去加入房间</button>
+                        </div>
+                    </template>
+                </EmptyState>
             </template>
 
             <!-- 工具 -->
@@ -510,12 +527,22 @@ onUnmounted(() => {
                     subtitle="首次使用需要获取一次官方工具；下载完成后自动校验 SHA-256 并解压，之后无需再下载。"
                 >
                     <template v-if="downloading">
-                        <progress
+                        <!-- 原生 <progress> → 全局 .progress-bar 收编（UI_SYSTEM §5 进度条唯一形态） -->
+                        <div
                             data-ui="TerracottaPanel:6f7c029c3008"
-                            class="tc-progress"
-                            :value="status.downloaded || 0"
-                            :max="status.total || undefined"
-                        ></progress>
+                            class="progress-bar tc-progress"
+                            :class="{ 'is-indeterminate': downloadPercent == null }"
+                            role="progressbar"
+                            aria-label="陶瓦工具下载进度"
+                            :aria-valuenow="downloadPercent ?? undefined"
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                        >
+                            <div
+                                class="progress-bar-fill"
+                                :style="downloadPercent == null ? undefined : { width: downloadPercent + '%' }"
+                            ></div>
+                        </div>
                         <p class="connection-muted">
                             {{ ((status.downloaded || 0) / 1048576).toFixed(1) }} MB{{
                                 status.total ? ' / ' + (status.total / 1048576).toFixed(1) + ' MB' : ''
@@ -635,8 +662,6 @@ onUnmounted(() => {
 }
 .tc-progress {
     width: 100%;
-    accent-color: var(--accent);
-    height: 8px;
     margin: 4px 0;
 }
 .tc-download-btn {
@@ -788,30 +813,6 @@ onUnmounted(() => {
     font-weight: 700;
 }
 
-/* 会话空状态 */
-.tc-empty {
-    border: 1px dashed var(--border-strong);
-    padding: 30px 20px;
-    text-align: center;
-    border-radius: var(--radius-md);
-    color: var(--text-dim);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    background: var(--card-2);
-}
-.tc-empty h3 {
-    margin: 0;
-    color: var(--text);
-    font-size: 15px;
-}
-.tc-empty p {
-    margin: 0;
-    max-width: 440px;
-    line-height: 1.7;
-    font-size: 13px;
-}
 .tc-empty-actions {
     justify-content: center;
 }

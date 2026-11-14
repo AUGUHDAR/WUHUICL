@@ -24,6 +24,12 @@
 .modal { max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; }
 .modal :is(input, select, textarea) { min-width: 0; max-width: 100%; }
 .modal-actions { flex-wrap: wrap; }
+/* chrome 变体：带边线的 footer 形态（自身贴底、无 margin-top；ModVersion/ModMigration 族） */
+.modal-actions--chrome {
+  margin-top: 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
 
 /* ---------------- 页内既有语义类的节奏 ---------------- */
 .settings-page { max-width: 1120px; }

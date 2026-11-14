@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** 工单：附件走系统选择框或拖进窗口，列表靠 poll 与服务端对齐。 */
 import UiGlyph from '../../UiGlyph.vue';
+import EmptyState from '../../EmptyState.vue';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { toast } from '../../../store';
 import { call, onDropPaths, vl } from './useVoxlink';
@@ -181,7 +182,7 @@ onMounted(() => void load());
             </div>
             <div class="vl-row">
                 <button v-if="view === 'list'" class="btn btn-ghost btn-sm" :disabled="busy" @click="load">刷新</button>
-                <button v-if="view === 'list'" class="btn btn-sm" @click="view = 'create'">新建工单</button>
+                <button v-if="view === 'list'" class="btn btn-gold btn-sm" @click="view = 'create'">新建工单</button>
                 <button v-if="view !== 'list'" class="btn btn-ghost btn-sm" @click="view = 'list'">返回列表</button>
             </div>
         </div>
@@ -189,7 +190,7 @@ onMounted(() => void load());
         <p v-if="error" class="vl-error" role="alert">{{ error }}</p>
 
         <template v-if="view === 'list'">
-            <div v-if="busy && !tickets.length" class="vl-empty">正在同步工单…</div>
+            <div v-if="busy && !tickets.length" class="vl-status" role="status">正在同步工单…</div>
             <div v-else-if="tickets.length" class="vl-grid">
                 <article v-for="t in pageTickets" :key="str(t.id)" class="vl-room">
                     <div class="vl-room-meta">
@@ -198,10 +199,20 @@ onMounted(() => void load());
                     </div>
                     <div class="vl-room-name">{{ str(t.description) || '（没有描述）' }}</div>
                     <div class="vl-players">{{ stamp(t.lastTimeMs || t.timeMs) }}</div>
-                    <button class="btn btn-sm" @click="open(str(t.id))">查看</button>
+                    <button class="btn btn-ghost btn-sm" @click="open(str(t.id))">查看</button>
                 </article>
             </div>
-            <div v-else class="vl-empty">还没有工单</div>
+            <!-- 空态（EmptyState 收编：说明 + 入口） -->
+            <EmptyState
+                v-else
+                data-ui="voxlink:tickets-empty"
+                title="还没有工单"
+                description="遇到联机问题时在这里提交工单，附件可以拖进窗口；VoxLink 回复后回这里查看。"
+            >
+                <template #action>
+                    <button class="btn btn-gold" @click="view = 'create'">新建工单</button>
+                </template>
+            </EmptyState>
             <div v-if="tickets.length > PAGE" class="vl-actions">
                 <button class="btn btn-ghost btn-sm" :disabled="page <= 0" @click="page -= 1">上一页</button>
                 <span class="vl-hint">第 {{ page + 1 }} / {{ Math.ceil(tickets.length / PAGE) }} 页</span>
@@ -247,10 +258,10 @@ onMounted(() => void load());
                 ></textarea>
             </label>
 
+            <!-- 附件拖放区（专用样式，非空态） -->
             <div
-                class="vl-empty"
+                class="vl-dropzone"
                 :class="{ dropping }"
-                style="padding: 18px 12px; cursor: pointer"
                 @click="pickFiles"
                 @dragenter.prevent="dropping = true"
                 @dragover.prevent="dropping = true"
@@ -266,7 +277,7 @@ onMounted(() => void load());
             </div>
 
             <div class="vl-actions">
-                <button class="btn" :disabled="busy" @click="send">{{ isCreate ? '提交' : '发送追问' }}</button>
+                <button class="btn btn-gold" :disabled="busy" @click="send">{{ isCreate ? '提交' : '发送追问' }}</button>
                 <button v-if="!isCreate && detail" class="btn btn-ghost" :disabled="busy" @click="remove">删除工单</button>
             </div>
         </template>
@@ -274,11 +285,6 @@ onMounted(() => void load());
 </template>
 
 <style scoped>
-.vl-empty.dropping {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--accent-2);
-}
 .vl-pill.ok {
     cursor: pointer;
 }

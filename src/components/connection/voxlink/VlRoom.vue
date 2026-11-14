@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /** 我的房间：连接进度、地址、模组同步、日志、退房。 */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { call, phaseLabel, refresh, stop, vl } from './useVoxlink';
+import EmptyState from '../../EmptyState.vue';
+import { call, phaseLabel, refresh, section, stop, vl } from './useVoxlink';
 import { copyText } from '../../../api';
 import { toast } from '../../../store';
 import './voxlink.css';
@@ -72,9 +73,19 @@ const missing = computed(() => Number(gate.value?.missing ?? (gate.value?.rows a
 <template>
     <div data-ui="voxlink:room">
         <div v-if="!vl.alive" class="vl-card">
-            <div class="vl-empty">
-                现在没有进行中的房间。去大厅挑一个，或者自己开一个把房号发给朋友。
-            </div>
+            <!-- 空态（EmptyState 收编：说明 + 入口） -->
+            <EmptyState
+                data-ui="voxlink:room-empty"
+                title="现在没有进行中的房间"
+                description="去大厅挑一个房间加入，或者自己开一个把房号发给朋友。"
+            >
+                <template #action>
+                    <div class="vl-row vl-empty-actions">
+                        <button class="btn btn-gold btn-sm" @click="section = 'lobby'">去大厅看看</button>
+                        <button class="btn btn-ghost btn-sm" @click="section = 'create'">去创建房间</button>
+                    </div>
+                </template>
+            </EmptyState>
         </div>
 
         <template v-else>
@@ -95,7 +106,7 @@ const missing = computed(() => Number(gate.value?.missing ?? (gate.value?.rows a
 
                 <div v-if="address" class="vl-addr" style="margin-top: 12px">
                     <code>{{ address }}</code>
-                    <button class="btn btn-sm" @click="copy(address, '服务器地址已复制')">复制地址</button>
+                    <button class="btn btn-ghost btn-sm" @click="copy(address, '服务器地址已复制')">复制地址</button>
                 </div>
 
                 <ol v-if="address" class="vl-steps" style="margin-top: 12px">

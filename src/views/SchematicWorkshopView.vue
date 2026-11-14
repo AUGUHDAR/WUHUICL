@@ -1561,15 +1561,16 @@ onBeforeUnmount(() => {
 
 <template>
     <main ref="workspace" class="schematic-page" data-onboarding-id="schematic-preview-workspace">
+        <!-- 顶部进度条（inventory D）：全局 .progress-bar 基类 + scoped 覆盖定位/规格 -->
         <div
             v-if="loadingStage"
-            class="absolute inset-x-0 top-0 z-40 h-1 overflow-hidden bg-surface-5"
+            class="progress-bar schematic-progress-track"
             role="progressbar"
             :aria-label="loadingLabel"
             :aria-valuenow="Math.round(stageProgress(loadingStage))"
         >
             <div
-                class="h-full bg-brand transition-[width] duration-200"
+                class="progress-bar-fill schematic-progress-fill"
                 :style="{ width: `${stageProgress(loadingStage)}%` }"
             ></div>
         </div>
@@ -2386,6 +2387,24 @@ onBeforeUnmount(() => {
     flex-direction: column;
     overflow: hidden;
     background: var(--color-bg);
+}
+
+/* 顶部细进度条（inventory D；等价原 tw 工具类 absolute inset-x-0 top-0 z-40 h-1 bg-surface-5 / bg-brand）。
+   令牌取自 lab 桥接层（--surface-5/--color-brand）与全局动效令牌；总管在 ui-system.css
+   定义共享 .progress-bar 后替换为全局类。 */
+.schematic-progress-track {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    z-index: 40;
+    height: var(--space-1);
+    border-radius: 0;
+    background: var(--surface-5);
+}
+.schematic-progress-fill {
+    background: var(--color-brand);
+    border-radius: 0;
+    transition: width 0.2s var(--ease-out, ease);
 }
 
 .schematic-recent {

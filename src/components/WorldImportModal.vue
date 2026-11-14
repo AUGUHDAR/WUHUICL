@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { errText, getSettings, importWorld, listFolders, listLoaders, scanFolder } from '../api';
 import { refreshInstalled, store, toast } from '../store';
+import SelectMenu from './SelectMenu.vue';
 import type {
     GameFolder,
     InstalledVersion,
@@ -81,6 +82,54 @@ const canSubmit = computed(() => {
         (!newLoader.value || !!newLoaderVersion.value)
     );
 });
+
+/** 原生 select 收编 SelectMenu（inventory G）的选项清单 */
+const candidateOptions = computed(() =>
+    (props.info?.candidates ?? []).map((item) => ({
+        value: item.id,
+        label: item.worldName,
+        description: item.id
+    }))
+);
+const folderOptions = computed(() =>
+    folders.value.map((folder) => ({
+        value: folder.path,
+        label: folder.name + (folder.isDefault ? '（默认）' : ''),
+        description: folder.path
+    }))
+);
+const versionOptions = computed(() =>
+    orderedVersions.value.map((version) => ({
+        value: version.id,
+        label: version.id,
+        description: [
+            'MC ' + version.mcVersion,
+            version.loader || '',
+            candidate.value?.versionConfidence === 'exact' &&
+            version.mcVersion === candidate.value.minecraftVersion
+                ? '推荐：版本一致'
+                : ''
+        ]
+            .filter(Boolean)
+            .join(' · '),
+        disabled: version.incomplete || version.failed,
+        disabledReason: version.incomplete
+            ? '下载未完成，不能作为导入目标'
+            : version.failed
+              ? '安装失败，不能作为导入目标'
+              : ''
+    }))
+);
+const loaderOptions = [
+    { value: '', label: '纯净版' },
+    { value: 'fabric', label: 'Fabric' },
+    { value: 'forge', label: 'Forge' },
+    { value: 'neoforge', label: 'NeoForge' },
+    { value: 'quilt', label: 'Quilt' }
+];
+const loaderVersionOptions = computed(() =>
+    loaderVersions.value.map((value) => ({ value, label: value }))
+);
 
 function fmtSize(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
@@ -230,16 +279,13 @@ async function submit() {
     <Teleport to="body">
         <div v-if="open" class="modal-mask" @pointerdown.self="!busy && emit('close')">
             <div class="modal world-modal">
-                <h3 class="world-title">导入 Minecraft 存档</h3>
+                <h3 class="modal-title">导入 Minecraft 存档</h3>
 
                 <template v-if="info && candidate">
+                    <!-- 原生 select 收编 SelectMenu（inventory G；选项级禁用走 disabled+disabledReason 显式说明） -->
                     <label v-if="info.candidates.length > 1" class="field">
                         <span>检测到多个世界</span>
-                        <select v-model="selectedCandidateId" class="select">
-                            <option v-for="item in info.candidates" :key="item.id" :value="item.id">
-                                {{ item.worldName }} · {{ item.id }}
-                            </option>
-                        </select>
+                        <SelectMenu v-model="selectedCandidateId" :options="candidateOptions" />
                     </label>
 
                     <div class="world-summary">
@@ -299,21 +345,12 @@ async function submit() {
 
                     <label class="field">
                         <span>目标游戏文件夹</span>
-                        <select
+                        <SelectMenu
                             v-model="targetFolder"
-                            class="select"
+                            :options="folderOptions"
                             :disabled="busy"
                             @change="loadTargetFolder"
-                        >
-                            <option
-                                v-for="folder in folders"
-                                :key="folder.path"
-                                :value="folder.path"
-                            >
-                                {{ folder.name }}{{ folder.isDefault ? '（默认）' : '' }} ·
-                                {{ folder.path }}
-                            </option>
-                        </select>
+                        />
                     </label>
 
                     <div class="mode-tabs">
@@ -332,27 +369,11 @@ async function submit() {
                     <template v-if="mode === 'existing'">
                         <label class="field">
                             <span>目标实例</span>
-                            <select
+                            <SelectMenu
                                 v-model="targetVersionId"
-                                class="select"
+                                :options="versionOptions"
                                 :disabled="loadingTargets || busy"
-                            >
-                                <option
-                                    v-for="version in orderedVersions"
-                                    :key="version.id"
-                                    :value="version.id"
-                                    :disabled="version.incomplete || version.failed"
-                                >
-                                    {{ version.id }} · MC {{ version.mcVersion
-                                    }}{{ version.loader ? ` · ${version.loader}` : ''
-                                    }}{{
-                                        candidate.versionConfidence === 'exact' &&
-                                        version.mcVersion === candidate.minecraftVersion
-                                            ? '（推荐：版本一致）'
-                                            : ''
-                                    }}
-                                </option>
-                            </select>
+                            />
                         </label>
                         <label v-if="exactMismatch" class="ack-row danger">
                             <input v-model="allowMismatch" type="checkbox" />
@@ -375,26 +396,16 @@ async function submit() {
                             /></label>
                             <label class="field"
                                 ><span>Loader</span
-                                ><select v-model="newLoader" class="select">
-                                    <option value="">纯净版</option>
-                                    <option value="fabric">Fabric</option>
-                                    <option value="forge">Forge</option>
-                                    <option value="neoforge">NeoForge</option>
-                                    <option value="quilt">Quilt</option>
-                                </select></label
+                                ><SelectMenu v-model="newLoader" :options="loaderOptions" /></label
                             >
                         </div>
                         <label v-if="newLoader" class="field"
                             ><span>Loader 版本</span
-                            ><select
+                            ><SelectMenu
                                 v-model="newLoaderVersion"
-                                class="select"
+                                :options="loaderVersionOptions"
                                 :disabled="!loaderVersions.length"
-                            >
-                                <option v-for="value in loaderVersions" :key="value" :value="value">
-                                    {{ value }}
-                                </option></select
-                            ><small v-if="loaderError" class="error-text">{{
+                            /><small v-if="loaderError" class="error-text">{{
                                 loaderError
                             }}</small></label
                         >
@@ -438,7 +449,8 @@ async function submit() {
     max-height: 88vh;
     overflow-y: auto;
 }
-.world-title {
+/* 标题类名对齐全站弹层基类 .modal-title（UI_SYSTEM §5；原 .world-title 为本地变体） */
+.modal-title {
     margin: 0 0 var(--space-4);
     font-size: var(--text-lg);
     font-weight: 700;

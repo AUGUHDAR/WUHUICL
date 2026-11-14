@@ -14,6 +14,8 @@ import ResourceScopeFields from '../components/ResourceScopeFields.vue';
 import ResourcePathChip from '../components/ResourcePathChip.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
 import ResourcePagination from '../components/ResourcePagination.vue';
+import EmptyState from '../components/EmptyState.vue';
+import UiGlyph from '../components/UiGlyph.vue';
 import { useSweepSelect } from '../composables/sweepSelect';
 import type { SchematicPreviewSource } from '../lab/schematic-preview/backend';
 import ProjectionConvert from '../components/ProjectionConvert.vue';
@@ -331,7 +333,11 @@ onUnmounted(() => {
                     <h1>投影渲染</h1>
                     <p class="muted">3D 查看与编辑；拖入 .litematic / .schem 或从实例选择也可以。</p>
                 </div>
-                <button class="btn btn-ghost" @click="renderMode = false">← 返回投影列表</button>
+                <button class="btn btn-ghost" @click="renderMode = false">
+                    <!-- 文本符号 ← 收编 UiGlyph arrow-left（inventory H；UiGlyph 已有矢量） -->
+                    <UiGlyph name="arrow-left" :size="14" />
+                    返回投影列表
+                </button>
             </header>
             <SchematicWorkshopView :key="renderKey" :auto-open="rendering" class="projection-workshop-embed" />
         </template>
@@ -373,7 +379,10 @@ onUnmounted(() => {
                     :disabled="busy || loading"
                     @click="refresh(false, true)"
                 >
-                    {{ loading ? '读取中…' : '↻ 刷新' }}
+                    <!-- 文本符号 ↻ 收编 UiGlyph refresh（inventory H；GameView 同款范式） -->
+                    <span v-if="loading" class="spin"></span>
+                    <UiGlyph v-else name="refresh" :size="14" />
+                    {{ loading ? '读取中' : '刷新' }}
                 </button>
             </div>
         </header>
@@ -559,31 +568,40 @@ onUnmounted(() => {
                 class="card"
                 label="正在读取投影目录…"
             />
-            <div
+            <!-- 空态收编 EmptyState（inventory B）：三态文案拆 title/description，引导按钮进 #action -->
+            <EmptyState
                 data-ui="ProjectionsView:9196e415ffb9"
                 v-else-if="!rows.length && !error"
-                class="card empty"
-            >
-                <span>{{
+                icon="cube"
+                :title="
                     data.entries.length
-                        ? '没有匹配的投影，请调整搜索或筛选。'
+                        ? '没有匹配的投影'
                         : othersHaveProjections
-                          ? '当前实例还没有投影，但该文件夹的其它实例里有。'
-                          : '暂无投影。可导入 .litematic、.schem、.schematic 或原版结构 .nbt。'
-                }}</span
-                ><button
-                    data-ui="ProjectionsView:c0ed13df1c01"
-                    v-if="data.entries.length || othersHaveProjections"
-                    class="btn btn-ghost"
-                    @click="
-                        othersHaveProjections
-                            ? (scope = 'folder')
-                            : ((query = ''), (kind = 'all'), (source = 'all'));
-                    "
-                >
-                    {{ othersHaveProjections ? '查看版本文件夹内的所有' : '清除筛选' }}
-                </button>
-            </div>
+                          ? '当前实例还没有投影'
+                          : '暂无投影'
+                "
+                :description="
+                    data.entries.length
+                        ? '请调整搜索或筛选条件。'
+                        : othersHaveProjections
+                          ? '该文件夹的其它实例里有投影，可切到「版本文件夹内的所有」查看。'
+                          : '可导入 .litematic、.schem、.schematic 或原版结构 .nbt。'
+                "
+            >
+                <template v-if="data.entries.length || othersHaveProjections" #action>
+                    <button
+                        data-ui="ProjectionsView:c0ed13df1c01"
+                        class="btn btn-ghost"
+                        @click="
+                            othersHaveProjections
+                                ? (scope = 'folder')
+                                : ((query = ''), (kind = 'all'), (source = 'all'));
+                        "
+                    >
+                        {{ othersHaveProjections ? '查看版本文件夹内的所有' : '清除筛选' }}
+                    </button>
+                </template>
+            </EmptyState>
             <div
                 v-else-if="rows.length"
                 :inert="loading || !!error"
@@ -787,10 +805,6 @@ onUnmounted(() => {
 .pagination {
     justify-content: center;
 }
-.empty {
-    text-align: center;
-    padding: 40px;
-}
 .failed {
     color: var(--danger, #e76b75);
 }
@@ -935,8 +949,18 @@ onUnmounted(() => {
     padding: 12px 0;
     min-height: 72px;
 }
-.recording-row:hover {
+/* 行 hover 统一规则（inventory L，2026-11-14 修正版；对照 GameView .installed-row）：
+   行背景 var(--hover) + 行内三颗操作整组苏醒（card-2 底 + border-strong 边 + 文字提亮），无位移；
+   accent 只在指向按钮本身 :hover 时出现。 */
+.recording-row:hover,
+.recording-row:focus-within {
     background: var(--hover);
+}
+.recording-row:hover :is(.btn):not(:disabled),
+.recording-row:focus-within :is(.btn):not(:disabled) {
+    background: var(--card-2);
+    border-color: var(--border-strong);
+    color: var(--text);
 }
 .recording-row.selected {
     background: color-mix(in srgb, var(--accent) 5%, transparent);
@@ -945,11 +969,9 @@ onUnmounted(() => {
     word-break: normal;
     overflow-wrap: break-word;
 }
-.recording-workspace > .empty {
-    background: transparent;
-    border: 0;
+/* 空态（EmptyState 组件）在工作区内保持无卡片外观、高度与原占位一致 */
+.recording-workspace > .empty-state {
     min-height: 220px;
-    box-shadow: none;
 }
 .recording-results {
     padding: 12px 16px;

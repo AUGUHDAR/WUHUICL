@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** 创建房间：实例反查加载器与版本，分类取服务端标签，端口自动检测。 */
 import { computed, onMounted, ref } from 'vue';
+import SelectMenu from '../../SelectMenu.vue';
 import { getInstalled } from '../../../api';
 import { store } from '../../../store';
 import { call, CLIENT_TAG, categories, host, loadCategories, refresh, section, vl } from './useVoxlink';
@@ -159,11 +160,20 @@ onMounted(() => {
         <div class="vl-row">
             <label class="vl-field" style="flex: 1; min-width: 240px">
                 <span>游戏实例</span>
-                <select class="input" :value="instanceId" :disabled="busy" @change="selectInstance(($event.target as HTMLSelectElement).value)">
-                    <option v-for="o in options" :key="`${o.folder}/${o.id}`" :value="o.id">
-                        {{ o.id }}（{{ o.mcVersion }} · {{ o.loader }}）
-                    </option>
-                </select>
+                <!-- 原生 select → SelectMenu 收编；label/描述两行展示版本与加载器 -->
+                <SelectMenu
+                    :model-value="instanceId"
+                    placeholder="选择游戏实例"
+                    :disabled="busy"
+                    :options="
+                        options.map((o) => ({
+                            value: o.id,
+                            label: o.id,
+                            description: `${o.mcVersion} · ${o.loader}`
+                        }))
+                    "
+                    @update:model-value="selectInstance"
+                />
             </label>
             <label class="vl-field" style="width: 180px">
                 <span>房间密码（可空）</span>

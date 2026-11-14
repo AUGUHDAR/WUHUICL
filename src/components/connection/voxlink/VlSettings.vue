@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** 设置：联机组件版本与后台更新状态、中继偏好、本机在听的端口。 */
 import { computed, onMounted, ref } from 'vue';
+import EmptyState from '../../EmptyState.vue';
 import { toast } from '../../../store';
 import { vl, call, ensure, vlCheckUpdate } from './useVoxlink';
 import './voxlink.css';
@@ -141,7 +142,13 @@ onMounted(() => {
             <div v-if="ports.length" class="vl-row">
                 <span v-for="(p, i) in ports" :key="i" class="vl-pill ok">{{ portText(p) }}</span>
             </div>
-            <div v-else class="vl-empty">没检测到在听的游戏端口</div>
+            <!-- 空态（EmptyState 收编：说明何时会出现内容） -->
+            <EmptyState
+                v-else
+                data-ui="voxlink:ports-empty"
+                title="没检测到在听的游戏端口"
+                description="游戏开着并把世界「对局域网开放」后，这里会列出在听的端口；点上方「刷新」可重新检测。"
+            />
             <div v-if="portError" class="vl-error">{{ portError }}</div>
         </div>
     </div>

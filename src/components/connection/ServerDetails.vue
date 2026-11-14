@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue';
 import type { ServerEntry, ServerPingResult, InstalledVersion } from '@shared/types';
 import ConnectionPanel from './ConnectionPanel.vue';
 import ConnectionStatus from './ConnectionStatus.vue';
 import ServerAddress from './ServerAddress.vue';
+import SelectMenu from '../SelectMenu.vue';
+import AppMenu from '../AppMenu.vue';
+import UiGlyph from '../UiGlyph.vue';
 import { privateServerText } from '@shared/serverPrivacy';
-defineProps<{
+const props = defineProps<{
     server: ServerEntry;
     ping: ServerPingResult | null;
     /** 服务器真实头像（SLP favicon 的 data URL；空 = 回退首字母） */
@@ -21,7 +25,7 @@ defineProps<{
     targetLabel: (target: InstalledVersion) => string;
     addressRevealed: boolean;
 }>();
-defineEmits<{
+const emit = defineEmits<{
     bind: [value: string];
     connect: [];
     refresh: [];
@@ -32,6 +36,31 @@ defineEmits<{
     copy: [];
     address: [];
 }>();
+
+/* 「更多」溢出菜单（AppMenu 收编，替代自造 details 浮层） */
+const moreOpen = ref(false);
+const moreAnchor = ref<HTMLElement | null>(null);
+const moreItems = computed(() => [
+    {
+        id: 'remove',
+        label: '删除服务器',
+        danger: true,
+        disabled: props.busy || props.binding,
+        disabledReason: props.busy
+            ? '正在启动游戏，请等待'
+            : props.binding
+              ? '正在保存实例关联'
+              : undefined
+    }
+]);
+/* 实例选择（SelectMenu 收编）：首项为「未关联」占位，与原 option 语义一致 */
+const boundOptions = computed(() => [
+    { value: '', label: '未关联实例 · 连接时选择' },
+    ...props.targets.map((v) => ({
+        value: props.targetToken(v),
+        label: props.targetLabel(v) + (v.isolated ? '（隔离）' : '')
+    }))
+]);
 </script>
 <template>
     <ConnectionPanel title="连接服务器" class="server-detail">
@@ -106,18 +135,13 @@ defineEmits<{
             服务器版本：{{ privateServerText(ping.version, server, addressRevealed) }}
         </p>
         <label data-ui="ServerDetails:59f1e2f8c71a" class="connection-field"
-            >使用此实例连接<select
+            >使用此实例连接<!-- 原生 select → SelectMenu 收编（data-ui 经 fallthrough 落在触发钮） --><SelectMenu
                 data-ui="ServerDetails:0a9558147a76"
-                class="select"
-                :value="bound"
+                :model-value="bound"
                 :disabled="busy || binding"
-                @change="$emit('bind', ($event.target as HTMLSelectElement).value)"
-            >
-                <option value="">未关联实例 · 连接时选择</option>
-                <option v-for="v in targets" :key="targetToken(v)" :value="targetToken(v)">
-                    {{ targetLabel(v) }}{{ v.isolated ? '（隔离）' : '' }}
-                </option>
-            </select></label
+                :options="boundOptions"
+                @update:model-value="$emit('bind', $event)"
+            /></label
         >
         <div data-ui="ServerDetails:49a9cb995a70" v-if="missing" class="connection-result">
             <ConnectionStatus tone="danger" label="关联实例缺失" />
@@ -168,7 +192,9 @@ defineEmits<{
                       : server.versionId && !missing
                         ? '启动并连接'
                         : '选择实例并连接'
-            }}<span data-ui="ServerDetails:82645c79195b" aria-hidden="true">↗</span>
+            }}<span data-ui="ServerDetails:82645c79195b" aria-hidden="true"
+                ><UiGlyph name="play" :size="13"
+            /></span>
         </button>
         <div data-ui="ServerDetails:afa5660e1f9f" class="connection-actions server-secondary">
             <button
@@ -179,22 +205,26 @@ defineEmits<{
             >
                 编辑服务器
             </button>
-            <details
-                class="server-more"
-                @keydown.esc="($event.currentTarget as HTMLDetailsElement).open = false"
+            <!-- 「更多」溢出菜单（AppMenu 收编：右端对齐，危险项入菜单） -->
+            <button
+                class="btn btn-ghost server-more-btn"
+                :aria-expanded="moreOpen"
+                aria-haspopup="menu"
+                aria-label="更多服务器操作"
+                @click="moreOpen = !moreOpen; moreAnchor = $event.currentTarget"
             >
-                <summary class="btn btn-ghost">更多</summary>
-                <div>
-                    <button
-                        class="btn btn-danger"
-                        :disabled="busy || binding"
-                        @click="$emit('remove')"
-                    >
-                        删除服务器
-                    </button>
-                </div>
-            </details>
+                <UiGlyph name="more" :size="14" />
+            </button>
         </div>
+        <AppMenu
+            :open="moreOpen"
+            :anchor="moreAnchor"
+            align="end"
+            aria-label="更多服务器操作"
+            :items="moreItems"
+            @select="$emit('remove')"
+            @close="moreOpen = false"
+        />
         <p
             data-ui="ServerDetails:571a6e757999"
             v-if="ping && !ping.online && !pending"
@@ -217,20 +247,8 @@ defineEmits<{
     overflow-wrap: anywhere;
     cursor: copy;
 }
-.server-more {
-    position: relative;
-}
-.server-more summary {
-    list-style: none;
-}
-.server-more > div {
-    position: absolute;
-    right: 0;
-    z-index: 4;
-    background: var(--surface-solid);
-    padding: 8px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+.server-more-btn {
+    padding: 0 10px;
 }
 .server-connect {
     min-height: 44px;

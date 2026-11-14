@@ -117,7 +117,8 @@ onMounted(load);
                     </button>
                 </header>
                 <div class="version-content">
-                    <div v-if="loading" class="empty">正在识别来源并查询适配版本…</div>
+                    <!-- 加载占位（非空态）：语义化类名，不复用全局 .empty（空态=指引+入口，加载=进行中说明） -->
+                    <div v-if="loading" class="loading-hint">正在识别来源并查询适配版本…</div>
                     <div v-if="error" class="error">
                         {{ error
                         }}<button v-if="!choices" class="btn btn-ghost" @click="load">重试</button>
@@ -167,7 +168,7 @@ onMounted(load);
                         </div></template
                     >
                 </div>
-                <footer>
+                <footer class="modal-actions modal-actions--chrome">
                     <small class="muted">校验后替换，保留启停状态</small
                     ><button class="btn btn-ghost" :disabled="applying" @click="emit('close')">
                         取消</button
@@ -196,9 +197,6 @@ onMounted(load);
 }
 .mod-version-modal header,
 .mod-version-modal footer {
-    display: flex;
-    gap: 12px;
-    align-items: center;
     padding: 20px 24px;
     flex-shrink: 0;
 }
@@ -218,6 +216,14 @@ h2 {
     min-height: 0;
     overflow: auto;
     padding: 20px 24px;
+}
+.loading-hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-6) var(--space-5);
+    color: var(--text-dim);
+    text-align: center;
 }
 .version-columns {
     display: grid;

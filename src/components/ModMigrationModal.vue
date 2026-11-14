@@ -221,7 +221,7 @@ async function start() {
                         </div>
                     </template>
                 </div>
-                <footer>
+                <footer class="modal-actions modal-actions--chrome">
                     <span class="muted">下载完成并校验后生成目标实例</span
                     ><button class="btn btn-ghost" :disabled="starting" @click="emit('close')">
                         取消</button
@@ -259,9 +259,6 @@ async function start() {
 }
 .migration-modal header,
 .migration-modal footer {
-    display: flex;
-    align-items: center;
-    gap: 12px;
     padding: 20px 24px;
     flex-shrink: 0;
 }

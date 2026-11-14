@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import ReferenceLinks from './ReferenceLinks.vue';
 import UiGlyph from '../UiGlyph.vue';
+import TabPills from '../TabPills.vue';
+import EmptyState from '../EmptyState.vue';
+import SelectMenu from '../SelectMenu.vue';
+import AppMenu from '../AppMenu.vue';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import ConnectionPanel from './ConnectionPanel.vue';
 import ConfirmModal from '../ConfirmModal.vue';
@@ -53,8 +57,7 @@ const NAV: Array<{ key: FrpTab; label: string }> = [
 
 const kamucl = window.kamucl;
 const tunnels = ref<ManagedTunnel[]>([]);
-const form = reactive({ accessKey: '' });
-const operations = reactive(new Set<string>());
+const form = reactive({ accessKey: '' });const operations = reactive(new Set<string>());
 const stopping = reactive(new Set<string>());
 const errorMsg = ref('');
 const accountReady = computed(() => !!nodesResult.value && !nodesError.value);
@@ -107,8 +110,51 @@ const creatableNodes = computed(() =>
         (n) => (onlyFree.value ? n.free : true) && n.online && n.canCreate
     )
 );
+/* 节点选择（SelectMenu 收编）：首项为占位提示，与原生 select 的空 option 语义一致 */
+const nodeOptions = computed(() => [
+    {
+        value: '',
+        label: nodesResult.value ? '选择可用节点' : '请先读取账号节点'
+    },
+    ...creatableNodes.value.map((n) => ({
+        value: String(n.id),
+        label: n.name,
+        description: `${n.free ? '免费' : '专业版'}${
+            n.load !== null ? ' · 负载 ' + n.load + '%' : ''
+        }`
+    }))
+]);
 const connected = computed(() => tunnels.value.filter((t) => t.status === 'running').length);
 const busy = computed(() => creating.value || nodesLoading.value);
+/* 分区 tab（TabPills 收编）：「我的隧道」运行中显示红点 */
+const tabItems = computed(() =>
+    NAV.map((item) => ({
+        value: item.key,
+        label: item.label,
+        dot: item.key === 'tunnels' && connected.value > 0
+    }))
+);
+/* 卡片 ⋯ 菜单（AppMenu 收编）：同一时刻只开一份，锚定触发按钮 */
+const moreOpen = ref('');
+const moreAnchor = ref<HTMLElement | null>(null);
+const moreTarget = computed(() => tunnels.value.find((t) => t.id === moreOpen.value) ?? null);
+function toggleMore(t: ManagedTunnel, event: MouseEvent) {
+    if (moreOpen.value === t.id) {
+        moreOpen.value = '';
+        return;
+    }
+    moreOpen.value = t.id;
+    moreAnchor.value = event.currentTarget as HTMLElement;
+}
+const moreItems = computed(() => [
+    {
+        id: 'delete',
+        label: '删除隧道',
+        danger: true,
+        disabled: !!moreTarget.value?.deleting,
+        disabledReason: moreTarget.value?.deleting ? '正在删除，请稍候' : undefined
+    }
+]);
 let disposed = false;
 const statusLabel: Record<string, string> = {
     idle: '未启动',
@@ -273,19 +319,24 @@ onBeforeUnmount(() => {
             @cancel="cancelDelete"
         />
 
-        <!-- 分区导航（VoxLink 同款胶囊） -->
-        <nav class="connect-tabs" aria-label="樱花穿透分区" data-ui="frp:nav">
-            <button
-                v-for="item in NAV"
-                :key="item.key"
-                class="connect-tab"
-                :class="{ active: tab === item.key }"
-                :data-ui="'frp:tab:' + item.key"
-                @click="tab = item.key"
-            >
-                {{ item.label }}<span v-if="item.key === 'tunnels' && connected" class="dot"></span>
-            </button>
-        </nav>
+        <!-- 隧道卡片 ⋯ 菜单（AppMenu：右端对齐触发钮） -->
+        <AppMenu
+            :open="!!moreOpen"
+            :anchor="moreAnchor"
+            align="end"
+            aria-label="隧道更多操作"
+            :items="moreItems"
+            @select="moreTarget && askDelete(moreTarget)"
+            @close="moreOpen = ''"
+        />
+
+        <!-- 分区导航（TabPills 收编：与全站分段单选同形态） -->
+        <TabPills
+            v-model="tab"
+            :items="tabItems"
+            aria-label="樱花穿透分区"
+            data-ui="frp:nav"
+        />
 
         <p data-ui="FrpPanel:54b1d9fe0e6e" v-if="errorMsg" class="connection-error" role="alert">
             {{ errorMsg }}
@@ -371,7 +422,7 @@ onBeforeUnmount(() => {
                                 <button
                                     data-ui="FrpPanel:d8c4790e0c8e"
                                     v-if="!active(t) && !t.busy"
-                                    class="btn btn-gold"
+                                    class="btn btn-gold btn-sm"
                                     :disabled="t.deleting || operations.has(t.id)"
                                     @click="control(t, false)"
                                 >
@@ -379,30 +430,22 @@ onBeforeUnmount(() => {
                                 ><button
                                     data-ui="FrpPanel:1cbfb09e7f09"
                                     v-if="active(t) || t.desired || t.busy"
-                                    class="btn btn-ghost"
+                                    class="btn btn-ghost btn-sm"
                                     :disabled="t.deleting || stopping.has(t.id)"
                                     @click="control(t, true)"
                                 >
                                     {{ t.busy ? '取消启动' : '停止隧道' }}
                                 </button>
-                                <details
-                                    class="frp-more"
-                                    @keydown.esc="($event.currentTarget as HTMLDetailsElement).open = false"
+                                <!-- 溢出 ⋯（AppMenu 收编：与全站 ⋯ 口径统一，菜单位于右上） -->
+                                <button
+                                    data-ui="FrpPanel:05be50a5135c"
+                                    class="btn btn-ghost btn-sm frp-more-btn"
+                                    :aria-label="'更多操作 ' + t.name"
+                                    :aria-expanded="moreOpen === t.id"
+                                    @click="toggleMore(t, $event)"
                                 >
-                                    <summary class="btn btn-ghost btn-sm" :aria-label="'更多操作 ' + t.name">
-                                        ⋯
-                                    </summary>
-                                    <div>
-                                        <button
-                                            data-ui="FrpPanel:05be50a5135c"
-                                            class="btn btn-danger btn-sm"
-                                            :disabled="t.deleting"
-                                            @click="askDelete(t)"
-                                        >
-                                            删除隧道
-                                        </button>
-                                    </div>
-                                </details>
+                                    <UiGlyph name="more" :size="14" />
+                                </button>
                             </div>
                         </footer>
 
@@ -425,18 +468,27 @@ onBeforeUnmount(() => {
                     </article>
                 </div>
 
-                <div v-else class="frp-empty">
-                    <template v-if="!accountReady">
-                        <h3>还没有连接樱花穿透账号</h3>
-                        <p>先在「账号密钥」里填入访问密钥并读取账号，隧道会显示在这里。</p>
+                <!-- 空态（EmptyState 收编：说明 + 入口，UX「空状态指引」） -->
+                <EmptyState
+                    v-if="!accountReady"
+                    data-ui="frp:tunnel-empty"
+                    title="还没有连接樱花穿透账号"
+                    description="先在「账号密钥」里填入访问密钥并读取账号，隧道会显示在这里。"
+                >
+                    <template #action>
                         <button class="btn btn-gold" @click="tab = 'account'">去填密钥</button>
                     </template>
-                    <template v-else>
-                        <h3>还没有隧道</h3>
-                        <p>创建一条隧道并启动后，这里会出现远程地址，把它发给好友就能一起玩。</p>
+                </EmptyState>
+                <EmptyState
+                    v-else
+                    data-ui="frp:tunnel-empty"
+                    title="还没有隧道"
+                    description="创建一条隧道并启动后，这里会出现远程地址，把它发给好友就能一起玩。"
+                >
+                    <template #action>
                         <button class="btn btn-gold" @click="tab = 'create'">新建隧道</button>
                     </template>
-                </div>
+                </EmptyState>
             </template>
 
             <!-- 新建隧道 -->
@@ -481,15 +533,12 @@ onBeforeUnmount(() => {
                         </label>
                         <label class="connection-field">
                             <span>服务节点</span>
-                            <select data-ui="FrpPanel:e06c3d520528" v-model="creation.node" class="input">
-                                <option value="">
-                                    {{ nodesResult ? '选择可用节点' : '请先读取账号节点' }}
-                                </option>
-                                <option v-for="n in creatableNodes" :key="n.id" :value="String(n.id)">
-                                    {{ n.name }} · {{ n.free ? '免费' : '专业版'
-                                    }}{{ n.load !== null ? ' · 负载 ' + n.load + '%' : '' }}
-                                </option>
-                            </select>
+                            <!-- 原生 select → SelectMenu 收编（data-ui 锚点经 fallthrough 落在触发钮） -->
+                            <SelectMenu
+                                data-ui="FrpPanel:e06c3d520528"
+                                v-model="creation.node"
+                                :options="nodeOptions"
+                            />
                         </label>
                         <label class="connection-field">
                             <span>远程端口（可选）</span>
@@ -838,46 +887,14 @@ onBeforeUnmount(() => {
     font-size: 12px;
     padding: 4px 0;
 }
-.frp-more {
-    position: relative;
-}
-.frp-more summary {
-    list-style: none;
-}
-.frp-more > div {
-    position: absolute;
-    right: 0;
-    top: calc(100% + 4px);
-    padding: 8px;
-    background: var(--surface-solid);
-    border: 1px solid var(--border);
-    z-index: 5;
-    border-radius: var(--radius-md);
+.frp-more-btn {
+    padding: 0 10px;
 }
 
-/* 空状态 */
-.frp-empty {
-    border: 1px dashed var(--border-strong);
-    padding: 30px 20px;
-    text-align: center;
-    border-radius: var(--radius-md);
-    color: var(--text-dim);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    background: var(--card-2);
-}
-.frp-empty h3 {
-    margin: 0;
-    color: var(--text);
-    font-size: 15px;
-}
-.frp-empty p {
-    margin: 0;
-    max-width: 440px;
-    line-height: 1.7;
-    font-size: 13px;
+/* 节点参考列表：行 hover 统一规则（F 节补齐） */
+.node-item:hover {
+    background: var(--hover);
+    border-color: var(--border-strong);
 }
 
 /* 新建表单 */

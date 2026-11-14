@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** 大厅：浏览公开房间；无密码房间点「加入」直接进房，有密码才带码去加入页。 */
 import { onMounted, ref } from 'vue';
+import EmptyState from '../../EmptyState.vue';
 import { natLabel } from '../../../../shared/voxlinkNat';
 import {
     call,
@@ -131,9 +132,19 @@ onMounted(() => {
 
         <div v-if="error" class="vl-error">{{ error }}</div>
 
-        <div v-else-if="loading && !rooms.length" class="vl-empty">正在寻找公开房间…</div>
+        <div v-else-if="loading && !rooms.length" class="vl-status" role="status">正在寻找公开房间…</div>
 
-        <div v-else-if="!rooms.length" class="vl-empty">暂时没有公开房间，创建一个邀请好友吧。</div>
+        <!-- 空态（EmptyState 收编：说明 + 入口，UX「空状态指引」） -->
+        <EmptyState
+            v-else-if="!rooms.length"
+            data-ui="voxlink:lobby-empty"
+            title="暂时没有公开房间"
+            description="别人开着的房间会列在这里；现在可以先自己开一个，把房号发给好友。"
+        >
+            <template #action>
+                <button class="btn btn-gold" @click="section = 'create'">去创建房间</button>
+            </template>
+        </EmptyState>
 
         <div v-else class="vl-grid" style="margin-top: 14px">
             <div v-for="room in rooms" :key="room.code" class="vl-room">

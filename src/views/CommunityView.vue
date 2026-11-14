@@ -26,6 +26,9 @@ import { communityFileMatchesInstance, usesCommunityLoader } from '@shared/commu
 import { mcmodSearchUrl, mcmodPageUrl } from '@shared/communityLinks';
 import SelectMenu from '../components/SelectMenu.vue';
 import UiGlyph from '../components/UiGlyph.vue';
+import TabPills from '../components/TabPills.vue';
+import EmptyState from '../components/EmptyState.vue';
+import ResourcePagination from '../components/ResourcePagination.vue';
 import CommunityVersionFilter from '../components/CommunityVersionFilter.vue';
 import { readCommunitySession, saveCommunitySession } from '../communitySession';
 import {
@@ -35,7 +38,31 @@ import {
     usableCommunityInstance,
     type CommunityVersionSource
 } from '../communityVersionSelection';
-const previousSession = readCommunitySession();
+const currentInstance = selectedInstance;
+const allTargets = ref<InstalledVersion[]>([]);
+const downloadQueue = useCommunityDownloadQueue();
+const detailProject = ref<CommunityProjectReference | null>(null);
+const communityTab = ref<'browse' | 'favorites'>(previousSession?.tab ?? 'browse');
+const favoriteSearch = ref(previousSession?.favoriteSearch ?? '');
+/* 分区 tab（TabPills 收编）：收藏数角标随收藏列表更新 */
+const communityTabItems = computed(() => [
+    { value: 'browse', label: '找资源' },
+    { value: 'favorites', label: '已收藏 MOD', count: favorites.value.length }
+]);
+const kindTabItems = computed(() =>
+    kindTabs.map((t) => ({ value: t.value as string, label: t.label }))
+);
+/** 类型切换：写入 query 并触发重搜（TabPills 单一监听口，避免 v-model 双监听顺序问题） */
+function kindChanged(value: CommunityKind) {
+    query.kind = value;
+    onFilterChange();
+}
+/** 版本来源切换（TabPills 收编） */
+const versionSourceItems = computed(() => [
+    { value: 'all', label: '全部版本' },
+    { value: 'installed', label: '已安装版本', count: installedVersionOptions.value.length },
+    { value: 'custom', label: '自定义版本' }
+]);
 import MarqueeText from '../components/MarqueeText.vue';
 import CommunityDownloadQueue from '../components/CommunityDownloadQueue.vue';
 import { useCommunityDownloadQueue } from '../useCommunityDownloadQueue';
@@ -70,24 +97,12 @@ function sourceUrl(r: CommunityProjectReference, kind: CommunityKind = query.kin
     return `https://www.curseforge.com/minecraft/${CF_KIND_SEGMENT[kind] ?? 'mc-mods'}/${r.slug || r.projectId}`;
 }
 
-/**
- * 在启动器内打开网页（内联浏览器）。
- * 白名单之外或内联打开失败时，自动退回系统浏览器——玩家永远不会「点了没反应」。
- */
-async function openInline(url: string, title: string) {
-    try {
-        await window.kamucl.invoke('inlineWeb:open', url, title);
-    } catch {
-        openExternal(url);
-    }
-}
-
 /** MC 百科：词典/百科桥已附身份（mcmodId）直达 class 详情页（PCL 口径）；
  *  否则先实时精确检索，失败或无命中回退搜索页 */
 async function openMcmod(item: CommunityProjectReference) {
     const direct = mcmodPageUrl({ ...item, slug: item.slug ?? '' });
     if (direct && item.mcmodId && item.mcmodId > 0) {
-        await openInline(direct, item.title || 'MC 百科');
+        openExternal(direct);
         return;
     }
     const searchUrl = mcmodSearchUrl({ ...item, slug: item.slug ?? '' });
@@ -100,41 +115,17 @@ async function openMcmod(item: CommunityProjectReference) {
         const r = await communityMcmod(keyword);
         const hit = r.hits[0];
         if (hit?.url) {
-            await openInline(hit.url, item.title || 'MC 百科');
+            openExternal(hit.url);
             return;
         }
     } catch {
         // 百科查询失败：回退到搜索页
     }
-    await openInline(searchUrl, item.title || 'MC 百科');
+    openExternal(searchUrl);
 }
 
 function openExternal(url: string) {
     window.open(url, '_blank');
-}
-const currentInstance = selectedInstance;
-const allTargets = ref<InstalledVersion[]>([]);
-const downloadQueue = useCommunityDownloadQueue();
-const detailProject = ref<CommunityProjectReference | null>(null);
-const communityTab = ref<'browse' | 'favorites'>(previousSession?.tab ?? 'browse');
-const favoriteSearch = ref(previousSession?.favoriteSearch ?? '');
-watch(communityTab, (tab) => {
-    if (tab === 'browse') void nextTick(updateKindBlob);
-});
-function sectionKeyboard(event: KeyboardEvent) {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
-    communityTab.value =
-        event.key === 'Home'
-            ? 'browse'
-            : event.key === 'End'
-              ? 'favorites'
-              : communityTab.value === 'browse'
-                ? 'favorites'
-                : 'browse';
-    void nextTick(() =>
-        document.querySelector<HTMLElement>(`[data-ui="community:${communityTab.value}"]`)?.focus()
-    );
 }
 
 // ---------------- 搜索条件 ----------------
@@ -147,49 +138,6 @@ const kindTabs: Array<{ value: CommunityKind; label: string }> = [
     { value: 'shader', label: '光影包' },
     { value: 'datapack', label: '数据包' }
 ];
-
-/** 类型筛选胶囊滑动指示块（与导航水滴/游戏 Tab 同款弹簧动效） */
-const kindCapsules = ref<HTMLElement | null>(null);
-const kindBlob = reactive({ left: 0, top: 0, width: 0, height: 0, on: false });
-function updateKindBlob() {
-    const root = kindCapsules.value;
-    if (!root) return;
-    const active = root.querySelector<HTMLElement>(`.capsule[data-kind="${query.kind}"]`);
-    if (!active) return;
-    kindBlob.left = active.offsetLeft;
-    kindBlob.top = active.offsetTop;
-    kindBlob.width = active.offsetWidth;
-    kindBlob.height = active.offsetHeight;
-    kindBlob.on = true;
-}
-// 字体、主题及换行会改变胶囊尺寸，分类切换以外也需要重算。
-let kindBlobObserver: ResizeObserver | null = null;
-onMounted(() => {
-    nextTick(updateKindBlob);
-    setTimeout(updateKindBlob, 200);
-    kindBlobObserver = new ResizeObserver(() => updateKindBlob());
-    watch(
-        kindCapsules,
-        (el) => {
-            kindBlobObserver?.disconnect();
-            if (el) kindBlobObserver?.observe(el);
-        },
-        { immediate: true }
-    );
-    // 主题切换改变配色/字体度量 → 重算
-    watch(
-        () => store.settings?.theme,
-        () => nextTick(() => setTimeout(updateKindBlob, 60))
-    );
-});
-onUnmounted(() => kindBlobObserver?.disconnect());
-const kindBlobStyle = computed(() => ({
-    left: kindBlob.left + 'px',
-    top: kindBlob.top + 'px',
-    width: kindBlob.width + 'px',
-    height: kindBlob.height + 'px',
-    opacity: kindBlob.on ? 1 : 0
-}));
 
 const sourceOptions: Array<{ value: 'all' | CommunitySource; label: string }> = [
     { value: 'all', label: '全部来源' },
@@ -305,11 +253,6 @@ const manualLoaderMismatch = computed(
         (filterInstance.value.loader ?? '') !== query.loader
 );
 // query 必须先初始化。过早运行 getter 会抛错，导致监听未订阅分类变化。
-watch(
-    () => query.kind,
-    () => nextTick(updateKindBlob),
-    { flush: 'post' }
-);
 const supportsLoader = computed(() => usesCommunityLoader(query.kind));
 const usesPagination = computed(() => !supportsLoader.value);
 
@@ -369,10 +312,6 @@ const currentPage = ref(previousSession?.page ?? 1);
 const totalResults = ref(previousSession?.total ?? 0);
 const searchWarnings = ref<string[]>(previousSession?.warnings ?? []);
 const totalPages = computed(() => Math.max(1, Math.ceil(totalResults.value / PAGE_SIZE)));
-const visiblePages = computed(() => {
-    const start = Math.max(1, Math.min(currentPage.value - 2, totalPages.value - 4));
-    return Array.from({ length: Math.min(5, totalPages.value) }, (_, i) => start + i);
-});
 const listCard = ref<HTMLElement | null>(null);
 
 let searchGeneration = 0;
@@ -763,6 +702,8 @@ watch(targetOptions, (options) => {
 });
 let fileGeneration = 0,
     openGeneration = 0;
+/** 详情页指定文件打开下载弹窗时预选的 fileId（loadFiles 成功后套用一次） */
+const pendingFileId = ref('');
 async function loadFiles() {
     if (!modal.item) return;
     const generation = ++fileGeneration,
@@ -779,7 +720,12 @@ async function loadFiles() {
         });
         if (generation !== fileGeneration || !modal.open) return;
         modal.files = files;
-        modal.fileId = (files.find((f) => f.releaseType === 'release') ?? files[0])?.fileId ?? '';
+        const preset = pendingFileId.value;
+        pendingFileId.value = '';
+        modal.fileId =
+            (preset && files.some((f) => f.fileId === preset) ? preset : undefined) ??
+            (files.find((f) => f.releaseType === 'release') ?? files[0])?.fileId ??
+            '';
         if (!files.length)
             modal.filesError = usesCommunityLoader(modal.kind)
                 ? '当前 Minecraft / Loader 条件下没有文件，可手动调整筛选。'
@@ -791,9 +737,14 @@ async function loadFiles() {
     }
 }
 
-async function openDownload(item: CommunityProjectReference, kind: CommunityKind = query.kind) {
+async function openDownload(
+    item: CommunityProjectReference,
+    kind: CommunityKind = query.kind,
+    presetFileId?: string
+) {
     const generation = ++openGeneration;
     fileGeneration++;
+    pendingFileId.value = presetFileId ?? '';
     modal.open = true;
     modal.item = item;
     modal.kind = kind;
@@ -895,37 +846,27 @@ function confirmDownload() {
         </div>
         <CommunityDownloadQueue />
 
-        <div
-            class="community-sections"
-            role="tablist"
+        <!-- 分区 tab（TabPills 收编：收藏数角标，形态与全站分段单选一致） -->
+        <TabPills
+            v-model="communityTab"
+            :items="communityTabItems"
             aria-label="社区资源分区"
-            @keydown="sectionKeyboard"
-        >
-            <button
-                class="community-section"
-                role="tab"
-                data-ui="community:browse"
-                :tabindex="communityTab === 'browse' ? 0 : -1"
-                :aria-selected="communityTab === 'browse'"
-                :class="{ active: communityTab === 'browse' }"
-                @click="communityTab = 'browse'"
-            >
-                找资源</button
-            ><button
-                class="community-section"
-                role="tab"
-                data-ui="community:favorites"
-                :tabindex="communityTab === 'favorites' ? 0 : -1"
-                :aria-selected="communityTab === 'favorites'"
-                :class="{ active: communityTab === 'favorites' }"
-                @click="communityTab = 'favorites'"
-            >
-                已收藏 MOD <span>{{ favorites.length }}</span>
-            </button>
-        </div>
+        />
+
+        <!-- 资源详情同页整页视图（CommunityView 详情子状态） -->
+        <CommunityModDetails
+            v-if="detailProject"
+            :reference="detailProject"
+            :match-version="query.mcVersion"
+            @close="detailProject = null"
+            @download-file="
+                openDownload(detailProject!, 'mod', $event);
+            "
+            @wiki="openMcmod"
+        />
 
         <CommunityFavorites
-            v-if="communityTab === 'favorites'"
+            v-else-if="communityTab === 'favorites'"
             :keyword="favoriteSearch"
             @download="openDownload($event, 'mod')"
             @details="detailProject = $event"
@@ -938,28 +879,13 @@ function confirmDownload() {
         <template v-else>
             <!-- 搜索卡片 -->
             <div data-ui="CommunityView:5551ade589f2" class="card search-card">
-                <div data-ui="CommunityView:cc7ad8d814fc" class="kind-capsules" ref="kindCapsules">
-                    <span
-                        data-ui="CommunityView:911176084f18"
-                        class="capsule-blob"
-                        :style="kindBlobStyle"
-                        aria-hidden="true"
-                    ></span>
-                    <button
-                        data-ui="CommunityView:9275c1ee8bbc"
-                        v-for="t in kindTabs"
-                        :key="t.value"
-                        class="capsule"
-                        :data-kind="t.value"
-                        :class="{ active: query.kind === t.value }"
-                        @click="
-                            query.kind = t.value;
-                            onFilterChange();
-                        "
-                    >
-                        {{ t.label }}
-                    </button>
-                </div>
+                <!-- 资源类型筛选（TabPills 收编：与分区 tab/版本来源同形态） -->
+                <TabPills
+                    :model-value="query.kind"
+                    :items="kindTabItems"
+                    aria-label="资源类型"
+                    @update:model-value="kindChanged($event as CommunityKind)"
+                />
 
                 <section class="version-filter-panel" aria-label="Minecraft 版本筛选">
                     <div class="version-filter-heading">
@@ -971,38 +897,13 @@ function confirmDownload() {
                             ></span
                         >
                     </div>
-                    <div class="version-source-options" role="group" aria-label="版本选择来源">
-                        <button
-                            type="button"
-                            class="version-source-option"
-                            data-ui="community:versions-all"
-                            :class="{ active: versionSelection.source === 'all' }"
-                            :aria-pressed="versionSelection.source === 'all'"
-                            @click="chooseVersionSource('all')"
-                        >
-                            全部版本
-                        </button>
-                        <button
-                            type="button"
-                            class="version-source-option"
-                            data-ui="community:versions-installed"
-                            :class="{ active: versionSelection.source === 'installed' }"
-                            :aria-pressed="versionSelection.source === 'installed'"
-                            @click="chooseVersionSource('installed')"
-                        >
-                            已安装版本<span>{{ installedVersionOptions.length }}</span>
-                        </button>
-                        <button
-                            type="button"
-                            class="version-source-option"
-                            data-ui="community:versions-custom"
-                            :class="{ active: versionSelection.source === 'custom' }"
-                            :aria-pressed="versionSelection.source === 'custom'"
-                            @click="chooseVersionSource('custom')"
-                        >
-                            自定义版本
-                        </button>
-                    </div>
+                    <!-- 版本来源（TabPills 收编：三处分段单选同形态） -->
+                    <TabPills
+                        :model-value="versionSelection.source"
+                        :items="versionSourceItems"
+                        aria-label="版本选择来源"
+                        @update:model-value="chooseVersionSource($event as CommunityVersionSource)"
+                    />
                     <div
                         v-if="versionSelection.source === 'installed'"
                         class="version-filter-detail"
@@ -1118,20 +1019,7 @@ function confirmDownload() {
                             v-if="loading"
                             class="spin"
                         ></span>
-                        <svg
-                            v-else
-                            viewBox="0 0 24 24"
-                            width="14"
-                            height="14"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                        >
-                            <circle cx="11" cy="11" r="7" />
-                            <path d="m21 21-4.3-4.3" />
-                        </svg>
+                        <UiGlyph v-else name="search" :size="14" />
                         搜索
                     </button>
                     <button
@@ -1215,44 +1103,34 @@ function confirmDownload() {
                     retry
                     @retry="doSearch(true)"
                 />
-                <!-- 错误态 -->
-                <div
+                <!-- 错误态（EmptyState 收编：原因 + 重试入口，UX「失败处理」） -->
+                <EmptyState
                     data-ui="CommunityView:680f71022a3b"
                     v-else-if="loadError && !results.length"
-                    class="empty"
+                    icon="warning"
+                    title="搜索失败"
+                    :description="loadError"
                 >
-                    <span>搜索失败：{{ loadError }}</span>
-                    <button
-                        data-ui="CommunityView:dadfdac6acc0"
-                        class="btn btn-ghost btn-sm"
-                        @click="usesPagination ? doSearch(false) : onSearch()"
-                    >
-                        重试
-                    </button>
-                </div>
-                <!-- 空态 -->
-                <div data-ui="CommunityView:170233f26efe" v-else-if="!results.length" class="empty">
-                    <svg
-                        viewBox="0 0 24 24"
-                        width="40"
-                        height="40"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.7"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    >
-                        <circle cx="12" cy="12" r="9" />
-                        <path d="M3 12h18" />
-                        <path d="M12 3a13.5 13.5 0 0 1 0 18" />
-                        <path d="M12 3a13.5 13.5 0 0 0 0 18" />
-                    </svg>
-                    <span>{{
-                        searched
-                            ? '没有找到匹配的资源，换个关键词或条件试试'
-                            : '输入关键词或选择条件开始搜索'
-                    }}</span>
-                </div>
+                    <template #action>
+                        <button
+                            data-ui="CommunityView:dadfdac6acc0"
+                            class="btn btn-ghost btn-sm"
+                            @click="usesPagination ? doSearch(false) : onSearch()"
+                        >
+                            重试
+                        </button>
+                    </template>
+                </EmptyState>
+                <!-- 空态（EmptyState 收编：手绘地球 SVG → UiGlyph globe 统一口径） -->
+                <EmptyState
+                    data-ui="CommunityView:170233f26efe"
+                    v-else-if="!results.length"
+                    icon="globe"
+                    :title="searched ? '没有找到匹配的资源' : '还没有搜索结果'"
+                    :description="
+                        searched ? '换个关键词或筛选条件再试试。' : '输入关键词或选择条件开始搜索。'
+                    "
+                />
                 <!-- 列表 -->
                 <template v-else>
                     <div
@@ -1326,23 +1204,9 @@ function confirmDownload() {
                                         :title="`打开 ${r.source === 'modrinth' ? 'Modrinth' : 'CurseForge'} 源页面（查看完整介绍）`"
                                         @click="openExternal(sourceUrl(r))"
                                     >
-                                        <svg
-                                            viewBox="0 0 24 24"
-                                            width="14"
-                                            height="14"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                        >
-                                            <path
-                                                d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"
-                                            />
-                                            <path d="M15 3h6v6" />
-                                            <path d="M10 14 21 3" />
-                                        </svg>
+                                        <UiGlyph name="expand" :size="14" />
                                     </button>
+                                    <!-- 「百科」入口保留（UiGlyph 暂无 book 名，手绘书本图标维持，已报总管扩表） -->
                                     <button
                                         data-ui="CommunityView:0c667bb024b0"
                                         class="icon-btn"
@@ -1382,23 +1246,11 @@ function confirmDownload() {
                                             toggleProject(r.source, r.projectId, r.title, r.iconUrl)
                                         "
                                     >
-                                        <svg
-                                            viewBox="0 0 24 24"
-                                            width="16"
-                                            height="16"
-                                            :fill="
-                                                favorites.some((f) => f.key === itemKey(r))
-                                                    ? 'currentColor'
-                                                    : 'none'
-                                            "
-                                            stroke="currentColor"
-                                            stroke-width="1.7"
-                                            stroke-linejoin="round"
-                                        >
-                                            <path
-                                                d="m12 3 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3L3 9.6l6.2-.9Z"
-                                            />
-                                        </svg>
+                                        <UiGlyph
+                                            name="star"
+                                            :size="16"
+                                            :filled="favorites.some((f) => f.key === itemKey(r))"
+                                        />
                                     </button>
                                 </div>
                                 <button
@@ -1406,20 +1258,7 @@ function confirmDownload() {
                                     class="btn btn-gold btn-sm result-dl"
                                     @click="openDownload(r)"
                                 >
-                                    <svg
-                                        viewBox="0 0 24 24"
-                                        width="13"
-                                        height="13"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                    >
-                                        <path d="M12 3v11" />
-                                        <path d="m7 10 5 5 5-5" />
-                                        <path d="M4 21h16" />
-                                    </svg>
+                                    <UiGlyph name="download" :size="13" />
                                     下载
                                 </button>
                             </div>
@@ -1453,44 +1292,15 @@ function confirmDownload() {
                         </button>
                     </div>
                 </template>
-                <nav
+                <!-- 分页（ResourcePagination 收编：与资源六页同一形态「上一页 / N · 共X项 / 下一页」） -->
+                <ResourcePagination
                     data-ui="CommunityView:d47a3ad6ba73"
-                    v-if="usesPagination && searched && totalPages > 1"
-                    class="pagination"
-                    aria-label="资源分页"
-                >
-                    <span class="muted"
-                        >共 {{ totalResults }} 项 · 第 {{ currentPage }} / {{ totalPages }} 页</span
-                    >
-                    <button
-                        data-ui="CommunityView:391d4872befc"
-                        class="btn btn-ghost btn-sm"
-                        :disabled="loading || currentPage <= 1"
-                        @click="goToPage(currentPage - 1)"
-                    >
-                        上一页
-                    </button>
-                    <button
-                        data-ui="CommunityView:79ac33e57fdc"
-                        v-for="page in visiblePages"
-                        :key="page"
-                        class="btn btn-sm"
-                        :class="page === currentPage ? 'btn-gold' : 'btn-ghost'"
-                        :aria-current="page === currentPage ? 'page' : undefined"
-                        :disabled="loading"
-                        @click="goToPage(page)"
-                    >
-                        {{ page }}
-                    </button>
-                    <button
-                        data-ui="CommunityView:2f9290893a14"
-                        class="btn btn-ghost btn-sm"
-                        :disabled="loading || currentPage >= totalPages"
-                        @click="goToPage(currentPage + 1)"
-                    >
-                        下一页
-                    </button>
-                </nav>
+                    v-if="usesPagination && searched"
+                    :page="currentPage"
+                    :page-count="totalPages"
+                    :total="totalResults"
+                    @update:page="goToPage"
+                />
             </div>
         </template>
         <!-- 下载模态框 -->
@@ -1530,31 +1340,19 @@ function confirmDownload() {
                                     : ' 收藏模组'
                             }}
                         </button>
+                        <!-- 资源链接行：统一 btn-ghost btn-sm 档位（I 节同卡同职能同档） -->
                         <button
                             data-ui="CommunityView:6fabba70cd3a"
                             class="btn btn-ghost btn-sm"
-                            :title="'在启动器内打开源页面'"
-                            @click="
-                                openInline(
-                                    sourceUrl(modal.item, modal.kind),
-                                    modal.item.title || '源页面'
-                                )
-                            "
+                            :title="'用系统浏览器打开源页面'"
+                            @click="openExternal(sourceUrl(modal.item, modal.kind))"
                         >
+                            <UiGlyph name="globe" :size="14" />
                             {{
                                 modal.item.source === 'modrinth'
                                     ? 'Modrinth 源页面'
                                     : 'CurseForge 源页面'
                             }}
-                        </button>
-                        <button
-                            data-ui="CommunityView:source-external"
-                            class="icon-btn"
-                            title="用系统浏览器打开"
-                            aria-label="用系统浏览器打开源页面"
-                            @click="openExternal(sourceUrl(modal.item, modal.kind))"
-                        >
-                            <UiGlyph name="expand" :size="14" />
                         </button>
                         <button
                             data-ui="CommunityView:03eb0c52ad3e"
@@ -1722,77 +1520,24 @@ function confirmDownload() {
                 </div>
             </div>
         </Teleport>
-        <CommunityModDetails
-            v-if="detailProject"
-            :reference="detailProject"
-            @close="detailProject = null"
-            @download="
-                detailProject = null;
-                openDownload($event, 'mod');
-            "
-        />
     </div>
 </template>
 
 <style scoped>
-.community-sections {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px;
-    /* 分段控件：外圈靠描边成组，选中项自己带底，不再整体垫一层 */
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
+.community-page {
+    /* M 节间距呼吸统一：去掉 12px 特例，跟随全局 .page 的 --card-gap */
+    gap: var(--card-gap);
+}
+.community-page > .tab-pills {
     align-self: flex-start;
-}
-.community-section {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 36px;
-    border: 0;
-    border-radius: var(--radius-sm);
-    padding: 0 16px;
-    background: transparent;
-    color: var(--text-dim);
-    font: inherit;
-    font-size: 13px;
-    cursor: pointer;
-    transition:
-        background 160ms,
-        color 160ms;
-}
-.community-section.active {
-    background: var(--accent-soft);
-    color: var(--accent-2);
-    font-weight: 600;
-}
-.community-section span {
-    display: grid;
-    place-items: center;
-    min-width: 20px;
-    height: 20px;
-    padding: 0 5px;
-    /* 计数徽标：半透明淡底即可，避免又一个小实心块 */
-    background: color-mix(in srgb, var(--card-solid, var(--card)) 45%, transparent);
-    border-radius: 6px;
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-}
-.community-section:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
 }
 .version-filter-panel {
     display: grid;
     gap: var(--space-3);
     padding: 0 0 var(--space-4);
-    /* 卡内区块：靠「底部一条分隔线 + 间距」分组，既不再垫第二层底，
-       也不再用整圈描边把自己变成「卡中卡」。 */
+    /* 卡内区块：靠「底部一条分隔线 + 间距」分组（分隔线统一 var(--border)，不再半透明） */
     border: 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    border-bottom: 1px solid var(--border);
     border-radius: 0;
     background: transparent;
 }
@@ -1807,47 +1552,6 @@ function confirmDownload() {
 .version-filter-heading .muted {
     font-size: var(--text-xs);
     overflow-wrap: anywhere;
-}
-.version-source-options {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-}
-.version-source-option {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-2);
-    min-height: var(--ctl-h);
-    padding: var(--space-2) var(--space-4);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--card);
-    color: var(--text-dim);
-    font: inherit;
-    font-size: var(--text-sm);
-    cursor: pointer;
-}
-.version-source-option:hover {
-    background: var(--hover);
-    color: var(--text);
-}
-.version-source-option.active {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--text);
-    font-weight: 600;
-}
-.version-source-option:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-}
-.version-source-option span {
-    min-width: 1.4em;
-    padding: 1px 5px;
-    border-radius: var(--radius-sm);
-    background: var(--hover);
-    font-size: var(--text-xs);
 }
 .version-filter-detail {
     display: flex;
@@ -1899,59 +1603,6 @@ function confirmDownload() {
     flex-shrink: 0;
 }
 
-.kind-capsules {
-    position: relative;
-    display: flex;
-    gap: 2px;
-    flex-wrap: wrap;
-    padding: 3px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    /* 同上：实心胶囊已经靠 blob 高亮，外圈不再垫第二层底 */
-    background: transparent;
-    width: fit-content;
-}
-/* Selection follows the active category with the shared deceleration curve. */
-.capsule-blob {
-    position: absolute;
-    border-radius: 999px;
-    background: var(--accent-grad);
-    box-shadow: 0 2px 8px var(--accent-soft);
-    transition:
-        left var(--motion-normal) var(--ease-out),
-        top var(--motion-normal) var(--ease-out),
-        width var(--motion-normal) var(--ease-out),
-        height 0.32s ease,
-        opacity 0.15s ease;
-    pointer-events: none;
-    z-index: 0;
-}
-.capsule {
-    position: relative;
-    z-index: 1;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: calc(var(--ctl-h) - 6px);
-    padding: 0 var(--space-4);
-    border: none;
-    border-radius: 999px;
-    background: transparent;
-    color: var(--text-dim);
-    font-size: var(--text-sm);
-    font-family: inherit;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: color 0.2s ease;
-}
-.capsule:hover {
-    color: var(--text);
-}
-.capsule.active {
-    color: var(--on-accent);
-    font-weight: 600;
-}
-
 .filter-row {
     display: flex;
     gap: var(--space-3);
@@ -1969,14 +1620,6 @@ function confirmDownload() {
     background: transparent;
     border: 0;
     box-shadow: none;
-}
-.pagination {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-4) 0 var(--space-2);
 }
 .search-warning {
     color: var(--text-dim);
@@ -2011,9 +1654,16 @@ function confirmDownload() {
         opacity: 1;
     }
 }
+/* 卡片 hover（L 节统一规则）：背景 var(--hover) + 边框 border-strong 提亮，无阴影无位移；
+   操作区整组苏醒（icon-btn 组 card-2 + border-strong），主下载按钮金色常态已是最高亮 */
 .result-card:hover {
-    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-    box-shadow: var(--shadow);
+    background: var(--hover);
+    border-color: var(--border-strong);
+}
+.result-card:hover .result-links .icon-btn:not(:disabled) {
+    background: var(--card-2);
+    border-color: var(--border-strong);
+    color: var(--text);
 }
 
 .result-top {
@@ -2105,7 +1755,8 @@ function confirmDownload() {
     justify-content: space-between;
     gap: var(--space-2);
     padding-top: var(--space-2);
-    border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+    /* 卡内分隔线统一 var(--border)（用户截图反馈：55% 半透明线在背景上忽隐忽现） */
+    border-top: 1px solid var(--border);
 }
 .result-links {
     display: flex;
@@ -2370,13 +2021,6 @@ function confirmDownload() {
 .result-meta {
     font-size: 12px;
 }
-.capsule {
-    border: 0 !important;
-}
-.capsule-blob {
-    background: var(--accent-soft) !important;
-    box-shadow: none !important;
-}
 @media (max-width: 800px) {
     .instance-row {
         flex-wrap: wrap;
@@ -2392,7 +2036,6 @@ function confirmDownload() {
 .community-page {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 12px !important;
 }
 .community-page > .page-head {
     margin: 0;
@@ -2402,11 +2045,6 @@ function confirmDownload() {
 }
 .community-page .search-card {
     margin: 0;
-}
-.community-page .kind-capsules {
-    margin: 0;
-    /* 恢复 base 的对称内衬：0 0 8px 会让首/尾胶囊顶着容器圆角，滑动指示块出界 */
-    padding: 3px;
 }
 .community-page .search-card .filter-row {
     margin: 0;
@@ -2421,22 +2059,19 @@ function confirmDownload() {
     .community-page > .instance-row {
         justify-content: flex-end;
     }
-    /* 两栏只服务于「找资源」分支；分区条、下载队列、收藏管理都跨满整行 */
+    /* 两栏只服务于「找资源」分支；分区条、详情整页、下载队列、收藏管理都跨满整行 */
     .community-page > .search-card,
     .community-page > .card,
     .community-page > .status-strip,
-    .community-page > .community-sections,
-    .community-page > .favorites-manager {
+    .community-page > .tab-pills,
+    .community-page > .favorites-manager,
+    .community-page > .community-detail-page {
         grid-column: 1/-1;
     }
 }
 
-.community-page .capsule.active {
-    color: var(--text);
-    background: var(--accent-soft);
-    text-shadow: none;
-}
-/* ---------- 搜索联想下拉 ---------- */
+/* ---------- 搜索联想下拉（保留特殊实现；视觉对齐 select-menu-float 同族：
+   描边/圆角同款，底 96% card-solid + blur(16px) saturate(85%) + --shadow 阴影） ---------- */
 .search-input-wrap {
     position: relative;
     flex: 1;
@@ -2450,37 +2085,42 @@ function confirmDownload() {
     top: calc(100% + 6px);
     left: 0;
     right: 0;
-        z-index: var(--z-menu);
+    z-index: var(--z-menu);
     display: flex;
     flex-direction: column;
-    padding: 6px;
+    gap: var(--space-1);
+    padding: var(--space-2);
     max-height: 300px;
     overflow-y: auto;
-    background: color-mix(in srgb, var(--card-solid, var(--card)) 97%, transparent);
+    background: color-mix(in srgb, var(--card-solid, var(--card)) 96%, transparent);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-lg);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(16px) saturate(85%);
+    -webkit-backdrop-filter: blur(16px) saturate(85%);
 }
 .suggest-item {
     display: flex;
     align-items: baseline;
     gap: 8px;
     width: 100%;
-    padding: 7px 10px;
+    padding: 7px 12px;
     border: 0;
-    border-radius: var(--radius-sm, 8px);
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text);
     font: inherit;
     font-size: var(--text-sm);
     text-align: left;
     cursor: pointer;
+    transition: background 0.12s ease;
 }
-.suggest-item:hover,
+.suggest-item:hover {
+    background: var(--hover);
+}
 .suggest-item.active {
     background: var(--accent-soft);
+    color: color-mix(in srgb, var(--text) 86%, var(--accent));
 }
 .suggest-label {
     flex-shrink: 0;

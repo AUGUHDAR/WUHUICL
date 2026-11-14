@@ -19,6 +19,9 @@ import {
     syncServersFromDat
 } from '../api';
 import ConnectionStatus from '../components/connection/ConnectionStatus.vue';
+import EmptyState from '../components/EmptyState.vue';
+import SelectMenu from '../components/SelectMenu.vue';
+import UiGlyph from '../components/UiGlyph.vue';
 import ServerListItem from '../components/connection/ServerListItem.vue';
 import ServerDetails from '../components/connection/ServerDetails.vue';
 import ServerAddress from '../components/connection/ServerAddress.vue';
@@ -500,21 +503,12 @@ async function copyAddress(s: ServerEntry) {
                 :disabled="loading"
                 @click="openAdd()"
             >
-                <span data-ui="ServersView:12718dc300bd" aria-hidden="true">＋</span> 添加服务器
+                <UiGlyph name="plus" :size="14" /> 添加服务器
             </button>
         </header>
         <div data-ui="ServersView:eee6f822ac69" class="server-toolbar">
             <label data-ui="ServersView:fd69834ac923" class="server-search"
-                ><svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.7"
-                    aria-hidden="true"
-                >
-                    <circle cx="10.5" cy="10.5" r="6.5" />
-                    <path d="m16 16 5 5" /></svg
-                ><input
+                ><UiGlyph name="search" :size="18" /><input
                     data-ui="ServersView:3445c173cb2a"
                     v-model="store.searchKeyword"
                     type="search"
@@ -582,37 +576,50 @@ async function copyAddress(s: ServerEntry) {
             class="connection-panel"
             label="正在整理服务器列表…"
         />
+        <!-- 空态（EmptyState 收编：服务器插画进 #icon 插槽，引导按钮进 #action） -->
         <div
             data-ui="ServersView:0c74b7b7657d"
             v-else-if="!servers.length && !loadError"
-            class="connection-panel connection-empty"
+            class="connection-panel"
         >
-            <span data-ui="ServersView:ace2288ec1cd" class="connection-symbol" aria-hidden="true"
-                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
-                    <rect x="3" y="3" width="18" height="8" rx="2" />
-                    <rect x="3" y="13" width="18" height="8" rx="2" />
-                    <path d="M7 7h2m-2 10h2" /></svg
-            ></span>
-            <h3>下一站，去哪个世界？</h3>
-            <p>添加好友的服务器地址，或同步游戏内的收藏。关联实例后即可快速进入。</p>
-            <button data-ui="ServersView:425560590e46" class="btn btn-gold" @click="openAdd()">
-                添加第一个服务器
-            </button>
+            <EmptyState
+                title="下一站，去哪个世界？"
+                description="添加好友的服务器地址，或同步游戏内的收藏。关联实例后即可快速进入。"
+            >
+                <template #icon>
+                    <span data-ui="ServersView:ace2288ec1cd" class="connection-symbol" aria-hidden="true"
+                        ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">
+                            <rect x="3" y="3" width="18" height="8" rx="2" />
+                            <rect x="3" y="13" width="18" height="8" rx="2" />
+                            <path d="M7 7h2m-2 10h2" /></svg
+                    ></span>
+                </template>
+                <template #action>
+                    <button data-ui="ServersView:425560590e46" class="btn btn-gold" @click="openAdd()">
+                        添加第一个服务器
+                    </button>
+                </template>
+            </EmptyState>
         </div>
         <div
             data-ui="ServersView:18026edb487f"
             v-else-if="!filteredServers.length && !loadError"
-            class="connection-panel connection-empty"
+            class="connection-panel"
         >
-            <h3>没有找到匹配的服务器</h3>
-            <p>试试其他名称、地址或关键词。</p>
-            <button
-                data-ui="ServersView:9d3cfed9a775"
-                class="btn btn-ghost"
-                @click="store.searchKeyword = ''"
+            <EmptyState
+                title="没有找到匹配的服务器"
+                description="试试其他名称、地址或关键词。"
             >
-                清除搜索
-            </button>
+                <template #action>
+                    <button
+                        data-ui="ServersView:9d3cfed9a775"
+                        class="btn btn-ghost"
+                        @click="store.searchKeyword = ''"
+                    >
+                        清除搜索
+                    </button>
+                </template>
+            </EmptyState>
         </div>
         <div
             data-ui="ServersView:327a59a2e7d9"
@@ -815,20 +822,15 @@ async function copyAddress(s: ServerEntry) {
                         :revealed="addressRevealed(joinModal.target)"
                         @toggle="toggleAddress(joinModal.target)"
                     />
-                    <select
+                    <!-- 原生 select → SelectMenu 收编（data-ui 锚点经 fallthrough 落在触发钮） -->
+                    <SelectMenu
                         data-ui="ServersView:86d2c55efdd8"
                         v-model="joinModal.versionId"
-                        class="select"
-                        @change="syncJoinSelection"
-                    >
-                        <option
-                            v-for="v in targets"
-                            :key="`${v.folder}\u0000${v.id}`"
-                            :value="targetToken(v)"
-                        >
-                            {{ targetLabel(v) }}
-                        </option>
-                    </select>
+                        :options="
+                            targets.map((v) => ({ value: targetToken(v), label: targetLabel(v) }))
+                        "
+                        @change="syncJoinSelection()"
+                    />
                     <p data-ui="ServersView:6b5692aed293" class="muted join-hint">
                         Java 1.20 及以上会使用官方 Quick Play
                         直接进入；更旧版本只启动正确实例，并保留服务器记录。
@@ -941,9 +943,7 @@ async function copyAddress(s: ServerEntry) {
     background: var(--card);
     transition:
         background 160ms ease,
-        border-color 160ms ease,
-        transform 0.18s ease,
-        box-shadow 0.22s ease;
+        border-color 160ms ease;
     overflow: hidden;
     animation: server-row-in 0.38s cubic-bezier(0.22, 0.9, 0.32, 1) backwards;
 }
@@ -978,14 +978,10 @@ async function copyAddress(s: ServerEntry) {
         transform: translateY(0);
     }
 }
+/* 行 hover 统一规则（L 节，单处定义）：背景 var(--hover) + 边框 border-strong 提亮，无位移无阴影 */
 .servers-page .server-list-item:hover {
     border-color: var(--border-strong);
-    background: var(--card-2);
-    transform: translateY(-2px);
-    box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 10%, transparent);
-}
-.servers-page .server-list-item:active {
-    transform: translateY(0) scale(0.998);
+    background: var(--hover);
 }
 .servers-page .server-list-item.active,
 .servers-page .server-list-item.checked {
@@ -1024,10 +1020,6 @@ async function copyAddress(s: ServerEntry) {
     color: var(--accent-2);
     font-size: var(--text-lg);
     font-weight: 700;
-    transition: transform 0.18s cubic-bezier(0.22, 0.9, 0.32, 1.2);
-}
-.servers-page .server-list-item:hover .server-monogram {
-    transform: scale(1.08);
 }
 .servers-page .server-monogram.large {
     width: 48px;
@@ -1262,14 +1254,6 @@ async function copyAddress(s: ServerEntry) {
 .servers-page .server-list-item {
     animation: none;
     overflow: visible;
-}
-.servers-page .server-list-item:hover,
-.servers-page .server-list-item:active {
-    transform: none;
-    box-shadow: none;
-}
-.servers-page .server-list-item:hover .server-monogram {
-    transform: none;
 }
 @media (min-width: 1121px) {
     .servers-page .server-workspace {

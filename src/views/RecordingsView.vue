@@ -14,6 +14,8 @@ import ResourceScopeFields from '../components/ResourceScopeFields.vue';
 import ResourcePathChip from '../components/ResourcePathChip.vue';
 import ResourcePagination from '../components/ResourcePagination.vue';
 import ConfirmModal from '../components/ConfirmModal.vue';
+import EmptyState from '../components/EmptyState.vue';
+import UiGlyph from '../components/UiGlyph.vue';
 import { useSweepSelect } from '../composables/sweepSelect';
 const data = ref<RecordingCatalog>({ entries: [], warnings: [], library: '', instances: [] });
 const loading = ref(false),
@@ -301,7 +303,10 @@ onUnmounted(() => {
                     :disabled="busy || loading"
                     @click="refresh(false, true)"
                 >
-                    {{ loading ? '读取中…' : '↻ 刷新' }}
+                    <!-- 文本符号 ↻ 收编 UiGlyph refresh（inventory H；GameView 同款范式） -->
+                    <span v-if="loading" class="spin"></span>
+                    <UiGlyph v-else name="refresh" :size="14" />
+                    {{ loading ? '读取中' : '刷新' }}
                 </button>
             </div>
         </header>
@@ -479,29 +484,32 @@ onUnmounted(() => {
                 class="card"
                 label="正在读取录像目录…"
             />
-            <div
+            <!-- 空态收编 EmptyState（inventory B）：双分支文案拆 title/description，清除筛选进 #action -->
+            <EmptyState
                 data-ui="RecordingsView:9196e415ffb9"
                 v-else-if="!rows.length && !error"
-                class="card empty"
-            >
-                <span>{{
+                icon="clip"
+                :title="data.entries.length ? '没有匹配的录像' : '暂无录像'"
+                :description="
                     data.entries.length
-                        ? '没有匹配的录像，请调整搜索或筛选。'
-                        : '暂无录像。可导入 .mcpr 或 Flashback .zip，或在游戏中完成录制并保存。'
-                }}</span
-                ><button
-                    data-ui="RecordingsView:c0ed13df1c01"
-                    v-if="data.entries.length"
-                    class="btn btn-ghost"
-                    @click="
-                        query = '';
-                        kind = 'all';
-                        source = 'all';
-                    "
-                >
-                    清除筛选
-                </button>
-            </div>
+                        ? '请调整搜索或筛选条件。'
+                        : '可导入 .mcpr 或 Flashback .zip，或在游戏中完成录制并保存。'
+                "
+            >
+                <template v-if="data.entries.length" #action>
+                    <button
+                        data-ui="RecordingsView:c0ed13df1c01"
+                        class="btn btn-ghost"
+                        @click="
+                            query = '';
+                            kind = 'all';
+                            source = 'all';
+                        "
+                    >
+                        清除筛选
+                    </button>
+                </template>
+            </EmptyState>
             <div
                 v-else-if="rows.length"
                 :inert="loading || !!error"
@@ -683,10 +691,6 @@ onUnmounted(() => {
 .pagination {
     justify-content: center;
 }
-.empty {
-    text-align: center;
-    padding: 40px;
-}
 .failed {
     color: var(--danger, #e76b75);
 }
@@ -811,8 +815,18 @@ onUnmounted(() => {
     padding: 12px 0;
     min-height: 72px;
 }
-.recording-row:hover {
+/* 行 hover 统一规则（inventory L，2026-11-14 修正版；对照 GameView .installed-row）：
+   行背景 var(--hover) + 行内操作整组苏醒（card-2 底 + border-strong 边 + 文字提亮），无位移；
+   accent 只在指向按钮本身 :hover 时出现。全页仅此一处 hover 定义（原 814/938 两处已归一）。 */
+.recording-row:hover,
+.recording-row:focus-within {
     background: var(--hover);
+}
+.recording-row:hover :is(.btn):not(:disabled),
+.recording-row:focus-within :is(.btn):not(:disabled) {
+    background: var(--card-2);
+    border-color: var(--border-strong);
+    color: var(--text);
 }
 .recording-row.selected {
     background: color-mix(in srgb, var(--accent) 5%, transparent);
@@ -821,11 +835,9 @@ onUnmounted(() => {
     word-break: normal;
     overflow-wrap: break-word;
 }
-.recording-workspace > .empty {
-    background: transparent;
-    border: 0;
+/* 空态（EmptyState 组件）在工作区内保持无卡片外观、高度与原占位一致 */
+.recording-workspace > .empty-state {
     min-height: 220px;
-    box-shadow: none;
 }
 .recording-results {
     padding: 12px 16px;

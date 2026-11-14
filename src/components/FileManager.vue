@@ -33,6 +33,8 @@ import {
 } from '../store';
 import { resourceDisplayName, pageSelection } from '@shared/uiPresentation';
 import ContentSkeleton from './ContentSkeleton.vue';
+import EmptyState from './EmptyState.vue';
+import UiGlyph from './UiGlyph.vue';
 import ModMigrationModal from './ModMigrationModal.vue';
 import ModVersionModal from './ModVersionModal.vue';
 import type { ManagedMod, ModOperationResult } from '@shared/modManagement';
@@ -1022,7 +1024,10 @@ function openChangelog(e: Row) {
                     aria-label="刷新文件列表"
                     @click="load"
                 >
-                    {{ loading ? '读取中…' : '↻ 刷新' }}
+                    <!-- 文本符号 ↻ 收编 UiGlyph refresh（inventory H；GameView tool-refresh 同款范式） -->
+                    <span v-if="loading" class="spin spin-sm"></span>
+                    <UiGlyph v-else name="refresh" :size="14" />
+                    {{ loading ? '读取中' : '刷新' }}
                 </button>
                 <details
                     data-ui="FileManager:4aeae736e670"
@@ -1111,10 +1116,21 @@ function openChangelog(e: Row) {
                 </details>
             </div>
         </div>
-        <!-- 未安装任何版本时提示 -->
-        <div data-ui="FileManager:de9f15303347" v-if="!currentVersion" class="card empty">
-            <span>当前游戏文件夹没有可选版本，请先到「游戏版本」页安装或选择版本</span>
-        </div>
+        <!-- 未安装任何版本时提示：收编 EmptyState（UX「空状态指引」：说明+入口按钮，对照 GameView 示范） -->
+        <EmptyState
+            data-ui="FileManager:de9f15303347"
+            v-if="!currentVersion"
+            class="card"
+            icon="warning"
+            title="当前游戏文件夹没有可选版本"
+            description="请先到「游戏版本」页安装或选择一个版本，再回到这里管理文件。"
+        >
+            <template #action>
+                <button class="btn btn-gold btn-sm" @click="store.currentView = 'game'">
+                    去安装或选择版本
+                </button>
+            </template>
+        </EmptyState>
 
         <div data-ui="FileManager:4c9771e53b3b" v-if="currentVersion" class="fm-controls">
             <input
@@ -1286,51 +1302,63 @@ function openChangelog(e: Row) {
                 retry
                 @retry="load"
             />
-            <div
+            <!-- 空态收编 EmptyState（inventory B）：错误=原因+重试入口；空目录=页面图标走 #icon 槽；筛选无果=引导回全部 -->
+            <EmptyState
                 data-ui="FileManager:12ff8f1f3706"
                 v-else-if="loadError && !entries.length"
-                class="empty"
+                icon="warning"
+                title="读取失败"
+                :description="loadError"
             >
-                <span>读取失败：{{ loadError }}</span>
-                <button
-                    data-ui="FileManager:9605a11dc3ac"
-                    class="btn btn-ghost btn-sm"
-                    @click="load"
-                >
-                    重试
-                </button>
-            </div>
-            <div data-ui="FileManager:c33c3939fd8c" v-else-if="!entries.length" class="empty">
-                <span
-                    data-ui="FileManager:a3b8daa1f95d"
-                    class="empty-icon"
-                    v-html="props.icon"
-                ></span>
-                <span>{{ props.emptyText }}</span>
-                <!-- 聚合范围才需要补充说明；实例视图提示拖拽导入这条更短路径 -->
-                <small v-if="scope === 'folder'" class="muted"
-                    >已查找共享目录与
-                    {{ aggregateInstances.length }} 个实例的该子目录，都没有文件。</small
-                >
-                <small v-else class="muted">也可以直接把文件拖进本页面导入。</small>
-            </div>
-            <div data-ui="FileManager:40d26ad64938" v-else-if="!displayEntries.length" class="empty">
-                <span>{{
+                <template #action>
+                    <button
+                        data-ui="FileManager:9605a11dc3ac"
+                        class="btn btn-ghost btn-sm"
+                        @click="load"
+                    >
+                        重试
+                    </button>
+                </template>
+            </EmptyState>
+            <EmptyState
+                data-ui="FileManager:c33c3939fd8c"
+                v-else-if="!entries.length"
+                :title="props.emptyText"
+                :description="
+                    scope === 'folder'
+                        ? `已查找共享目录与 ${aggregateInstances.length} 个实例的该子目录，都没有文件。`
+                        : '也可以直接把文件拖进本页面导入。'
+                "
+            >
+                <template #icon>
+                    <span
+                        data-ui="FileManager:a3b8daa1f95d"
+                        class="empty-icon"
+                        v-html="props.icon"
+                    ></span>
+                </template>
+            </EmptyState>
+            <EmptyState
+                data-ui="FileManager:40d26ad64938"
+                v-else-if="!displayEntries.length"
+                :title="
                     updatesTab
                         ? updatePanel.checking
                             ? '正在检查更新…'
                             : '没有可更新的模组'
                         : '当前搜索或筛选条件没有匹配的文件'
-                }}</span>
-                <button
-                    v-if="updatesTab && !updatePanel.checking"
-                    data-ui="FileManager:upd-back-all"
-                    class="btn btn-ghost btn-sm"
-                    @click="setTab('all')"
-                >
-                    回到全部
-                </button>
-            </div>
+                "
+            >
+                <template v-if="updatesTab && !updatePanel.checking" #action>
+                    <button
+                        data-ui="FileManager:upd-back-all"
+                        class="btn btn-ghost btn-sm"
+                        @click="setTab('all')"
+                    >
+                        回到全部
+                    </button>
+                </template>
+            </EmptyState>
             <div
                 data-ui="FileManager:893880828b4a"
                 v-else
@@ -1382,36 +1410,14 @@ function openChangelog(e: Row) {
                             alt=""
                             @error="delete modIcons[rowKey(e)]"
                         />
-                        <svg
-                            v-else-if="e.isDir"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.7"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                        >
-                            <path
-                                d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"
-                            />
-                        </svg>
+                        <!-- 手绘文件夹/文件 SVG 收编 UiGlyph（inventory H；尺寸由 .fm-file-icon :deep(svg) 撑满容器） -->
+                        <UiGlyph v-else-if="e.isDir" name="folder" />
                         <span
                             v-else-if="isArchiveEntry(e)"
                             class="fm-file-icon-kind"
                             v-html="props.icon"
                         ></span>
-                        <svg
-                            v-else
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.7"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                        >
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-                            <path d="M14 2v6h6" />
-                        </svg>
+                        <UiGlyph v-else name="file" />
                     </span>
                     <span
                         data-ui="FileManager:8c8c91106eaa"
@@ -1442,15 +1448,8 @@ function openChangelog(e: Row) {
                                 @click.stop="onRowUpdate(e)"
                                 @contextmenu.prevent.stop="openChangelog(e)"
                             >
-                                <svg
-                                    viewBox="0 0 1024 1024"
-                                    fill="currentColor"
-                                    aria-hidden="true"
-                                >
-                                    <path
-                                        d="M640 768H384l-32-32V509H213l-23-55 298-298h45l298 298-23 55H810v226z m-224-64h192V477l32-32h93L512 223 290 445h94l32 32zM352 831h320v64H352z"
-                                    />
-                                </svg>
+                                <!-- 手绘上传箭头 SVG 收编 UiGlyph upload（inventory H；同语义：装入新版本） -->
+                                <UiGlyph name="upload" :size="14" />
                             </button>
                         </span>
                         <small
@@ -1524,61 +1523,66 @@ function openChangelog(e: Row) {
                         v-if="props.rel === 'mods' && !isModEntry(e)"
                         aria-hidden="true"
                     ></span>
-                    <details
-                        class="file-more"
-                        @keydown.esc="($event.currentTarget as HTMLDetailsElement).open = false"
-                    >
-                        <summary
-                            data-ui="FileManager:859ab7a92cdd"
-                            class="btn btn-ghost btn-sm"
-                            :aria-label="'更多操作 ' + e.name"
+                    <!-- PCL PageInstanceMod 行模型（inventory M，多数决落地）：高频操作行内直出——
+                         启停开关 + 删除常驻行内；⋯ 折叠只收低频（锁定/切换版本，PCL 无此概念）。
+                         资源包/光影包行没有低频操作，折叠不渲染。 -->
+                    <div class="fm-ops">
+                        <details
+                            v-if="isModEntry(e)"
+                            class="file-more"
+                            @keydown.esc="($event.currentTarget as HTMLDetailsElement).open = false"
                         >
-                            ⋯
-                        </summary>
-                        <div
-                            class="file-more-actions"
-                            @click="
-                                ($event.currentTarget as HTMLElement)
-                                    .closest('details')
-                                    ?.removeAttribute('open')
-                            "
+                            <summary
+                                data-ui="FileManager:859ab7a92cdd"
+                                class="btn btn-ghost btn-sm"
+                                :aria-label="'更多操作 ' + e.name"
+                            >
+                                <!-- 文本符号 ⋯ 收编 UiGlyph more（inventory H；GameView 行内同口径） -->
+                                <UiGlyph name="more" :size="16" />
+                            </summary>
+                            <div
+                                class="file-more-actions"
+                                @click="
+                                    ($event.currentTarget as HTMLElement)
+                                        .closest('details')
+                                        ?.removeAttribute('open')
+                                "
+                            >
+                                <button
+                                    data-ui="FileManager:40ebd7f85d68"
+                                    class="btn btn-ghost btn-sm"
+                                    :disabled="batchBusy"
+                                    :aria-label="
+                                        (catalogOf(e)?.locked ? '解除锁定 ' : '锁定 ') + e.name
+                                    "
+                                    :title="
+                                        catalogOf(e)?.locked
+                                            ? '已锁定：不参与批量更新，点击解除'
+                                            : '锁定此模组版本'
+                                    "
+                                    @click="toggleLock(e)"
+                                >
+                                    {{ catalogOf(e)?.locked ? '解锁' : '锁定' }}</button
+                                ><button
+                                    data-ui="FileManager:fd277c185a8b"
+                                    class="btn btn-ghost btn-sm"
+                                    :disabled="batchBusy"
+                                    :aria-label="'切换版本 ' + e.name"
+                                    @click="switchFile = e.name"
+                                >
+                                    切换版本
+                                </button>
+                            </div>
+                        </details>
+                        <button
+                            data-ui="FileManager:537aea904555"
+                            class="btn btn-danger btn-sm fm-remove"
+                            :disabled="batchBusy"
+                            @click="onRemove(e)"
                         >
-                            <button
-                                data-ui="FileManager:40ebd7f85d68"
-                                v-if="isModEntry(e)"
-                                class="btn btn-ghost btn-sm"
-                                :disabled="batchBusy"
-                                :aria-label="
-                                    (catalogOf(e)?.locked ? '解除锁定 ' : '锁定 ') + e.name
-                                "
-                                :title="
-                                    catalogOf(e)?.locked
-                                        ? '已锁定：不参与批量更新，点击解除'
-                                        : '锁定此模组版本'
-                                "
-                                @click="toggleLock(e)"
-                            >
-                                {{ catalogOf(e)?.locked ? '解锁' : '锁定' }}</button
-                            ><button
-                                data-ui="FileManager:fd277c185a8b"
-                                v-if="isModEntry(e)"
-                                class="btn btn-ghost btn-sm"
-                                :disabled="batchBusy"
-                                :aria-label="'切换版本 ' + e.name"
-                                @click="switchFile = e.name"
-                            >
-                                切换版本
-                            </button>
-                            <button
-                                data-ui="FileManager:537aea904555"
-                                class="btn btn-danger btn-sm fm-remove"
-                                :disabled="batchBusy"
-                                @click="onRemove(e)"
-                            >
-                                删除
-                            </button>
-                        </div>
-                    </details>
+                            删除
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1633,8 +1637,16 @@ function openChangelog(e: Row) {
 }
 .file-more summary {
     list-style: none;
-    font-size: 18px;
+}
+/* 「更多」details 两档尺寸写死（inventory I：头部非 sm、行内 sm）。
+   头部 = 常规档按钮（与头部其他按钮同级等高等宽）；行内 = btn-sm 小档（模板已带 btn-sm）。 */
+.fm-actions .file-more > summary {
     min-width: 36px;
+}
+.fm-row .file-more > summary {
+    min-width: 32px;
+    padding-left: 6px;
+    padding-right: 6px;
 }
 .file-more[open] {
     z-index: 5;
@@ -1644,17 +1656,23 @@ function openChangelog(e: Row) {
     right: 0;
     top: 100%;
     display: grid;
-    gap: 8px;
-    padding: 10px;
+    gap: var(--space-2);
+    padding: var(--space-2);
     min-width: 150px;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
     background: var(--surface-solid);
     box-shadow: var(--shadow);
 }
-.file-more-actions .fm-remove {
-    border-top: 1px solid var(--border);
-    margin-top: 4px;
+/* 行内操作区（M：⋯ 折叠 + 行内删除同组；启动停开关在左侧独立列） */
+.fm-ops {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    justify-content: flex-end;
+}
+.fm-row .fm-ops {
+    flex-wrap: nowrap;
 }
 .fm-list {
     overflow: visible;
@@ -1837,9 +1855,6 @@ function openChangelog(e: Row) {
     border-radius: var(--radius-md);
     transition: background 0.15s ease;
 }
-.fm-row:hover {
-    background: var(--card-2);
-}
 .fm-file-icon {
     display: flex;
     width: 32px;
@@ -1847,7 +1862,8 @@ function openChangelog(e: Row) {
     color: var(--accent);
     flex-shrink: 0;
 }
-.fm-file-icon svg {
+/* UiGlyph 的 svg 在子组件作用域内，:deep 才能撑满容器（与原内联 SVG 等效） */
+.fm-file-icon :deep(svg) {
     width: 100%;
     height: 100%;
 }
@@ -1878,13 +1894,10 @@ function openChangelog(e: Row) {
     width: 86px;
     text-align: right;
 }
+/* 行内删除（M：PCL 模型常驻行内）：走全局 btn-danger 档（danger-soft 底 + danger 边），
+   不再沿用折叠时代的隐形 ghost 覆写——行内直出的破坏性操作要看得见（UX「不可用≠消失」同源纪律） */
 .fm-remove {
     flex-shrink: 0;
-    background: transparent;
-    border-color: transparent;
-}
-.fm-remove:hover {
-    border-color: var(--danger-border);
 }
 .fm-toggle {
     flex-shrink: 0;
@@ -1937,7 +1950,7 @@ function openChangelog(e: Row) {
 .fm-name-line {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-2);
     max-width: 100%;
 }
 .fm-upd-btn {
@@ -1957,10 +1970,6 @@ function openChangelog(e: Row) {
     transition:
         opacity 0.15s ease,
         background 0.15s ease;
-}
-.fm-upd-btn svg {
-    width: 100%;
-    height: 100%;
 }
 .fm-upd-btn:hover:not(:disabled) {
     opacity: 1;
@@ -2078,7 +2087,8 @@ function openChangelog(e: Row) {
 .fm-table-head,
 .fm-row {
     display: grid;
-    grid-template-columns: 36px minmax(0, 1fr) 88px 132px 40px;
+    /* 末列 auto：操作区宽度随内容（非模组行=删除，模组行=⋯+删除），不再按折叠时代的 40px 定宽（inventory M） */
+    grid-template-columns: 36px minmax(0, 1fr) 88px 132px auto;
     gap: 12px;
     align-items: center;
 }
@@ -2142,10 +2152,10 @@ function openChangelog(e: Row) {
     text-align: left;
 }
 .file-manager[data-resource='mods'] .fm-table-head {
-    grid-template-columns: 18px minmax(0, 1fr) 88px 132px 42px 40px;
+    grid-template-columns: 18px minmax(0, 1fr) 88px 132px 42px auto;
 }
 .file-manager[data-resource='mods'] .fm-row {
-    grid-template-columns: 18px 32px minmax(0, 1fr) 88px 132px 42px 40px;
+    grid-template-columns: 18px 32px minmax(0, 1fr) 88px 132px 42px auto;
 }
 .file-manager[data-resource='mods'] .fm-table-head > span:nth-child(2) {
     grid-column: 2/4;
@@ -2167,14 +2177,14 @@ function openChangelog(e: Row) {
 @media (max-width: 1150px) {
     .fm-table-head,
     .fm-row {
-        grid-template-columns: 32px minmax(0, 1fr) 70px 36px;
+        grid-template-columns: 32px minmax(0, 1fr) 70px auto;
     }
     .fm-date {
         display: none !important;
     }
     .file-manager[data-resource='mods'] .fm-row,
     .file-manager[data-resource='mods'] .fm-table-head {
-        grid-template-columns: 18px 28px minmax(0, 1fr) 70px 38px 36px;
+        grid-template-columns: 18px 28px minmax(0, 1fr) 70px 38px auto;
     }
     .fm-context > label {
         flex: 1 1 260px;
@@ -2198,7 +2208,7 @@ function openChangelog(e: Row) {
     }
     .file-manager[data-resource='mods'] .fm-row,
     .file-manager[data-resource='mods'] .fm-table-head {
-        grid-template-columns: 18px 24px minmax(0, 1fr) 38px 36px;
+        grid-template-columns: 18px 24px minmax(0, 1fr) 38px auto;
     }
     .file-manager[data-resource='mods'] .fm-meta,
     .file-manager[data-resource='mods'] .fm-table-head > span:nth-child(3) {
@@ -2224,6 +2234,17 @@ function openChangelog(e: Row) {
     border-radius: 0;
     box-shadow: none;
     background: transparent;
+}
+/* 行 hover 统一规则（inventory L，2026-11-14 用户拍板修正版；对照 GameView .installed-row 注释块）：
+   行 hover = 行背景 var(--hover) + 操作区低存在感控件整组苏醒
+   （card-2 背景 + border-strong 边框 + 文字提亮），无位移；
+   主操作的 accent 点亮只发生在指向按钮本身 :hover 时（.fm-upd-btn 自带规则），行 hover 不点亮 accent。
+   行内删除保持 btn-danger 档位不参与苏醒：破坏性操作的红色身份优先于通用提亮。 */
+.fm-row:hover :is(.file-more > summary):not(:disabled),
+.fm-row:focus-within :is(.file-more > summary):not(:disabled) {
+    background: var(--card-2);
+    border-color: var(--border-strong);
+    color: var(--text);
 }
 .fm-row:hover {
     background: var(--hover);

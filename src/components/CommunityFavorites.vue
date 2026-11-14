@@ -3,6 +3,7 @@ import UiGlyph from './UiGlyph.vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import SelectMenu from './SelectMenu.vue';
 import ConfirmModal from './ConfirmModal.vue';
+import EmptyState from './EmptyState.vue';
 import {
     favorites,
     favoriteBusy,
@@ -244,38 +245,40 @@ const sortOptions = [
             读取失败：{{ loadError }}<span v-if="favorites.length"> · 保留上次已确认的收藏</span
             ><button class="btn btn-ghost btn-sm" @click="refresh">重试</button>
         </div>
-        <div v-if="loading && !favorites.length" class="card favorite-empty" role="status">
+        <div v-if="loading && !favorites.length" class="card favorite-loading" role="status">
             正在读取收藏…
         </div>
-        <div v-else-if="!favorites.length && !loadError" class="card favorite-empty">
-            <svg
-                width="36"
-                height="36"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.7"
-                aria-hidden="true"
-            >
-                <path
-                    d="m12 3 2.8 5.7 6.3.9-4.6 4.4 1.1 6.3-5.6-3-5.6 3 1.1-6.3L3 9.6l6.2-.9Z"
-                /></svg
-            ><strong>还没有收藏模组</strong
-            ><span class="muted">在浏览列表中点亮星标，即可在这里统一管理。</span
-            ><button class="btn btn-gold" @click="emit('browse')">去浏览模组</button>
-        </div>
-        <div v-else-if="!visible.length && !loadError" class="card favorite-empty">
-            <strong>没有匹配的收藏</strong><span class="muted">尝试其他名称或来源。</span
-            ><button
-                class="btn btn-ghost"
-                @click="
-                    keyword = '';
-                    source = 'all';
-                "
-            >
-                清除筛选
-            </button>
-        </div>
+        <!-- 空态（EmptyState 收编：说明 + 入口，UX「空状态指引」） -->
+        <EmptyState
+            v-else-if="!favorites.length && !loadError"
+            data-ui="favorites:empty"
+            icon="star"
+            title="还没有收藏模组"
+            description="在浏览列表中点亮星标，即可在这里统一管理。"
+        >
+            <template #action>
+                <button class="btn btn-gold" @click="emit('browse')">去浏览模组</button>
+            </template>
+        </EmptyState>
+        <EmptyState
+            v-else-if="!visible.length && !loadError"
+            data-ui="favorites:filter-empty"
+            icon="search"
+            title="没有匹配的收藏"
+            description="尝试其他名称或来源。"
+        >
+            <template #action>
+                <button
+                    class="btn btn-ghost"
+                    @click="
+                        keyword = '';
+                        source = 'all';
+                    "
+                >
+                    清除筛选
+                </button>
+            </template>
+        </EmptyState>
         <div v-else class="favorite-list">
             <article
                 v-for="record in visible"
@@ -651,19 +654,11 @@ const sortOptions = [
 .favorite-remove {
     color: var(--accent-2);
 }
-.favorite-empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    padding: 44px 24px;
+.favorite-loading {
+    padding: 34px 24px;
     text-align: center;
-}
-.favorite-empty svg {
     color: var(--text-dim);
-}
-.favorite-empty .muted {
-    font-size: 13px;
+    font-size: var(--text-sm);
 }
 .favorite-link-modal {
     padding: 24px;
